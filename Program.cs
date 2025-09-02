@@ -165,6 +165,47 @@ public sealed class TaigaApi
         res.EnsureSuccessStatusCode();
         return await res.Content.ReadAsStringAsync();
     }
+
+    // In TaigaApi
+    public async Task<string> ListUserStoriesAsync(int projectId, int page = 1)
+    {
+        await EnsureAuthAsync();
+        var http = Client();
+
+        // 1) resolve status IDs for "Done" and "Archived" in this project
+        var stRes = await http.GetAsync($"userstory-statuses?project={projectId}");
+        stRes.EnsureSuccessStatusCode();
+        using var stDoc = JsonDocument.Parse(await stRes.Content.ReadAsStringAsync());
+        var excludeIds = new List<int>();
+        foreach (var st in stDoc.RootElement.EnumerateArray())
+        {
+            var name = st.TryGetProperty("name", out var n) ? n.GetString() : null;
+            if (name is null) continue;
+            if (string.Equals(name, "Done", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "Archived", StringComparison.OrdinalIgnoreCase))
+            {
+                if (st.TryGetProperty("id", out var idProp) && idProp.TryGetInt32(out var id))
+                    excludeIds.Add(id);
+            }
+        }
+
+        // 2) build query
+        var q = new List<string>
+        {
+            $"project={projectId}",
+            $"page={page}",
+            "status__is_archived=false",
+            "status__is_closed=false"
+        };
+        foreach (var id in excludeIds)
+            q.Add($"exclude_status={id}");
+
+
+        var usRes = await http.GetAsync($"userstories?{string.Join("&", q)}");
+        usRes.EnsureSuccessStatusCode();
+        return await usRes.Content.ReadAsStringAsync();
+    }
+
 }
 
 // ===== MCP tools (DI via constructor; no [FromServices]) =====
@@ -202,4 +243,10 @@ public sealed class TaigaTools
     [McpServerTool(Name = "update_issue")]
     public Task<string> UpdateIssue(int issueId, JsonElement patch)
         => _api.UpdateIssueAsync(issueId, patch);
+
+    // In TaigaTools
+    [McpServerTool(Name = "list_user_stories")]
+    public Task<string> ListUserStories(int projectId, int page = 1)
+        => _api.ListUserStoriesAsync(projectId, page);
+
 }
