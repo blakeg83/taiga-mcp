@@ -70,6 +70,47 @@ public sealed class TaigaApi
                  ?? throw new InvalidOperationException("Taiga auth_token missing");
     }
 
+    public async Task<string> ListProjectsAsync(string? member = null, int page = 1)
+    {
+        await EnsureAuthAsync();
+        var http = Client();
+        var url = string.IsNullOrEmpty(member)
+            ? $"projects?page={page}"
+            : $"projects?member={Uri.EscapeDataString(member)}&page={page}";
+        var res = await http.GetAsync(url);
+        res.EnsureSuccessStatusCode();
+
+        // Trim to id, slug, name
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        // API may return either an array or a paged object with "results"
+        JsonElement root = doc.RootElement;
+        JsonElement list = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("results", out var results)
+            ? results
+            : root;
+
+        var items = new List<Dictionary<string, object?>>();
+        foreach (var p in list.EnumerateArray())
+        {
+            items.Add(new()
+            {
+                ["id"] = p.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
+                ["slug"] = p.TryGetProperty("slug", out var slug) ? slug.GetString() : null,
+                ["name"] = p.TryGetProperty("name", out var name) ? name.GetString() : null
+            });
+        }
+        return JsonSerializer.Serialize(items);
+    }
+
+    public async Task<int> ResolveProjectIdAsync(string slug)
+    {
+        await EnsureAuthAsync();
+        var http = Client();
+        var res = await http.GetAsync($"resolver?project={Uri.EscapeDataString(slug)}");
+        res.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("project").GetInt32();
+    }
+
     public async Task<string> ListIssuesAsync(int projectId, int page)
     {
         await EnsureAuthAsync();
@@ -136,6 +177,14 @@ public sealed class TaigaTools
     {
         _api = api;
     }
+
+    [McpServerTool(Name = "list_projects")]
+    public Task<string> ListProjects(string? member = "me", int page = 1)
+    => _api.ListProjectsAsync(member, page);
+
+    [McpServerTool(Name = "resolve_project")]
+    public async Task<string> ResolveProject(string slug)
+    => JsonSerializer.Serialize(new { project = await _api.ResolveProjectIdAsync(slug) });
 
     [McpServerTool(Name = "list_issues")]
     public Task<string> ListIssues(int projectId, int page = 1)
