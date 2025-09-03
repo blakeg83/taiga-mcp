@@ -1,16 +1,17 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 /// <summary>Handles Taiga authentication and token reuse.</summary>
 public sealed class AuthClient
 {
-    private readonly TaigaConfig _cfg;
+    private readonly TaigaOptions _cfg;
     private string? _token;
 
-    public AuthClient(TaigaConfig cfg)
+    public AuthClient(IOptions<TaigaOptions> opts)
     {
-        _cfg = cfg;
+        _cfg = opts.Value;
     }
 
     public async Task EnsureAuthAsync(HttpClient http)
