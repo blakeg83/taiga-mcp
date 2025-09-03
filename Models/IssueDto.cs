@@ -8,6 +8,9 @@ public sealed record IssueDto
     [JsonPropertyName("ref")]
     public int Ref { get; init; }
 
+    [JsonPropertyName("project")]
+    public int Project { get; set; }
+
     [JsonPropertyName("subject")]
     public string? Subject { get; init; }
 
