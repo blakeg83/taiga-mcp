@@ -21,10 +21,26 @@ public sealed class IssueApi
         Dictionary<int, string> types,
         Dictionary<int, string> priorities)
     {
-        int sid = it.TryGetProperty("status", out var sEl) && sEl.TryGetInt32(out var sVal) ? sVal : 0;
-        int sev = it.TryGetProperty("severity", out var sevEl) && sevEl.TryGetInt32(out var sevVal) ? sevVal : 0;
-        int typ = it.TryGetProperty("type", out var tEl) && tEl.TryGetInt32(out var tVal) ? tVal : 0;
-        int pri = it.TryGetProperty("priority", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
+        int sid = it.TryGetProperty("status", out var sEl)
+            && sEl.ValueKind != JsonValueKind.Null
+            && sEl.TryGetInt32(out var sVal)
+            ? sVal
+            : 0;
+        int sev = it.TryGetProperty("severity", out var sevEl)
+            && sevEl.ValueKind != JsonValueKind.Null
+            && sevEl.TryGetInt32(out var sevVal)
+            ? sevVal
+            : 0;
+        int typ = it.TryGetProperty("type", out var tEl)
+            && tEl.ValueKind != JsonValueKind.Null
+            && tEl.TryGetInt32(out var tVal)
+            ? tVal
+            : 0;
+        int pri = it.TryGetProperty("priority", out var pEl)
+            && pEl.ValueKind != JsonValueKind.Null
+            && pEl.TryGetInt32(out var pVal)
+            ? pVal
+            : 0;
 
         return new IssueDto
         {
@@ -35,7 +51,11 @@ public sealed class IssueApi
             Severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
             Type = types.TryGetValue(typ, out var tName) ? tName : null,
             Priority = priorities.TryGetValue(pri, out var pName) ? pName : null,
-            AssignedTo = it.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
+            AssignedTo = it.TryGetProperty("assigned_to", out var a)
+                && a.ValueKind != JsonValueKind.Null
+                && a.TryGetInt32(out var av)
+                ? av
+                : (int?)null,
             Modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
         };
     }
@@ -75,6 +95,98 @@ public sealed class IssueApi
         foreach (var it in doc.RootElement.EnumerateArray())
         {
             items.Add(MapIssue(it, statuses, severities, types, priorities));
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"issue-statuses?project={projectId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssueStatusDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            items.Add(new IssueStatusDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var id) ? id : 0,
+                Name = el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null,
+                Slug = el.TryGetProperty("slug", out var slugEl) ? slugEl.GetString() : null,
+                IsClosed = el.TryGetProperty("is_closed", out var closedEl) && closedEl.ValueKind == JsonValueKind.True
+            });
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<IssueSeverityDto>> ListIssueSeveritiesAsync(int projectId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"severities?project={projectId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssueSeverityDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            items.Add(new IssueSeverityDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var id) ? id : 0,
+                Name = el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null,
+                Slug = el.TryGetProperty("slug", out var slugEl) ? slugEl.GetString() : null,
+                Color = el.TryGetProperty("color", out var colorEl) ? colorEl.GetString() : null
+            });
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<IssueTypeDto>> ListIssueTypesAsync(int projectId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"issue-types?project={projectId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssueTypeDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            items.Add(new IssueTypeDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var id) ? id : 0,
+                Name = el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null,
+                Slug = el.TryGetProperty("slug", out var slugEl) ? slugEl.GetString() : null,
+                Color = el.TryGetProperty("color", out var colorEl) ? colorEl.GetString() : null
+            });
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<IssuePriorityDto>> ListIssuePrioritiesAsync(int projectId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"priorities?project={projectId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssuePriorityDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            items.Add(new IssuePriorityDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var id) ? id : 0,
+                Name = el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null,
+                Slug = el.TryGetProperty("slug", out var slugEl) ? slugEl.GetString() : null,
+                Color = el.TryGetProperty("color", out var colorEl) ? colorEl.GetString() : null
+            });
         }
 
         return items;

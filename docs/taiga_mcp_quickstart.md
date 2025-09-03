@@ -31,6 +31,10 @@ dotnet add package Microsoft.Extensions.Hosting
   - `list_issues(projectId, page)`
   - `create_issue(projectId, subject, …)`
   - `update_issue(issueId, patch)` (**requires version field** for OCC)
+  - `list_issue_statuses(projectId)`
+  - `list_issue_severities(projectId)`
+  - `list_issue_types(projectId)`
+  - `list_issue_priorities(projectId)`
 
 Build:
 ```bash
@@ -112,6 +116,10 @@ Look for `taiga` in the MCP servers list.
 List projects I belong to
 Call the tool list_projects with member=me and page=1
 Call the tool list_issues with projectId=12345 and page=1
+Call the tool list_issue_statuses with projectId=12345
+Call the tool list_issue_severities with projectId=12345
+Call the tool list_issue_types with projectId=12345
+Call the tool list_issue_priorities with projectId=12345
 Create a Taiga issue in project 12345 with subject "Bug"
 Update Taiga issue 67890 with patch {"subject":"Fix title","version":3}
 ```

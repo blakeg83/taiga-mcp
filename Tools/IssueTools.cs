@@ -41,4 +41,32 @@ public sealed class IssueTools
         var issue = await _issues.UpdateIssueAsync(issueId, patch);
         return JsonSerializer.Serialize(issue, JsonOpts);
     }
+
+    [McpServerTool(Name = "list_issue_statuses")]
+    public async Task<string> ListIssueStatuses(int projectId)
+    {
+        var statuses = await _issues.ListIssueStatusesAsync(projectId);
+        return JsonSerializer.Serialize(statuses, JsonOpts);
+    }
+
+    [McpServerTool(Name = "list_issue_severities")]
+    public async Task<string> ListIssueSeverities(int projectId)
+    {
+        var severities = await _issues.ListIssueSeveritiesAsync(projectId);
+        return JsonSerializer.Serialize(severities, JsonOpts);
+    }
+
+    [McpServerTool(Name = "list_issue_types")]
+    public async Task<string> ListIssueTypes(int projectId)
+    {
+        var types = await _issues.ListIssueTypesAsync(projectId);
+        return JsonSerializer.Serialize(types, JsonOpts);
+    }
+
+    [McpServerTool(Name = "list_issue_priorities")]
+    public async Task<string> ListIssuePriorities(int projectId)
+    {
+        var priorities = await _issues.ListIssuePrioritiesAsync(projectId);
+        return JsonSerializer.Serialize(priorities, JsonOpts);
+    }
 }
