@@ -47,6 +47,7 @@ public sealed class IssueApi
             Id = it.GetProperty("id").GetInt32(),
             Ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
             Subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
+            Description = it.TryGetProperty("description", out var desc) ? desc.GetString() : null,
             Status = statuses.TryGetValue(sid, out var sName) ? sName : null,
             Severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
             Type = types.TryGetValue(typ, out var tName) ? tName : null,
@@ -56,7 +57,8 @@ public sealed class IssueApi
                 && a.TryGetInt32(out var av)
                 ? av
                 : (int?)null,
-            Modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
+            Modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null,
+            Version = it.TryGetProperty("version", out var ver) && ver.TryGetInt32(out var vv) ? vv : 0
         };
     }
 
