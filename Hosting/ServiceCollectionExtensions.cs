@@ -21,7 +21,17 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton(new TaigaConfig(taigaUser, taigaPass));
-        services.AddSingleton<TaigaApi>();
+        services.AddSingleton<AuthClient>();
+        services.AddSingleton<ProjectApi>(sp =>
+            new ProjectApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
+                sp.GetRequiredService<AuthClient>()));
+        services.AddSingleton<IssueApi>(sp =>
+            new IssueApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
+                sp.GetRequiredService<AuthClient>()));
+        services.AddSingleton<UserStoryApi>(sp =>
+            new UserStoryApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
+                sp.GetRequiredService<AuthClient>()));
+        services.AddSingleton<ITaigaApi, TaigaApi>();
 
         services
             .AddMcpServer()
