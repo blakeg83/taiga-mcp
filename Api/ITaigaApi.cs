@@ -11,5 +11,6 @@ public interface ITaigaApi
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags);
     Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch);
+    Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId);
     Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1);
 }
