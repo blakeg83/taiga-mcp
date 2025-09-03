@@ -68,7 +68,7 @@ public sealed class TaigaApi
         => GetMapAsync("issue-statuses", projectId, _issueStatusCache);
 
     private Task<Dictionary<int, string>> GetIssueSeveritiesAsync(int projectId)
-        => GetMapAsync("issue-severities", projectId, _issueSeverityCache);
+        => GetMapAsync("severities", projectId, _issueSeverityCache);
 
     private Task<Dictionary<int, string>> GetIssueTypesAsync(int projectId)
         => GetMapAsync("issue-types", projectId, _issueTypeCache);
