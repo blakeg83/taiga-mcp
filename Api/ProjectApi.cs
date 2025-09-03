@@ -12,7 +12,7 @@ public sealed class ProjectApi
         _auth = auth;
     }
 
-    public async Task<string> ListProjectsAsync(string? member, int page)
+    public async Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member, int page)
     {
         await _auth.EnsureAuthAsync(_http);
         var url = string.IsNullOrEmpty(member)
@@ -27,17 +27,17 @@ public sealed class ProjectApi
             ? results
             : root;
 
-        var items = new List<Dictionary<string, object?>>();
+        var items = new List<ProjectDto>();
         foreach (var p in list.EnumerateArray())
         {
-            items.Add(new()
+            items.Add(new ProjectDto
             {
-                ["id"] = p.TryGetProperty("id", out var id) ? id.GetInt32() : 0,
-                ["slug"] = p.TryGetProperty("slug", out var slug) ? slug.GetString() : null,
-                ["name"] = p.TryGetProperty("name", out var name) ? name.GetString() : null
+                Id = p.TryGetProperty("id", out var id) && id.TryGetInt32(out var iv) ? iv : 0,
+                Slug = p.TryGetProperty("slug", out var slug) ? slug.GetString() : null,
+                Name = p.TryGetProperty("name", out var name) ? name.GetString() : null
             });
         }
-        return JsonSerializer.Serialize(items);
+        return items;
     }
 
     public async Task<int> ResolveProjectIdAsync(string slug)
