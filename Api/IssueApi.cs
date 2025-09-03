@@ -103,6 +103,29 @@ public sealed class IssueApi
         return items;
     }
 
+    public async Task<IReadOnlyList<IssueSeverityDto>> ListIssueSeveritiesAsync(int projectId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"severities?project={projectId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssueSeverityDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            items.Add(new IssueSeverityDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var id) ? id : 0,
+                Name = el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null,
+                Slug = el.TryGetProperty("slug", out var slugEl) ? slugEl.GetString() : null,
+                Color = el.TryGetProperty("color", out var colorEl) ? colorEl.GetString() : null
+            });
+        }
+
+        return items;
+    }
+
     public async Task<IReadOnlyList<IssueTypeDto>> ListIssueTypesAsync(int projectId)
     {
         await _auth.EnsureAuthAsync(_http);

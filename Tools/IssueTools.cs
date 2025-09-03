@@ -49,6 +49,13 @@ public sealed class IssueTools
         return JsonSerializer.Serialize(statuses, JsonOpts);
     }
 
+    [McpServerTool(Name = "list_issue_severities")]
+    public async Task<string> ListIssueSeverities(int projectId)
+    {
+        var severities = await _issues.ListIssueSeveritiesAsync(projectId);
+        return JsonSerializer.Serialize(severities, JsonOpts);
+    }
+
     [McpServerTool(Name = "list_issue_types")]
     public async Task<string> ListIssueTypes(int projectId)
     {
