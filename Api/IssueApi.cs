@@ -232,6 +232,7 @@ public sealed class IssueApi
     }
 
     public async Task<IssueDto> UpdateIssueAsync(
+        int projectId,
         int issueId,
         string subject,
         int version,
@@ -247,6 +248,7 @@ public sealed class IssueApi
 
         var payload = new IssueUpdateDto
         {
+            Project = projectId,
             Subject = subject,
             Version = version,
             Description = description,
