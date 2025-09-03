@@ -52,14 +52,16 @@ public sealed class UserStoryApi
         var items = new List<UserStoryDto>();
         foreach (var us in doc.RootElement.EnumerateArray())
         {
-            int stId = us.TryGetProperty("status", out var stEl) && stEl.TryGetInt32(out var stVal) ? stVal : 0;
+            if (!us.TryGetProperty("id", out var idEl) || idEl.ValueKind == JsonValueKind.Null || !idEl.TryGetInt32(out var idVal))
+                continue;
+            int stId = us.TryGetProperty("status", out var stEl) && stEl.ValueKind != JsonValueKind.Null && stEl.TryGetInt32(out var stVal) ? stVal : 0;
             items.Add(new UserStoryDto
             {
-                Id = us.GetProperty("id").GetInt32(),
-                Ref = us.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
+                Id = idVal,
+                Ref = us.TryGetProperty("ref", out var r) && r.ValueKind != JsonValueKind.Null && r.TryGetInt32(out var rv) ? rv : 0,
                 Subject = us.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
                 Status = statusMap.TryGetValue(stId, out var stName) ? stName : null,
-                AssignedTo = us.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
+                AssignedTo = us.TryGetProperty("assigned_to", out var a) && a.ValueKind != JsonValueKind.Null && a.TryGetInt32(out var av) ? av : (int?)null,
                 Modified = us.TryGetProperty("modified_date", out var md) ? md.GetString() : null
             });
         }
