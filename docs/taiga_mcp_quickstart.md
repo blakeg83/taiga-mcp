@@ -22,10 +22,10 @@ dotnet add package ModelContextProtocol --prerelease
 dotnet add package Microsoft.Extensions.Hosting
 ```
 
-Edit **Program.cs** to:
-- Set up an `HttpClient` for Taiga API
-- Implement `TaigaApi` helper (handles `/auth`, issues, and projects)
-- Define MCP tools in `TaigaTools`:
+ Edit **Program.cs** to:
+ - Set up an `HttpClient` for Taiga API
+ - Register domain APIs for projects, issues, and user stories
+ - Define MCP tools in `[McpServerToolType]` classes under `Tools/`:
   - `list_projects(member?, page)`
   - `resolve_project(slug)`
   - `list_issues(projectId, page)`
