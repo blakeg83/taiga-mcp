@@ -146,24 +146,27 @@ public sealed class TaigaApi
         await EnsureAuthAsync();
         var http = Client();
 
-        // 1) maps
+        // maps
         var statuses = await GetIssueStatusesAsync(projectId);
         var severities = await GetIssueSeveritiesAsync(projectId);
         var types = await GetIssueTypesAsync(projectId);
 
-        // 2) exclude Closed/Rejected by ID
-        var excludeIds = statuses
-            .Where(kv => kv.Value.Contains("Closed", StringComparison.OrdinalIgnoreCase) ||
-                         kv.Value.Contains("Rejected", StringComparison.OrdinalIgnoreCase))
-            .Select(kv => kv.Key);
+        // if "Rejected" exists, exclude by id (belt-and-suspenders)
+        var rejectedIds = statuses.Where(kv => string.Equals(kv.Value, "Rejected", StringComparison.OrdinalIgnoreCase))
+                                  .Select(kv => kv.Key);
 
-        // 3) request with excludes
-        var q = new List<string> { $"project={projectId}", $"page={page}" };
-        foreach (var id in excludeIds) q.Add($"exclude_status={id}");
+        // query: filter out closed + archived on the server; also exclude "Rejected" ids
+        var q = new List<string> {
+        $"project={projectId}",
+        $"page={page}",
+        "status__is_closed=false",
+        "status__is_archived=false"
+    };
+        foreach (var id in rejectedIds) q.Add($"exclude_status={id}");
+
         var res = await http.GetAsync($"issues?{string.Join("&", q)}");
         res.EnsureSuccessStatusCode();
 
-        // 4) compact projection with names
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var items = new List<object>(64);
         foreach (var it in doc.RootElement.EnumerateArray())
@@ -177,20 +180,20 @@ public sealed class TaigaApi
                 id = it.GetProperty("id").GetInt32(),
                 @ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
                 subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
-                description = it.TryGetProperty("description", out var desc) ? desc.GetString() : null,
                 status = statuses.TryGetValue(sid, out var sName) ? sName : null,
                 severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
                 type = types.TryGetValue(typ, out var tName) ? tName : null,
+                assigned_to = it.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
                 modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
             });
         }
 
-        var json = JsonSerializer.Serialize(
+        return JsonSerializer.Serialize(
             items,
             new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
         );
-        return json;
     }
+
 
 
     public async Task<string> CreateIssueAsync(
