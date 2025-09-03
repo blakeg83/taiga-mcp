@@ -6,7 +6,7 @@ public interface ITaigaApi
     Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member = null, int page = 1);
     Task<int> ResolveProjectIdAsync(string slug);
     Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page);
-    Task<IssueDto> CreateIssueAsync(
+    Task<bool> CreateIssueAsync(
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags);

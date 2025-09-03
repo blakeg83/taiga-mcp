@@ -26,7 +26,7 @@ public sealed class TaigaApi : ITaigaApi
     public Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page)
         => _issues.ListIssuesAsync(projectId, page);
 
-    public Task<IssueDto> CreateIssueAsync(
+    public Task<bool> CreateIssueAsync(
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags)
