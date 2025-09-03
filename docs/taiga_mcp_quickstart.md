@@ -30,7 +30,7 @@ dotnet add package Microsoft.Extensions.Hosting
   - `resolve_project(slug)`
   - `list_issues(projectId, page)`
   - `create_issue(projectId, subject, …)`
-  - `update_issue(issueId, subject, version, ...)` (version required)
+  - `update_issue(issueId, version, subject?, ...)` (version required; only send fields you want to change)
   - `list_issue_statuses(projectId)`
   - `list_issue_severities(projectId)`
   - `list_issue_types(projectId)`
