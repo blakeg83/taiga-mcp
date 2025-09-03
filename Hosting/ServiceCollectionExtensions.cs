@@ -29,9 +29,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ProjectApi>(sp =>
             new ProjectApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
                 sp.GetRequiredService<AuthClient>()));
+
+        services.AddSingleton<IssueMetadataCache>(sp =>
+            new IssueMetadataCache(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
+                sp.GetRequiredService<AuthClient>()));
+
         services.AddSingleton<IssueApi>(sp =>
             new IssueApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
-                sp.GetRequiredService<AuthClient>()));
+                sp.GetRequiredService<AuthClient>(),
+                sp.GetRequiredService<IssueMetadataCache>()));
+
         services.AddSingleton<UserStoryApi>(sp =>
             new UserStoryApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
                 sp.GetRequiredService<AuthClient>()));
