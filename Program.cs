@@ -46,6 +46,7 @@ public sealed class TaigaApi
     private readonly Dictionary<int, Dictionary<int, string>> _issueStatusCache = new();
     private readonly Dictionary<int, Dictionary<int, string>> _issueSeverityCache = new();
     private readonly Dictionary<int, Dictionary<int, string>> _issueTypeCache = new();
+    private readonly Dictionary<int, Dictionary<int, string>> _issuePriorityCache = new();
 
     private async Task<Dictionary<int, string>> GetMapAsync(string path, int projectId, Dictionary<int, Dictionary<int, string>> cache)
     {
@@ -72,7 +73,8 @@ public sealed class TaigaApi
 
     private Task<Dictionary<int, string>> GetIssueTypesAsync(int projectId)
         => GetMapAsync("issue-types", projectId, _issueTypeCache);
-
+    private Task<Dictionary<int, string>> GetIssuePrioritiesAsync(int projectId)
+    => GetMapAsync("priorities", projectId, _issuePriorityCache);
 
     public TaigaApi(IHttpClientFactory factory, TaigaConfig cfg)
     {
@@ -150,12 +152,11 @@ public sealed class TaigaApi
         var statuses = await GetIssueStatusesAsync(projectId);
         var severities = await GetIssueSeveritiesAsync(projectId);
         var types = await GetIssueTypesAsync(projectId);
+        var priorities = await GetIssuePrioritiesAsync(projectId);
 
-        // if "Rejected" exists, exclude by id (belt-and-suspenders)
         var rejectedIds = statuses.Where(kv => string.Equals(kv.Value, "Rejected", StringComparison.OrdinalIgnoreCase))
                                   .Select(kv => kv.Key);
 
-        // query: filter out closed + archived on the server; also exclude "Rejected" ids
         var q = new List<string> {
         $"project={projectId}",
         $"page={page}",
@@ -174,6 +175,7 @@ public sealed class TaigaApi
             int sid = it.TryGetProperty("status", out var sEl) && sEl.TryGetInt32(out var sVal) ? sVal : 0;
             int sev = it.TryGetProperty("severity", out var sevEl) && sevEl.TryGetInt32(out var sevVal) ? sevVal : 0;
             int typ = it.TryGetProperty("type", out var tEl) && tEl.TryGetInt32(out var tVal) ? tVal : 0;
+            int pri = it.TryGetProperty("priority", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
 
             items.Add(new
             {
@@ -183,6 +185,7 @@ public sealed class TaigaApi
                 status = statuses.TryGetValue(sid, out var sName) ? sName : null,
                 severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
                 type = types.TryGetValue(typ, out var tName) ? tName : null,
+                priority = priorities.TryGetValue(pri, out var pName) ? pName : null,
                 assigned_to = it.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
                 modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
             });
@@ -193,8 +196,6 @@ public sealed class TaigaApi
             new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
         );
     }
-
-
 
     public async Task<string> CreateIssueAsync(
         int projectId, string subject, string? description,
