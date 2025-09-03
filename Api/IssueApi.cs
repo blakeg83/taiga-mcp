@@ -228,17 +228,37 @@ public sealed class IssueApi
         return MapIssue(el, statuses, severities, types, priorities);
     }
 
-    public async Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch)
+    public async Task<IssueDto> UpdateIssueAsync(
+        int issueId,
+        string subject,
+        int version,
+        string? description,
+        int? status,
+        int? type,
+        int? priority,
+        int? severity,
+        int? assigned_to,
+        string[]? tags)
     {
         await _auth.EnsureAuthAsync(_http);
-        if (!patch.TryGetProperty("version", out _))
-            throw new InvalidOperationException("Taiga requires 'version' in patch for optimistic concurrency.");
 
-        var req = new HttpRequestMessage(new HttpMethod("PATCH"), $"issues/{issueId}")
+        var payload = new IssueUpdateDto
         {
-            Content = new StringContent(patch.GetRawText(), Encoding.UTF8, "application/json")
+            Subject = subject,
+            Version = version,
+            Description = description,
+            Status = status,
+            Type = type,
+            Priority = priority,
+            Severity = severity,
+            AssignedTo = assigned_to,
+            Tags = tags
         };
-        var res = await _http.SendAsync(req);
+        var json = JsonSerializer.Serialize(
+            payload,
+            new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
+        );
+        var res = await _http.PutAsync($"issues/{issueId}", new StringContent(json, Encoding.UTF8, "application/json"));
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
