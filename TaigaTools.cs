@@ -5,9 +5,9 @@ using ModelContextProtocol.Server;
 [McpServerToolType]
 public sealed class TaigaTools
 {
-    private readonly TaigaApi _api;
+    private readonly ITaigaApi _api;
 
-    public TaigaTools(TaigaApi api)
+    public TaigaTools(ITaigaApi api)
     {
         _api = api;
     }
