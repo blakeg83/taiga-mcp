@@ -192,7 +192,7 @@ public sealed class IssueApi
         return items;
     }
 
-    public async Task<bool> CreateIssueAsync(
+    public async Task<IssueDto> CreateIssueAsync(
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags)
@@ -218,20 +218,14 @@ public sealed class IssueApi
         var res = await _http.PostAsync("issues", new StringContent(json, Encoding.UTF8, "application/json"));
         res.EnsureSuccessStatusCode();
 
-        if(res.IsSuccessStatusCode) {
-            return true;
-        }
-
-        return false;
-
-        //using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        //var el = doc.RootElement;
-        //int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : projectId;
-        //var statuses = await _cache.GetStatusesAsync(proj);
-        //var severities = await _cache.GetSeveritiesAsync(proj);
-        //var types = await _cache.GetTypesAsync(proj);
-        //var priorities = await _cache.GetPrioritiesAsync(proj);
-        //return MapIssue(el, statuses, severities, types, priorities);
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var el = doc.RootElement;
+        int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : projectId;
+        var statuses = await _cache.GetStatusesAsync(proj);
+        var severities = await _cache.GetSeveritiesAsync(proj);
+        var types = await _cache.GetTypesAsync(proj);
+        var priorities = await _cache.GetPrioritiesAsync(proj);
+        return MapIssue(el, statuses, severities, types, priorities);
     }
 
     public async Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch)
