@@ -10,8 +10,12 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddTaigaServices(this IServiceCollection services, IConfiguration config)
     {
         services.AddLogging(b => b.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Information));
-
-        services.Configure<TaigaOptions>(config.GetSection("Taiga"));
+        services
+            .AddOptions<TaigaOptions>()
+            .Bind(config.GetSection("Taiga"))
+            .Validate(o => !string.IsNullOrEmpty(o.Username) && !string.IsNullOrEmpty(o.Password),
+                "Taiga credentials are required")
+            .ValidateOnStart();
 
         services.AddHttpClient("taiga", (sp, client) =>
         {
