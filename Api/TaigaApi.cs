@@ -17,24 +17,24 @@ public sealed class TaigaApi : ITaigaApi
         _cfg = opts.Value;
     }
 
-    public Task<string> ListProjectsAsync(string? member = null, int page = 1)
+    public Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member = null, int page = 1)
         => _projects.ListProjectsAsync(member, page);
 
     public Task<int> ResolveProjectIdAsync(string slug)
         => _projects.ResolveProjectIdAsync(slug);
 
-    public Task<string> ListIssuesAsync(int projectId, int page)
+    public Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page)
         => _issues.ListIssuesAsync(projectId, page);
 
-    public Task<string> CreateIssueAsync(
+    public Task<IssueDto> CreateIssueAsync(
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags)
         => _issues.CreateIssueAsync(projectId, subject, description, status, type, priority, severity, assigned_to, tags);
 
-    public Task<string> UpdateIssueAsync(int issueId, JsonElement patch)
+    public Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch)
         => _issues.UpdateIssueAsync(issueId, patch);
 
-    public Task<string> ListUserStoriesAsync(int projectId, int page = 1)
+    public Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1)
         => _userStories.ListUserStoriesAsync(projectId, page);
 }
