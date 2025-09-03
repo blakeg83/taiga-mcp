@@ -4,7 +4,8 @@
 - Source: `Program.cs` hosts the MCP server, DI, and Taiga API wrapper.
 - Project files: `TaigaMCP.csproj`, `TaigaMCP.sln`.
 - Build artifacts: `bin/` and `obj/` (auto‑generated; do not commit).
-- Tools are defined in `TaigaTools` via `[McpServerTool]` attributes.
+- Tools live under the `Tools/` folder. Each class is marked with
+  `[McpServerToolType]` and exposes methods with `[McpServerTool]`.
 
 ## Build, Run, and Development
 - Restore/build: `dotnet restore && dotnet build -c Debug`
@@ -37,4 +38,7 @@
 - Validate network calls with `EnsureSuccessStatusCode()` and handle pagination where applicable.
 
 ## Agent‑Specific Notes
-- Add a new tool by creating a method on `TaigaTools` and annotate with `[McpServerTool(Name = "your_tool")]`. Use `TaigaApi` via DI for Taiga access and return JSON strings.
+- Add a new tool by adding a method to an existing class in `Tools/` or
+   creating a new `[McpServerToolType]` class. Inject the necessary domain
+   API (e.g., `ProjectApi`) and annotate methods with
+   `[McpServerTool(Name = "your_tool")]` to return JSON strings.

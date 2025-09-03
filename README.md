@@ -54,7 +54,8 @@ Notes:
 - Use the absolute path to your published binary for `command`.
 
 ## Development Notes
-- Entry point and DI/live tools: `Program.cs` (`TaigaApi` + `TaigaTools`).
+ - Entry point and DI/live tools: `Program.cs` registers domain APIs and
+   loads `[McpServerToolType]` classes from the `Tools/` folder.
 - Transport: STDIO; logging via `Microsoft.Extensions.Logging` to stderr.
 - HTTP: `HttpClient` with bearer auth token acquired via `/auth`.
 
