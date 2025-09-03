@@ -120,6 +120,41 @@ public sealed class IssueApi
         return MapIssue(el, statuses, severities, types, priorities);
     }
 
+    public async Task<IReadOnlyList<IssueCommentDto>> GetIssueCommentsAsync(int issueId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"history/issue/{issueId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssueCommentDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            bool isHidden = el.TryGetProperty("is_hidden", out var hiddenEl) && hiddenEl.ValueKind == JsonValueKind.True;
+            if (isHidden) continue;
+
+            if (!el.TryGetProperty("comment", out var commentEl) || commentEl.ValueKind != JsonValueKind.String)
+                continue;
+
+            var userName = el.TryGetProperty("user", out var userEl)
+                && userEl.ValueKind == JsonValueKind.Object
+                && userEl.TryGetProperty("name", out var nameEl)
+                    ? nameEl.GetString()
+                    : null;
+
+            items.Add(new IssueCommentDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) ? idEl.GetString() : null,
+                Comment = commentEl.GetString(),
+                CreatedAt = el.TryGetProperty("created_at", out var createdEl) ? createdEl.GetString() : null,
+                User = userName is not null ? new IssueCommentUserDto { Name = userName } : null
+            });
+        }
+
+        return items;
+    }
+
     public async Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
     {
         await _auth.EnsureAuthAsync(_http);
