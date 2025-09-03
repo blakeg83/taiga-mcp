@@ -18,7 +18,8 @@ public interface ITaigaApi
         int? priority,
         int? severity,
         int? assigned_to,
-        string[]? tags);
+        string[]? tags,
+        string? comment);
     Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId);
     Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1);
 }

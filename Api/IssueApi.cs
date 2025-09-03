@@ -258,7 +258,8 @@ public sealed class IssueApi
         int? priority = null,
         int? severity = null,
         int? assigned_to = null,
-        string[]? tags = null)
+        string[]? tags = null,
+        string? comment = null)
     {
         await _auth.EnsureAuthAsync(_http);
 
@@ -272,7 +273,8 @@ public sealed class IssueApi
             Severity = severity,
             AssignedTo = assigned_to,
             Tags = tags,
-            Version = version
+            Version = version,
+            Comment = comment
         };
 
         var json = JsonSerializer.Serialize(

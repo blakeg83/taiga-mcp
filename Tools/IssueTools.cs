@@ -53,7 +53,8 @@ public sealed class IssueTools
         int? priority = null,
         int? severity = null,
         int? assigned_to = null,
-        string[]? tags = null)
+        string[]? tags = null,
+        string? comment = null)
     {
         var issue = await _issues.UpdateIssueAsync(
             issueId,
@@ -65,7 +66,8 @@ public sealed class IssueTools
             priority,
             severity,
             assigned_to,
-            tags);
+            tags,
+            comment);
         return JsonSerializer.Serialize(issue, JsonOpts);
     }
 

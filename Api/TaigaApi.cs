@@ -41,8 +41,9 @@ public sealed class TaigaApi : ITaigaApi
         int? priority,
         int? severity,
         int? assigned_to,
-        string[]? tags)
-        => _issues.UpdateIssueAsync(issueId, version, subject, description, status, type, priority, severity, assigned_to, tags);
+        string[]? tags,
+        string? comment)
+        => _issues.UpdateIssueAsync(issueId, version, subject, description, status, type, priority, severity, assigned_to, tags, comment);
 
     public Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
         => _issues.ListIssueStatusesAsync(projectId);
