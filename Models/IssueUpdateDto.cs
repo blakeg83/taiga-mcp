@@ -2,11 +2,8 @@ using System.Text.Json.Serialization;
 
 public sealed record IssueUpdateDto
 {
-    [JsonPropertyName("project")]
-    public int Project { get; set; }
-
     [JsonPropertyName("subject")]
-    public required string Subject { get; init; }
+    public string? Subject { get; init; }
 
     [JsonPropertyName("description")]
     public string? Description { get; init; }

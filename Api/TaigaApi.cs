@@ -32,9 +32,8 @@ public sealed class TaigaApi : ITaigaApi
         => _issues.CreateIssueAsync(projectId, subject, description, status, type, priority, severity, assigned_to, tags);
 
     public Task<IssueDto> UpdateIssueAsync(
-        int projectId,
         int issueId,
-        string subject,
+        string? subject,
         int version,
         string? description,
         int? status,
@@ -43,7 +42,7 @@ public sealed class TaigaApi : ITaigaApi
         int? severity,
         int? assigned_to,
         string[]? tags)
-        => _issues.UpdateIssueAsync(projectId, issueId, subject, version, description, status, type, priority, severity, assigned_to, tags);
+        => _issues.UpdateIssueAsync(issueId, version, subject, description, status, type, priority, severity, assigned_to, tags);
 
     public Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
         => _issues.ListIssueStatusesAsync(projectId);

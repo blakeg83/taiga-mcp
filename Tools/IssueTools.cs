@@ -37,7 +37,6 @@ public sealed class IssueTools
 
     [McpServerTool(Name = "update_issue")]
     public async Task<string> UpdateIssue(
-        int projectId,
         int issueId,
         string subject,
         int version,
@@ -50,10 +49,9 @@ public sealed class IssueTools
         string[]? tags = null)
     {
         var issue = await _issues.UpdateIssueAsync(
-            projectId,
             issueId,
-            subject,
             version,
+            subject,
             description,
             status,
             type,

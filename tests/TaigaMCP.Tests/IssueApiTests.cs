@@ -54,7 +54,7 @@ public class IssueApiTests
         var cache = new IssueMetadataCache(http, auth);
         var api = new IssueApi(http, auth, cache);
 
-        await api.UpdateIssueAsync(1, 2, "Test", 1, null, null, null, null, null, null, null);
+        await api.UpdateIssueAsync(1, 2, "subject", "desc", null, null, null, null, null, null);
 
         Assert.Equal("PATCH", handler.PatchRequest?.Method.Method);
     }

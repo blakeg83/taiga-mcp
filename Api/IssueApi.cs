@@ -232,51 +232,62 @@ public sealed class IssueApi
     }
 
     public async Task<IssueDto> UpdateIssueAsync(
-        int projectId,
         int issueId,
-        string subject,
         int version,
-        string? description,
-        int? status,
-        int? type,
-        int? priority,
-        int? severity,
-        int? assigned_to,
-        string[]? tags)
+        string? subject = null,
+        string? description = null,
+        int? status = null,
+        int? type = null,
+        int? priority = null,
+        int? severity = null,
+        int? assigned_to = null,
+        string[]? tags = null)
     {
         await _auth.EnsureAuthAsync(_http);
 
         var payload = new IssueUpdateDto
         {
-            Project = projectId,
             Subject = subject,
-            Version = version,
             Description = description,
             Status = status,
             Type = type,
             Priority = priority,
             Severity = severity,
             AssignedTo = assigned_to,
-            Tags = tags
+            Tags = tags,
+            Version = version
         };
+
         var json = JsonSerializer.Serialize(
             payload,
-            new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
-        );
-        using var req = new HttpRequestMessage(new HttpMethod("PATCH"), $"issues/{issueId}")
+            new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
+
+        using var req = new HttpRequestMessage(HttpMethod.Patch, $"issues/{issueId}")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
-        var res = await _http.SendAsync(req);
-        res.EnsureSuccessStatusCode();
+        req.Headers.Accept.ParseAdd("application/json");
 
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var res = await _http.SendAsync(req);
+        var body = await res.Content.ReadAsStringAsync();
+
+        if (!res.IsSuccessStatusCode)
+            throw new HttpRequestException($"PATCH issues/{issueId} failed: {(int)res.StatusCode} {res.ReasonPhrase}\n{body}");
+
+        using var doc = JsonDocument.Parse(body);
         var el = doc.RootElement;
+
+        // Map using your existing caches
         int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
         var statuses = await _cache.GetStatusesAsync(proj);
         var severities = await _cache.GetSeveritiesAsync(proj);
         var types = await _cache.GetTypesAsync(proj);
         var priorities = await _cache.GetPrioritiesAsync(proj);
+
         return MapIssue(el, statuses, severities, types, priorities);
     }
+
 }
