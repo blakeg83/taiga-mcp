@@ -23,6 +23,13 @@ public sealed class IssueTools
         return JsonSerializer.Serialize(issues, JsonOpts);
     }
 
+    [McpServerTool(Name = "get_issue")]
+    public async Task<string> GetIssue(int issueId)
+    {
+        var issue = await _issues.GetIssueAsync(issueId);
+        return JsonSerializer.Serialize(issue, JsonOpts);
+    }
+
     [McpServerTool(Name = "create_issue")]
     public async Task<string> CreateIssue(
         int projectId,
