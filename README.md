@@ -16,8 +16,8 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 ## Build and Run
 ```bash
 dotnet restore && dotnet build -c Release
-TAIGA_USERNAME=you@example.com TAIGA_PASSWORD=secret \
-  TAIGA_BASE_URL=https://api.taiga.io/api/v1/ \
+TAIGA__USERNAME=you@example.com TAIGA__PASSWORD=secret \
+  TAIGA__BASEURL=https://api.taiga.io/api/v1/ \
   dotnet run
 ```
 
@@ -29,9 +29,9 @@ dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFil
 
 ## Configuration
 Set environment variables for the server process:
-- `TAIGA_BASE_URL` (optional, default: `https://api.taiga.io/api/v1/`)
-- `TAIGA_USERNAME`
-- `TAIGA_PASSWORD`
+- `TAIGA__BASEURL` (optional, default: `https://api.taiga.io/api/v1/`)
+- `TAIGA__USERNAME`
+- `TAIGA__PASSWORD`
 
 For Codex CLI, point the MCP server `command` to the published binary and pass the env vars. See the quickstart for a full `config.toml` example.
 
@@ -42,7 +42,7 @@ Add an MCP server entry pointing to the published binary:
 [mcp_servers.taiga]
 command = "/home/you/src/taiga-mcp/bin/Release/net8.0/linux-x64/publish/TaigaMCP"
 args = []
-env = { TAIGA_BASE_URL = "https://api.taiga.io/api/v1/", TAIGA_USERNAME = "you@example.com", TAIGA_PASSWORD = "yourpass" }
+env = { TAIGA__BASEURL = "https://api.taiga.io/api/v1/", TAIGA__USERNAME = "you@example.com", TAIGA__PASSWORD = "yourpass" }
 
 # Optional: trust local projects for Codex (example paths)
 [projects]

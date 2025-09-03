@@ -9,8 +9,8 @@
 
 ## Build, Run, and Development
 - Restore/build: `dotnet restore && dotnet build -c Debug`
-- Run locally: `TAIGA_USERNAME=you TAIGA_PASSWORD=secret dotnet run`
-  - Optional: `TAIGA_BASE_URL=https://api.taiga.io/api/v1/` (default shown).
+- Run locally: `TAIGA__USERNAME=you TAIGA__PASSWORD=secret dotnet run`
+  - Optional: `TAIGA__BASEURL=https://api.taiga.io/api/v1/` (default shown).
 - Clean: `dotnet clean`
 - Format (if installed): `dotnet format` to enforce C# style.
 
@@ -33,7 +33,7 @@
 - Keep changes focused; include notes on configuration/env vars if behavior depends on them.
 
 ## Security & Configuration
-- Credentials come from env vars: `TAIGA_USERNAME`, `TAIGA_PASSWORD`; never commit secrets.
+- Credentials come from env vars: `TAIGA__USERNAME`, `TAIGA__PASSWORD`; never commit secrets.
 - Tokens are cached in memory per process; restart to clear.
 - Validate network calls with `EnsureSuccessStatusCode()` and handle pagination where applicable.
 

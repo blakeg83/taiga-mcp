@@ -50,7 +50,7 @@ Edit **~/.codex/config.toml** in WSL. Example:
 [mcp_servers.taiga]
 command = "/home/bgauthier/projects/TaigaMCP/bin/Release/net8.0/linux-x64/publish/TaigaMCP"
 args = []
-env = { TAIGA_BASE_URL = "https://api.taiga.io/api/v1", TAIGA_USERNAME = "you@example.com", TAIGA_PASSWORD = "yourpass" }
+env = { TAIGA__BASEURL = "https://api.taiga.io/api/v1", TAIGA__USERNAME = "you@example.com", TAIGA__PASSWORD = "yourpass" }
 ```
 
 > **Tip:** Inline tables (like `env = { ... }`) must all be on one line. Breaking across lines causes TOML parse errors.
@@ -81,7 +81,7 @@ npx @modelcontextprotocol/inspector dotnet run --project ./TaigaMCP.csproj
 - Transport: `STDIO`
 - Command: `dotnet`
 - Args: `run --project ./TaigaMCP.csproj`
-- Env: TAIGA_BASE_URL, TAIGA_USERNAME, TAIGA_PASSWORD
+- Env: TAIGA__BASEURL, TAIGA__USERNAME, TAIGA__PASSWORD
 
 Click **Connect** → call tools interactively.
 
