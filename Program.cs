@@ -43,6 +43,36 @@ public sealed class TaigaApi
     private readonly IHttpClientFactory _factory;
     private readonly TaigaConfig _cfg;
     private string? _token;
+    private readonly Dictionary<int, Dictionary<int, string>> _issueStatusCache = new();
+    private readonly Dictionary<int, Dictionary<int, string>> _issueSeverityCache = new();
+    private readonly Dictionary<int, Dictionary<int, string>> _issueTypeCache = new();
+
+    private async Task<Dictionary<int, string>> GetMapAsync(string path, int projectId, Dictionary<int, Dictionary<int, string>> cache)
+    {
+        if (cache.TryGetValue(projectId, out var m)) return m;
+        var http = Client();
+        var res = await http.GetAsync($"{path}?project={projectId}");
+        res.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var map = new Dictionary<int, string>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            if (!el.TryGetProperty("id", out var idProp) || !el.TryGetProperty("name", out var nameProp)) continue;
+            if (idProp.TryGetInt32(out var id) && nameProp.GetString() is { } name) map[id] = name;
+        }
+        cache[projectId] = map;
+        return map;
+    }
+
+    private Task<Dictionary<int, string>> GetIssueStatusesAsync(int projectId)
+        => GetMapAsync("issue-statuses", projectId, _issueStatusCache);
+
+    private Task<Dictionary<int, string>> GetIssueSeveritiesAsync(int projectId)
+        => GetMapAsync("issue-severities", projectId, _issueSeverityCache);
+
+    private Task<Dictionary<int, string>> GetIssueTypesAsync(int projectId)
+        => GetMapAsync("issue-types", projectId, _issueTypeCache);
+
 
     public TaigaApi(IHttpClientFactory factory, TaigaConfig cfg)
     {
@@ -115,10 +145,51 @@ public sealed class TaigaApi
     {
         await EnsureAuthAsync();
         var http = Client();
-        var res = await http.GetAsync($"issues?project={projectId}&page={page}");
+
+        // 1) maps
+        var statuses = await GetIssueStatusesAsync(projectId);
+        var severities = await GetIssueSeveritiesAsync(projectId);
+        var types = await GetIssueTypesAsync(projectId);
+
+        // 2) exclude Closed/Rejected by ID
+        var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Closed", "Rejected" };
+        var excludeIds = statuses.Where(kv => exclude.Contains(kv.Value)).Select(kv => kv.Key);
+
+        // 3) request with excludes
+        var q = new List<string> { $"project={projectId}", $"page={page}" };
+        foreach (var id in excludeIds) q.Add($"exclude_status={id}");
+        var res = await http.GetAsync($"issues?{string.Join("&", q)}");
         res.EnsureSuccessStatusCode();
-        return await res.Content.ReadAsStringAsync();
+
+        // 4) compact projection with names
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<object>(64);
+        foreach (var it in doc.RootElement.EnumerateArray())
+        {
+            int sid = it.TryGetProperty("status", out var sEl) && sEl.TryGetInt32(out var sVal) ? sVal : 0;
+            int sev = it.TryGetProperty("severity", out var sevEl) && sevEl.TryGetInt32(out var sevVal) ? sevVal : 0;
+            int typ = it.TryGetProperty("type", out var tEl) && tEl.TryGetInt32(out var tVal) ? tVal : 0;
+
+            items.Add(new
+            {
+                id = it.GetProperty("id").GetInt32(),
+                @ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
+                subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
+                description = it.TryGetProperty("description", out var desc) ? desc.GetString() : null,
+                status = statuses.TryGetValue(sid, out var sName) ? sName : null,
+                severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
+                type = types.TryGetValue(typ, out var tName) ? tName : null,
+                modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
+            });
+        }
+
+        var json = JsonSerializer.Serialize(
+            items,
+            new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
+        );
+        return json;
     }
+
 
     public async Task<string> CreateIssueAsync(
         int projectId, string subject, string? description,
