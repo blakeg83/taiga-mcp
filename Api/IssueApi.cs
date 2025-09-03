@@ -103,6 +103,23 @@ public sealed class IssueApi
         return items;
     }
 
+    public async Task<IssueDto> GetIssueAsync(int issueId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"issues/{issueId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var el = doc.RootElement;
+        int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
+        var statuses = await _cache.GetStatusesAsync(proj);
+        var severities = await _cache.GetSeveritiesAsync(proj);
+        var types = await _cache.GetTypesAsync(proj);
+        var priorities = await _cache.GetPrioritiesAsync(proj);
+        return MapIssue(el, statuses, severities, types, priorities);
+    }
+
     public async Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
     {
         await _auth.EnsureAuthAsync(_http);

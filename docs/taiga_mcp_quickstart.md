@@ -29,6 +29,7 @@ dotnet add package Microsoft.Extensions.Hosting
   - `list_projects(member?, page)`
   - `resolve_project(slug)`
   - `list_issues(projectId, page)`
+  - `get_issue(issueId)`
   - `create_issue(projectId, subject, …)`
   - `update_issue(issueId, version, subject?, ...)` (version required; only send fields you want to change)
   - `list_issue_statuses(projectId)`
@@ -116,6 +117,7 @@ Look for `taiga` in the MCP servers list.
 List projects I belong to
 Call the tool list_projects with member=me and page=1
 Call the tool list_issues with projectId=12345 and page=1
+Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345
 Call the tool list_issue_severities with projectId=12345
 Call the tool list_issue_types with projectId=12345
