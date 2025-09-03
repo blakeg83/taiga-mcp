@@ -11,7 +11,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddLogging(b => b.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Information));
 
-        services.Configure<TaigaOptions>(config);
+        services.Configure<TaigaOptions>(config.GetSection("Taiga"));
 
         services.AddHttpClient("taiga", (sp, client) =>
         {
