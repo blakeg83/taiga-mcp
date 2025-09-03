@@ -9,6 +9,7 @@ public interface ITaigaApi
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags);
     Task<IssueDto> UpdateIssueAsync(
+        int projectId,
         int issueId,
         string subject,
         int version,
