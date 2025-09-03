@@ -21,10 +21,26 @@ public sealed class IssueApi
         Dictionary<int, string> types,
         Dictionary<int, string> priorities)
     {
-        int sid = it.TryGetProperty("status", out var sEl) && sEl.TryGetInt32(out var sVal) ? sVal : 0;
-        int sev = it.TryGetProperty("severity", out var sevEl) && sevEl.TryGetInt32(out var sevVal) ? sevVal : 0;
-        int typ = it.TryGetProperty("type", out var tEl) && tEl.TryGetInt32(out var tVal) ? tVal : 0;
-        int pri = it.TryGetProperty("priority", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
+        int sid = it.TryGetProperty("status", out var sEl)
+            && sEl.ValueKind != JsonValueKind.Null
+            && sEl.TryGetInt32(out var sVal)
+            ? sVal
+            : 0;
+        int sev = it.TryGetProperty("severity", out var sevEl)
+            && sevEl.ValueKind != JsonValueKind.Null
+            && sevEl.TryGetInt32(out var sevVal)
+            ? sevVal
+            : 0;
+        int typ = it.TryGetProperty("type", out var tEl)
+            && tEl.ValueKind != JsonValueKind.Null
+            && tEl.TryGetInt32(out var tVal)
+            ? tVal
+            : 0;
+        int pri = it.TryGetProperty("priority", out var pEl)
+            && pEl.ValueKind != JsonValueKind.Null
+            && pEl.TryGetInt32(out var pVal)
+            ? pVal
+            : 0;
 
         return new IssueDto
         {
@@ -35,7 +51,11 @@ public sealed class IssueApi
             Severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
             Type = types.TryGetValue(typ, out var tName) ? tName : null,
             Priority = priorities.TryGetValue(pri, out var pName) ? pName : null,
-            AssignedTo = it.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
+            AssignedTo = it.TryGetProperty("assigned_to", out var a)
+                && a.ValueKind != JsonValueKind.Null
+                && a.TryGetInt32(out var av)
+                ? av
+                : (int?)null,
             Modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
         };
     }
