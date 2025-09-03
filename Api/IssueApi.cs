@@ -137,6 +137,10 @@ public sealed class IssueApi
             if (!el.TryGetProperty("comment", out var commentEl) || commentEl.ValueKind != JsonValueKind.String)
                 continue;
 
+            var commentStr = commentEl.GetString();
+            if (string.IsNullOrEmpty(commentStr))
+                continue;
+
             var userName = el.TryGetProperty("user", out var userEl)
                 && userEl.ValueKind == JsonValueKind.Object
                 && userEl.TryGetProperty("name", out var nameEl)
@@ -146,7 +150,7 @@ public sealed class IssueApi
             items.Add(new IssueCommentDto
             {
                 Id = el.TryGetProperty("id", out var idEl) ? idEl.GetString() : null,
-                Comment = commentEl.GetString(),
+                Comment = commentStr,
                 CreatedAt = el.TryGetProperty("created_at", out var createdEl) ? createdEl.GetString() : null,
                 User = userName is not null ? new IssueCommentUserDto { Name = userName } : null
             });
