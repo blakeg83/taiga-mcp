@@ -152,8 +152,10 @@ public sealed class TaigaApi
         var types = await GetIssueTypesAsync(projectId);
 
         // 2) exclude Closed/Rejected by ID
-        var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Closed", "Rejected" };
-        var excludeIds = statuses.Where(kv => exclude.Contains(kv.Value)).Select(kv => kv.Key);
+        var excludeIds = statuses
+            .Where(kv => kv.Value.Contains("Closed", StringComparison.OrdinalIgnoreCase) ||
+                         kv.Value.Contains("Rejected", StringComparison.OrdinalIgnoreCase))
+            .Select(kv => kv.Key);
 
         // 3) request with excludes
         var q = new List<string> { $"project={projectId}", $"page={page}" };
