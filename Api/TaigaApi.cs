@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 
 /// <summary>Main Taiga API delegating to domain APIs.</summary>
 public sealed class TaigaApi : ITaigaApi
@@ -6,12 +7,14 @@ public sealed class TaigaApi : ITaigaApi
     private readonly ProjectApi _projects;
     private readonly IssueApi _issues;
     private readonly UserStoryApi _userStories;
+    private readonly TaigaOptions _cfg;
 
-    public TaigaApi(ProjectApi projects, IssueApi issues, UserStoryApi userStories)
+    public TaigaApi(ProjectApi projects, IssueApi issues, UserStoryApi userStories, IOptions<TaigaOptions> opts)
     {
         _projects = projects;
         _issues = issues;
         _userStories = userStories;
+        _cfg = opts.Value;
     }
 
     public Task<string> ListProjectsAsync(string? member = null, int page = 1)
