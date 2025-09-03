@@ -44,8 +44,33 @@ public sealed class IssueApi
 
     private Task<Dictionary<int, string>> GetIssuePrioritiesAsync(int projectId)
         => GetMapAsync("priorities", projectId, _priorityCache);
+    private static IssueDto MapIssue(
+        JsonElement it,
+        Dictionary<int, string> statuses,
+        Dictionary<int, string> severities,
+        Dictionary<int, string> types,
+        Dictionary<int, string> priorities)
+    {
+        int sid = it.TryGetProperty("status", out var sEl) && sEl.TryGetInt32(out var sVal) ? sVal : 0;
+        int sev = it.TryGetProperty("severity", out var sevEl) && sevEl.TryGetInt32(out var sevVal) ? sevVal : 0;
+        int typ = it.TryGetProperty("type", out var tEl) && tEl.TryGetInt32(out var tVal) ? tVal : 0;
+        int pri = it.TryGetProperty("priority", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
 
-    public async Task<string> ListIssuesAsync(int projectId, int page)
+        return new IssueDto
+        {
+            Id = it.GetProperty("id").GetInt32(),
+            Ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
+            Subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
+            Status = statuses.TryGetValue(sid, out var sName) ? sName : null,
+            Severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
+            Type = types.TryGetValue(typ, out var tName) ? tName : null,
+            Priority = priorities.TryGetValue(pri, out var pName) ? pName : null,
+            AssignedTo = it.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
+            Modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
+        };
+    }
+
+    public async Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page)
     {
         await _auth.EnsureAuthAsync(_http);
 
@@ -76,64 +101,52 @@ public sealed class IssueApi
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        var items = new List<object>(64);
+        var items = new List<IssueDto>(64);
         foreach (var it in doc.RootElement.EnumerateArray())
         {
-            int sid = it.TryGetProperty("status", out var sEl) && sEl.TryGetInt32(out var sVal) ? sVal : 0;
-            int sev = it.TryGetProperty("severity", out var sevEl) && sevEl.TryGetInt32(out var sevVal) ? sevVal : 0;
-            int typ = it.TryGetProperty("type", out var tEl) && tEl.TryGetInt32(out var tVal) ? tVal : 0;
-            int pri = it.TryGetProperty("priority", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
-
-            items.Add(new
-            {
-                id = it.GetProperty("id").GetInt32(),
-                @ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
-                subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
-                status = statuses.TryGetValue(sid, out var sName) ? sName : null,
-                severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
-                type = types.TryGetValue(typ, out var tName) ? tName : null,
-                priority = priorities.TryGetValue(pri, out var pName) ? pName : null,
-                assigned_to = it.TryGetProperty("assigned_to", out var a) && a.TryGetInt32(out var av) ? av : (int?)null,
-                modified = it.TryGetProperty("modified_date", out var md) ? md.GetString() : null
-            });
+            items.Add(MapIssue(it, statuses, severities, types, priorities));
         }
 
-        return JsonSerializer.Serialize(
-            items,
-            new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
-        );
+        return items;
     }
 
-    public async Task<string> CreateIssueAsync(
+    public async Task<IssueDto> CreateIssueAsync(
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags)
     {
         await _auth.EnsureAuthAsync(_http);
 
-        var payload = new Dictionary<string, object?>
+        var payload = new IssueCreateDto
         {
-            ["project"] = projectId,
-            ["subject"] = subject,
-            ["description"] = description,
-            ["status"] = status,
-            ["type"] = type,
-            ["priority"] = priority,
-            ["severity"] = severity,
-            ["assigned_to"] = assigned_to,
-            ["tags"] = tags
+            Project = projectId,
+            Subject = subject,
+            Description = description,
+            Status = status,
+            Type = type,
+            Priority = priority,
+            Severity = severity,
+            AssignedTo = assigned_to,
+            Tags = tags
         };
         var json = JsonSerializer.Serialize(
-            payload
-                .Where(p => p.Value is not null)
-                .ToDictionary(p => p.Key, p => p.Value)
+            payload,
+            new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
         );
         var res = await _http.PostAsync("issues", new StringContent(json, Encoding.UTF8, "application/json"));
         res.EnsureSuccessStatusCode();
-        return await res.Content.ReadAsStringAsync();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var el = doc.RootElement;
+        int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : projectId;
+        var statuses = await GetIssueStatusesAsync(proj);
+        var severities = await GetIssueSeveritiesAsync(proj);
+        var types = await GetIssueTypesAsync(proj);
+        var priorities = await GetIssuePrioritiesAsync(proj);
+        return MapIssue(el, statuses, severities, types, priorities);
     }
 
-    public async Task<string> UpdateIssueAsync(int issueId, JsonElement patch)
+    public async Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch)
     {
         await _auth.EnsureAuthAsync(_http);
         if (!patch.TryGetProperty("version", out _))
@@ -145,6 +158,14 @@ public sealed class IssueApi
         };
         var res = await _http.SendAsync(req);
         res.EnsureSuccessStatusCode();
-        return await res.Content.ReadAsStringAsync();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var el = doc.RootElement;
+        int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
+        var statuses = await GetIssueStatusesAsync(proj);
+        var severities = await GetIssueSeveritiesAsync(proj);
+        var types = await GetIssueTypesAsync(proj);
+        var priorities = await GetIssuePrioritiesAsync(proj);
+        return MapIssue(el, statuses, severities, types, priorities);
     }
 }
