@@ -6,44 +6,14 @@ public sealed class IssueApi
 {
     private readonly HttpClient _http;
     private readonly AuthClient _auth;
-    private readonly Dictionary<int, Dictionary<int, string>> _statusCache = new();
-    private readonly Dictionary<int, Dictionary<int, string>> _severityCache = new();
-    private readonly Dictionary<int, Dictionary<int, string>> _typeCache = new();
-    private readonly Dictionary<int, Dictionary<int, string>> _priorityCache = new();
+    private readonly IssueMetadataCache _cache;
 
-    public IssueApi(HttpClient http, AuthClient auth)
+    public IssueApi(HttpClient http, AuthClient auth, IssueMetadataCache cache)
     {
         _http = http;
         _auth = auth;
+        _cache = cache;
     }
-
-    private async Task<Dictionary<int, string>> GetMapAsync(string path, int projectId, Dictionary<int, Dictionary<int, string>> cache)
-    {
-        if (cache.TryGetValue(projectId, out var m)) return m;
-        var res = await _http.GetAsync($"{path}?project={projectId}");
-        res.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        var map = new Dictionary<int, string>(32);
-        foreach (var el in doc.RootElement.EnumerateArray())
-        {
-            if (!el.TryGetProperty("id", out var idProp) || !el.TryGetProperty("name", out var nameProp)) continue;
-            if (idProp.TryGetInt32(out var id) && nameProp.GetString() is { } name) map[id] = name;
-        }
-        cache[projectId] = map;
-        return map;
-    }
-
-    private Task<Dictionary<int, string>> GetIssueStatusesAsync(int projectId)
-        => GetMapAsync("issue-statuses", projectId, _statusCache);
-
-    private Task<Dictionary<int, string>> GetIssueSeveritiesAsync(int projectId)
-        => GetMapAsync("severities", projectId, _severityCache);
-
-    private Task<Dictionary<int, string>> GetIssueTypesAsync(int projectId)
-        => GetMapAsync("issue-types", projectId, _typeCache);
-
-    private Task<Dictionary<int, string>> GetIssuePrioritiesAsync(int projectId)
-        => GetMapAsync("priorities", projectId, _priorityCache);
     private static IssueDto MapIssue(
         JsonElement it,
         Dictionary<int, string> statuses,
@@ -74,10 +44,10 @@ public sealed class IssueApi
     {
         await _auth.EnsureAuthAsync(_http);
 
-        var statuses = await GetIssueStatusesAsync(projectId);
-        var severities = await GetIssueSeveritiesAsync(projectId);
-        var types = await GetIssueTypesAsync(projectId);
-        var priorities = await GetIssuePrioritiesAsync(projectId);
+        var statuses = await _cache.GetStatusesAsync(projectId);
+        var severities = await _cache.GetSeveritiesAsync(projectId);
+        var types = await _cache.GetTypesAsync(projectId);
+        var priorities = await _cache.GetPrioritiesAsync(projectId);
 
         var rejected = await _http.GetAsync($"issue-statuses?project={projectId}&is_closed=true");
         rejected.EnsureSuccessStatusCode();
@@ -139,10 +109,10 @@ public sealed class IssueApi
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var el = doc.RootElement;
         int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : projectId;
-        var statuses = await GetIssueStatusesAsync(proj);
-        var severities = await GetIssueSeveritiesAsync(proj);
-        var types = await GetIssueTypesAsync(proj);
-        var priorities = await GetIssuePrioritiesAsync(proj);
+        var statuses = await _cache.GetStatusesAsync(proj);
+        var severities = await _cache.GetSeveritiesAsync(proj);
+        var types = await _cache.GetTypesAsync(proj);
+        var priorities = await _cache.GetPrioritiesAsync(proj);
         return MapIssue(el, statuses, severities, types, priorities);
     }
 
@@ -162,10 +132,10 @@ public sealed class IssueApi
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var el = doc.RootElement;
         int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
-        var statuses = await GetIssueStatusesAsync(proj);
-        var severities = await GetIssueSeveritiesAsync(proj);
-        var types = await GetIssueTypesAsync(proj);
-        var priorities = await GetIssuePrioritiesAsync(proj);
+        var statuses = await _cache.GetStatusesAsync(proj);
+        var severities = await _cache.GetSeveritiesAsync(proj);
+        var types = await _cache.GetTypesAsync(proj);
+        var priorities = await _cache.GetPrioritiesAsync(proj);
         return MapIssue(el, statuses, severities, types, priorities);
     }
 }
