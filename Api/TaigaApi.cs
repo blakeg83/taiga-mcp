@@ -35,6 +35,9 @@ public sealed class TaigaApi : ITaigaApi
     public Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch)
         => _issues.UpdateIssueAsync(issueId, patch);
 
+    public Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
+        => _issues.ListIssueStatusesAsync(projectId);
+
     public Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1)
         => _userStories.ListUserStoriesAsync(projectId, page);
 }

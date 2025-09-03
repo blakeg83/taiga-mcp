@@ -80,6 +80,29 @@ public sealed class IssueApi
         return items;
     }
 
+    public async Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
+    {
+        await _auth.EnsureAuthAsync(_http);
+
+        var res = await _http.GetAsync($"issue-statuses?project={projectId}");
+        res.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        var items = new List<IssueStatusDto>(32);
+        foreach (var el in doc.RootElement.EnumerateArray())
+        {
+            items.Add(new IssueStatusDto
+            {
+                Id = el.TryGetProperty("id", out var idEl) && idEl.TryGetInt32(out var id) ? id : 0,
+                Name = el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null,
+                Slug = el.TryGetProperty("slug", out var slugEl) ? slugEl.GetString() : null,
+                IsClosed = el.TryGetProperty("is_closed", out var closedEl) && closedEl.ValueKind == JsonValueKind.True
+            });
+        }
+
+        return items;
+    }
+
     public async Task<IssueDto> CreateIssueAsync(
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
