@@ -46,6 +46,7 @@ public sealed class IssueApi
         {
             Id = it.GetProperty("id").GetInt32(),
             Ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
+            Project = it.TryGetProperty("project", out var projEl) && projEl.TryGetInt32(out var projVal) ? projVal : 0, 
             Subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
             Description = it.TryGetProperty("description", out var desc) ? desc.GetString() : null,
             Status = statuses.TryGetValue(sid, out var sName) ? sName : null,
