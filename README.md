@@ -6,6 +6,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `list_projects(member?, page)`: List projects (use `member=me` for your projects).
 - `resolve_project(slug)`: Resolve a Taiga project slug to its numeric ID.
 - `list_issues(projectId, page)`: Page through issues for a project.
+- `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
 - `update_issue(issueId, subject, version, ...)`: Update an issue via PUT; include `version`.
 - `list_issue_statuses(projectId)`: List available issue statuses for a project.
