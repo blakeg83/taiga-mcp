@@ -45,7 +45,7 @@ public sealed class IssueTools
     [McpServerTool(Name = "update_issue")]
     public async Task<string> UpdateIssue(
         int issueId,
-        string subject,
+        string? subject,
         int version,
         string? description = null,
         int? status = null,
