@@ -46,7 +46,7 @@ public sealed class IssueApi
         {
             Id = it.GetProperty("id").GetInt32(),
             Ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
-            Project = it.TryGetProperty("project", out var projEl) && projEl.TryGetInt32(out var projVal) ? projVal : 0, 
+            Project = it.TryGetProperty("project", out var projEl) && projEl.TryGetInt32(out var projVal) ? projVal : 0,
             Subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
             Description = it.TryGetProperty("description", out var desc) ? desc.GetString() : null,
             Status = statuses.TryGetValue(sid, out var sName) ? sName : null,
@@ -263,7 +263,11 @@ public sealed class IssueApi
             payload,
             new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
         );
-        var res = await _http.PutAsync($"issues/{issueId}", new StringContent(json, Encoding.UTF8, "application/json"));
+        using var req = new HttpRequestMessage(new HttpMethod("PATCH"), $"issues/{issueId}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        var res = await _http.SendAsync(req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
