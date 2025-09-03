@@ -36,9 +36,29 @@ public sealed class IssueTools
     }
 
     [McpServerTool(Name = "update_issue")]
-    public async Task<string> UpdateIssue(int issueId, JsonElement patch)
+    public async Task<string> UpdateIssue(
+        int issueId,
+        string subject,
+        int version,
+        string? description = null,
+        int? status = null,
+        int? type = null,
+        int? priority = null,
+        int? severity = null,
+        int? assigned_to = null,
+        string[]? tags = null)
     {
-        var issue = await _issues.UpdateIssueAsync(issueId, patch);
+        var issue = await _issues.UpdateIssueAsync(
+            issueId,
+            version,
+            subject,
+            description,
+            status,
+            type,
+            priority,
+            severity,
+            assigned_to,
+            tags);
         return JsonSerializer.Serialize(issue, JsonOpts);
     }
 

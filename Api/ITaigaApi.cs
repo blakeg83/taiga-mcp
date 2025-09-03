@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 /// <summary>Taiga API abstraction.</summary>
 public interface ITaigaApi
 {
@@ -10,7 +8,17 @@ public interface ITaigaApi
         int projectId, string subject, string? description,
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags);
-    Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch);
+    Task<IssueDto> UpdateIssueAsync(
+        int issueId,
+        string? subject,
+        int version,
+        string? description,
+        int? status,
+        int? type,
+        int? priority,
+        int? severity,
+        int? assigned_to,
+        string[]? tags);
     Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId);
     Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1);
 }

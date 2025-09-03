@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Options;
 
 /// <summary>Main Taiga API delegating to domain APIs.</summary>
@@ -32,8 +31,18 @@ public sealed class TaigaApi : ITaigaApi
         int? assigned_to, string[]? tags)
         => _issues.CreateIssueAsync(projectId, subject, description, status, type, priority, severity, assigned_to, tags);
 
-    public Task<IssueDto> UpdateIssueAsync(int issueId, JsonElement patch)
-        => _issues.UpdateIssueAsync(issueId, patch);
+    public Task<IssueDto> UpdateIssueAsync(
+        int issueId,
+        string? subject,
+        int version,
+        string? description,
+        int? status,
+        int? type,
+        int? priority,
+        int? severity,
+        int? assigned_to,
+        string[]? tags)
+        => _issues.UpdateIssueAsync(issueId, version, subject, description, status, type, priority, severity, assigned_to, tags);
 
     public Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
         => _issues.ListIssueStatusesAsync(projectId);

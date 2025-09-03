@@ -8,8 +8,14 @@ public sealed record IssueDto
     [JsonPropertyName("ref")]
     public int Ref { get; init; }
 
+    [JsonPropertyName("project")]
+    public int Project { get; set; }
+
     [JsonPropertyName("subject")]
     public string? Subject { get; init; }
+
+    [JsonPropertyName("description")]
+    public string? Description { get; init; }
 
     [JsonPropertyName("status")]
     public string? Status { get; init; }
@@ -28,5 +34,8 @@ public sealed record IssueDto
 
     [JsonPropertyName("modified")]
     public string? Modified { get; init; }
+
+    [JsonPropertyName("version")]
+    public int Version { get; init; }
 }
 
