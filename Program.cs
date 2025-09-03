@@ -73,8 +73,9 @@ public sealed class TaigaApi
 
     private Task<Dictionary<int, string>> GetIssueTypesAsync(int projectId)
         => GetMapAsync("issue-types", projectId, _issueTypeCache);
+
     private Task<Dictionary<int, string>> GetIssuePrioritiesAsync(int projectId)
-    => GetMapAsync("priorities", projectId, _issuePriorityCache);
+        => GetMapAsync("priorities", projectId, _issuePriorityCache);
 
     public TaigaApi(IHttpClientFactory factory, TaigaConfig cfg)
     {
