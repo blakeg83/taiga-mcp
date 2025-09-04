@@ -64,6 +64,12 @@ Notes:
 - Transport: STDIO; logging via `Microsoft.Extensions.Logging` to stderr.
 - HTTP: `HttpClient` with bearer auth token acquired via `/auth`.
 
+## Debug Logging
+- Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.
+- Example:
+  - `Logging__LogLevel__Default=Debug TAIGA__USERNAME=you@example.com TAIGA__PASSWORD=secret dotnet run`
+- These logs include auth refresh/relogin breadcrumbs without exposing secrets.
+
 ## Quickstart & Examples
 For end-to-end setup (Codex config, MCP Inspector, troubleshooting), see:
 
