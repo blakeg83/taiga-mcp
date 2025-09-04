@@ -14,11 +14,11 @@ public sealed class ProjectApi
 
     public async Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member, int page)
     {
-        await _auth.EnsureAuthAsync(_http);
         var url = string.IsNullOrEmpty(member)
             ? $"projects?page={page}"
             : $"projects?member={Uri.EscapeDataString(member)}&page={page}";
-        var res = await _http.GetAsync(url);
+        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -42,8 +42,8 @@ public sealed class ProjectApi
 
     public async Task<int> ResolveProjectIdAsync(string slug)
     {
-        await _auth.EnsureAuthAsync(_http);
-        var res = await _http.GetAsync($"resolver?project={Uri.EscapeDataString(slug)}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"resolver?project={Uri.EscapeDataString(slug)}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         return doc.RootElement.GetProperty("project").GetInt32();
