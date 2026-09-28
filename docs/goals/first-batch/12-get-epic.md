@@ -57,12 +57,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose epic detail
 
-- [ ] Register get_epic in EpicTools with the internal-ID description.
-- [ ] Document how to obtain an epic ID from list_epics and use it for linking an existing story.
-- [ ] Explicitly label returned server summary fields and document that linked-story listing is a later inventory goal.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose get_epic MCP interface`.
+- [x] Register get_epic in EpicTools with the internal-ID description.
+- [x] Document how to obtain an epic ID from list_epics and use it for linking an existing story.
+- [x] Explicitly label returned server summary fields and document that linked-story listing is a later inventory goal.
+- [x] Validate this step: real STDIO MCP tools/list and tools/call tests passed (`8` integration tests), including required argument binding and JSON output.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose get_epic MCP interface`.
 
 ## Step 4: Verify detail and failures
 
@@ -109,8 +109,8 @@ computed progress is part of this goal.
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline passed; pinned route/serializer evidence recorded; detail fixture and DTO contract added. | Specify get_epic contracts / `33f4f24` |
-| 2 | In progress | Focused domain tests (`8`) and Debug build passed; exact route, mapping, validation, and no-relation-read behavior documented. | Implement get_epic API behavior / pending |
-| 3 | Not started | — | Expose get_epic MCP interface / pending |
+| 2 | Complete | Focused domain tests (`8`) and Debug build passed; exact route, mapping, validation, and no-relation-read behavior documented. | Implement get_epic API behavior / `32b2323` |
+| 3 | In progress | Real STDIO `tools/list`/`tools/call` integration passed (`8` tests); schema, response example, internal-ID workflow, summaries, and deferred links documented. | Expose get_epic MCP interface / pending |
 | 4 | Not started | — | Verify get_epic workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
