@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssueCreateDto
 {
     [JsonPropertyName("project")]
@@ -29,4 +31,3 @@ public sealed record IssueCreateDto
     [JsonPropertyName("tags")]
     public string[]? Tags { get; init; }
 }
-

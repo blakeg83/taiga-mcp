@@ -31,8 +31,6 @@ Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga
 - `Tools/IssueTools.cs`
 - `Api/IssueApi.cs`
 - `Models/IssueDto.cs`
-- `Api/ITaigaApi.cs`
-- `Api/TaigaApi.cs`
 - `tests/TaigaMCP.Tests/IssueListTests.cs`
 - `docs/taiga_tools_reference.md`, `README.md`, and `docs/taiga_mcp_quickstart.md` for implemented behavior and examples.
 - This goal and `docs/taiga_command_inventory.md` for progress, evidence, and remaining scope.
@@ -50,7 +48,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement filtered paged retrieval
 
-- [ ] Add an internal list-options model and encoded query builder; retain a forwarding overload for current domain/facade callers.
+- [ ] Add an internal list-options model and encoded query builder; retain a forwarding overload for current domain callers.
 - [ ] Remove unconditional closed-status exclusions when includeClosed=true or explicit statuses are supplied; retain the default open-only view.
 - [ ] Capture pagination headers before disposing the response; add metadata IDs to mapping without changing existing label properties.
 - [ ] Implement an internal page result shared by array and envelope modes; do not issue one detail request per issue.

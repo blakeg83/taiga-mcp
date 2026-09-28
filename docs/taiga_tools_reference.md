@@ -236,3 +236,8 @@ integration tests, including the expected failure of the contaminated
 temporary-copy experiment. The nullable issue contract was verified through
 the real `IssueTools.GetIssue` path, with `assigned_to` absent from the public
 JSON when the upstream value is null.
+
+Cleanup compatibility: production C# types now live in `TaigaMCP.Api`,
+`TaigaMCP.Tools`, and other folder namespaces. The unused aggregate facade is
+removed; internal consumers use domain APIs. MCP signatures, defaults, JSON
+property names and response omission are unchanged at this stage.

@@ -1,4 +1,7 @@
+using TaigaMCP.Api;
 using System.Text.Json;
+
+namespace TaigaMCP.Caching;
 
 /// <summary>
 /// Caches issue metadata such as statuses, severities, types and priorities per project.
@@ -50,4 +53,3 @@ public sealed class IssueMetadataCache
     public Task<Dictionary<int, string>> GetPrioritiesAsync(int projectId)
         => GetMapAsync("priorities", projectId, _priorityCache);
 }
-

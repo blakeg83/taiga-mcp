@@ -1,3 +1,6 @@
+using TaigaMCP.Api;
+using TaigaMCP.Caching;
+using TaigaMCP.Tools;
 using System.Net;
 using System.Text.Json;
 using Xunit;

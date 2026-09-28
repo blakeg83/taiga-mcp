@@ -31,8 +31,6 @@ Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga
 - `Tools/UserStoryTools.cs`
 - `Api/UserStoryApi.cs`
 - `Models/UserStoryDto.cs`
-- `Api/ITaigaApi.cs`
-- `Api/TaigaApi.cs`
 - `tests/TaigaMCP.Tests/UserStoryListTests.cs`
 - `docs/taiga_tools_reference.md`, `README.md`, and `docs/taiga_mcp_quickstart.md` for implemented behavior and examples.
 - This goal and `docs/taiga_command_inventory.md` for progress, evidence, and remaining scope.
@@ -53,7 +51,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 - [ ] Reuse goal 01 query/page helpers and add story-specific options; remove Done/Archived string matching.
 - [ ] Apply closed/archive restrictions only when not overridden by explicit statuses; omit those restrictions when corresponding include flags are enabled.
 - [ ] Add project, status_id, milestone, and a nullable version when present to list mapping; do not invent version when the list response omits it.
-- [ ] Keep existing DTO JSON fields and facade overloads compatible.
+- [ ] Keep existing DTO JSON fields and domain callers compatible.
 - [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
 - [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_user_stories API behavior`.

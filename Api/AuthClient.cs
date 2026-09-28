@@ -1,9 +1,12 @@
+using TaigaMCP.Config;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+
+namespace TaigaMCP.Api;
 
 public sealed class AuthClient
 {

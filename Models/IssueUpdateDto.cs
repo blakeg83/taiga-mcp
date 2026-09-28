@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssueUpdateDto
 {
     [JsonPropertyName("subject")]
@@ -32,4 +34,3 @@ public sealed record IssueUpdateDto
     [JsonPropertyName("version")]
     public required int Version { get; init; }
 }
-

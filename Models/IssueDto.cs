@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssueDto
 {
     [JsonPropertyName("id")]
@@ -9,7 +11,7 @@ public sealed record IssueDto
     public int Ref { get; init; }
 
     [JsonPropertyName("project")]
-    public int Project { get; set; }
+    public int Project { get; init; }
 
     [JsonPropertyName("subject")]
     public string? Subject { get; init; }
@@ -38,4 +40,3 @@ public sealed record IssueDto
     [JsonPropertyName("version")]
     public int Version { get; init; }
 }
-

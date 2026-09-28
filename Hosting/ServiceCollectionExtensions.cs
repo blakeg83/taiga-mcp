@@ -1,8 +1,13 @@
+using TaigaMCP.Api;
+using TaigaMCP.Caching;
+using TaigaMCP.Config;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net.Http.Headers;
+
+namespace TaigaMCP.Hosting;
 
 public static class ServiceCollectionExtensions
 {
@@ -41,7 +46,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<UserStoryApi>(sp =>
             new UserStoryApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
                 sp.GetRequiredService<AuthClient>()));
-        services.AddSingleton<ITaigaApi, TaigaApi>();
 
         services
             .AddMcpServer()

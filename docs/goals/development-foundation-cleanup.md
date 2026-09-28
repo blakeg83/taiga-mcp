@@ -48,14 +48,14 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 2: simplify structure and standardize serialization
 
-- [ ] Add file-scoped `TaigaMCP.*` namespaces matching the existing folders and update production/test imports. Keep the top-level entry point small.
-- [ ] Remove `Api/ITaigaApi.cs`, `Api/TaigaApi.cs`, their DI registration, and obsolete references after resolving the Step 1 caller audit. Keep tools injecting their concrete domain APIs.
-- [ ] Update the batch contracts and affected goal instructions to use domain APIs and stop requiring preservation of the removed facade.
-- [ ] Replace repeated tool serializer settings with one shared response-serialization policy preserving current snake_case property attributes and omitted nullable response properties.
-- [ ] Keep upstream request serialization distinct from tool response serialization. Preserve existing create/PATCH omission behavior and explicit empty arrays, empty strings, false, and zero when applicable. Do not implement field clearing or change public signatures here.
-- [ ] Make DTO mutability consistent where existing callers permit it; remove unused fields/usings and obsolete generated-looking comments without broad unrelated formatting churn.
-- [ ] Run the full test suite and compare MCP discovery/schema and representative result serialization to Step 1. Fix any unintended contract change.
-- [ ] Update docs/evidence and commit as `Simplify API layers and serialization conventions`.
+- [x] Add file-scoped `TaigaMCP.*` namespaces matching the existing folders and update production/test imports. Keep the top-level entry point small.
+- [x] Remove `Api/ITaigaApi.cs`, `Api/TaigaApi.cs`, their DI registration, and obsolete references after resolving the Step 1 caller audit. Keep tools injecting their concrete domain APIs.
+- [x] Update the batch contracts and affected goal instructions to use domain APIs and stop requiring preservation of the removed facade.
+- [x] Replace repeated tool serializer settings with one shared response-serialization policy preserving current snake_case property attributes and omitted nullable response properties.
+- [x] Keep upstream request serialization distinct from tool response serialization. Preserve existing create/PATCH omission behavior and explicit empty arrays, empty strings, false, and zero when applicable. Do not implement field clearing or change public signatures here.
+- [x] Make DTO mutability consistent where existing callers permit it; remove unused fields/usings and obsolete generated-looking comments without broad unrelated formatting churn.
+- [x] Run the full test suite and compare MCP discovery/schema and representative result serialization to Step 1. Fix any unintended contract change.
+- [x] Update docs/evidence and commit as `Simplify API layers and serialization conventions`.
 
 ## Step 3: centralize HTTP transport, disposal, and cancellation
 
@@ -143,7 +143,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | Step | Status | Validation, decisions, and documentation evidence | Commit reference |
 | --- | --- | --- | --- |
 | 1. Baseline | Complete | Prerequisites 003fe00/b219e39 verified in history and 13 passing tests; root restore/Debug build/tests passed, zero warnings, no locks. SDK, package, caller/path audit and layer lifetimes recorded in docs/development.md. Existing reference matches all 11 signatures/shapes. | Document cleanup baseline and compatibility boundaries |
-| 2. Structure/serialization | Not started | Pending | Pending |
+| 2. Structure/serialization | Complete | Previous commit c77e1c0. Namespaces, unused facade removal, shared response policy and init-only DTO; domain plan references updated. Full Debug suite: 13 passed. | Simplify API layers and serialization conventions |
 | 3. Transport | Not started | Pending | Pending |
 | 4. Authentication | Not started | Pending | Pending |
 | 5. Cache | Not started | Pending | Pending |
@@ -152,4 +152,3 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | 8. Guardrails/final verification | Not started | Pending | Pending |
 
 Final handoff: list completed steps and commit hashes, exact checks and outcomes, intentional compatibility changes and migration examples, outstanding limitations, and the definition-of-done result. Do not claim live integration or remote CI success from mocked/local tests.
-

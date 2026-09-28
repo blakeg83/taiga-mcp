@@ -1,3 +1,5 @@
+namespace TaigaMCP.Config;
+
 /// <summary>Options for connecting to Taiga.</summary>
 public class TaigaOptions
 {

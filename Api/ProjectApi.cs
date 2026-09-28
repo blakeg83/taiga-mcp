@@ -1,4 +1,7 @@
+using TaigaMCP.Models;
 using System.Text.Json;
+
+namespace TaigaMCP.Api;
 
 /// <summary>Project operations.</summary>
 public sealed class ProjectApi

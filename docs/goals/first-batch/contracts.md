@@ -8,7 +8,7 @@ These are proposed implementation decisions for this batch, not descriptions of 
 - Existing list tools return arrays by default. Add includePageInfo=false; when true, return the page envelope below. New list tools always return the envelope.
 - Existing issue response status/type/priority/severity properties are labels. Keep them and add status_id/type_id/priority_id/severity_id, rather than changing their types. Story status labels likewise remain compatible.
 - New resource DTOs use explicit JSON property names: id, ref, project, subject, status_id, status, assigned_to, and modified. Detail DTOs include description and version. Nullable fields remain nullable; never manufacture ID/version zero from absent required data.
-- Reuse domain APIs directly in tools. Keep ITaigaApi/TaigaApi's existing methods source-compatible through forwarding overloads where needed; do not expand that legacy facade for every new tool without an actual caller.
+- Reuse concrete domain APIs directly in tools. The unused aggregate facade was removed by the development cleanup; do not recreate it.
 - Use AuthClient and the configured HttpClient. New TaskApi/EpicApi registrations belong in Hosting/ServiceCollectionExtensions.cs; assembly tool discovery is already configured.
 - Each goal owns its function-specific DTOs/tests. Share only proven reusable query, page, patch, and error behavior.
 

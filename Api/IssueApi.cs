@@ -1,5 +1,9 @@
+using TaigaMCP.Models;
+using TaigaMCP.Caching;
 using System.Text;
 using System.Text.Json;
+
+namespace TaigaMCP.Api;
 
 /// <summary>Issue operations.</summary>
 public sealed class IssueApi
@@ -331,7 +335,6 @@ public sealed class IssueApi
         using var doc = JsonDocument.Parse(body);
         var el = doc.RootElement;
 
-        // Map using your existing caches
         int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
         var statuses = await _cache.GetStatusesAsync(proj);
         var severities = await _cache.GetSeveritiesAsync(proj);

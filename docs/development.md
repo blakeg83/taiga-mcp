@@ -50,3 +50,14 @@ Windows cmd.exe; CI must account for that platform dependency.
 Use fake HTTP and synthetic credentials for tests. Never stop running MCP
 servers to free build outputs. If locked, use a unique output directory outside
 the checkout, for example `dotnet test -c Debug -p:OutputPath=C:\Temp\TaigaMCP-unique\ -p:UseAppHost=false`.
+
+## Step 2: structure and serialization
+
+After baseline commit `c77e1c0`, production classes now use file-scoped
+TaigaMCP folder namespaces. Tools inject concrete APIs; the unused aggregate
+facade and its DI registration are removed. ToolResponseJson centralizes
+response null omission. Request serializers remain independent and unchanged.
+IssueDto.Project is init-only, matching other DTO properties; no caller mutates
+it. Feature plans now reference domain APIs. `dotnet test -c Debug` passed all
+13 tests, including production 11-tool discovery/schema checks, representative
+mapping, request version forwarding, and null response omission.

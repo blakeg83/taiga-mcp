@@ -1,15 +1,12 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using TaigaMCP.Api;
 using ModelContextProtocol.Server;
+
+namespace TaigaMCP.Tools;
 
 [McpServerToolType]
 public sealed class IssueTools
 {
     private readonly IssueApi _issues;
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
 
     public IssueTools(IssueApi issues)
     {
@@ -20,7 +17,7 @@ public sealed class IssueTools
     public async Task<string> ListIssues(int projectId, int page = 1)
     {
         var issues = await _issues.ListIssuesAsync(projectId, page);
-        return JsonSerializer.Serialize(issues, JsonOpts);
+        return ToolResponseJson.Serialize(issues);
     }
 
     [McpServerTool(Name = "get_issue")]
@@ -29,7 +26,7 @@ public sealed class IssueTools
         var issue = await _issues.GetIssueAsync(issueId);
         var comments = await _issues.GetIssueCommentsAsync(issueId);
         var result = new { issue, comments };
-        return JsonSerializer.Serialize(result, JsonOpts);
+        return ToolResponseJson.Serialize(result);
     }
 
     [McpServerTool(Name = "create_issue")]
@@ -41,7 +38,7 @@ public sealed class IssueTools
         int? assigned_to = null, string[]? tags = null)
     {
         var issue = await _issues.CreateIssueAsync(projectId, subject, description, status, type, priority, severity, assigned_to, tags);
-        return JsonSerializer.Serialize(issue, JsonOpts);
+        return ToolResponseJson.Serialize(issue);
     }
 
     [McpServerTool(Name = "update_issue")]
@@ -70,34 +67,34 @@ public sealed class IssueTools
             assigned_to,
             tags,
             comment);
-        return JsonSerializer.Serialize(issue, JsonOpts);
+        return ToolResponseJson.Serialize(issue);
     }
 
     [McpServerTool(Name = "list_issue_statuses")]
     public async Task<string> ListIssueStatuses(int projectId)
     {
         var statuses = await _issues.ListIssueStatusesAsync(projectId);
-        return JsonSerializer.Serialize(statuses, JsonOpts);
+        return ToolResponseJson.Serialize(statuses);
     }
 
     [McpServerTool(Name = "list_issue_severities")]
     public async Task<string> ListIssueSeverities(int projectId)
     {
         var severities = await _issues.ListIssueSeveritiesAsync(projectId);
-        return JsonSerializer.Serialize(severities, JsonOpts);
+        return ToolResponseJson.Serialize(severities);
     }
 
     [McpServerTool(Name = "list_issue_types")]
     public async Task<string> ListIssueTypes(int projectId)
     {
         var types = await _issues.ListIssueTypesAsync(projectId);
-        return JsonSerializer.Serialize(types, JsonOpts);
+        return ToolResponseJson.Serialize(types);
     }
 
     [McpServerTool(Name = "list_issue_priorities")]
     public async Task<string> ListIssuePriorities(int projectId)
     {
         var priorities = await _issues.ListIssuePrioritiesAsync(projectId);
-        return JsonSerializer.Serialize(priorities, JsonOpts);
+        return ToolResponseJson.Serialize(priorities);
     }
 }
