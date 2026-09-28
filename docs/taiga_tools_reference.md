@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 18 tools:
+The current server exposes 19 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -16,7 +16,7 @@ The current server exposes 18 tools:
   `list_issue_priorities`.
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
-- 3 task tools: `list_tasks`, `get_task`, and `create_task`.
+- 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
 - 1 epic tool: `list_epics`.
 
 The first-batch documents describe 15 additional or expanded functions. The
@@ -320,6 +320,13 @@ An update returns the server's authoritative detail, for example:
   from inline `status_extra_info.name`; an unavailable label leaves the
   numeric `status_id` intact. Standalone tasks preserve null parent/sprint
   values, and listing makes no parent or detail requests.
+- `list_epics` maps `statusIds`, `assignedTo`, `tags`, and `query` to Taiga's
+  verified `status`, `assigned_to`, `tags`, and `q` filters. With no explicit
+  status IDs, `includeClosed=false` sends `status__is_closed=false`; explicit
+  statuses or `includeClosed=true` omit that restriction. Epic status labels
+  come only from inline `status_extra_info.name`; an unavailable label leaves
+  the numeric `status_id` intact. Listing makes no status-metadata, related
+  story, or progress requests.
 - `get_task` requests exactly `tasks/{taskId}` and returns one detail object.
   It validates positive `taskId` input and required positive `id`, `ref`, and
   `project` plus nonnegative `version` in the response. It preserves Markdown,

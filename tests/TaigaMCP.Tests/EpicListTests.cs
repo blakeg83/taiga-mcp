@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net;
 using TaigaMCP.Api;
 using TaigaMCP.Models;
 using TaigaMCP.Tools;
@@ -117,6 +118,34 @@ public sealed class EpicListTests
         }
     }
 
+    [Fact]
+    public async Task ListEpicsPage_UsesServerClosedFlagForLocalizedStatuses()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Get, "/api/v1/epics", request =>
+            {
+                return request.Uri.Query switch
+                {
+                    "?project=123&page=1&status__is_closed=false" => AuthenticationTests.Json(
+                        "[{\"id\":301,\"ref\":12,\"project\":123,\"subject\":\"Open\",\"status\":7,\"status_extra_info\":{\"name\":\"Done\"}}]"),
+                    "?project=123&page=1&status=8" => AuthenticationTests.Json(
+                        "[{\"id\":302,\"ref\":13,\"project\":123,\"subject\":\"Closed\",\"status\":8,\"status_extra_info\":{\"name\":\"Terminado\"}}]"),
+                    _ => throw new InvalidOperationException($"Unexpected epic query: {request.Uri.Query}")
+                };
+            });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = NewApi(handler, auth);
+            var open = Assert.Single((await api.ListEpicsPageAsync(123, new EpicListOptions())).Items);
+            var closed = Assert.Single((await api.ListEpicsPageAsync(123, new EpicListOptions { StatusIds = [8] })).Items);
+
+            Assert.Equal("Done", open.Status);
+            Assert.Equal("Terminado", closed.Status);
+            Assert.Equal(8, closed.StatusId);
+        }
+    }
+
     [Theory]
     [InlineData(0, 1)]
     [InlineData(123, 0)]
@@ -165,6 +194,57 @@ public sealed class EpicListTests
             Assert.Equal(99, epic.StatusId);
             Assert.Null(epic.Status);
             Assert.Null(epic.Version);
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicsPage_EmptyPageKeepsUnknownPaginationMetadataNull()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics",
+                "[]",
+                headers: new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "not-a-number",
+                    ["x-pagination-next"] = "https://evil.example/epics?page=8"
+                });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListEpicsPageAsync(
+                123,
+                new EpicListOptions { Page = 4 });
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicsTool_ReportsSafeHttpFailures()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics",
+                "{\"detail\":\"secret epic credentials\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() =>
+                new EpicTools(NewApi(handler, auth)).ListEpics(123));
+
+            Assert.Contains("403", error.Message);
+            Assert.Contains("permission denied", error.Message);
+            Assert.DoesNotContain("secret epic credentials", error.Message);
+            Assert.Single(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/epics"));
         }
     }
 

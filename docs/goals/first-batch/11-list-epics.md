@@ -67,39 +67,39 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify epic listing
 
-- [ ] Test DI resolution and MCP discovery/invocation alongside all existing tools.
-- [ ] Cover custom closed statuses, explicit statuses overriding the default, Unicode/tag encoding, pagination headers, and empty lists.
-- [ ] Test a project with epics disabled or access denied without turning server errors into an empty success list.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify list_epics workflow`.
+- [x] Test DI resolution and MCP discovery/invocation alongside all existing tools.
+- [x] Cover custom closed statuses, explicit statuses overriding the default, Unicode/tag encoding, pagination headers, and empty lists.
+- [x] Test a project with epics disabled or access denied without turning server errors into an empty success list.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify list_epics workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Epic tools are discovered through assembly scanning and DI resolves their dependencies.
-- [ ] Open/closed filtering uses real project metadata or verified query flags.
-- [ ] Returned IDs and pagination are sufficient for detail lookup.
-- [ ] Listing does not calculate misleading progress from a partial related-story set.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Epic tools are discovered through assembly scanning and DI resolves their dependencies.
+- [x] Open/closed filtering uses real project metadata or verified query flags.
+- [x] Returned IDs and pagination are sufficient for detail lookup.
+- [x] Listing does not calculate misleading progress from a partial related-story set.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can find epics with predictable project-scoped filters and pagination.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can find epics with predictable project-scoped filters and pagination.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet restore`, Debug build (0 warnings/errors), and sequential Debug test run passed (237 tests). Added a passing DTO/fixture contract check. On 2026-09-28, verified against pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`: `EpicViewSet.filter_fields` supports `project`, `assigned_to`, and `status__is_closed`; registered filter backends support status IDs, tags, and `q`; `EpicListSerializer` supplies `id`, `ref`, `project`, `modified_date`, `subject`, `color`, `version`, `status`, `assigned_to`, and `tags`. The implementation will use the verified `status__is_closed=false` flag for the default and omit it for explicit statuses or `includeClosed=true`; no status metadata lookup or name-based closure inference is needed. Source: https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py and https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py | Specify list_epics contracts / pending |
-| 2 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused `EpicListTests` passed 8 tests. `EpicApi` uses `TaigaTransport.ReadWithHeadersAsync`, requests one encoded page, maps inline status labels without metadata/detail lookups, preserves numeric status IDs/color/tags/nullable assignment, parses trusted pagination headers, and rejects invalid IDs/pages, malformed arrays, and malformed epic fields before/at mapping. Previous commit: `f6146cc`. | Implement list_epics API behavior / pending |
-| 3 | Complete | The real STDIO MCP integration test now discovers `list_epics`, verifies its required/optional schema, calls it with every optional filter, and asserts the exact encoded request and page envelope. Focused `EpicListTests` plus the integration build/test path pass; the tool returns explicit `null` pagination metadata when headers are absent. Previous commit: `057540f`. | Expose list_epics MCP interface / pending |
-| 4 | Not started | — | Verify list_epics workflow / pending |
+| 1 | Complete | Baseline `dotnet restore`, Debug build (0 warnings/errors), and sequential Debug test run passed (237 tests). Added a passing DTO/fixture contract check. On 2026-09-28, verified against pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`: `EpicViewSet.filter_fields` supports `project`, `assigned_to`, and `status__is_closed`; registered filter backends support status IDs, tags, and `q`; `EpicListSerializer` supplies `id`, `ref`, `project`, `modified_date`, `subject`, `color`, `version`, `status`, `assigned_to`, and `tags`. The implementation will use the verified `status__is_closed=false` flag for the default and omit it for explicit statuses or `includeClosed=true`; no status metadata lookup or name-based closure inference is needed. Source: https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py and https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py | `f6146cc` |
+| 2 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused `EpicListTests` passed 8 tests. `EpicApi` uses `TaigaTransport.ReadWithHeadersAsync`, requests one encoded page, maps inline status labels without metadata/detail lookups, preserves numeric status IDs/color/tags/nullable assignment, parses trusted pagination headers, and rejects invalid IDs/pages, malformed arrays, and malformed epic fields before/at mapping. Previous commit: `f6146cc`. | `057540f` |
+| 3 | Complete | The real STDIO MCP integration test now discovers `list_epics`, verifies its required/optional schema, calls it with every optional filter, and asserts the exact encoded request and page envelope. Focused `EpicListTests` plus the integration build/test path pass; the tool returns explicit `null` pagination metadata when headers are absent. Previous commit: `057540f`. | `5757870` |
+| 4 | Complete | Root `dotnet restore` passed; root `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; root `dotnet test -c Debug --no-build --no-restore` passed all 249 tests. The prescribed Release build/test also passed all 249 tests. Edge coverage includes localized closed statuses, status precedence, Unicode/tag encoding, trusted pagination, empty lists, and safe 403 failure without credential leakage. No live Taiga calls or writes were made. | Verify list_epics workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
