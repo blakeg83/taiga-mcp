@@ -323,6 +323,7 @@ public sealed class McpIntegrationTests
                 "create_issue",
                 "create_user_story",
                 "get_issue",
+                "get_task",
                 "get_user_story",
                 "list_issue_priorities",
                 "list_issue_severities",
@@ -392,6 +393,13 @@ public sealed class McpIntegrationTests
             var getUserStoryRequired = getUserStory.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "userStoryId" }, getUserStoryRequired);
+
+            var getTask = Assert.Single(tools, tool => tool.Name == "get_task");
+            var getTaskProperties = getTask.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "taskId" }, getTaskProperties);
+            var getTaskRequired = getTask.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "taskId" }, getTaskRequired);
 
             var createUserStory = Assert.Single(tools, tool => tool.Name == "create_user_story");
             var createUserStoryProperties = createUserStory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -521,6 +529,20 @@ public sealed class McpIntegrationTests
                 "/api/v1/tasks?project=123&page=2&status=11&user_story=102&milestone=55&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 taskRequest.PathAndQuery);
             Assert.Equal("Bearer integration-token", taskRequest.Authorization);
+
+            var taskDetail = await client.CallToolAsync(
+                "get_task",
+                new Dictionary<string, object?> { ["taskId"] = 203 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(taskDetail.IsError == true);
+            var taskDetailJson = JsonSerializer.Deserialize<JsonElement>(GetText(taskDetail));
+            Assert.Equal(JsonValueKind.Object, taskDetailJson.ValueKind);
+            Assert.Equal(203, taskDetailJson.GetProperty("id").GetInt32());
+            Assert.Equal(17, taskDetailJson.GetProperty("ref").GetInt32());
+            Assert.Equal(2, taskDetailJson.GetProperty("version").GetInt32());
+            Assert.Equal("**Acceptance:** preserve Markdown and Unicode — ✓", taskDetailJson.GetProperty("description").GetString());
+            var taskDetailRequest = Assert.Single(taiga.Requests, request => request.PathAndQuery == "/api/v1/tasks/203");
+            Assert.Equal("Bearer integration-token", taskDetailRequest.Authorization);
 
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);

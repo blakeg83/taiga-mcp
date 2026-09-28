@@ -14,6 +14,17 @@ public sealed class TaskTools
         _tasks = tasks;
     }
 
+    [McpServerTool(Name = "get_task")]
+    [Description("Retrieve one task by its positive internal ID, not the displayed #ref. Returns one detail object with the authoritative version, description, status, assignment, parent story, sprint, tags, due-date, and blocking fields. Comments, attachments, and parent details are not loaded.")]
+    public async Task<string> GetTask(
+        [Description("Positive internal task ID, not the displayed #ref.")] int taskId,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _tasks.GetTaskAsync(taskId, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
     [McpServerTool(Name = "list_tasks")]
     [Description("List one page of tasks in a project. By default only tasks with open statuses are returned; explicit statusIds take precedence over includeClosed. userStoryId and milestoneId select parent story and sprint filters. The result always uses the items/page/total/next_page/has_more envelope. Standalone tasks and tasks with unavailable status labels are preserved; detail, sorting, dates, and closed-status metadata filters are not included.")]
     public async Task<string> ListTasks(

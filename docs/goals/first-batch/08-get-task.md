@@ -57,12 +57,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose the detail tool
 
-- [ ] Add get_task to TaskTools and describe internal taskId versus human reference.
-- [ ] Document list_tasks -> get_task -> update_task, explicitly obtaining a fresh detail version.
-- [ ] Ensure the returned JSON shape is a detail object and not a page envelope.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose get_task MCP interface`.
+- [x] Add get_task to TaskTools and describe internal taskId versus human reference.
+- [x] Document list_tasks -> get_task -> update_task, explicitly obtaining a fresh detail version.
+- [x] Ensure the returned JSON shape is a detail object and not a page envelope.
+- [x] Validate this step: MCP tools/list schema and actual tools/call tests passed, including required argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose get_task MCP interface`.
 
 ## Step 4: Verify detail correctness
 
@@ -98,7 +98,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (181 passed) passed before changes. Added standalone/story-linked fixture contracts, required identity/version malformed cases, and unknown-field tolerance. Verified 2026-09-28 against taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` and taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e`; no live Taiga calls. | Specify get_task contracts / pending |
 | 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore` passed (188 tests, 0 failures) and included standalone/story-linked mapping, null parent/sprint, Markdown/tags/colors, due-date/blocking fields, status-label absence, required-field rejection, invalid ID, malformed object, auth/request count, and no extra reads. Debug build passed with 0 warnings/errors. HTTP route is `GET tasks/{taskId}`; transport owns response disposal; no live calls. | Implement get_task API behavior / pending |
-| 3 | Not started | — | Expose get_task MCP interface / pending |
+| 3 | Complete | Production MCP discovery now reports `get_task` with required `taskId`; the STDIO integration test calls it against fake HTTP and verifies a detail object, authoritative IDs/version/Markdown, exact `/api/v1/tasks/203` route, bearer auth, and no page envelope. Focused suite passed with 188 tests after exposure. Documentation updated in the reference, README, quickstart, and inventory. | Expose get_task MCP interface / pending |
 | 4 | Not started | — | Verify get_task workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
