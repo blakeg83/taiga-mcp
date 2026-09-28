@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using TaigaMCP.Api;
 using Xunit;
@@ -173,6 +174,107 @@ public sealed class UserStoryUpdateTests
             Assert.Contains(expectedDetail, exception.Message, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("synthetic-token", exception.Message);
             Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Get);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateUserStoryAsync_AllowsServerAcceptedStaleVersionWithoutReplay()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Patch,
+                "/api/v1/userstories/102",
+                """
+                {"id":102,"ref":18,"project":12,"subject":"Server accepted non-overlapping edit","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"tags":[],"milestone":55,"version":8}
+                """);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var story = await api.UpdateUserStoryAsync(102, version: 7, status: 7);
+
+            Assert.Equal(8, story.Version);
+            Assert.Equal("Server accepted non-overlapping edit", story.Subject);
+            var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+            using var body = JsonDocument.Parse(patch.Body);
+            Assert.Equal(7, body.RootElement.GetProperty("version").GetInt32());
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Get);
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
+    public async Task UpdateUserStoryAsync_PropagatesForbiddenOrMissingWithoutRetry(
+        HttpStatusCode statusCode,
+        string category)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Patch,
+                "/api/v1/userstories/102",
+                "{\"detail\":\"secret synthetic-token\"}",
+                statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                api.UpdateUserStoryAsync(102, version: 7, status: 1));
+
+            Assert.Contains(((int)statusCode).ToString(), exception.Message);
+            Assert.Contains(category, exception.Message);
+            Assert.DoesNotContain("synthetic-token", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Get);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateUserStoryAsync_ReadModifyReadUsesServerVersionAndPreservesUnrelatedFields()
+    {
+        var readBack = """
+            {"id":102,"ref":18,"project":12,"subject":"Before","description":"Keep this","status":1,"status_extra_info":{"name":"Backlog"},"assigned_to":11,"tags":[["keep","#336699"]],"milestone":55,"version":4}
+            """;
+        string patchBody = string.Empty;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(
+                HttpMethod.Patch,
+                "/api/v1/userstories/102",
+                request =>
+                {
+                    patchBody = request.Body;
+                    readBack = """
+                        {"id":102,"ref":18,"project":12,"subject":"After","description":"Keep this","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"tags":[["keep","#336699"]],"milestone":55,"version":5}
+                        """;
+                    return JsonResponse(readBack);
+                })
+            .AddRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                _ => JsonResponse(readBack));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var before = await api.GetUserStoryAsync(102);
+            var updated = await api.UpdateUserStoryAsync(102, before.Version, status: 7, assigned_to: 42);
+            var after = await api.GetUserStoryAsync(102);
+
+            Assert.Equal(4, before.Version);
+            Assert.Equal(5, updated.Version);
+            Assert.Equal("After", updated.Subject);
+            Assert.Equal(5, after.Version);
+            Assert.Equal("After", after.Subject);
+            using var body = JsonDocument.Parse(patchBody);
+            AssertPatchProperties(body.RootElement, "assigned_to", "status", "version");
+            Assert.Equal(4, body.RootElement.GetProperty("version").GetInt32());
+            Assert.Equal(7, body.RootElement.GetProperty("status").GetInt32());
+            Assert.Equal(42, body.RootElement.GetProperty("assigned_to").GetInt32());
         }
     }
 
@@ -202,6 +304,12 @@ public sealed class UserStoryUpdateTests
                 """
                 {"id":102,"ref":18,"project":12,"subject":"Server subject","description":"Server description","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"tags":[["search","#336699"]],"milestone":55,"modified_date":"2026-09-28T12:30:00Z","version":8}
                 """);
+
+    private static HttpResponseMessage JsonResponse(string json)
+        => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
 
     private static void AssertPatchProperties(JsonElement body, params string[] expectedNames)
     {
