@@ -153,6 +153,17 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/tasks/204")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                {"id":204,"ref":18,"project":123,"subject":"Integration child task","description":"Acceptance: complete the saved-search endpoint.","status":11,"status_extra_info":{"name":"Ready"},"assigned_to":42,"user_story":103,"milestone":55,"tags":[["search","#336699"]],"modified_date":"2026-09-28T12:01:00Z","version":1,"is_closed":false}
+                """);
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/90")
         {
             await RespondAsync(
@@ -199,6 +210,17 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 context.Response,
                 HttpStatusCode.Created,
                 createdStory);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Post.Method && path == "/api/v1/tasks")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.Created,
+                """
+                {"id":204,"ref":18,"project":123,"subject":"Integration child task","description":"Acceptance: complete the saved-search endpoint.","status":11,"status_extra_info":{"name":"Ready"},"assigned_to":42,"user_story":103,"milestone":55,"tags":[["search","#336699"]],"modified_date":"2026-09-28T12:01:00Z","version":1,"is_closed":false}
+                """);
             return;
         }
 

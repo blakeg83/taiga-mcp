@@ -103,11 +103,11 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose create_task
 
-- [ ] Add required projectId/subject plus optional arguments and describe inheritance in the public schema.
-- [ ] Document a parent-linked example and a standalone example; explain that ordinary create does not inherit the native bulk-create sprint restriction.
-- [ ] Keep TaskApi construction/DI consistent if a parent lookup dependency is added.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] Add required projectId/subject plus optional arguments and describe inheritance in the public schema.
+- [x] Document a parent-linked example and a standalone example; explain that ordinary create does not inherit the native bulk-create sprint restriction.
+- [x] Keep TaskApi construction/DI consistent if a parent lookup dependency is added.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_task MCP interface`.
 
 ## Step 4: Verify creation workflows
@@ -147,8 +147,8 @@ No live Taiga project was used.
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned backend source reviewed; contract decisions and JSON fixtures recorded. Focused fixture tests passed (3); no failing production suite was introduced. | Specify create_task contracts / `b8d8937` |
-| 2 | Complete | `TaskCreateTests` passed (16); `dotnet build -c Debug` passed with 0 warnings/errors. Added `TaskCreateDto`, injected `UserStoryApi` parent validation, one-POST creation, authoritative response mapping, and safe ambiguous-write errors. | Implement create_task API behavior / pending |
-| 3 | Not started | — | Expose create_task MCP interface / pending |
+| 2 | Complete | `TaskCreateTests` passed (16); `dotnet build -c Debug` passed with 0 warnings/errors. Added `TaskCreateDto`, injected `UserStoryApi` parent validation, one-POST creation, authoritative response mapping, and safe ambiguous-write errors. | Implement create_task API behavior / `d6cbe9b` |
+| 3 | Complete | Production STDIO `tools/list` and `tools/call` passed; schema exposes the 8 public arguments with only `projectId` and `subject` required. Reference, README, quickstart, and inventory now document the delivered subset. | Expose create_task MCP interface / pending |
 | 4 | Not started | — | Verify create_task workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

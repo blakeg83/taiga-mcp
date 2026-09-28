@@ -97,7 +97,7 @@ API/source basis: [story endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | --- | --- | --- |
 | `list_tasks` | New — delivered subset | `projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with supported parent story, sprint, status, assignee, tag, and text filters, including closed tasks when requested. Detail, date, sort, and arbitrary export filters remain planned. |
 | `get_task` | Delivered subset | `taskId`; retrieve description, status, assignee, parent story, sprint, tags, due date, blocking information, and version. Comments, attachments, and parent details remain deferred. |
-| `create_task` | New | `projectId, subject, userStoryId?, milestoneId?, fields?`; create a story task or standalone task. Story-linked tasks inherit their story's sprint. |
+| `create_task` | Delivered subset | `projectId, subject, userStoryId?, milestoneId?, description?, status?, assigned_to?, tags?`; create a story task or standalone task, validate an optional parent, and return authoritative detail. Story-linked tasks inherit their story's sprint. Bulk fields, due dates, blockers, iocaine, and cross-project creation remain planned. |
 | `update_task` | New | `taskId, version, fields`; edit task content, status, assignment, tags, blocking, due date, and Taiga's `is_iocaine` flag. |
 | `delete_task` | New | `taskId`; delete the task and report the result. |
 | `bulk_create_tasks` | New | `projectId, milestoneId, subjects[], userStoryId?, statusId?`; use the native bulk endpoint, which currently requires a sprint. Tasks outside a sprint need individual creation if the deployed endpoint retains that restriction. |

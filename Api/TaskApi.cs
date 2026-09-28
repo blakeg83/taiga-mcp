@@ -42,7 +42,7 @@ public sealed class TaskApi
             if (parent.Project != projectId)
                 throw new ArgumentException("userStoryId must belong to projectId.");
 
-            if (parent.Milestone != milestoneId)
+            if (milestoneId.HasValue && parent.Milestone != milestoneId)
                 throw new ArgumentException("milestoneId must match the parent story milestone.");
 
             effectiveMilestoneId = null;

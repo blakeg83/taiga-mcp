@@ -14,6 +14,33 @@ public sealed class TaskTools
         _tasks = tasks;
     }
 
+    [McpServerTool(Name = "create_task")]
+    [Description("Create one task in a project. A story-linked task validates the parent project and inherits the parent's sprint; a matching milestoneId is redundant and is omitted from the create request. Standalone tasks may omit milestoneId or select a sprint. Omitted optional fields use Taiga project defaults; bulk creation, due dates, blockers, and iocaine are not included.")]
+    public async Task<string> CreateTask(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Nonblank task subject.")] string subject,
+        [Description("Optional positive internal parent user story ID; its project and sprint are validated before creation.")] int? userStoryId = null,
+        [Description("Optional positive internal sprint ID for a standalone task; when a parent story is supplied it must match the parent's sprint.")] int? milestoneId = null,
+        [Description("Optional task description; an empty string is sent explicitly.")] string? description = null,
+        [Description("Optional positive internal task status ID.")] int? status = null,
+        [Description("Optional positive internal assignee user ID.")] int? assigned_to = null,
+        [Description("Optional task tags; an empty array is sent explicitly.")] string[]? tags = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var task = await _tasks.CreateTaskAsync(
+            projectId,
+            subject,
+            userStoryId,
+            milestoneId,
+            description,
+            status,
+            assigned_to,
+            tags,
+            cancellationToken);
+        return ToolResponseJson.Serialize(task);
+    });
+
     [McpServerTool(Name = "get_task")]
     [Description("Retrieve one task by its positive internal ID, not the displayed #ref. Returns one detail object with the authoritative version, description, status, assignment, parent story, sprint, tags, due-date, and blocking fields. Comments, attachments, and parent details are not loaded.")]
     public async Task<string> GetTask(

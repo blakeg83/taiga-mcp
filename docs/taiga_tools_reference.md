@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 16 tools:
+The current server exposes 17 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -16,13 +16,13 @@ The current server exposes 16 tools:
   `list_issue_priorities`.
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
-- 2 task tools: `list_tasks` and `get_task`.
+- 3 task tools: `list_tasks`, `get_task`, and `create_task`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Epic, task create/update, and cross-
-resource commands are not exposed by this server yet. `update_user_story`
+individual checklists are complete. Epic, task update, and cross-resource
+commands are not exposed by this server yet. `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
 `clearFields` containing only the wire names `assigned_to` and `milestone`.
@@ -59,11 +59,46 @@ show the JSON contents, not an MCP `content` wrapper.
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
+| `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
 spelling for compatibility. The MCP SDK schema and runtime binding are
 verified by the integration tests added by this foundation goal.
+
+### `create_task` contract
+
+The signature is `create_task(projectId, subject, userStoryId?, milestoneId?,
+description?, status?, assigned_to?, tags?)`. `projectId` must be positive and
+`subject` must be nonblank. Optional IDs must be positive; omitted optional
+fields are omitted from the request so Taiga project defaults apply, while an
+empty description or tag array is explicit.
+
+For a standalone task, use either of these forms:
+
+```json
+{"projectId":12,"subject":"Capture deployment checklist"}
+{"projectId":12,"subject":"Prepare release notes","milestoneId":55}
+```
+
+For a story-linked task, the server reads the parent story before creation to
+validate its project. If `milestoneId` is omitted, the parent's current sprint
+is authoritative. If it is supplied, it must equal the parent's sprint,
+including the null case; a matching value is omitted from the POST and Taiga
+still validates the relationship at save time. A parent changing between the
+lookup and POST is therefore a server-side race, not a client-side guarantee.
+
+```json
+{"projectId":12,"subject":"Implement saved-search endpoint","userStoryId":102}
+```
+
+The tool performs one `POST /api/v1/tasks` and returns the server's task detail,
+including the resulting `user_story`, `milestone`, and `version`. It does not
+use Taiga's native bulk-create endpoint, so standalone creation is not subject
+to that endpoint's sprint requirement. Bulk creation, due dates, blockers,
+iocaine, and cross-project creation remain planned. A transport or response
+mapping failure after the POST is reported as potentially applied and is never
+automatically retried.
 
 ### `get_task` contract
 
@@ -215,6 +250,11 @@ An update returns the server's authoritative detail, for example:
   colored tags, nullable assignment/parent/sprint fields, numeric status IDs,
   due-date and blocking fields, and ignores unfamiliar upstream fields. It
   performs no metadata, parent, history, comment, or attachment reads.
+- `create_task` maps `userStoryId` to `user_story` and standalone `milestoneId`
+  to `milestone`. It validates an optional parent story before POST, omits a
+  matching or inherited parent milestone, preserves empty description/tag
+  values, and returns the authoritative task detail. No retry follows an
+  ambiguous create failure.
 - `get_user_story` requests exactly `userstories/{userStoryId}`. It uses the
   returned `status_extra_info.name` when present and otherwise performs one
   project-scoped `userstory-statuses?project=...` lookup; if no usable project
@@ -281,6 +321,7 @@ The following sources were checked on 2026-09-28:
   [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60)
   and [TaskListSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57).
 - Task detail was checked on 2026-09-28 against the pinned [task GET route](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/tasks/endpoints.adoc#L191-L199), [detail command](https://raw.githubusercontent.com/taigaio/taiga-doc/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/generated/tasks-get-cmd.adoc), and backend [TaskSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L59-L73). The backend's task serializer supplies description and the shared task serializer supplies parent/sprint IDs, tags, version, blocking, and due-date fields. This is pinned source evidence, not a deployed-version claim.
+- Task creation was checked on 2026-09-28 against the pinned backend [TaskViewSet save and pre-condition logic](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L91-L122). The normal `POST /tasks` path copies a parent story's sprint and rejects cross-project or mismatched parent/sprint values. This is pinned source evidence, not a deployed-version claim.
 - The story detail route and serializer fields were checked against pinned
   `taiga-doc` revision
   [`7455fd37cb164bbf80198c1517fd0ef414e2a7b9`](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/user-stories/endpoints.adoc)
