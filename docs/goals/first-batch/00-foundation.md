@@ -14,12 +14,12 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 
 ## Step 1: establish a baseline and record contracts
 
-- [ ] Inspect AGENTS.md, git status, project/solution, domain APIs, DI, and all current tool names. Preserve the untracked command inventory if still present.
-- [ ] Run restore and Debug build; record results and whether dotnet test has any tests to execute.
-- [ ] Inventory the 11 existing public tool schemas and array/issue-detail response shapes; record representative sanitized examples.
-- [ ] Verify pagination headers, filter encodings, update errors, and installed MCP invocation APIs using primary sources/package metadata; record source versions.
-- [ ] Create docs/taiga_tools_reference.md with a clear implemented-versus-planned distinction and link it from README.md.
-- [ ] Update this goal's execution record and commit this step as: Document batch contracts and baseline.
+- [x] Inspect AGENTS.md, git status, project/solution, domain APIs, DI, and all current tool names. Preserve the untracked command inventory if still present.
+- [x] Run restore and Debug build; record results and whether dotnet test has any tests to execute.
+- [x] Inventory the 11 existing public tool schemas and array/issue-detail response shapes; record representative sanitized examples.
+- [x] Verify pagination headers, filter encodings, update errors, and installed MCP invocation APIs using primary sources/package metadata; record source versions.
+- [x] Create docs/taiga_tools_reference.md with a clear implemented-versus-planned distinction and link it from README.md.
+- [x] Update this goal's execution record and commit this step as: Document batch contracts and baseline.
 
 ## Step 2: add isolated HTTP contract testing
 
@@ -60,9 +60,13 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 
 | Step | Status | Evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | — |
+| 1 | Complete | `docs/taiga_tools_reference.md`; README link; inventory distinction; baseline and source versions recorded above. | Document batch contracts and baseline |
 | 2 | Not started | — | — |
 | 3 | Not started | — | — |
 | 4 | Not started | — | — |
 
-Record source revision/date, baseline failures, deviations, and remaining blockers here as work proceeds.
+Source/date: official Taiga REST API documentation and Taiga backend `main` at `4d11baef9027f5598f6341d6eb4261de2840688e`, plus installed ModelContextProtocol `0.3.0-preview.4` package metadata and SDK tag `15f8e89ac3aedb2bb4fa9232f6093f092b2ce956`, checked 2026-09-28.
+
+Baseline: restore passed; the initial Debug build was blocked by four pre-existing server processes holding the apphost executable; `dotnet test` passed with no tests discovered. Development builds use `-p:UseAppHost=false` while those processes remain.
+
+Deviation: the current source uses concrete domain APIs and bare-array list results, so this foundation records the compatibility gap rather than changing public behavior before the function-specific goals. Remaining work is the isolated fixture, SDK integration proof, and final reusable verification conventions.

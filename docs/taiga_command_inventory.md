@@ -1,13 +1,15 @@
 # Taiga command inventory
 
-Reviewed September 25, 2026. This is a proposed MCP command inventory only; it does not implement any commands.
+Reviewed September 28, 2026. This inventory includes the 11 commands already
+implemented by the repository and the larger command set that remains planned;
+it does not imply that planned commands are deployed.
 
 Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). These plans cover a defined subset of this inventory and remain unimplemented until their checklists are completed.
 
 ## Scope and notation
 
 - **Tickets** means user stories and tasks here. Taiga exposes issues, epics, user stories, and tasks as separate resources; command names preserve those distinctions.
-- **Existing** means exposed by this repository today. **Extend** means an existing command needs broader behavior. **New** means a proposed command. Parameters below describe the intended interface, not exact current signatures.
+- **Existing** means exposed by this repository today. **Extend** means an existing command needs broader behavior. **New** means a proposed command. Parameters below describe the intended interface, not exact current signatures. The exact current signatures and JSON shapes are in the [implemented tool reference](taiga_tools_reference.md).
 - Shared commands take `kind = issue | epic | user_story | task` and an internal numeric `id`. A displayed `#ref` must first be resolved within its project.
 - List commands should expose pagination, supported filters, ordering, and an explicit choice to include completed work. Return JSON with IDs, references, useful labels, versions where available, and pagination information.
 - Updates should distinguish omitted fields from explicit clearing, use Taiga's version checks where required, and report conflicts. Closing and reopening mean selecting a project status; status names must not be hardcoded.
