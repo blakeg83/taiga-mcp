@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssueSeverityDto
 {
     [JsonPropertyName("id")]
@@ -14,4 +16,3 @@ public sealed record IssueSeverityDto
     [JsonPropertyName("color")]
     public string? Color { get; init; }
 }
-

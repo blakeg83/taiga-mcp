@@ -4,12 +4,12 @@ These are proposed implementation decisions for this batch, not descriptions of 
 
 ## Compatibility and layering
 
-- Keep every existing MCP name, parameter name, default that matters to callers, and response shape unless an additive opt-in is specified below.
+- Preserve the post-cleanup MCP baseline: all names/response shapes, member=null project default, flag-based story filtering and open-only issue filtering. The cleanup intentionally changed the old member=6 and label-based defaults; later goals preserve this corrected baseline unless an additive opt-in is specified below.
 - Existing list tools return arrays by default. Add includePageInfo=false; when true, return the page envelope below. New list tools always return the envelope.
 - Existing issue response status/type/priority/severity properties are labels. Keep them and add status_id/type_id/priority_id/severity_id, rather than changing their types. Story status labels likewise remain compatible.
 - New resource DTOs use explicit JSON property names: id, ref, project, subject, status_id, status, assigned_to, and modified. Detail DTOs include description and version. Nullable fields remain nullable; never manufacture ID/version zero from absent required data.
-- Reuse domain APIs directly in tools. Keep ITaigaApi/TaigaApi's existing methods source-compatible through forwarding overloads where needed; do not expand that legacy facade for every new tool without an actual caller.
-- Use AuthClient and the configured HttpClient. New TaskApi/EpicApi registrations belong in Hosting/ServiceCollectionExtensions.cs; assembly tool discovery is already configured.
+- Reuse concrete domain APIs directly in tools. The unused aggregate facade was removed by the development cleanup; do not recreate it.
+- Use TaigaTransport for HTTP JSON reads, with caller-owned requests/documents and transport-owned responses. Pass CancellationToken end to end; AuthClient handles authentication. New TaskApi/EpicApi registrations belong in Hosting/ServiceCollectionExtensions.cs; assembly tool discovery is already configured.
 - Each goal owns its function-specific DTOs/tests. Share only proven reusable query, page, patch, and error behavior.
 
 ## Listing and pagination
@@ -45,3 +45,18 @@ These are proposed implementation decisions for this batch, not descriptions of 
 - The dedicated comment command returns kind, id, returned version, and comment_submitted=true only after a successful update. That flag means submission succeeded, not that a history-entry identifier was obtained.
 
 Concurrency source: [Taiga OCC mixin](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/occ/mixins.py). API verification starting point: [official REST API](https://docs.taiga.io/api.html). Pin the actual reference used in the implementation evidence.
+
+## Foundation verification notes
+
+The installed `ModelContextProtocol` `0.3.0-preview.4` SDK was verified with
+the test project on 2026-09-28. A successful `CallToolAsync` response can have
+`CallToolResult.IsError == null`; a tool execution failure is represented by a
+result with `IsError == true` and text content. The SDK's generated schema
+omits the `required` property when no parameters are required. Defaults and
+nullable parameters therefore need runtime call tests in addition to schema
+inspection. The test-only probe confirmed that explicit `false`, empty arrays,
+and explicit nulls survive binding, while omitting a required integer produces
+a tool failure. The production STDIO fixture now tees raw child STDOUT before
+the SDK sees it and validates every emitted line as a JSON-RPC 2.0 message;
+negative tests reject blank, plain-text, and non-message JSON lines, and a
+temporary contaminated application copy fails the end-to-end session.

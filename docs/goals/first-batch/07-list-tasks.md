@@ -49,7 +49,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement TaskApi and DI
 
-- [ ] Add TaskApi accepting configured HttpClient and AuthClient; register using the same named-client pattern as existing domains.
+- [ ] Add TaskApi accepting TaigaTransport; register the concrete domain API in Hosting/ServiceCollectionExtensions.cs and pass CancellationToken through every call.
 - [ ] Reuse query/page helpers with positive-ID/page validation, authenticated requests, success checks, and response disposal.
 - [ ] Map parent and sprint IDs without treating null as zero; do not fetch every parent story for listing.
 - [ ] Validate this step: run domain request/response tests for this behavior and Debug build.

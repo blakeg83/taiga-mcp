@@ -1,8 +1,13 @@
+using TaigaMCP.Api;
+using TaigaMCP.Caching;
+using TaigaMCP.Config;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net.Http.Headers;
+
+namespace TaigaMCP.Hosting;
 
 public static class ServiceCollectionExtensions
 {
@@ -12,8 +17,11 @@ public static class ServiceCollectionExtensions
         services
             .AddOptions<TaigaOptions>()
             .Bind(config.GetSection("Taiga"))
-            .Validate(o => !string.IsNullOrEmpty(o.Username) && !string.IsNullOrEmpty(o.Password),
+            .Validate(o => !string.IsNullOrWhiteSpace(o.Username) && !string.IsNullOrWhiteSpace(o.Password),
                 "Taiga credentials are required")
+            .Validate(o => TaigaOptions.IsValidBaseUrl(o.BaseUrl), "Taiga base URL must be absolute HTTP/HTTPS without credentials, query or fragment")
+            .PostConfigure(o => { if (TaigaOptions.IsValidBaseUrl(o.BaseUrl)) o.BaseUrl = o.BaseUrl.TrimEnd('/') + "/"; })
+            .Validate(o => o.MetadataTtlSeconds > 0, "Taiga metadata TTL must be positive")
             .ValidateOnStart();
 
         services.AddHttpClient("taiga", (sp, client) =>
@@ -24,25 +32,13 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         });
 
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<AuthClient>();
-        services.AddSingleton<ProjectApi>(sp =>
-            new ProjectApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
-                sp.GetRequiredService<AuthClient>()));
-
-        services.AddSingleton<IssueMetadataCache>(sp =>
-            new IssueMetadataCache(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
-                sp.GetRequiredService<AuthClient>()));
-
-        services.AddSingleton<IssueApi>(sp =>
-            new IssueApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
-                sp.GetRequiredService<AuthClient>(),
-                sp.GetRequiredService<IssueMetadataCache>()));
-
-        services.AddSingleton<UserStoryApi>(sp =>
-            new UserStoryApi(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
-                sp.GetRequiredService<AuthClient>()));
-        services.AddSingleton<ITaigaApi, TaigaApi>();
-
+        services.AddSingleton<TaigaTransport>();
+        services.AddSingleton<ProjectApi>();
+        services.AddSingleton<IssueMetadataCache>();
+        services.AddSingleton<IssueApi>();
+        services.AddSingleton<UserStoryApi>();
         services
             .AddMcpServer()
             .WithStdioServerTransport()

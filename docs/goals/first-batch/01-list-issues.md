@@ -31,8 +31,6 @@ Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga
 - `Tools/IssueTools.cs`
 - `Api/IssueApi.cs`
 - `Models/IssueDto.cs`
-- `Api/ITaigaApi.cs`
-- `Api/TaigaApi.cs`
 - `tests/TaigaMCP.Tests/IssueListTests.cs`
 - `docs/taiga_tools_reference.md`, `README.md`, and `docs/taiga_mcp_quickstart.md` for implemented behavior and examples.
 - This goal and `docs/taiga_command_inventory.md` for progress, evidence, and remaining scope.
@@ -43,14 +41,14 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 - [ ] Capture the current array result and open-only query in baseline fixtures; make the intended corrected query explicit.
 - [ ] Verify each public filter's wire name and multi-value encoding from issue filter source; reject invalid IDs/pages before HTTP.
-- [ ] Define explicit-status precedence and missing-header behavior with tests; do not carry forward unsupported status__is_archived issue filtering.
+- [ ] Define explicit-status precedence and missing-header behavior with tests; retain the cleanup's removal of unsupported status__is_archived issue filtering.
 - [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
 - [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_issues contracts`.
 
 ## Step 2: Implement filtered paged retrieval
 
-- [ ] Add an internal list-options model and encoded query builder; retain a forwarding overload for current domain/facade callers.
+- [ ] Add an internal list-options model and encoded query builder; retain a forwarding overload for current domain callers.
 - [ ] Remove unconditional closed-status exclusions when includeClosed=true or explicit statuses are supplied; retain the default open-only view.
 - [ ] Capture pagination headers before disposing the response; add metadata IDs to mapping without changing existing label properties.
 - [ ] Implement an internal page result shared by array and envelope modes; do not issue one detail request per issue.

@@ -31,8 +31,6 @@ Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga
 - `Tools/IssueTools.cs`
 - `Api/IssueApi.cs`
 - `Models/IssueUpdateDto.cs`
-- `Api/ITaigaApi.cs`
-- `Api/TaigaApi.cs`
 - `tests/TaigaMCP.Tests/IssueUpdateTests.cs`
 - `docs/taiga_tools_reference.md`, `README.md`, and `docs/taiga_mcp_quickstart.md` for implemented behavior and examples.
 - This goal and `docs/taiga_command_inventory.md` for progress, evidence, and remaining scope.
@@ -43,7 +41,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 - [ ] Add fixtures for assignment omitted, assignment set, and explicit assignment clear; distinguish null omission from a JSON null in the wire body.
 - [ ] Specify conflict rules for set-and-clear and unknown clearFields names; reject empty updates unless a nonblank comment is supplied.
-- [ ] Plan an overload/reordering that makes subject optional in C# and the MCP schema without breaking facade callers.
+- [ ] Plan an overload/reordering that makes subject optional in C# and the MCP schema while documenting the public signature change.
 - [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
 - [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_issue contracts`.
@@ -61,7 +59,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 ## Step 3: Expose compatible tool arguments
 
 - [ ] Ensure MCP lists issueId/version as required and subject as optional; retain snake_case assigned_to and all old argument names.
-- [ ] Thread clearFields through IssueApi and any affected facade overloads without widening unrelated APIs.
+- [ ] Thread clearFields through IssueApi without widening unrelated APIs.
 - [ ] Document a read-current-version then update flow and how callers resolve version rejection.
 - [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
 - [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.

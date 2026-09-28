@@ -5,6 +5,8 @@ VisualStudioVersion = 17.14.36408.4 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaigaMCP", "TaigaMCP.csproj", "{8D5C49D0-82F4-4F6E-B574-38DCBE82EBC5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TaigaMCP.Tests", "tests\TaigaMCP.Tests\TaigaMCP.Tests.csproj", "{3AB94A98-13FA-47E9-A826-9523A9D1C266}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{8D5C49D0-82F4-4F6E-B574-38DCBE82EBC5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8D5C49D0-82F4-4F6E-B574-38DCBE82EBC5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8D5C49D0-82F4-4F6E-B574-38DCBE82EBC5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3AB94A98-13FA-47E9-A826-9523A9D1C266}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3AB94A98-13FA-47E9-A826-9523A9D1C266}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3AB94A98-13FA-47E9-A826-9523A9D1C266}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3AB94A98-13FA-47E9-A826-9523A9D1C266}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

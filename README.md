@@ -3,19 +3,21 @@
 TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, and manage issues via Taiga’s REST API.
 
 ## Features
-- `list_projects(member?, page)`: List projects (use the numeric member ID, currently `member=6`, for your projects).
+- `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
 - `resolve_project(slug)`: Resolve a Taiga project slug to its numeric ID.
 - `list_issues(projectId, page)`: Page through issues for a project.
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
-- `update_issue(issueId, version, subject?, ...)`: Partially update an issue via PATCH; include `version`.
+- `update_issue(issueId, subject, version, ...)`: Partially update an issue via PATCH; include `version` and pass `subject=null` when changing other fields.
 - `list_issue_statuses(projectId)`: List available issue statuses for a project.
 - `list_issue_severities(projectId)`: List available issue severities for a project.
 - `list_issue_types(projectId)`: List available issue types for a project.
 - `list_issue_priorities(projectId)`: List available issue priorities for a project.
 
+- `list_user_stories(projectId, page)`: List one page of open, non-archived stories.
+
 ## Requirements
-- .NET 8 SDK
+- SDK selected by `global.json` (10.0.401, latest patch within that feature band) and .NET 8 runtime
 - Taiga account and credentials
 
 ## Build and Run
@@ -37,6 +39,7 @@ Set environment variables for the server process:
 - `TAIGA__BASEURL` (optional, default: `https://api.taiga.io/api/v1/`)
 - `TAIGA__USERNAME`
 - `TAIGA__PASSWORD`
+- `TAIGA__METADATATTLSECONDS` (optional positive integer, default 300)
 
 For Codex CLI, point the MCP server `command` to the published binary and pass the env vars. See the quickstart for a full `config.toml` example.
 
@@ -59,13 +62,35 @@ Notes:
 - Use the absolute path to your published binary for `command`.
 
 ## Development Notes
- - Entry point and DI/live tools: `Program.cs` registers domain APIs and
-   loads `[McpServerToolType]` classes from the `Tools/` folder.
-- Transport: STDIO; logging via `Microsoft.Extensions.Logging` to stderr.
-- HTTP: `HttpClient` with bearer auth token acquired via `/auth`.
 
+`Program.cs` creates the host; `Hosting/ServiceCollectionExtensions.cs` registers
+options, APIs and tools. Tools use concrete domain APIs and a shared transport
+with cancellation, safe errors and explicit disposal. Auth token state and the
+expiring metadata cache are singleton services; named HTTP clients are obtained
+per operation. STDIO carries MCP messages only; logging goes to stderr.
+
+See the [developer guide](docs/development.md) and the completed
+[foundation cleanup goal](docs/goals/development-foundation-cleanup.md).
+
+Windows PowerShell:
+
+```powershell
+dotnet restore
+dotnet build -c Debug
+dotnet test -c Debug
+$env:TAIGA__USERNAME = 'your-user'
+$env:TAIGA__PASSWORD = 'your-password'
+dotnet run --no-build
+```
+
+Tests use fake HTTP and synthetic credentials. CI restores, builds and tests
+Release on Windows. Publish long-running MCP servers to a separate versioned
+directory, for example `dotnet publish TaigaMCP.csproj -c Release -o C:\TaigaMCP\published\v1`.
+If a server locks normal outputs, use a unique external output directory for
+build/tests; do not stop that server. See the developer guide for the exact command.
 ## Implementation Planning
 
+- [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
 - [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. These are plans, not implemented capabilities.
 
@@ -79,3 +104,14 @@ Notes:
 For end-to-end setup (Codex config, MCP Inspector, troubleshooting), see:
 
 - docs/taiga_mcp_quickstart.md
+
+## Intentional list behavior changes
+
+`list_projects` now defaults to `member=null` (no member filter). To retain the
+previous account-specific selection, call `list_projects(member="6")`, or send
+`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
+Story lists use Taiga's `status__is_closed=false` and
+`status__is_archived=false`; English labels such as Done/Archived no longer
+exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
+issue archive filtering and redundant status-exclusion requests were removed.
+These are behavior corrections, not behavior-preserving refactoring.

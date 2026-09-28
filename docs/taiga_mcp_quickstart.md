@@ -6,44 +6,36 @@ This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C
 ---
 
 ## Prerequisites
-- .NET 8 SDK
-- WSL Ubuntu environment
+- SDK selected by `global.json` (10.0.401 with latestPatch) and .NET 8 runtime
+- Windows PowerShell or a Linux/WSL shell (the test contamination fixture currently requires Windows)
 - Node.js (for MCP Inspector)
 - Codex CLI installed
 - A Taiga account
 
 ---
 
-## 1. Create the MCP Server
-```bash
-dotnet new console -n TaigaMCP
-cd TaigaMCP
-dotnet add package ModelContextProtocol --prerelease
-dotnet add package Microsoft.Extensions.Hosting
+## 1. Build the existing server
+
+Clone this repository and run from its root; do not recreate the project or
+upgrade its pinned packages as part of setup.
+
+```powershell
+dotnet restore
+dotnet build -c Debug
+dotnet test -c Debug
 ```
 
- Edit **Program.cs** to:
- - Set up an `HttpClient` for Taiga API
- - Register domain APIs for projects, issues, and user stories
- - Define MCP tools in `[McpServerToolType]` classes under `Tools/`:
-  - `list_projects(member?, page)`
-  - `resolve_project(slug)`
-  - `list_issues(projectId, page)`
-  - `get_issue(issueId)`
-  - `create_issue(projectId, subject, …)`
-  - `update_issue(issueId, version, subject?, ...)` (version required; only send fields you want to change)
-  - `list_issue_statuses(projectId)`
-  - `list_issue_severities(projectId)`
-  - `list_issue_types(projectId)`
-  - `list_issue_priorities(projectId)`
+`Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
+configuration, named HTTP clients, the shared transport, domain APIs, cache and
+MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
+See the [implemented tool reference](taiga_tools_reference.md) for all 11 tools.
 
-Build:
-```bash
-dotnet build
-```
+For long-running MCP use, publish to a separate versioned directory. Keeping the
+published server apart from development outputs avoids executable/DLL locks.
+See the [developer guide](development.md) for temporary-output validation when
+an existing server already holds a build output open.
 
 ---
-
 ## 2. Configure Codex CLI
 Edit **~/.codex/config.toml** in WSL. Example:
 
@@ -153,7 +145,7 @@ Update Taiga issue 67890 setting subject "Fix title" and version 3
 ### Common mistakes
 - Wrong binary path in `config.toml`
 - Env vars not on one line in TOML
-- Missing `version` field on updates → Taiga returns 409
+- Include the current `version` on updates. Taiga may report a version conflict as a 400 field-validation response or a 409 conflict, depending on the deployed version and overlap; inspect the returned validation details and do not blindly retry an ambiguous write.
 
 ---
 
@@ -165,3 +157,28 @@ You now have:
 - Integrated Codex CLI for natural language interaction
 - Troubleshooting steps for TOML parse errors, startup timeouts, and stdout logging
 
+
+### Validated configuration and updates
+
+`TAIGA__USERNAME` and `TAIGA__PASSWORD` must be nonblank. Optional
+`TAIGA__BASEURL` is an absolute HTTP/HTTPS API URL without embedded credentials,
+query, or fragment. Optional `TAIGA__METADATATTLSECONDS` is a positive integer
+(default 300). Startup rejects invalid configuration.
+
+Use positive internal project/entity IDs and pages >= 1. For an update of only
+description/tags, pass `subject: null` and the current `version`; use
+`description: ""` or `tags: []` to empty those fields. Null optional values leave
+fields unchanged. Empty updates and negative versions are rejected before HTTP.
+A write error saying it may already have applied requires reading the entity
+before deciding whether to retry. See [development conventions](development.md).
+
+## Intentional list behavior changes
+
+`list_projects` now defaults to `member=null` (no member filter). To retain the
+previous account-specific selection, call `list_projects(member="6")`, or send
+`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
+Story lists use Taiga's `status__is_closed=false` and
+`status__is_archived=false`; English labels such as Done/Archived no longer
+exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
+issue archive filtering and redundant status-exclusion requests were removed.
+These are behavior corrections, not behavior-preserving refactoring.

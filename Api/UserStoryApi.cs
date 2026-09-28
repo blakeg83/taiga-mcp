@@ -1,24 +1,24 @@
+using TaigaMCP.Models;
 using System.Text.Json;
+
+namespace TaigaMCP.Api;
 
 /// <summary>User story operations.</summary>
 public sealed class UserStoryApi
 {
-    private readonly HttpClient _http;
-    private readonly AuthClient _auth;
+    private readonly TaigaTransport _transport;
 
-    public UserStoryApi(HttpClient http, AuthClient auth)
+    public UserStoryApi(TaigaTransport transport)
     {
-        _http = http;
-        _auth = auth;
+        _transport = transport;
     }
 
-    public async Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1)
+    public async Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
         using var stReq = new HttpRequestMessage(HttpMethod.Get, $"userstory-statuses?project={projectId}");
-        var stRes = await _auth.SendAsync(_http, stReq);
-        stRes.EnsureSuccessStatusCode();
-        using var stDoc = JsonDocument.Parse(await stRes.Content.ReadAsStringAsync());
-        var excludeIds = new List<int>();
+        using var stDoc = await _transport.ReadAsync(stReq, cancellationToken);
         var statusMap = new Dictionary<int, string>();
         foreach (var st in stDoc.RootElement.EnumerateArray())
         {
@@ -27,11 +27,7 @@ public sealed class UserStoryApi
             if (st.TryGetProperty("id", out var idProp) && idProp.TryGetInt32(out var id))
             {
                 statusMap[id] = name;
-                if (string.Equals(name, "Done", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "Archived", StringComparison.OrdinalIgnoreCase))
-                {
-                    excludeIds.Add(id);
-                }
+
             }
         }
 
@@ -42,13 +38,9 @@ public sealed class UserStoryApi
             "status__is_archived=false",
             "status__is_closed=false"
         };
-        foreach (var id in excludeIds)
-            q.Add($"exclude_status={id}");
 
         using var usReq = new HttpRequestMessage(HttpMethod.Get, $"userstories?{string.Join("&", q)}");
-        var usRes = await _auth.SendAsync(_http, usReq);
-        usRes.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await usRes.Content.ReadAsStringAsync());
+        using var doc = await _transport.ReadAsync(usReq, cancellationToken);
         var items = new List<UserStoryDto>();
         foreach (var us in doc.RootElement.EnumerateArray())
         {

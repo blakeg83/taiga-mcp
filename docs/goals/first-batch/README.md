@@ -1,6 +1,6 @@
 # First implementation batch: agent goal documents
 
-Status: planned; no functionality in this batch has been implemented by these documents.
+Status: feature goals 01-15 remain planned. Goal 00, its review fixes and the development foundation cleanup are complete; their test/transport/auth/cache infrastructure is available.
 
 ## Selected batch
 
@@ -26,6 +26,8 @@ The 15 functions below prioritize the daily cycle of finding work, reading its c
 | 15 | [add_work_item_comment](15-add-work-item-comment.md) | Record decisions and progress across all four kinds | 02, 06, 10, 12 |
 
 ## How to use these documents
+
+Foundation review follow-up: [Goal 00 review fixes](00-foundation-review-fixes.md) addresses PR #31's protocol-output verification and nullable-response documentation findings. It is complete and retained by the [development cleanup](../development-foundation-cleanup.md). Use the final infrastructure described in [development](../../development.md).
 
 Assign one goal document to a coding agent, along with access to this repository. Tell it to read [the execution instructions](execution-instructions.md), [the shared contracts](contracts.md), and the linked prerequisites before editing. Implement in the order above by default. Documents are task specifications, not instructions to start separate chats or delegate automatically.
 
