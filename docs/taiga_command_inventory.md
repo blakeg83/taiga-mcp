@@ -211,7 +211,7 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 11 tool names were inventoried from [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
+- The current 12 tool names were inventoried from [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset, optional page envelope, and goal 04 core detail read; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
 - Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. Shared wrappers can reuse underlying resource operations during a future implementation.
