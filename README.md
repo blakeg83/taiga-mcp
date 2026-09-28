@@ -19,7 +19,7 @@ provide nonempty `statusIds` or `includeClosed=true` to include closed work.
 See the [implemented tool reference](docs/taiga_tools_reference.md) for the
 wire filters and envelope fields.
 
-- `list_user_stories(projectId, page)`: List one page of open, non-archived stories.
+- `list_user_stories(projectId, page, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?)`: List one page of backlog or sprint stories with explicit status/assignment/text filters; the default is an array and `includePageInfo` opts into pagination metadata.
 
 ## Requirements
 - SDK selected by `global.json` (10.0.401, latest patch within that feature band) and .NET 8 runtime
@@ -116,7 +116,10 @@ For end-to-end setup (Codex config, MCP Inspector, troubleshooting), see:
 previous account-specific selection, call `list_projects(member="6")`, or send
 `{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
 Story lists use Taiga's `status__is_closed=false` and
-`status__is_archived=false`; English labels such as Done/Archived no longer
-exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
-issue archive filtering and redundant status-exclusion requests were removed.
-These are behavior corrections, not behavior-preserving refactoring.
+`status__is_archived=false` by default; nonempty status IDs override both,
+and include flags selectively remove them. `backlogOnly=true` uses
+`milestone__isnull=true`, while `milestoneId` selects a sprint. English labels
+such as Done/Archived never determine filtering. Issue lists use
+`status__is_closed=false` only: unsupported issue archive filtering and
+redundant status-exclusion requests were removed. These are behavior
+corrections, not behavior-preserving refactoring.

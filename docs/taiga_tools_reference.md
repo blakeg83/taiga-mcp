@@ -17,11 +17,12 @@ The current server exposes 11 tools:
 - 1 user-story tool: `list_user_stories`.
 
 The first-batch documents describe 15 additional or expanded functions. The
-`list_issues` expansion is delivered; the remaining goal documents describe
-planned work until their individual checklists are complete. Epic, task,
-richer user-story, and cross-resource commands are not exposed by this server
-yet. See the [command inventory](taiga_command_inventory.md) and [first-batch
-plan index](goals/first-batch/README.md) for the remaining planned coverage.
+`list_issues` and `list_user_stories` expansions are delivered; the remaining
+goal documents describe planned work until their individual checklists are
+complete. Story detail/create/update, epic, task, and cross-resource commands
+are not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
+and [first-batch plan index](goals/first-batch/README.md) for the remaining
+planned coverage.
 
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.
@@ -40,7 +41,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_priorities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
-| `list_user_stories` | `projectId` integer, required; `page` integer, default `1` | Array of `{ id, ref, subject, status, assigned_to, modified }`. The current API excludes closed and archived stories. |
+| `list_user_stories` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `milestoneId`, `backlogOnly=false`, `tags`, `query`, `includeClosed=false`, `includeArchived=false`, and `includePageInfo=false` optional | Bare array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`; with `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Explicit status IDs override automatic closed/archive restrictions. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -102,7 +103,14 @@ Issue list/detail results:
 User-story and metadata results:
 
 ```json
-[{"id":789,"ref":12,"subject":"Ship the fix","status":"Ready","assigned_to":42,"modified":"2026-09-28T12:02:00Z"}]
+[{"id":789,"ref":12,"project":123,"subject":"Ship the fix","status_id":1,"status":"Ready","assigned_to":42,"modified":"2026-09-28T12:02:00Z","milestone":55,"version":7}]
+```
+
+```json
+{"items":[{"id":789,"ref":12,"project":123,"subject":"Ship the fix","status_id":1,"status":"Ready"}],"page":1,"total":null,"next_page":null,"has_more":null}
+```
+
+```json
 [{"id":1,"name":"Open","slug":"open","is_closed":false}]
 [{"id":2,"name":"Bug","slug":"bug","color":"#cc0000"}]
 ```
@@ -119,14 +127,23 @@ User-story and metadata results:
   comma-separated in the wire value and then percent-encoded. The default
   `status__is_closed=false` restriction is omitted when nonempty explicit
   statuses or `includeClosed=true` are selected. Invalid positive-ID/page
-  inputs fail before HTTP. The expanded MCP arguments and opt-in page
-  envelope are documented here once the tool exposure step is complete.
-- Current list methods request one page and return bare arrays. `list_issues`
-  additionally supports the opt-in page envelope; missing or malformed
-  pagination headers remain explicit `null` values rather than being treated
-  as zero totals or a completed result.
-- Issue and story labels are derived from project metadata calls. The current
-  DTOs preserve labels for compatibility and do not expose all source IDs.
+  inputs fail before HTTP.
+- Current list methods request one page and return bare arrays by default.
+  `list_issues` and `list_user_stories` additionally support the opt-in page
+  envelope; missing or malformed pagination headers remain explicit `null`
+  values rather than being treated as zero totals or a completed result.
+- `list_user_stories` maps `statusIds`, `assignedTo`, `milestoneId`,
+  `backlogOnly`, `tags`, and `query` to Taiga's allowlisted `status`,
+  `assigned_to`, `milestone`, `milestone__isnull`, `tags`, and `q` filters.
+  `milestoneId` and `backlogOnly=true` are mutually exclusive. Empty or
+  missing status IDs use the automatic open/non-archived restrictions unless
+  the corresponding include flag is enabled; nonempty status IDs suppress
+  both restrictions. The story list never infers filtering from translated
+  status names.
+- Issue and story labels are derived from project metadata calls. Story list
+  results additionally preserve `project` and `status_id`, and expose
+  `milestone` and `version` only when the list response supplies them. A
+  missing list version is not fabricated as zero.
 - The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
   null-valued response properties such as an unassigned issue's `assigned_to`
   are omitted from current tool JSON. This response omission is distinct from
@@ -289,7 +306,10 @@ refresh. See [development](development.md) for lifetimes and future contracts.
 previous account-specific selection, call `list_projects(member="6")`, or send
 `{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
 Story lists use Taiga's `status__is_closed=false` and
-`status__is_archived=false`; English labels such as Done/Archived no longer
-exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
-issue archive filtering and redundant status-exclusion requests were removed.
-These are behavior corrections, not behavior-preserving refactoring.
+`status__is_archived=false` by default; nonempty status IDs override both,
+and the include flags selectively remove them. `backlogOnly=true` uses
+`milestone__isnull=true`, while `milestoneId` selects a sprint. English labels
+such as Done/Archived never determine filtering. Issue lists use
+`status__is_closed=false` only: unsupported issue archive filtering and
+redundant status-exclusion requests were removed. These are behavior
+corrections, not behavior-preserving refactoring.

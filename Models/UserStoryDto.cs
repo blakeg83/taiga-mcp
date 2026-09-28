@@ -10,8 +10,14 @@ public sealed record UserStoryDto
     [JsonPropertyName("ref")]
     public int Ref { get; init; }
 
+    [JsonPropertyName("project")]
+    public int? Project { get; init; }
+
     [JsonPropertyName("subject")]
     public string? Subject { get; init; }
+
+    [JsonPropertyName("status_id")]
+    public int? StatusId { get; init; }
 
     [JsonPropertyName("status")]
     public string? Status { get; init; }
@@ -21,4 +27,10 @@ public sealed record UserStoryDto
 
     [JsonPropertyName("modified")]
     public string? Modified { get; init; }
+
+    [JsonPropertyName("milestone")]
+    public int? Milestone { get; init; }
+
+    [JsonPropertyName("version")]
+    public int? Version { get; init; }
 }

@@ -1,5 +1,5 @@
-using TaigaMCP.Models;
 using System.Text.Json;
+using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
 
@@ -13,51 +13,128 @@ public sealed class UserStoryApi
         _transport = transport;
     }
 
-    public async Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+        => (await ListUserStoriesPageAsync(
+            projectId,
+            new UserStoryListOptions { Page = page },
+            cancellationToken)).Items;
+
+    internal async Task<UserStoryListPage> ListUserStoriesPageAsync(
+        int projectId,
+        UserStoryListOptions options,
+        CancellationToken cancellationToken = default)
     {
         InputValidation.Positive(projectId, nameof(projectId));
-        InputValidation.Positive(page, nameof(page));
-        using var stReq = new HttpRequestMessage(HttpMethod.Get, $"userstory-statuses?project={projectId}");
-        using var stDoc = await _transport.ReadAsync(stReq, cancellationToken);
-        var statusMap = new Dictionary<int, string>();
-        foreach (var st in stDoc.RootElement.EnumerateArray())
-        {
-            var name = st.TryGetProperty("name", out var n) ? n.GetString() : null;
-            if (name is null) continue;
-            if (st.TryGetProperty("id", out var idProp) && idProp.TryGetInt32(out var id))
-            {
-                statusMap[id] = name;
+        InputValidation.Positive(options.Page, nameof(options.Page));
+        ValidateListOptions(options);
 
-            }
-        }
+        var statusMap = await LoadStatusMapAsync(projectId, cancellationToken);
+        using var usReq = new HttpRequestMessage(
+            HttpMethod.Get,
+            UserStoryListQueryBuilder.Build(projectId, options));
+        using var response = await _transport.ReadWithHeadersAsync(usReq, cancellationToken);
+        using var doc = response.Document;
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid user story list data.");
 
-        var q = new List<string>
-        {
-            $"project={projectId}",
-            $"page={page}",
-            "status__is_archived=false",
-            "status__is_closed=false"
-        };
+        var items = new List<UserStoryDto>(64);
+        foreach (var userStory in doc.RootElement.EnumerateArray())
+            items.Add(MapUserStory(userStory, statusMap));
 
-        using var usReq = new HttpRequestMessage(HttpMethod.Get, $"userstories?{string.Join("&", q)}");
-        using var doc = await _transport.ReadAsync(usReq, cancellationToken);
-        var items = new List<UserStoryDto>();
-        foreach (var us in doc.RootElement.EnumerateArray())
-        {
-            if (!us.TryGetProperty("id", out var idEl) || idEl.ValueKind == JsonValueKind.Null || !idEl.TryGetInt32(out var idVal))
-                continue;
-            int stId = us.TryGetProperty("status", out var stEl) && stEl.ValueKind != JsonValueKind.Null && stEl.TryGetInt32(out var stVal) ? stVal : 0;
-            items.Add(new UserStoryDto
-            {
-                Id = idVal,
-                Ref = us.TryGetProperty("ref", out var r) && r.ValueKind != JsonValueKind.Null && r.TryGetInt32(out var rv) ? rv : 0,
-                Subject = us.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
-                Status = statusMap.TryGetValue(stId, out var stName) ? stName : null,
-                AssignedTo = us.TryGetProperty("assigned_to", out var a) && a.ValueKind != JsonValueKind.Null && a.TryGetInt32(out var av) ? av : (int?)null,
-                Modified = us.TryGetProperty("modified_date", out var md) ? md.GetString() : null
-            });
-        }
-
-        return items;
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new UserStoryListPage(
+            items,
+            options.Page,
+            pageInfo.Total,
+            pageInfo.NextPage,
+            pageInfo.HasMore);
     }
+
+    private async Task<IReadOnlyDictionary<int, string>> LoadStatusMapAsync(
+        int projectId,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"userstory-statuses?project={projectId}");
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid user story status data.");
+
+        var statusMap = new Dictionary<int, string>();
+        foreach (var status in document.RootElement.EnumerateArray())
+        {
+            if (!status.TryGetProperty("id", out var idElement) ||
+                !idElement.TryGetInt32(out var id) ||
+                !status.TryGetProperty("name", out var nameElement) ||
+                nameElement.ValueKind != JsonValueKind.String)
+                continue;
+
+            statusMap[id] = nameElement.GetString()!;
+        }
+
+        return statusMap;
+    }
+
+    private static void ValidateListOptions(UserStoryListOptions options)
+    {
+        if (options.StatusIds is not null)
+            foreach (var id in options.StatusIds)
+                InputValidation.Positive(id, "statusIds");
+
+        InputValidation.OptionalIds(
+            (options.AssignedTo, nameof(options.AssignedTo)),
+            (options.MilestoneId, nameof(options.MilestoneId)));
+
+        if (options.BacklogOnly && options.MilestoneId.HasValue)
+            throw new ArgumentException("milestoneId cannot be combined with backlogOnly=true.");
+    }
+
+    private static UserStoryDto MapUserStory(
+        JsonElement userStory,
+        IReadOnlyDictionary<int, string> statusMap)
+    {
+        if (userStory.ValueKind != JsonValueKind.Object ||
+            !userStory.TryGetProperty("id", out var idElement) ||
+            !idElement.TryGetInt32(out var id))
+            throw new TaigaRequestException("Taiga returned invalid user story data.");
+
+        var statusId = ReadOptionalInt(userStory, "status");
+        return new UserStoryDto
+        {
+            Id = id,
+            Ref = ReadInt(userStory, "ref"),
+            Project = ReadOptionalInt(userStory, "project"),
+            Subject = ReadOptionalString(userStory, "subject"),
+            StatusId = statusId,
+            Status = statusId.HasValue && statusMap.TryGetValue(statusId.Value, out var status)
+                ? status
+                : null,
+            AssignedTo = ReadOptionalInt(userStory, "assigned_to"),
+            Modified = ReadOptionalString(userStory, "modified_date"),
+            Milestone = ReadOptionalInt(userStory, "milestone"),
+            Version = ReadOptionalInt(userStory, "version")
+        };
+    }
+
+    private static int ReadInt(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) && value.TryGetInt32(out var number)
+            ? number
+            : 0;
+
+    private static int? ReadOptionalInt(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) &&
+           value.ValueKind == JsonValueKind.Number &&
+           value.TryGetInt32(out var number)
+            ? number
+            : null;
+
+    private static string? ReadOptionalString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) &&
+           value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 }
