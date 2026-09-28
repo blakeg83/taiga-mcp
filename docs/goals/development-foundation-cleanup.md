@@ -1,6 +1,6 @@
 # Goal: prepare TaigaMCP for sustainable feature development
 
-Status: planned; implementation has not started.
+Status: in progress; Step 1 baseline verified.
 
 ## Objective
 
@@ -38,13 +38,13 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 1: establish a verified baseline and compatibility inventory
 
-- [ ] Verify the prerequisite foundation-review work is complete and committed. Record its commit references and rerun its focused checks, including strict protocol-output and omitted-null response tests.
-- [ ] Record branch, baseline commit, working-tree changes, installed SDK (`dotnet --info`), target framework, and package versions without printing environment secrets.
-- [ ] Run root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug`. Record the actual test count and any output-lock workaround.
-- [ ] Capture the current public tools, parameter names/defaults, and representative JSON shapes in the tool reference. Identify intentional changes reserved for Step 7: project member default and English-name story filtering.
-- [ ] Search tracked source, tests, docs, and scripts for `ITaigaApi`/`TaigaApi` callers and startup/build-path assumptions. Record whether removing the facade affects any actual consumer; if a real consumer exists, document the migration before removing it.
-- [ ] Document layer responsibilities and the intended shared transport, authentication, and cache lifetimes in `docs/development.md`.
-- [ ] Update the execution record and commit as `Document cleanup baseline and compatibility boundaries`.
+- [x] Verify the prerequisite foundation-review work is complete and committed. Record its commit references and rerun its focused checks, including strict protocol-output and omitted-null response tests.
+- [x] Record branch, baseline commit, working-tree changes, installed SDK (`dotnet --info`), target framework, and package versions without printing environment secrets.
+- [x] Run root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug`. Record the actual test count and any output-lock workaround.
+- [x] Capture the current public tools, parameter names/defaults, and representative JSON shapes in the tool reference. Identify intentional changes reserved for Step 7: project member default and English-name story filtering.
+- [x] Search tracked source, tests, docs, and scripts for `ITaigaApi`/`TaigaApi` callers and startup/build-path assumptions. Record whether removing the facade affects any actual consumer; if a real consumer exists, document the migration before removing it.
+- [x] Document layer responsibilities and the intended shared transport, authentication, and cache lifetimes in `docs/development.md`.
+- [x] Update the execution record and commit as `Document cleanup baseline and compatibility boundaries`.
 
 ## Step 2: simplify structure and standardize serialization
 
@@ -142,7 +142,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 | Step | Status | Validation, decisions, and documentation evidence | Commit reference |
 | --- | --- | --- | --- |
-| 1. Baseline | Not started | Pending | Pending |
+| 1. Baseline | Complete | Prerequisites 003fe00/b219e39 verified in history and 13 passing tests; root restore/Debug build/tests passed, zero warnings, no locks. SDK, package, caller/path audit and layer lifetimes recorded in docs/development.md. Existing reference matches all 11 signatures/shapes. | Document cleanup baseline and compatibility boundaries |
 | 2. Structure/serialization | Not started | Pending | Pending |
 | 3. Transport | Not started | Pending | Pending |
 | 4. Authentication | Not started | Pending | Pending |
@@ -152,3 +152,4 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | 8. Guardrails/final verification | Not started | Pending | Pending |
 
 Final handoff: list completed steps and commit hashes, exact checks and outcomes, intentional compatibility changes and migration examples, outstanding limitations, and the definition-of-done result. Do not claim live integration or remote CI success from mocked/local tests.
+
