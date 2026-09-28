@@ -21,7 +21,15 @@ The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
 individual checklists are complete. Story update, epic, task, and
-cross-resource commands are not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
+cross-resource commands are not exposed by this server yet. The planned
+`update_user_story` contract uses `userStoryId`, a nonnegative `version`,
+optional `subject`, `description`, `status`, `assigned_to`, `tags`,
+`milestoneId`, and `comment`, plus `clearFields` containing only the wire
+names `assigned_to` and `milestone`. Omitted nullable fields remain untouched;
+explicit clear fields send JSON null; `description=""` and `tags=[]` are
+explicit clears. A sprint move is sent once to the story and Taiga determines
+any effects on child tasks; the MCP tool will not patch child tasks separately.
+See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
 

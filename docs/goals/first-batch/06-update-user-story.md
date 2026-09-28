@@ -24,7 +24,7 @@ Illustrative MCP arguments (IDs are placeholders):
 {"userStoryId":102,"version":3,"clearFields":["milestone"],"comment":"Move back to backlog."}
 ```
 
-Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/userstories/api.py). Before implementing, record a pinned upstream revision or deployed-version evidence; a floating main branch is not a deployment guarantee.
+Primary verification source: [Taiga source/API at pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e`](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py), verified 2026-09-28. This is upstream source evidence, not a claim about the deployed version.
 
 ## Files and integration points
 
@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define partial-update semantics
 
-- [ ] Reuse goal 02's presence-aware approach; define wire-key clear names rather than mixing milestone and milestoneId.
-- [ ] Add fixtures for unassignment, sprint removal, empty description/tags, comment-only updates, and untouched omissions.
-- [ ] Document that a story sprint change can affect its child tasks through server behavior; do not separately patch every child.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_user_story contracts`.
+- [x] Reuse goal 02's presence-aware approach; define wire-key clear names rather than mixing milestone and milestoneId.
+- [x] Add fixtures for unassignment, sprint removal, empty description/tags, comment-only updates, and untouched omissions.
+- [x] Document that a story sprint change can affect its child tasks through server behavior; do not separately patch every child.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_user_story contracts`.
 
 ## Step 2: Implement versioned story edits
 
@@ -96,7 +96,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify update_user_story contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed on 2026-09-28: 141 tests, 0 warnings/errors. Contract fixtures validate omitted fields, explicit assignment/sprint nulls, empty description/tags, and comment-only payloads. Taiga source verified at pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e` on 2026-09-28: `UserStoryViewSet.update` routes through the standard update at `PATCH userstories/{id}`; the serializer exposes `subject`, `description`, `status`, `assigned_to`, `tags`, `milestone`, `comment`, and `version`; OCC permits non-overlapping stale edits and rejects overlapping conflicts through field validation. Source: https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py | Specify update_user_story contracts / pending |
 | 2 | Not started | — | Implement update_user_story API behavior / pending |
 | 3 | Not started | — | Expose update_user_story MCP interface / pending |
 | 4 | Not started | — | Verify update_user_story workflow / pending |
