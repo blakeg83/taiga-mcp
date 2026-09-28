@@ -49,12 +49,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement EpicApi and registration
 
-- [ ] Create EpicApi accepting TaigaTransport; register it in Hosting/ServiceCollectionExtensions.cs and pass CancellationToken through every call.
-- [ ] Reuse query/page logic and preserve numeric status IDs, color, tags, and nullable assignment.
-- [ ] Keep one-page behavior and avoid related-story/detail lookups for every epic.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_epics API behavior`.
+- [x] Create EpicApi accepting TaigaTransport; register it in Hosting/ServiceCollectionExtensions.cs and pass CancellationToken through every call.
+- [x] Reuse query/page logic and preserve numeric status IDs, color, tags, and nullable assignment.
+- [x] Keep one-page behavior and avoid related-story/detail lookups for every epic.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_epics API behavior`.
 
 ## Step 3: Expose epic discovery
 
@@ -98,7 +98,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, Debug build (0 warnings/errors), and sequential Debug test run passed (237 tests). Added a passing DTO/fixture contract check. On 2026-09-28, verified against pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`: `EpicViewSet.filter_fields` supports `project`, `assigned_to`, and `status__is_closed`; registered filter backends support status IDs, tags, and `q`; `EpicListSerializer` supplies `id`, `ref`, `project`, `modified_date`, `subject`, `color`, `version`, `status`, `assigned_to`, and `tags`. The implementation will use the verified `status__is_closed=false` flag for the default and omit it for explicit statuses or `includeClosed=true`; no status metadata lookup or name-based closure inference is needed. Source: https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py and https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py | Specify list_epics contracts / pending |
-| 2 | Not started | — | Implement list_epics API behavior / pending |
+| 2 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused `EpicListTests` passed 8 tests. `EpicApi` uses `TaigaTransport.ReadWithHeadersAsync`, requests one encoded page, maps inline status labels without metadata/detail lookups, preserves numeric status IDs/color/tags/nullable assignment, parses trusted pagination headers, and rejects invalid IDs/pages, malformed arrays, and malformed epic fields before/at mapping. Previous commit: `f6146cc`. | Implement list_epics API behavior / pending |
 | 3 | Not started | — | Expose list_epics MCP interface / pending |
 | 4 | Not started | — | Verify list_epics workflow / pending |
 

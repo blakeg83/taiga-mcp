@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IssueApi>();
         services.AddSingleton<UserStoryApi>();
         services.AddSingleton<TaskApi>();
+        services.AddSingleton<EpicApi>();
         services
             .AddMcpServer()
             .WithStdioServerTransport()

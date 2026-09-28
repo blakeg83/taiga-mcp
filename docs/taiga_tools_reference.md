@@ -33,7 +33,8 @@ not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
 unsupported clear names, and set/clear collisions fail before HTTP; write
 failures are not replayed.
 The planned `list_epics` contract is now source-verified but is not exposed
-until its implementation goal is complete. Its intended signature is
+until its implementation goal is complete. The domain API is now implemented,
+but the MCP wrapper is still deferred to the remaining steps. Its intended signature is
 `list_epics(projectId, page=1, statusIds?, assignedTo?, tags?, query?,
 includeClosed=false)`, and it will always return the page envelope
 `{ items, page, total, next_page, has_more }`. The default wire filter is
@@ -42,7 +43,9 @@ that restriction. The allowlisted filters are `status`, `assigned_to`,
 `tags`, and `q`, with encoded values. Epic list items will expose
 `id`, `ref`, `project`, `subject`, `status_id`, `status`, `assigned_to`,
 `color`, `tags`, `modified`, and optional `version`; no related-story
-lookups or progress aggregation are part of this list operation.
+lookups or progress aggregation are part of this list operation. Invalid
+project/page/filter IDs fail before HTTP, malformed list data is a safe Taiga
+request failure, and missing pagination headers remain unknown (`null`).
 
 This contract was checked on 2026-09-28 against pinned taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e` in the [epic API source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py)
