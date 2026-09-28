@@ -52,6 +52,39 @@ public sealed class TaskTools
         return ToolResponseJson.Serialize(result);
     });
 
+    [McpServerTool(Name = "update_task")]
+    [Description("Update one task using the caller-supplied version. Omitted nullable fields stay unchanged; empty description or tags are explicit clears, and isBlocked=false is sent explicitly. Use clearFields=[\"assigned_to\"] to unassign. Setting or clearing isBlocked does not change blockedNote; pass blockedNote=\"\" to clear the note. Requires a change or nonblank comment and does not automatically retry version conflicts. Parent story, sprint, due dates, and iocaine are not included.")]
+    public async Task<string> UpdateTask(
+        [Description("Positive internal task ID, not the displayed #ref.")] int taskId,
+        [Description("Required current task version, zero or greater; forwarded unchanged to Taiga.")] int version,
+        [Description("Optional nonblank subject; omission or null leaves it unchanged.")] string? subject = null,
+        [Description("Description; null leaves it unchanged, while an empty string clears it.")] string? description = null,
+        [Description("Optional positive internal task status ID; null leaves it unchanged.")] int? status = null,
+        [Description("Optional positive internal assignee user ID; null leaves it unchanged, while clearFields can unassign.")] int? assigned_to = null,
+        [Description("Tags; null leaves them unchanged, while an empty array clears them.")] string[]? tags = null,
+        [Description("Optional blocking flag; null leaves it unchanged, while false explicitly unblocks the task.")] bool? isBlocked = null,
+        [Description("Optional blocking note; null leaves it unchanged, while an empty string clears the note. Changing isBlocked does not change this field.")] string? blockedNote = null,
+        [Description("Optional comment; a comment-only update requires nonblank text.")] string? comment = null,
+        [Description("Optional fields to clear explicitly; only assigned_to is accepted, using this exact wire name.")] string[]? clearFields = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var task = await _tasks.UpdateTaskAsync(
+            taskId,
+            version,
+            subject,
+            description,
+            status,
+            assigned_to,
+            tags,
+            isBlocked,
+            blockedNote,
+            comment,
+            clearFields,
+            cancellationToken);
+        return ToolResponseJson.Serialize(task);
+    });
+
     [McpServerTool(Name = "list_tasks")]
     [Description("List one page of tasks in a project. By default only tasks with open statuses are returned; explicit statusIds take precedence over includeClosed. userStoryId and milestoneId select parent story and sprint filters. The result always uses the items/page/total/next_page/has_more envelope. Standalone tasks and tasks with unavailable status labels are preserved; detail, sorting, dates, and closed-status metadata filters are not included.")]
     public async Task<string> ListTasks(

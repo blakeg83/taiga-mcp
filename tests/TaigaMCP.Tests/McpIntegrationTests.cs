@@ -336,6 +336,7 @@ public sealed class McpIntegrationTests
                 "list_user_stories",
                 "resolve_project",
                 "update_issue",
+                "update_task",
                 "update_user_story"
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
@@ -401,6 +402,15 @@ public sealed class McpIntegrationTests
             var getTaskRequired = getTask.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "taskId" }, getTaskRequired);
+
+            var updateTask = Assert.Single(tools, tool => tool.Name == "update_task");
+            var updateTaskProperties = updateTask.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "taskId", "version", "subject", "description", "status", "assigned_to", "tags", "isBlocked", "blockedNote", "comment", "clearFields" },
+                updateTaskProperties);
+            var updateTaskRequired = updateTask.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "taskId", "version" }, updateTaskRequired);
 
             var createTask = Assert.Single(tools, tool => tool.Name == "create_task");
             var createTaskProperties = createTask.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -553,6 +563,31 @@ public sealed class McpIntegrationTests
             Assert.Equal("**Acceptance:** preserve Markdown and Unicode — ✓", taskDetailJson.GetProperty("description").GetString());
             var taskDetailRequest = Assert.Single(taiga.Requests, request => request.PathAndQuery == "/api/v1/tasks/203");
             Assert.Equal("Bearer integration-token", taskDetailRequest.Authorization);
+
+            var updatedTask = await client.CallToolAsync(
+                "update_task",
+                new Dictionary<string, object?>
+                {
+                    ["taskId"] = 203,
+                    ["version"] = 2,
+                    ["description"] = string.Empty,
+                    ["tags"] = Array.Empty<string>(),
+                    ["isBlocked"] = false,
+                    ["blockedNote"] = string.Empty,
+                    ["clearFields"] = null
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(updatedTask.IsError == true, GetText(updatedTask));
+            var updatedTaskJson = JsonSerializer.Deserialize<JsonElement>(GetText(updatedTask));
+            Assert.Equal(3, updatedTaskJson.GetProperty("version").GetInt32());
+            Assert.Equal(string.Empty, updatedTaskJson.GetProperty("description").GetString());
+            Assert.Empty(updatedTaskJson.GetProperty("tags").EnumerateArray());
+            Assert.False(updatedTaskJson.GetProperty("is_blocked").GetBoolean());
+            using var updatedTaskBody = JsonDocument.Parse(
+                taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203").Body);
+            AssertPatchProperties(updatedTaskBody.RootElement, "blocked_note", "description", "is_blocked", "tags", "version");
+            Assert.Equal(string.Empty, updatedTaskBody.RootElement.GetProperty("blocked_note").GetString());
+            Assert.False(updatedTaskBody.RootElement.TryGetProperty("assigned_to", out _));
 
             var createdTask = await client.CallToolAsync(
                 "create_task",

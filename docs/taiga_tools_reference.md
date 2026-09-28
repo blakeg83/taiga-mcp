@@ -60,6 +60,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
+| `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -115,27 +116,32 @@ attachments, and parent-detail requests are outside this command.
 The concrete `TaskApi.GetTaskAsync` implementation and `get_task` MCP tool
 follow this wire contract.
 For a later edit, use `list_tasks` to find the internal ID, call `get_task` to
-obtain a fresh authoritative `version`, and pass that version to the planned
-`update_task` command; this read does not load comments, attachments, or the
-parent object.
+obtain a fresh authoritative `version`, and pass that version to
+`update_task`; this read does not load comments, attachments, or the parent
+object.
 
-### Planned `update_task` contract
+### `update_task` contract
 
-Goal 10 will expose `update_task(taskId, version, subject?, description?,
-status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?)`.
-The domain API now implements this PATCH contract; MCP exposure remains Step 3.
-Until that goal is complete, this section is a planned public tool rather than
-an available MCP tool. Omitted fields remain unchanged; `description=""`,
+The available `update_task` tool has the signature
+`update_task(taskId, version, subject?, description?, status?, assigned_to?,
+tags?, isBlocked?, blockedNote?, comment?, clearFields?)`. Omitted fields remain
+unchanged; `description=""`,
 `tags=[]`, `isBlocked=false`, and `blockedNote=""` are explicit updates.
 `clearFields` accepts only `assigned_to`, and emits `assigned_to: null` for an
 explicit unassignment. Setting or clearing `isBlocked` does not implicitly
 change `blockedNote`. The caller supplies the nonnegative version from a fresh
 `get_task` result, and a PATCH returns the server's authoritative task detail.
 
-Planned workflow example:
+Unblock workflow example:
 
 ```json
 {"taskId":203,"version":2,"isBlocked":false,"blockedNote":"","comment":"Dependency resolved."}
+```
+
+The result is the server's updated detail, for example:
+
+```json
+{"id":203,"ref":17,"project":123,"subject":"Integration task","is_blocked":false,"blocked_note":"","version":3}
 ```
 
 ## Representative sanitized JSON

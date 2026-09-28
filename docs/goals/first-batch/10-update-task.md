@@ -57,12 +57,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose task edits
 
-- [ ] Add update_task to TaskTools with required taskId/version and clear blocking/unassignment descriptions.
-- [ ] Document a read -> status update example and an unblock call that explicitly clears the note.
-- [ ] Ensure omission and explicit false bind correctly through the installed MCP SDK.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose update_task MCP interface`.
+- [x] Add update_task to TaskTools with required taskId/version and clear blocking/unassignment descriptions.
+- [x] Document a read -> status update example and an unblock call that explicitly clears the note.
+- [x] Ensure omission and explicit false bind correctly through the installed MCP SDK.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose update_task MCP interface`.
 
 ## Step 4: Verify progress and failure paths
 
@@ -97,8 +97,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline restore passed; baseline test run passed 214 tests. The concurrent baseline build hit a SourceLink output lock, so a serial baseline build rerun passed. Contract payload tests passed. Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked on 2026-09-28; task model fields, versioned update path, and detail serializer support the scoped PATCH. No deployed-version claim; no live Taiga writes. Goal/reference docs updated with omitted-vs-explicit semantics and planned examples. | Specify update_task contracts / a2e0b72 |
-| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~TaskUpdateTests`: 19 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Task PATCH tests cover omitted/set/clear assignment, empty description/tags, `is_blocked=false`, empty `blocked_note`, comment-only updates, invalid inputs, safe 400/409 errors, malformed success, and no retry. Domain API now maps the authoritative task detail; MCP exposure remains Step 3. | Implement update_task API behavior / pending |
-| 3 | Not started | — | Expose update_task MCP interface / pending |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~TaskUpdateTests`: 19 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Task PATCH tests cover omitted/set/clear assignment, empty description/tags, `is_blocked=false`, empty `blocked_note`, comment-only updates, invalid inputs, safe 400/409 errors, malformed success, and no retry. Domain API maps the authoritative task detail; no parent/sprint mutation is sent. | Implement update_task API behavior / 4dec867 |
+| 3 | Complete | The real STDIO integration test passed: `tools/list` exposes `update_task` with required `taskId`/`version` and all optional fields, and `tools/call` bound explicit `false`, empty arrays/strings, and explicit null omission. The fake server observed an exact PATCH body and returned valid JSON text. README, quickstart, reference, and inventory now describe the public tool. | Expose update_task MCP interface / pending |
 | 4 | Not started | — | Verify update_task workflow / pending |
 
 ### Step 1 decisions and planned examples

@@ -176,6 +176,8 @@ Call the tool list_user_stories with projectId=12345, milestoneId=678, and inclu
 Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool get_task with taskId=203
+Call the tool update_task with taskId=203, version=2, status=11
+Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."
 Call the tool get_user_story with userStoryId=102
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345
@@ -188,10 +190,11 @@ Update Taiga issue 67890 with version 4 and clearFields=["assigned_to"]
 ```
 
 For task edits, first use `list_tasks` to identify the internal task ID, then
-call `get_task` and use its fresh `version` with the planned `update_task`
-command. `get_task` accepts the internal ID, not the displayed `#ref`. Goal 10
-will support explicit assignment clearing with `clearFields=["assigned_to"]`
-and explicit unblock/note clearing with `isBlocked=false, blockedNote=""`.
+call `get_task` and use its fresh `version` with `update_task`. `get_task`
+accepts the internal ID, not the displayed `#ref`. Use
+`clearFields=["assigned_to"]` to unassign, and pass
+`isBlocked=false, blockedNote=""` when both the blocker and its note should be
+cleared. Changing `isBlocked` alone does not overwrite the note.
 
 ---
 

@@ -19,7 +19,9 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     private readonly Task _listenTask;
     private readonly ConcurrentQueue<RecordedTaigaRequest> _requests = [];
     private readonly object _storyLock = new();
+    private readonly object _taskLock = new();
     private string _userStory102 = "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created backlog story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}";
+    private string _task203 = "{\"id\":203,\"ref\":17,\"project\":123,\"subject\":\"Integration task\",\"description\":\"**Acceptance:** preserve Markdown and Unicode — ✓\",\"status\":11,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"user_story\":102,\"milestone\":55,\"tags\":[[\"search\",\"#336699\"]],\"modified_date\":\"2026-09-28T12:00:00Z\",\"version\":2,\"is_blocked\":false,\"blocked_note\":\"\",\"is_closed\":false}";
 
     private FakeTaigaHttpServer(HttpListener listener, string baseUrl)
     {
@@ -36,6 +38,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public HttpStatusCode UserStoryUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
     public HttpStatusCode TaskCreateStatusCode { get; set; } = HttpStatusCode.Created;
+
+    public HttpStatusCode TaskUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
@@ -146,12 +150,13 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/tasks/203")
         {
+            string task;
+            lock (_taskLock)
+                task = _task203;
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.OK,
-                """
-                {"id":203,"ref":17,"project":123,"subject":"Integration task","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status":11,"status_extra_info":{"name":"Ready","color":"#00aa00","is_closed":false},"assigned_to":null,"user_story":102,"milestone":55,"tags":[["search","#336699"]],"modified_date":"2026-09-28T12:00:00Z","version":2,"due_date":"2026-10-15","due_date_reason":"Release readiness review","due_date_status":"set","is_blocked":false,"blocked_note":"","is_closed":false,"future_field":"ignored"}
-                """);
+                task);
             return;
         }
 
@@ -244,6 +249,64 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 context.Response,
                 HttpStatusCode.Created,
                 responseBody);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Patch.Method && path == "/api/v1/tasks/203")
+        {
+            if (TaskUpdateStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(
+                    context.Response,
+                    TaskUpdateStatusCode,
+                    "{\"detail\":\"synthetic task update secret\"}");
+                return;
+            }
+
+            var patch = JsonNode.Parse(body)?.AsObject();
+            if (patch is null || !patch.TryGetPropertyValue("version", out var versionNode) ||
+                versionNode is null || versionNode.GetValueKind() != JsonValueKind.Number)
+            {
+                await RespondAsync(context.Response, HttpStatusCode.BadRequest, "{\"version\":[\"invalid version\"]}");
+                return;
+            }
+
+            string responseBody;
+            HttpStatusCode responseStatus;
+            lock (_taskLock)
+            {
+                var task = JsonNode.Parse(_task203)!.AsObject();
+                var currentVersion = task["version"]!.GetValue<int>();
+                var requestedVersion = versionNode.GetValue<int>();
+                if (requestedVersion != currentVersion)
+                {
+                    responseStatus = HttpStatusCode.Conflict;
+                    responseBody = "{\"detail\":\"version conflict\"}";
+                }
+                else
+                {
+                    foreach (var field in new[] { "subject", "description", "status", "assigned_to", "tags", "is_blocked", "blocked_note" })
+                    {
+                        if (patch.ContainsKey(field))
+                            task[field] = patch[field]?.DeepClone();
+                    }
+
+                    if (patch.TryGetPropertyValue("status", out var statusNode) && statusNode is not null)
+                    {
+                        task["status_extra_info"] = new JsonObject
+                        {
+                            ["name"] = statusNode.GetValue<int>() == 11 ? "Ready" : "In Progress"
+                        };
+                    }
+
+                    task["version"] = currentVersion + 1;
+                    _task203 = task.ToJsonString();
+                    responseStatus = HttpStatusCode.OK;
+                    responseBody = _task203;
+                }
+            }
+
+            await RespondAsync(context.Response, responseStatus, responseBody);
             return;
         }
 
