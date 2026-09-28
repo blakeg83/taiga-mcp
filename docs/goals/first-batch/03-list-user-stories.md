@@ -1,6 +1,6 @@
 # Goal 03: list_user_stories
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -39,12 +39,28 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Specify story list cases
 
-- [ ] Record current DTO fields and default array behavior before extending them.
-- [ ] Create status fixtures with localized/custom names and actual is_closed/is_archived flags; ensure names never determine filtering.
-- [ ] Verify backlog null filtering and define milestone/backlog conflict validation.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_user_stories contracts`.
+- [x] Record current DTO fields and default array behavior before extending them.
+- [x] Create status fixtures with localized/custom names and actual is_closed/is_archived flags; ensure names never determine filtering.
+- [x] Verify backlog null filtering and define milestone/backlog conflict validation.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_user_stories contracts`.
+
+Step 1 decisions and evidence (2026-09-28): the current `UserStoryDto` exposes
+`id`, `ref`, `subject`, `status`, `assigned_to`, and `modified`, and the public
+tool returns a bare JSON array by default. The baseline fixture uses localized
+and custom status names alongside their actual `is_closed` and `is_archived`
+flags; filtering is asserted against the wire flags, not names. The pinned
+Taiga source revision
+[`4d11baef9027f5598f6341d6eb4261de2840688e`](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py#L69-L75)
+allowlists `milestone`, `milestone__isnull`, `status__is_archived`, and
+`status__is_closed`. `backlogOnly=true` will therefore map to
+`milestone__isnull=true`; supplying both `milestoneId` and `backlogOnly=true`
+is invalid before HTTP. No deployed Taiga version was claimed.
+
+Baseline validation passed: `dotnet test -c Debug --no-restore` ran 103 tests.
+The new `UserStoryListTests` records the compatible array/default-flag contract
+and positive project/page validation without introducing a failing test suite.
 
 ## Step 2: Implement filters and page mapping
 
@@ -97,7 +113,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_user_stories contracts / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug --no-restore`: 103 passed. Pinned source revision and status/backlog decisions recorded above; baseline fixtures added. | Specify list_user_stories contracts / completed locally |
 | 2 | Not started | — | Implement list_user_stories API behavior / pending |
 | 3 | Not started | — | Expose list_user_stories MCP interface / pending |
 | 4 | Not started | — | Verify list_user_stories workflow / pending |
