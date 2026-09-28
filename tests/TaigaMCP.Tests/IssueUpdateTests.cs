@@ -32,6 +32,11 @@ public sealed class IssueUpdateTests
             var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
             using var body = JsonDocument.Parse(patch.Body);
             var root = body.RootElement;
+            AssertPatchProperties(
+                root,
+                assignmentCase == "omitted"
+                    ? ["description", "version"]
+                    : ["assigned_to", "description", "version"]);
             Assert.Equal(7, root.GetProperty("version").GetInt32());
             Assert.Equal("Changed", root.GetProperty("description").GetString());
 
@@ -85,6 +90,7 @@ public sealed class IssueUpdateTests
 
             var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
             using var body = JsonDocument.Parse(patch.Body);
+            AssertPatchProperties(body.RootElement, ["assigned_to", "version"]);
             Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("assigned_to").ValueKind);
             Assert.Equal(7, body.RootElement.GetProperty("version").GetInt32());
         }
@@ -104,6 +110,7 @@ public sealed class IssueUpdateTests
 
             var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
             using var body = JsonDocument.Parse(patch.Body);
+            AssertPatchProperties(body.RootElement, ["comment", "version"]);
             Assert.False(body.RootElement.TryGetProperty("subject", out _));
             Assert.Equal("Returned to triage.", body.RootElement.GetProperty("comment").GetString());
             Assert.Equal(7, body.RootElement.GetProperty("version").GetInt32());
@@ -194,5 +201,13 @@ public sealed class IssueUpdateTests
             .AddJsonRoute(HttpMethod.Get, "/api/v1/severities", "[{\"id\":2,\"name\":\"Normal\"}]")
             .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-types", "[{\"id\":3,\"name\":\"Bug\"}]")
             .AddJsonRoute(HttpMethod.Get, "/api/v1/priorities", "[{\"id\":4,\"name\":\"Normal\"}]");
+    }
+
+    private static void AssertPatchProperties(JsonElement body, params string[] expectedNames)
+    {
+        var actualNames = body.EnumerateObject().Select(property => property.Name);
+        Assert.Equal(
+            expectedNames.OrderBy(name => name, StringComparer.Ordinal),
+            actualNames.OrderBy(name => name, StringComparer.Ordinal));
     }
 }

@@ -48,6 +48,7 @@ public sealed class McpIntegrationTests
             ["tags"] = Array.Empty<string>()
         })).IsError == true);
         var body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Single(r => r.Method == "PATCH").Body);
+        AssertPatchProperties(body, "description", "tags", "version");
         Assert.False(body.TryGetProperty("subject", out _));
         Assert.Equal("", body.GetProperty("description").GetString());
         Assert.Equal(0, body.GetProperty("tags").GetArrayLength());
@@ -60,6 +61,7 @@ public sealed class McpIntegrationTests
             ["status"] = 1
         })).IsError == true);
         body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Last(request => request.Method == "PATCH").Body);
+        AssertPatchProperties(body, "status", "version");
         Assert.False(body.TryGetProperty("subject", out _));
         Assert.Equal(1, body.GetProperty("status").GetInt32());
         Assert.Equal(1, body.GetProperty("version").GetInt32());
@@ -71,6 +73,7 @@ public sealed class McpIntegrationTests
             ["clearFields"] = new[] { "assigned_to" }
         })).IsError == true);
         body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Last(request => request.Method == "PATCH").Body);
+        AssertPatchProperties(body, "assigned_to", "version");
         Assert.True(body.TryGetProperty("assigned_to", out var assignedTo));
         Assert.Equal(JsonValueKind.Null, assignedTo.ValueKind);
         Assert.Equal(2, body.GetProperty("version").GetInt32());
@@ -82,6 +85,7 @@ public sealed class McpIntegrationTests
             ["comment"] = "Returned to triage."
         })).IsError == true);
         body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Last(request => request.Method == "PATCH").Body);
+        AssertPatchProperties(body, "comment", "version");
         Assert.False(body.TryGetProperty("subject", out _));
         Assert.Equal("Returned to triage.", body.GetProperty("comment").GetString());
         Assert.Equal(3, body.GetProperty("version").GetInt32());
@@ -285,4 +289,12 @@ public sealed class McpIntegrationTests
 
     private static string GetText(CallToolResult result)
         => Assert.Single(result.Content.OfType<TextContentBlock>()).Text;
+
+    private static void AssertPatchProperties(JsonElement body, params string[] expectedNames)
+    {
+        var actualNames = body.EnumerateObject().Select(property => property.Name);
+        Assert.Equal(
+            expectedNames.OrderBy(name => name, StringComparer.Ordinal),
+            actualNames.OrderBy(name => name, StringComparer.Ordinal));
+    }
 }
