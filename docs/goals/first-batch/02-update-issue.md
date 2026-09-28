@@ -1,6 +1,6 @@
 # Goal 02: update_issue
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -39,12 +39,21 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define presence and compatibility cases
 
-- [ ] Add fixtures for assignment omitted, assignment set, and explicit assignment clear; distinguish null omission from a JSON null in the wire body.
-- [ ] Specify conflict rules for set-and-clear and unknown clearFields names; reject empty updates unless a nonblank comment is supplied.
-- [ ] Plan an overload/reordering that makes subject optional in C# and the MCP schema while documenting the public signature change.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_issue contracts`.
+- [x] Define fixtures for assignment omitted, assignment set, and explicit assignment clear; distinguish null omission from a JSON null in the wire body.
+- [x] Specify conflict rules for set-and-clear and unknown clearFields names; reject empty updates unless a nonblank comment is supplied.
+- [x] Plan an overload/reordering that makes subject optional in C# and the MCP schema while documenting the public signature change.
+- [x] Validate this step: baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-build --no-restore` passed on 2026-09-28 (90 tests, 0 failures). The new fixtures are recorded below and implementation tests are added in Step 2.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_issue contracts`.
+
+### Step 1 contract record
+
+- The public shape will be `update_issue(issueId, version, subject?, description?, status?, type?, priority?, severity?, assigned_to?, tags?, comment?, clearFields?)`. `issueId` and `version` remain required; `subject` becomes nullable with a default of `null`, so status-only, tag-only, comment-only, and unassignment calls do not need a subject argument.
+- A normal nullable field is omitted when its argument is `null`. This applies to `assigned_to`: omission leaves the current assignee unchanged, while `clearFields=["assigned_to"]` emits `"assigned_to":null`. A non-null assignee emits its integer value. `description=""` and `tags=[]` remain explicit values.
+- `clearFields` is null/empty by default and accepts only `assigned_to` in this goal. Unknown names and a field supplied both as a value and in `clearFields` are rejected before HTTP. An explicit clear counts as a real update; otherwise at least one selected value or a nonblank comment is required.
+- The C# API keeps the existing positional field order through `comment` and adds `clearFields` after it; the tool reorders required `version` before optional `subject` to make the generated MCP schema truthful without changing existing argument names.
+- The source evidence is Taiga-back revision [`4d11baef9027f5598f6341d6eb4261de2840688e`](https://github.com/taigaio/taiga-back/tree/4d11baef9027f5598f6341d6eb4261de2840688e), reviewed 2026-09-28 at [`taiga/projects/occ/mixins.py`](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/occ/mixins.py). It is pinned upstream source evidence, not a claim about a deployed Taiga version.
+- Planned wire fixtures: omitted assignment has no `assigned_to` property; set assignment has the selected integer; explicit clear has a JSON `null`; all include the caller's exact `version` and do not include unrelated nullable fields.
 
 ## Step 2: Implement versioned partial updates
 
@@ -98,7 +107,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify update_issue contracts / pending |
+| 1 | Complete | Baseline restore/build/test passed: 90 tests, 0 failures; contract/source record above | Specify update_issue contracts / pending |
 | 2 | Not started | — | Implement update_issue API behavior / pending |
 | 3 | Not started | — | Expose update_issue MCP interface / pending |
 | 4 | Not started | — | Verify update_issue workflow / pending |
