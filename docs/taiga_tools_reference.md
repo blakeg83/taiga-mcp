@@ -29,6 +29,11 @@ names `assigned_to` and `milestone`. Omitted nullable fields remain untouched;
 explicit clear fields send JSON null; `description=""` and `tags=[]` are
 explicit clears. A sprint move is sent once to the story and Taiga determines
 any effects on child tasks; the MCP tool will not patch child tasks separately.
+The domain API implementation now sends the supplied nonnegative version and
+returns Taiga's authoritative updated detail, but the public MCP tool remains
+planned until the interface step is complete. Invalid IDs, blank subjects,
+empty updates, unsupported clear names, and set/clear collisions fail before
+HTTP; write failures are not replayed.
 See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.

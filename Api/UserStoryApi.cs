@@ -111,6 +111,79 @@ public sealed class UserStoryApi
         }
     }
 
+    public async Task<UserStoryDetailDto> UpdateUserStoryAsync(
+        int userStoryId,
+        int version,
+        string? subject = null,
+        string? description = null,
+        int? status = null,
+        int? assigned_to = null,
+        string[]? tags = null,
+        int? milestoneId = null,
+        string? comment = null,
+        string[]? clearFields = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(userStoryId, nameof(userStoryId));
+        InputValidation.OptionalIds(
+            (status, nameof(status)),
+            (assigned_to, nameof(assigned_to)),
+            (milestoneId, nameof(milestoneId)));
+        if (version < 0) throw new ArgumentException("version must be nonnegative.");
+        if (subject is not null) InputValidation.Required(subject, nameof(subject));
+
+        var (clearAssignedTo, clearMilestone) = ValidateClearFields(clearFields, assigned_to, milestoneId);
+        if (subject is null && description is null && status is null && assigned_to is null && tags is null &&
+            milestoneId is null && !clearAssignedTo && !clearMilestone && string.IsNullOrWhiteSpace(comment))
+            throw new ArgumentException("An update requires a change or a nonblank comment.");
+
+        var payload = new UserStoryUpdateDto
+        {
+            Subject = subject,
+            Description = description,
+            Status = status,
+            AssignedTo = assigned_to,
+            Tags = tags,
+            Milestone = milestoneId,
+            Comment = comment,
+            Version = version
+        };
+        var json = JsonSerializer.Serialize(payload.ToPatchPayload(clearAssignedTo, clearMilestone));
+
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"userstories/{userStoryId}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            var userStory = document.RootElement;
+            var project = ReadDetailOptionalInt(userStory, "project");
+            var statusId = ReadDetailOptionalInt(userStory, "status");
+            var storyStatus = ReadStatusExtraInfoName(userStory);
+            if (storyStatus is null && statusId.HasValue && project is > 0)
+            {
+                var statusMap = await LoadStatusMapAsync(project.Value, cancellationToken);
+                storyStatus = statusMap.GetValueOrDefault(statusId.Value);
+            }
+
+            return MapUserStoryDetail(userStory, project, statusId, storyStatus);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response enrichment was cancelled. Read the entity before retrying.",
+                cancellationToken);
+        }
+        catch (Exception)
+        {
+            throw new TaigaRequestException(
+                "Taiga write may already have applied; response enrichment failed. Read the entity before retrying.");
+        }
+    }
+
     internal async Task<UserStoryListPage> ListUserStoriesPageAsync(
         int projectId,
         UserStoryListOptions options,
@@ -180,6 +253,34 @@ public sealed class UserStoryApi
 
         if (options.BacklogOnly && options.MilestoneId.HasValue)
             throw new ArgumentException("milestoneId cannot be combined with backlogOnly=true.");
+    }
+
+    private static (bool ClearAssignedTo, bool ClearMilestone) ValidateClearFields(
+        string[]? clearFields,
+        int? assignedTo,
+        int? milestoneId)
+    {
+        if (clearFields is null)
+            return (false, false);
+
+        var clearAssignedTo = false;
+        var clearMilestone = false;
+        foreach (var field in clearFields)
+        {
+            if (string.Equals(field, "assigned_to", StringComparison.Ordinal))
+                clearAssignedTo = true;
+            else if (string.Equals(field, "milestone", StringComparison.Ordinal))
+                clearMilestone = true;
+            else
+                throw new ArgumentException($"clearFields contains unsupported field '{field}'.");
+        }
+
+        if (clearAssignedTo && assignedTo.HasValue)
+            throw new ArgumentException("assigned_to cannot be set and cleared in the same update.");
+        if (clearMilestone && milestoneId.HasValue)
+            throw new ArgumentException("milestone cannot be set and cleared in the same update.");
+
+        return (clearAssignedTo, clearMilestone);
     }
 
     private static UserStoryDto MapUserStory(
