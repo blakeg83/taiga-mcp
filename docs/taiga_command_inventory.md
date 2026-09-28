@@ -4,7 +4,7 @@ Reviewed September 28, 2026. This inventory includes the 11 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
-Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). These plans cover a defined subset of this inventory and remain unimplemented until their checklists are completed.
+Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). The `list_issues` expansion is delivered; the remaining planned entries remain unimplemented until their checklists are completed.
 
 ## Scope and notation
 
@@ -35,7 +35,7 @@ API basis: [Taiga REST API: projects, users, memberships, roles, and resource lo
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_issues` | Extend | `projectId, filters?, orderBy?, page?`; filter by status, type, severity, priority, assignee, owner, tags, sprint, and supported dates/text. Allow completed issues; the current implementation always requests open work. |
+| `list_issues` | Extend — delivered subset | `projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?`; supports status, type, severity, priority, assignee, tags, and text filters plus an opt-in page envelope. Date, owner, sprint, sort, and all-page export behavior remain planned. |
 | `get_issue` | Extend | `issueId, includeComments?`; retain existing issue/comment retrieval and expose full useful fields, including metadata IDs, tags, sprint, due date, blocking information, and version. |
 | `create_issue` | Extend | `projectId, subject, fields?`; retain description, classification, assignment, and tags; add supported sprint, due-date, blocking, and watcher fields. |
 | `update_issue` | Extend | `issueId, version, fields, comment?`; update supported issue fields, including explicit unassignment and clearing optional values. Existing null omission prevents clearing an assignee. |

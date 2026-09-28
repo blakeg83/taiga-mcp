@@ -9,21 +9,59 @@ public sealed class TaigaRequestException : HttpRequestException
         : base(message, null, status) { }
 }
 
+internal sealed class TaigaReadResult : IDisposable
+{
+    public TaigaReadResult(
+        JsonDocument document,
+        IReadOnlyDictionary<string, string[]> headers,
+        Uri requestUri)
+    {
+        Document = document;
+        Headers = headers;
+        RequestUri = requestUri;
+    }
+
+    public JsonDocument Document { get; }
+    public IReadOnlyDictionary<string, string[]> Headers { get; }
+    public Uri RequestUri { get; }
+
+    public void Dispose() => Document.Dispose();
+}
+
 public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
 {
     // Caller owns the request and returned document; transport owns every response.
     public async Task<JsonDocument> ReadAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+    {
+        var result = await ReadWithHeadersAsync(request, cancellationToken);
+        return result.Document;
+    }
+
+    internal async Task<TaigaReadResult> ReadWithHeadersAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken = default)
     {
         var write = request.Method != HttpMethod.Get;
         var applied = false;
         try
         {
             using var http = clients.CreateClient("taiga");
+            var requestUri = request.RequestUri is { IsAbsoluteUri: true } absolute
+                ? absolute
+                : new Uri(http.BaseAddress ?? new Uri("http://localhost/"), request.RequestUri ?? new Uri("", UriKind.Relative));
             using var response = await auth.SendAsync(http, request, cancellationToken);
             await EnsureSuccessAsync(response, cancellationToken);
             applied = write;
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            var headers = response.Headers
+                .Concat(response.Content.Headers)
+                .GroupBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.SelectMany(pair => pair.Value).ToArray(),
+                    StringComparer.OrdinalIgnoreCase);
+            return new TaigaReadResult(document, headers, requestUri);
         }
         catch (OperationCanceledException) when (write && applied)
         {

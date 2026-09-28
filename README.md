@@ -5,7 +5,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
 - `resolve_project(slug)`: Resolve a Taiga project slug to its numeric ID.
-- `list_issues(projectId, page)`: Page through issues for a project.
+- `list_issues(projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?)`: Triage one page of issues with allowlisted filters. It returns the legacy array by default and an opt-in pagination envelope with `includePageInfo=true`.
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
 - `update_issue(issueId, subject, version, ...)`: Partially update an issue via PATCH; include `version` and pass `subject=null` when changing other fields.
@@ -13,6 +13,11 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `list_issue_severities(projectId)`: List available issue severities for a project.
 - `list_issue_types(projectId)`: List available issue types for a project.
 - `list_issue_priorities(projectId)`: List available issue priorities for a project.
+
+Issue list filters use internal Taiga IDs. The default view is open issues;
+provide nonempty `statusIds` or `includeClosed=true` to include closed work.
+See the [implemented tool reference](docs/taiga_tools_reference.md) for the
+wire filters and envelope fields.
 
 - `list_user_stories(projectId, page)`: List one page of open, non-archived stories.
 
@@ -92,7 +97,7 @@ build/tests; do not stop that server. See the developer guide for the exact comm
 
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
-- [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. These are plans, not implemented capabilities.
+- [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. The `list_issues` expansion is delivered; the remaining entries are plans.
 
 ## Debug Logging
 - Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.

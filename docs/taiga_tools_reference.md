@@ -16,12 +16,12 @@ The current server exposes 11 tools:
   `list_issue_priorities`.
 - 1 user-story tool: `list_user_stories`.
 
-The first-batch documents describe 15 additional or expanded functions. They
-are planned work until their individual goal checklists are complete. Epic,
-task, richer user-story, pagination-envelope, and cross-resource commands are
-not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
-and [first-batch plan index](goals/first-batch/README.md) for that planned
-coverage.
+The first-batch documents describe 15 additional or expanded functions. The
+`list_issues` expansion is delivered; the remaining goal documents describe
+planned work until their individual checklists are complete. Epic, task,
+richer user-story, and cross-resource commands are not exposed by this server
+yet. See the [command inventory](taiga_command_inventory.md) and [first-batch
+plan index](goals/first-batch/README.md) for the remaining planned coverage.
 
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.
@@ -32,7 +32,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | --- | --- | --- |
 | `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
-| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects. The current API requests open issues; issue archival is not a supported status filter. |
+| `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId`, `subject`, and `version` required by the current method signature; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, and `comment` optional | One issue object returned by Taiga after the PATCH. |
@@ -65,12 +65,26 @@ Issue list/detail results:
   "project":123,
   "subject":"Fix login",
   "status":"Open",
+  "status_id":1,
   "severity":"Normal",
+  "severity_id":2,
   "type":"Bug",
+  "type_id":3,
   "priority":"Normal",
+  "priority_id":4,
   "modified":"2026-09-28T12:00:00Z",
   "version":3
 }]
+```
+
+```json
+{
+  "items":[{"id":456,"ref":7,"project":123,"subject":"Fix login","status":"Open","status_id":1}],
+  "page":1,
+  "total":null,
+  "next_page":null,
+  "has_more":null
+}
 ```
 
 ```json
@@ -100,9 +114,17 @@ User-story and metadata results:
   with `Uri.EscapeDataString`; the existing issue and story filters are fixed
   query names assembled by the domain APIs, not arbitrary caller-provided
   query fragments.
-- The current list methods return bare arrays and do not expose page metadata.
-  The first-batch contract proposes an opt-in page envelope while preserving
-  the array default; this is planned until the relevant goal implements it.
+- Issue list requests use Taiga's verified `status`, `assigned_to`, `type`,
+  `priority`, `severity`, `tags`, and `q` filters. ID and tag collections are
+  comma-separated in the wire value and then percent-encoded. The default
+  `status__is_closed=false` restriction is omitted when nonempty explicit
+  statuses or `includeClosed=true` are selected. Invalid positive-ID/page
+  inputs fail before HTTP. The expanded MCP arguments and opt-in page
+  envelope are documented here once the tool exposure step is complete.
+- Current list methods request one page and return bare arrays. `list_issues`
+  additionally supports the opt-in page envelope; missing or malformed
+  pagination headers remain explicit `null` values rather than being treated
+  as zero totals or a completed result.
 - Issue and story labels are derived from project metadata calls. The current
   DTOs preserve labels for compatibility and do not expose all source IDs.
 - The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so

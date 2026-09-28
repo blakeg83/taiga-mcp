@@ -22,14 +22,26 @@ public sealed record IssueDto
     [JsonPropertyName("status")]
     public string? Status { get; init; }
 
+    [JsonPropertyName("status_id")]
+    public int? StatusId { get; init; }
+
     [JsonPropertyName("severity")]
     public string? Severity { get; init; }
+
+    [JsonPropertyName("severity_id")]
+    public int? SeverityId { get; init; }
 
     [JsonPropertyName("type")]
     public string? Type { get; init; }
 
+    [JsonPropertyName("type_id")]
+    public int? TypeId { get; init; }
+
     [JsonPropertyName("priority")]
     public string? Priority { get; init; }
+
+    [JsonPropertyName("priority_id")]
+    public int? PriorityId { get; init; }
 
     [JsonPropertyName("assigned_to")]
     public int? AssignedTo { get; init; }
