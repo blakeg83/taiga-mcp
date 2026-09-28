@@ -55,6 +55,29 @@ Use the returned internal `id` with the planned `get_epic` command when that
 goal is delivered. Later story-linking commands will also take this internal
 epic ID; the displayed `ref` is for human-facing project context only.
 
+### Planned `get_epic` contract
+
+Goal 12 defines `get_epic(epicId)` as one authenticated `GET
+/api/v1/epics/{epicId}` detail read. The result will expose the authoritative
+`id`, `ref`, `project`, `version`, description, subject, status ID/label,
+assignment, color, tags, and modified timestamp. It will also preserve
+server-supplied scalar context (`is_closed`, `is_blocked`, `blocked_note`,
+`client_requirement`, and `team_requirement`) and the optional raw
+`user_stories_counts` summary when the server provides it. Missing optional
+values are omitted from tool JSON; unknown upstream fields are ignored.
+
+The client will preserve Markdown/Unicode description text and the numeric
+status ID even when no inline status label is available. It will not fetch
+related stories, history, comments, or status metadata, and it will not
+compute progress. The planned detail mapping was checked on 2026-09-28
+against taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e` ([epic API](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py),
+[epic serializers](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py),
+[epic model](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/models.py))
+and taiga-doc revision
+`7455fd37cb164bbf80198c1517fd0ef414e2a7b9` ([epic endpoints](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/epics/endpoints.adoc)).
+This is pinned source evidence, not a deployed-version claim.
+
 See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.

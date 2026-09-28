@@ -1,6 +1,6 @@
 # Goal 12: get_epic
 
-Status: planned.
+Status: in progress on `codex/get-epic`.
 
 ## Objective
 
@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define epic detail mapping
 
-- [ ] Capture fixtures with null assignee, rich description, color, tags, and required version.
-- [ ] Decide which verified server summary fields to expose without claiming they represent a fully fetched related-story list.
-- [ ] Define malformed required identity/version handling and optional-field tolerance.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify get_epic contracts`.
+- [x] Capture fixtures with null assignee, rich description, color, tags, and required version.
+- [x] Decide which verified server summary fields to expose without claiming they represent a fully fetched related-story list.
+- [x] Define malformed required identity/version handling and optional-field tolerance.
+- [x] Validate this step: baseline restore/build/test passed (`249` tests); the fixture/DTO contract test passed (`1` test); fixture JSON parsed successfully.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify get_epic contracts`.
 
 ## Step 2: Implement epic retrieval
 
@@ -93,9 +93,22 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Execution record
 
+Step 1 baseline on 2026-09-28: `dotnet restore`, `dotnet build -c Debug
+--no-restore`, and `dotnet test -c Debug --no-build --no-restore` passed on
+the clean prerequisite baseline (`249` tests, zero build warnings/errors).
+Source verification used taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e` and taiga-doc revision
+`7455fd37cb164bbf80198c1517fd0ef414e2a7b9`; neither is claimed as the
+deployed version. The approved detail DTO requires positive `id`, `ref`, and
+`project`, plus nonnegative `version`. `description`, status/assignment,
+color, tags, modified timestamp, and server summary values are optional;
+`user_stories_counts` is preserved as raw JSON when present. Inline status
+labels are used without a metadata lookup, and no related-story traversal or
+computed progress is part of this goal.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify get_epic contracts / pending |
+| 1 | In progress | Baseline passed; pinned route/serializer evidence recorded; detail fixture and DTO contract added. | Specify get_epic contracts / pending |
 | 2 | Not started | — | Implement get_epic API behavior / pending |
 | 3 | Not started | — | Expose get_epic MCP interface / pending |
 | 4 | Not started | — | Verify get_epic workflow / pending |
