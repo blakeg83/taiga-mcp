@@ -1,6 +1,6 @@
 # Goal 09: create_task
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -25,6 +25,39 @@ Illustrative MCP arguments (IDs are placeholders):
 ```
 
 Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/tasks/api.py). Before implementing, record a pinned upstream revision or deployed-version evidence; a floating main branch is not a deployment guarantee.
+
+## Step 1 contract decisions
+
+The contract was checked on 2026-09-28 against Taiga backend revision
+`4d11baef9027f5598f6341d6eb4261de2840688e` (the source review revision already
+recorded in the tool reference). `TaskViewSet` uses the normal `POST /tasks`
+create path and `TaskSerializer`; its save hook copies the parent story's
+milestone to the task, while its pre-save checks reject a parent from another
+project and a sprint that differs from the parent. The relevant evidence is the
+[task viewset source](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L91-L122)
+and [task serializer source](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L64).
+This is pinned source evidence, not a claim about a particular deployed Taiga
+version.
+
+The approved behavior is:
+
+- A standalone task may omit `milestoneId` (project defaults apply) or send a
+  positive `milestoneId` as `milestone`.
+- A story-linked task performs a parent story lookup before `POST`. The parent
+  must belong to `projectId`; an explicit `milestoneId` must equal the parent's
+  milestone, including the null case. A matching milestone is redundant and is
+  omitted from the task request so Taiga remains authoritative. A parent sprint
+  changing between the lookup and POST is still rejected by the server.
+- Optional `description`, `status`, `assigned_to`, and `tags` are serialized
+  only when supplied; empty strings and arrays remain explicit. No bulk,
+  due-date, blocker, iocaine, or cross-project behavior is included.
+
+The committed fixtures cover standalone-unscheduled, standalone-sprint, and
+story-linked requests, plus sprinted/unsprinted parent stories and an
+authoritative created task response. Planned focused cases include wrong
+parent project, parent sprint mismatch, parent lookup denial, server status or
+assignee rejection, transport failure, response mapping failure, and exactly
+one task POST.
 
 ## Files and integration points
 
@@ -95,9 +128,13 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Execution record
 
+Baseline before Step 1: `dotnet restore`, `dotnet build -c Debug`, and
+`dotnet test -c Debug` passed on 2026-09-28 (191 tests, 0 warnings/errors).
+No live Taiga project was used.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify create_task contracts / pending |
+| 1 | Complete | Pinned backend source reviewed; contract decisions and JSON fixtures recorded. Focused fixture tests passed (3); no failing production suite was introduced. | Specify create_task contracts / pending |
 | 2 | Not started | — | Implement create_task API behavior / pending |
 | 3 | Not started | — | Expose create_task MCP interface / pending |
 | 4 | Not started | — | Verify create_task workflow / pending |
