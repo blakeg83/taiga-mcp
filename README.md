@@ -8,7 +8,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `list_issues(projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?)`: Triage one page of issues with allowlisted filters. It returns the legacy array by default and an opt-in pagination envelope with `includePageInfo=true`.
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
-- `update_issue(issueId, subject, version, ...)`: Partially update an issue via PATCH; include `version` and pass `subject=null` when changing other fields.
+- `update_issue(issueId, version, subject?, ..., clearFields?)`: Partially update an issue via PATCH; `subject` is optional, and `clearFields=["assigned_to"]` explicitly unassigns while omitted/null `assigned_to` leaves it unchanged.
 - `list_issue_statuses(projectId)`: List available issue statuses for a project.
 - `list_issue_severities(projectId)`: List available issue severities for a project.
 - `list_issue_types(projectId)`: List available issue types for a project.

@@ -35,7 +35,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
-| `update_issue` | `issueId`, `subject`, and `version` required by the current method signature; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, and `comment` optional | One issue object returned by Taiga after the PATCH. |
+| `update_issue` | `issueId` and `version` required; `subject`, `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One issue object returned by Taiga after the PATCH. |
 | `list_issue_statuses` | `projectId` integer, required | Array of `{ id, name, slug, is_closed }`. |
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
@@ -130,16 +130,22 @@ User-story and metadata results:
 - The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
   null-valued response properties such as an unassigned issue's `assigned_to`
   are omitted from current tool JSON. This response omission is distinct from
-  the planned page envelope, whose missing pagination values are explicit JSON
-  `null`, and from planned request-side `clearFields`, which will deliberately
-  encode JSON null to clear a nullable field.
-- Nullable create/update fields are serialized with `WhenWritingNull`, so an
-  omitted or null update value is currently indistinguishable from “leave it
-  unchanged.” Explicit clearing is a planned contract change owned by the
-  update goals. The current `tags` array is sent when non-null, including an
-  empty array.
-- `update_issue` sends the caller-supplied `version` in the PATCH body and
-  does not refresh and retry on a version error. Non-success responses retain HTTP status/category and allowlisted rejected field names through safe MCP errors. Arbitrary upstream text is not echoed; at most 4096 error bytes are read. Writes whose responses cannot be mapped report that they may already have applied. Cancellation propagates separately.
+  the page envelope, whose missing pagination values are explicit JSON `null`.
+- Nullable create/update fields use separate request policies. Create fields
+  still omit nulls so project defaults apply. For `update_issue`, omitted or
+  null optional values leave fields unchanged; `description=""` and `tags=[]`
+  remain explicit values; and `clearFields=["assigned_to"]` deliberately
+  emits JSON `"assigned_to":null` to unassign. Supplying an assignee and
+  clearing it in the same call, or naming another clear field, is rejected
+  before HTTP.
+- `update_issue` requires a nonnegative caller-supplied `version`, sends it
+  unchanged in the PATCH body, and does not refresh and retry on a version
+  error. An update must select a real field change, an explicit clear, or a
+  nonblank comment. Non-success responses retain HTTP status/category and
+  allowlisted rejected field names through safe MCP errors. Arbitrary upstream
+  text is not echoed; at most 4096 error bytes are read. Writes whose responses
+  cannot be mapped report that they may already have applied. Cancellation
+  propagates separately.
 - The isolated contract suite includes version-related fixtures for both a
   400 field-validation response and a 409 conflict response. These fixtures
   verify propagation of each status; they do not claim that every stale
@@ -266,7 +272,10 @@ Positive internal IDs and pages >= 1 are required. Slugs and supplied subjects
 must be nonblank. Update versions must be >= 0; an update needs a real change
 or nonblank comment. Empty description/tag arrays remain valid. These are
 intentional validation changes: invalid calls now fail before contacting Taiga.
-`update_issue.subject` remains required but nullable; pass null for other edits.
+`update_issue.subject` is optional and nullable; omit it for other edits.
+`clearFields=["assigned_to"]` explicitly unassigns the issue, while a missing
+or null `assigned_to` leaves it unchanged. The supplied version is always sent
+unchanged and version failures are not retried.
 Cancellation is injected by MCP and is not a tool argument.
 
 Credentials must be nonblank. `TAIGA__BASEURL` accepts an absolute HTTP/HTTPS URL

@@ -138,8 +138,10 @@ IDs must be positive, pages start at one, slugs/subjects must be nonblank, updat
 versions are nonnegative. An update must contain a change or nonblank comment.
 Optional null values leave defaults/fields unchanged; empty descriptions and
 empty tag arrays are valid explicit values. These validation errors now arrive
-as safe MCP errors before HTTP requests. `subject` remains a required nullable
-update parameter for schema compatibility; pass null when changing other fields.
+as safe MCP errors before HTTP requests. `update_issue.subject` is optional and
+nullable; omit it when changing other fields. Use
+`clearFields=["assigned_to"]` to explicitly unassign; ordinary null omission
+leaves the assignee unchanged.
 
 ## Future feature conventions (not implemented by cleanup)
 

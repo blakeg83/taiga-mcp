@@ -38,7 +38,7 @@ API basis: [Taiga REST API: projects, users, memberships, roles, and resource lo
 | `list_issues` | Extend — delivered subset | `projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?`; supports status, type, severity, priority, assignee, tags, and text filters plus an opt-in page envelope. Date, owner, sprint, sort, and all-page export behavior remain planned. |
 | `get_issue` | Extend | `issueId, includeComments?`; retain existing issue/comment retrieval and expose full useful fields, including metadata IDs, tags, sprint, due date, blocking information, and version. |
 | `create_issue` | Extend | `projectId, subject, fields?`; retain description, classification, assignment, and tags; add supported sprint, due-date, blocking, and watcher fields. |
-| `update_issue` | Extend | `issueId, version, fields, comment?`; update supported issue fields, including explicit unassignment and clearing optional values. Existing null omission prevents clearing an assignee. |
+| `update_issue` | Extend — delivered subset | `issueId, version, subject?, description?, status?, type?, priority?, severity?, assigned_to?, tags?, comment?, clearFields?`; supports versioned partial edits, explicit assignee clearing, and description/tag clearing. Due dates, sprints, blocking fields, and project moves remain planned. |
 | `delete_issue` | New | `issueId`; delete the issue and report the result. |
 | `bulk_create_issues` | New | `projectId, subjects[], milestoneId?`; submit Taiga's bulk creation format and return created IDs/references. Rich per-item fields would require separate creates/updates. |
 | `promote_issue_to_user_story` | New | `projectId, issueId`; invoke native promotion and return the new story and its source relationship. The source issue remains; any desired closing status is a separate change. |
@@ -213,6 +213,6 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 - The current 11 tool names were inventoried from [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) also excludes completed/archived stories, including by status name.
-- [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) and issue serialization currently omit nulls; explicit clearing needs a distinguishable update representation.
+- [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
 - Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. Shared wrappers can reuse underlying resource operations during a future implementation.
 - Structured arbitrary dependencies, time logging, and nested epics are not assumed to be native Taiga capabilities. External references or custom fields should not be presented as equivalent native relationships.

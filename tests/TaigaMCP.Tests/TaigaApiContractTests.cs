@@ -59,6 +59,9 @@ public sealed class TaigaApiContractTests
         Assert.Equal("Open", issue.Status);
         var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
         using var body = JsonDocument.Parse(patch.Body);
+        Assert.Equal(
+            new[] { "subject", "version" },
+            body.RootElement.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
         Assert.Equal(5, body.RootElement.GetProperty("version").GetInt32());
         Assert.Equal("Updated", body.RootElement.GetProperty("subject").GetString());
         Assert.Equal("Bearer synthetic-token", patch.Headers["Authorization"].Single());

@@ -81,11 +81,11 @@ public sealed class IssueTools
     });
 
     [McpServerTool(Name = "update_issue")]
-    [Description("Update an issue by internal ID using the caller-supplied version. Null leaves fields unchanged; empty description or tags clears them. Requires a change or nonblank comment. No automatic version retry.")]
+    [Description("Update an issue by internal ID using the caller-supplied version. Omitted or null fields stay unchanged; use clearFields=[\"assigned_to\"] to explicitly unassign. Empty description or tags clears them. Requires a change or nonblank comment. No automatic version retry.")]
     public async Task<string> UpdateIssue(
         [Description("Positive internal issue ID, not the project ref.")] int issueId,
-        [Description("Nonblank subject; null on update leaves unchanged.")] string? subject,
         [Description("Required current entity version, zero or greater; forwarded unchanged.")] int version,
+        [Description("Optional nonblank subject; omission or null leaves it unchanged.")] string? subject = null,
         [Description("Description; null leaves default/unchanged, empty string clears.")] string? description = null,
         [Description("Positive internal status ID; null leaves default/unchanged.")] int? status = null,
         [Description("Positive internal issue type ID; null leaves default/unchanged.")] int? type = null,
@@ -94,6 +94,7 @@ public sealed class IssueTools
         [Description("Positive internal user ID; null leaves default/unchanged and does not unassign.")] int? assigned_to = null,
         [Description("Tags; null leaves default/unchanged, empty array clears.")] string[]? tags = null,
         [Description("Optional comment; a comment-only update requires nonblank text.")] string? comment = null,
+        [Description("Optional fields to clear explicitly; this goal accepts only assigned_to.")] string[]? clearFields = null,
         CancellationToken cancellationToken = default)
     => await ToolErrors.RunAsync(async () =>
     {
@@ -108,7 +109,9 @@ public sealed class IssueTools
             severity,
             assigned_to,
             tags,
-            comment, cancellationToken);
+            comment,
+            clearFields,
+            cancellationToken: cancellationToken);
         return ToolResponseJson.Serialize(issue);
     });
 

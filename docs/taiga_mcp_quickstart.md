@@ -116,7 +116,8 @@ Call the tool list_issue_severities with projectId=12345
 Call the tool list_issue_types with projectId=12345
 Call the tool list_issue_priorities with projectId=12345
 Create a Taiga issue in project 12345 with subject "Bug"
-Update Taiga issue 67890 setting subject "Fix title" and version 3
+Update Taiga issue 67890 setting subject "Fix title" with version 3
+Update Taiga issue 67890 with version 4 and clearFields=["assigned_to"]
 ```
 
 ---
@@ -167,9 +168,12 @@ query, or fragment. Optional `TAIGA__METADATATTLSECONDS` is a positive integer
 (default 300). Startup rejects invalid configuration.
 
 Use positive internal project/entity IDs and pages >= 1. For an update of only
-description/tags, pass `subject: null` and the current `version`; use
-`description: ""` or `tags: []` to empty those fields. Null optional values leave
-fields unchanged. Empty updates and negative versions are rejected before HTTP.
+description/tags, omit `subject` and pass the current `version`; use
+`description: ""` or `tags: []` to empty those fields. Null optional values
+leave fields unchanged. To unassign explicitly, pass
+`clearFields: ["assigned_to"]`; do not combine it with `assigned_to`. Empty
+updates, unsupported clear fields, and negative versions are rejected before
+HTTP.
 A write error saying it may already have applied requires reading the entity
 before deciding whether to retry. See [development conventions](development.md).
 
