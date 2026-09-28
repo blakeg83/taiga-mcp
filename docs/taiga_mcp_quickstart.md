@@ -153,7 +153,7 @@ Update Taiga issue 67890 setting subject "Fix title" and version 3
 ### Common mistakes
 - Wrong binary path in `config.toml`
 - Env vars not on one line in TOML
-- Missing `version` field on updates → Taiga returns 409
+- Include the current `version` on updates. Taiga may report a version conflict as a 400 field-validation response or a 409 conflict, depending on the deployed version and overlap; inspect the returned validation details and do not blindly retry an ambiguous write.
 
 ---
 

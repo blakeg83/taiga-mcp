@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Xunit;
 
@@ -105,6 +106,26 @@ public sealed class TaigaApiContractTests
         var resolverRequest = Assert.Single(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/resolver"));
         Assert.Equal("Bearer synthetic-token", resolverRequest.Headers["Authorization"].Single());
         Assert.Equal("demo%20project", resolverRequest.Uri.Query.Split("project=", StringSplitOptions.None).Last());
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "{\"version\":[\"Invalid version\"]}", "400")]
+    [InlineData(HttpStatusCode.Conflict, "{\"detail\":\"Version conflict\"}", "409")]
+    public async Task UpdateIssueAsync_PropagatesVersionErrorStatus(
+        HttpStatusCode statusCode,
+        string errorBody,
+        string expectedStatus)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Patch, "/api/v1/issues/42", errorBody, statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        var api = new IssueApi(http, auth, new IssueMetadataCache(http, auth));
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            api.UpdateIssueAsync(42, version: 5, subject: "Updated"));
+
+        Assert.Contains(expectedStatus, exception.Message);
+        Assert.Contains("version", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Dictionary<string, string> ParseQuery(Uri uri)

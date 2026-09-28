@@ -117,6 +117,10 @@ User-story and metadata results:
   update message includes the HTTP status and response body. Future error
   handling must retain safe validation details without exposing credentials or
   unbounded response data.
+- The isolated contract suite includes version-related fixtures for both a
+  400 field-validation response and a 409 conflict response. These fixtures
+  verify propagation of each status; they do not claim that every stale
+  version is rejected, because Taiga can accept non-overlapping stale edits.
 - Issue history filtering currently omits hidden entries, entries without a
   string comment, and empty comments. The dedicated comment command described
   in the plans is not implemented.
@@ -189,3 +193,20 @@ fixture parses the returned text as JSON, which also proves that server logs do
 not corrupt STDOUT protocol output. A separate test-only stream server probes
 argument binding for explicit `false`, an empty array, an explicit null, and a
 missing required integer; the probe type is compiled only in the test project.
+
+Final validation on 2026-09-28 used the repository root and an explicit
+temporary output directory because two pre-existing `TaigaMCP.exe` processes
+held the default apphost file:
+
+```text
+dotnet restore
+dotnet build TaigaMCP.sln -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation-final\ -p:UseAppHost=false --no-restore
+dotnet test TaigaMCP.sln -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation-final\ -p:UseAppHost=false --no-restore
+```
+
+Restore passed; the alternate-output solution build passed with 0 warnings and
+the solution test run passed all 8 tests. The default `dotnet build -c Debug`
+and `dotnet test` commands were also run and stopped before compilation/test
+execution when MSBuild could not replace the locked default apphost. No server
+process was stopped, and no generated `bin/`, `obj/`, `.vs/`, credential, or
+live Taiga payload was added to the commit.

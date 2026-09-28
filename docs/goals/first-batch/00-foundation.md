@@ -1,6 +1,6 @@
 # Goal 00: establish shared implementation and verification foundations
 
-Status: planned.
+Status: complete.
 
 ## Objective
 
@@ -41,20 +41,20 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 
 ## Step 4: finalize reusable conventions and handoff
 
-- [ ] Add only small shared helpers justified by tests: page metadata parsing/query encoding can be introduced here or owned by goal 01; do not scaffold unused domain APIs.
-- [ ] Add version-error fixtures covering 400 field validation and 409 without asserting all stale versions are rejected.
-- [ ] Run root restore, Debug build, and tests; confirm no live endpoint or credentials are required.
-- [ ] Update quickstart version-conflict guidance, document how later goals add fixtures, and record final evidence.
-- [ ] Review tracked files for generated artifacts/secrets and confirm the solution discovers the tests.
-- [ ] Commit this step as: Finalize batch verification foundations.
+- [x] Add only small shared helpers justified by tests: page metadata parsing/query encoding can be introduced here or owned by goal 01; do not scaffold unused domain APIs.
+- [x] Add version-error fixtures covering 400 field validation and 409 without asserting all stale versions are rejected.
+- [x] Run root restore, Debug build, and tests; confirm no live endpoint or credentials are required.
+- [x] Update quickstart version-conflict guidance, document how later goals add fixtures, and record final evidence.
+- [x] Review tracked files for generated artifacts/secrets and confirm the solution discovers the tests.
+- [x] Commit this step as: Finalize batch verification foundations.
 
 ## Definition of done
 
-- [ ] The solution contains a runnable isolated test project and fake HTTP fixtures.
-- [ ] Current 11 tools pass compatibility/discovery checks; at least one is invoked through MCP.
-- [ ] Optional argument and error behavior are verified with the installed SDK.
-- [ ] Documentation and shared contracts accurately distinguish decisions from deployed behavior.
-- [ ] All four steps are committed and validated; root build/tests pass.
+- [x] The solution contains a runnable isolated test project and fake HTTP fixtures.
+- [x] Current 11 tools pass compatibility/discovery checks; at least one is invoked through MCP.
+- [x] Optional argument and error behavior are verified with the installed SDK.
+- [x] Documentation and shared contracts accurately distinguish decisions from deployed behavior.
+- [x] All four steps are committed and validated; root solution build/tests pass with the documented temporary-output fallback.
 
 ## Execution record
 
@@ -62,11 +62,11 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 | --- | --- | --- | --- |
 | 1 | Complete | `docs/taiga_tools_reference.md`; README link; inventory distinction; baseline and source versions recorded above. | `8a2f57d` — Document batch contracts and baseline |
 | 2 | Complete | `tests/TaigaMCP.Tests`; solution registration; fake HTTP fixture; four focused contract tests; fixture commands documented in the tool reference. | `7e1ba57` — Add isolated Taiga API contract tests |
-| 3 | Complete | STDIO integration against a fake Taiga listener; all 11 tool names; read invocation JSON; upstream failure result; test-only argument probe; SDK/schema notes in `contracts.md`. | Verify MCP discovery and argument binding |
-| 4 | Not started | — | — |
+| 3 | Complete | STDIO integration against a fake Taiga listener; all 11 tool names; read invocation JSON; upstream failure result; test-only argument probe; SDK/schema notes in `contracts.md`. | `d811c76` — Verify MCP discovery and argument binding |
+| 4 | Complete | Version 400/409 fixtures; quickstart conflict guidance; root restore; alternate-output solution build/test (0 warnings, 8 passing); default-output lock documented; generated-file/secrets review complete. | Finalize batch verification foundations |
 
 Source/date: official Taiga REST API documentation and Taiga backend `main` at `4d11baef9027f5598f6341d6eb4261de2840688e`, plus installed ModelContextProtocol `0.3.0-preview.4` package metadata and SDK tag `15f8e89ac3aedb2bb4fa9232f6093f092b2ce956`, checked 2026-09-28.
 
 Baseline: restore passed; the initial Debug build was blocked by four pre-existing server processes holding the apphost executable; `dotnet test` passed with no tests discovered. Development builds use `-p:UseAppHost=false` while those processes remain.
 
-Deviation: the current source uses concrete domain APIs and bare-array list results, so this foundation records the compatibility gap rather than changing public behavior before the function-specific goals. Step 2 validation passed with 4 tests using a temporary output directory because the normal app output is held by pre-existing TaigaMCP processes. Remaining work is the SDK integration proof and final reusable verification conventions.
+Deviation: the current source uses concrete domain APIs and bare-array list results, so this foundation records the compatibility gap rather than changing public behavior before the function-specific goals. Steps 2–4 use a temporary output directory because the normal app output is held by pre-existing TaigaMCP processes; no process was stopped and no live endpoint or credential was used. The default-output build/test commands were run and recorded as environment-blocked; the same root solution build/test with an explicit temporary output passed with 0 warnings and 8 tests.
