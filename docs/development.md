@@ -61,3 +61,27 @@ IssueDto.Project is init-only, matching other DTO properties; no caller mutates
 it. Feature plans now reference domain APIs. `dotnet test -c Debug` passed all
 13 tests, including production 11-tool discovery/schema checks, representative
 mapping, request version forwarding, and null response omission.
+
+## Step 3: HTTP ownership, cancellation and errors
+
+After `ffeba6b`, domain APIs/cache use TaigaTransport. Callers own requests and
+returned JsonDocuments; transport disposes responses/streams, including errors.
+Auth retry requests/content are disposed. Cancellation flows from injected MCP
+CancellationToken through APIs/cache/auth/send/read; cancellation is not an HTTP
+failure. No network/status retries were added (the existing one-401 replay is
+retained for Step 4). Writes followed by JSON/mapping/metadata failures warn
+that they may have applied; inspect the entity before retrying.
+
+Error processing reads at most 4096 bytes and exposes HTTP status, category and
+allowlisted rejected field names/version conflict. It deliberately does not echo
+arbitrary upstream validation text, even in recognized fields, because it can
+contain credentials or user data. TaigaRequestException retains StatusCode;
+ToolErrors converts only those safe messages to the installed McpException API.
+Installed 0.3.0-preview.4 XML documents that exception messages may be exposed;
+real MCP tests confirm IsError=true and safe 500 details. This is an intentional
+error-detail change from the old unbounded PATCH body.
+
+`dotnet build -c Debug`: zero warnings/errors. `dotnet test -c Debug`: 28 passed.
+Coverage adds GET/POST/PATCH response disposal, usable owned documents, seven
+HTTP error statuses, secret suppression, malformed JSON, pre-cancellation and
+write enrichment failure; all production schemas exclude cancellationToken.

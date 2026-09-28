@@ -59,16 +59,16 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 3: centralize HTTP transport, disposal, and cancellation
 
-- [ ] Add a focused `Api/TaigaTransport.cs` (or equally clear name) for authenticated sends, bounded error-body processing, success checks, and JSON response reading. Define request/response/JSON-document ownership explicitly.
-- [ ] Migrate `ProjectApi`, `IssueApi`, `UserStoryApi`, and metadata requests to the transport. Domain APIs continue to own routes, payload construction, mapping, and domain behavior.
-- [ ] Dispose every request, response, retry request, and owned content on success and failure. Avoid returning JSON elements backed by disposed documents.
-- [ ] Pass `CancellationToken` from MCP tool methods through APIs, cache waits, auth, HTTP sends, and reads. Confirm the installed MCP SDK treats it as injected context, not a user-facing tool parameter.
-- [ ] Introduce a consistent error representation retaining HTTP status and useful, bounded, sanitized validation details. Remove the update path's unbounded raw-body exception. Verify the installed SDK's supported way to expose safe tool errors and preserve `IsError=true` behavior.
-- [ ] Distinguish cancellation from upstream failures. Do not introduce automatic retries for network errors, throttling, or server failures, especially for writes.
-- [ ] Ensure successful writes followed by metadata/mapping failure report that the write may already have applied; they must not look safe to repeat blindly.
-- [ ] Add focused tests for successful GET/POST/PATCH, disposal on success/error, cancellation propagation, safe 400/401/403/404/409/429/5xx errors, malformed JSON, and write-success followed by enrichment failure. Assert status and useful details without requiring unsafe upstream text.
-- [ ] Run focused HTTP tests and production MCP integration tests; update contracts to reference the new transport.
-- [ ] Update docs/evidence and commit as `Centralize Taiga HTTP handling and cancellation`.
+- [x] Add a focused `Api/TaigaTransport.cs` (or equally clear name) for authenticated sends, bounded error-body processing, success checks, and JSON response reading. Define request/response/JSON-document ownership explicitly.
+- [x] Migrate `ProjectApi`, `IssueApi`, `UserStoryApi`, and metadata requests to the transport. Domain APIs continue to own routes, payload construction, mapping, and domain behavior.
+- [x] Dispose every request, response, retry request, and owned content on success and failure. Avoid returning JSON elements backed by disposed documents.
+- [x] Pass `CancellationToken` from MCP tool methods through APIs, cache waits, auth, HTTP sends, and reads. Confirm the installed MCP SDK treats it as injected context, not a user-facing tool parameter.
+- [x] Introduce a consistent error representation retaining HTTP status and useful, bounded, sanitized validation details. Remove the update path's unbounded raw-body exception. Verify the installed SDK's supported way to expose safe tool errors and preserve `IsError=true` behavior.
+- [x] Distinguish cancellation from upstream failures. Do not introduce automatic retries for network errors, throttling, or server failures, especially for writes.
+- [x] Ensure successful writes followed by metadata/mapping failure report that the write may already have applied; they must not look safe to repeat blindly.
+- [x] Add focused tests for successful GET/POST/PATCH, disposal on success/error, cancellation propagation, safe 400/401/403/404/409/429/5xx errors, malformed JSON, and write-success followed by enrichment failure. Assert status and useful details without requiring unsafe upstream text.
+- [x] Run focused HTTP tests and production MCP integration tests; update contracts to reference the new transport.
+- [x] Update docs/evidence and commit as `Centralize Taiga HTTP handling and cancellation`.
 
 ## Step 4: coordinate authentication and correct HTTP lifetimes
 
@@ -144,7 +144,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | --- | --- | --- | --- |
 | 1. Baseline | Complete | Prerequisites 003fe00/b219e39 verified in history and 13 passing tests; root restore/Debug build/tests passed, zero warnings, no locks. SDK, package, caller/path audit and layer lifetimes recorded in docs/development.md. Existing reference matches all 11 signatures/shapes. | Document cleanup baseline and compatibility boundaries |
 | 2. Structure/serialization | Complete | Previous commit c77e1c0. Namespaces, unused facade removal, shared response policy and init-only DTO; domain plan references updated. Full Debug suite: 13 passed. | Simplify API layers and serialization conventions |
-| 3. Transport | Not started | Pending | Pending |
+| 3. Transport | Complete | Previous ffeba6b. Shared transport/disposal, cancellation and safe errors; 28 Debug tests passed including actual MCP safe errors/schema and write uncertainty. Details in developer guide. | Centralize Taiga HTTP handling and cancellation |
 | 4. Authentication | Not started | Pending | Pending |
 | 5. Cache | Not started | Pending | Pending |
 | 6. Contracts/configuration | Not started | Pending | Pending |

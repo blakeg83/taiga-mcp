@@ -8,28 +8,23 @@ namespace TaigaMCP.Caching;
 /// </summary>
 public sealed class IssueMetadataCache
 {
-    private readonly HttpClient _http;
-    private readonly AuthClient _auth;
+    private readonly TaigaTransport _transport;
     private readonly Dictionary<int, Dictionary<int, string>> _statusCache = new();
     private readonly Dictionary<int, Dictionary<int, string>> _severityCache = new();
     private readonly Dictionary<int, Dictionary<int, string>> _typeCache = new();
     private readonly Dictionary<int, Dictionary<int, string>> _priorityCache = new();
 
-    public IssueMetadataCache(HttpClient http, AuthClient auth)
+    public IssueMetadataCache(TaigaTransport transport)
     {
-        _http = http;
-        _auth = auth;
+        _transport = transport;
     }
 
-    private async Task<Dictionary<int, string>> GetMapAsync(string path, int projectId, Dictionary<int, Dictionary<int, string>> cache)
+    private async Task<Dictionary<int, string>> GetMapAsync(string path, int projectId, Dictionary<int, Dictionary<int, string>> cache, CancellationToken cancellationToken)
     {
         if (cache.TryGetValue(projectId, out var m)) return m;
 
         using var req = new HttpRequestMessage(HttpMethod.Get, $"{path}?project={projectId}");
-        var res = await _auth.SendAsync(_http, req);
-        res.EnsureSuccessStatusCode();
-
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        using var doc = await _transport.ReadAsync(req, cancellationToken);
         var map = new Dictionary<int, string>(32);
         foreach (var el in doc.RootElement.EnumerateArray())
         {
@@ -41,15 +36,15 @@ public sealed class IssueMetadataCache
         return map;
     }
 
-    public Task<Dictionary<int, string>> GetStatusesAsync(int projectId)
-        => GetMapAsync("issue-statuses", projectId, _statusCache);
+    public Task<Dictionary<int, string>> GetStatusesAsync(int projectId, CancellationToken cancellationToken = default)
+        => GetMapAsync("issue-statuses", projectId, _statusCache, cancellationToken);
 
-    public Task<Dictionary<int, string>> GetSeveritiesAsync(int projectId)
-        => GetMapAsync("severities", projectId, _severityCache);
+    public Task<Dictionary<int, string>> GetSeveritiesAsync(int projectId, CancellationToken cancellationToken = default)
+        => GetMapAsync("severities", projectId, _severityCache, cancellationToken);
 
-    public Task<Dictionary<int, string>> GetTypesAsync(int projectId)
-        => GetMapAsync("issue-types", projectId, _typeCache);
+    public Task<Dictionary<int, string>> GetTypesAsync(int projectId, CancellationToken cancellationToken = default)
+        => GetMapAsync("issue-types", projectId, _typeCache, cancellationToken);
 
-    public Task<Dictionary<int, string>> GetPrioritiesAsync(int projectId)
-        => GetMapAsync("priorities", projectId, _priorityCache);
+    public Task<Dictionary<int, string>> GetPrioritiesAsync(int projectId, CancellationToken cancellationToken = default)
+        => GetMapAsync("priorities", projectId, _priorityCache, cancellationToken);
 }

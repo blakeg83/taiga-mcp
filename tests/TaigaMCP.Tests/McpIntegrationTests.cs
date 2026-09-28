@@ -40,6 +40,9 @@ public sealed class McpIntegrationTests
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
 
+            foreach (var tool in tools)
+                Assert.DoesNotContain("cancellationToken", tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name));
+
             var listProjects = Assert.Single(tools, tool => tool.Name == "list_projects");
             var listProjectsSchema = listProjects.JsonSchema;
             Assert.Contains("member", listProjectsSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
@@ -71,7 +74,8 @@ public sealed class McpIntegrationTests
                 new Dictionary<string, object?>(),
                 cancellationToken: protocolDeadline.Token);
             Assert.True(failed.IsError);
-            Assert.Contains("error", GetText(failed), StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("500", GetText(failed));
+            Assert.Contains("upstream failure", GetText(failed));
         }
 
         await process.DisposeAsync();

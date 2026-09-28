@@ -25,7 +25,7 @@ public sealed class TaigaApiContractTests
                 ]
                 """);
         var (http, auth) = TaigaTestClient.Create(handler);
-        var api = new IssueApi(http, auth, new IssueMetadataCache(http, auth));
+        var api = new IssueApi(new TaigaTransport(http, auth), new IssueMetadataCache(new TaigaTransport(http, auth)));
 
         var comments = await api.GetIssueCommentsAsync(42);
 
@@ -51,7 +51,7 @@ public sealed class TaigaApiContractTests
             .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-types", """[{"id":3,"name":"Bug"}]""")
             .AddJsonRoute(HttpMethod.Get, "/api/v1/priorities", """[{"id":4,"name":"Normal"}]""");
         var (http, auth) = TaigaTestClient.Create(handler);
-        var api = new IssueApi(http, auth, new IssueMetadataCache(http, auth));
+        var api = new IssueApi(new TaigaTransport(http, auth), new IssueMetadataCache(new TaigaTransport(http, auth)));
 
         var issue = await api.UpdateIssueAsync(42, version: 5, subject: "Updated");
 
@@ -79,7 +79,7 @@ public sealed class TaigaApiContractTests
                 [{"id":90,"ref":12,"subject":"Ship fix","status":10,"assigned_to":null,"modified_date":"2026-09-28T12:02:00Z"}]
                 """);
         var (http, auth) = TaigaTestClient.Create(handler);
-        var api = new UserStoryApi(http, auth);
+        var api = new UserStoryApi(new TaigaTransport(http, auth));
 
         var stories = await api.ListUserStoriesAsync(123, page: 2);
 
@@ -100,7 +100,7 @@ public sealed class TaigaApiContractTests
         var handler = new FakeHttpMessageHandler()
             .AddJsonRoute(HttpMethod.Get, "/api/v1/resolver", "{\"project\":123}");
         var (http, auth) = TaigaTestClient.Create(handler);
-        var api = new ProjectApi(http, auth);
+        var api = new ProjectApi(new TaigaTransport(http, auth));
 
         Assert.Equal(123, await api.ResolveProjectIdAsync("demo project"));
 
@@ -127,7 +127,7 @@ public sealed class TaigaApiContractTests
             .AddJsonRoute(HttpMethod.Get, "/api/v1/priorities", """[{"id":4,"name":"Normal"}]""")
             .AddJsonRoute(HttpMethod.Get, "/api/v1/history/issue/42", "[]");
         var (http, auth) = TaigaTestClient.Create(handler);
-        var api = new IssueApi(http, auth, new IssueMetadataCache(http, auth));
+        var api = new IssueApi(new TaigaTransport(http, auth), new IssueMetadataCache(new TaigaTransport(http, auth)));
         var tools = new IssueTools(api);
 
         var result = await tools.GetIssue(42);
@@ -150,9 +150,9 @@ public sealed class TaigaApiContractTests
         var handler = new FakeHttpMessageHandler()
             .AddJsonRoute(HttpMethod.Patch, "/api/v1/issues/42", errorBody, statusCode);
         var (http, auth) = TaigaTestClient.Create(handler);
-        var api = new IssueApi(http, auth, new IssueMetadataCache(http, auth));
+        var api = new IssueApi(new TaigaTransport(http, auth), new IssueMetadataCache(new TaigaTransport(http, auth)));
 
-        var exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+        var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
             api.UpdateIssueAsync(42, version: 5, subject: "Updated"));
 
         Assert.Contains(expectedStatus, exception.Message);

@@ -117,11 +117,7 @@ User-story and metadata results:
   update goals. The current `tags` array is sent when non-null, including an
   empty array.
 - `update_issue` sends the caller-supplied `version` in the PATCH body and
-  does not refresh and retry on a version error. Non-success responses are
-  surfaced as `HttpRequestException` by the current domain API; the current
-  update message includes the HTTP status and response body. Future error
-  handling must retain safe validation details without exposing credentials or
-  unbounded response data.
+  does not refresh and retry on a version error. Non-success responses retain HTTP status/category and allowlisted rejected field names through safe MCP errors. Arbitrary upstream text is not echoed; at most 4096 error bytes are read. Writes whose responses cannot be mapped report that they may already have applied. Cancellation propagates separately.
 - The isolated contract suite includes version-related fixtures for both a
   400 field-validation response and a 409 conflict response. These fixtures
   verify propagation of each status; they do not claim that every stale
