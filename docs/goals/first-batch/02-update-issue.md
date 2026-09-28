@@ -1,6 +1,6 @@
 # Goal 02: update_issue
 
-Status: in progress.
+Status: complete.
 
 ## Objective
 
@@ -89,40 +89,55 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify issue editing end to end
 
-- [ ] Invoke through MCP a status-only update with no subject, an unassignment, tag clearing, and a comment-only update.
-- [ ] Assert exact PATCH bodies and no accidental clearing of omitted fields.
-- [ ] Cover 400 version errors, 409, ordinary validation errors, 403, 404, malformed success bodies, and a transport failure with exactly one write attempt.
-- [ ] Retain regression coverage for get_issue returning visible comments.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify update_issue workflow`.
+- [x] Invoke through MCP a status-only update with no subject, an unassignment, tag clearing, and a comment-only update.
+- [x] Assert exact PATCH bodies and no accidental clearing of omitted fields.
+- [x] Cover 400 version errors, 409, ordinary validation errors, 403, 404, malformed success bodies, and a transport failure with exactly one write attempt.
+- [x] Retain regression coverage for get_issue returning visible comments.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify update_issue workflow`.
+
+### Step 4 verification record
+
+- `McpIntegrationTests` invokes status-only updates without `subject`, explicit assignee clearing, and tag/description clearing through the real STDIO MCP server. `IssueUpdateTests` covers omitted/set/clear assignment, comment-only updates, exact versions, conflicts, ordinary validation, 403/404, malformed success, and one-attempt transport failure. Existing `get_issue` comment and safe-error tests remain green.
+- No live Taiga writes were performed. Verification uses the repository's fake HTTP handler/server and synthetic credentials only.
+- Deferred scope remains unchanged: due dates, sprint changes, blocking fields, project moves, and other inventory commands are not exposed by this goal.
 
 ## Acceptance scenarios
 
-- [ ] Omitted assignee leaves it unchanged; clearFields emits a literal JSON null; conflicting input makes no HTTP request.
-- [ ] A status-only MCP call requires no subject argument.
-- [ ] The supplied version reaches Taiga unchanged; no server rejection triggers a blind retry.
-- [ ] Existing callers and create_issue serialization remain compatible.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Omitted assignee leaves it unchanged; clearFields emits a literal JSON null; conflicting input makes no HTTP request.
+- [x] A status-only MCP call requires no subject argument.
+- [x] The supplied version reaches Taiga unchanged; no server rejection triggers a blind retry.
+- [x] Existing callers and create_issue serialization remain compatible.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Issue edits and unassignment work through MCP with compatible inputs and truthful conflict/error results.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Issue edits and unassignment work through MCP with compatible inputs and truthful conflict/error results.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline restore/build/test passed: 90 tests, 0 failures; contract/source record above | Specify update_issue contracts / pending |
-| 2 | Complete | Focused update/API/validation tests: 13 passed; Debug build: 0 warnings/errors | Implement update_issue API behavior / pending |
-| 3 | Complete | MCP integration tests passed: 6; schema and status-only/clear calls verified | Expose update_issue MCP interface / pending |
-| 4 | Not started | — | Verify update_issue workflow / pending |
+| 1 | Complete | Baseline restore/build/test passed: 90 tests, 0 failures; contract/source record above | Specify update_issue contracts / 8cc1c85 |
+| 2 | Complete | Focused update/API/validation tests: 13 passed; Debug build: 0 warnings/errors | Implement update_issue API behavior / 285c714 |
+| 3 | Complete | MCP integration tests passed: 6; schema and status-only/clear calls verified | Expose update_issue MCP interface / fe1fef4 |
+| 4 | Complete | Final root restore/build/test and Release verification: 103 passed, 0 failed/skipped; final hash is reported in handoff | Verify update_issue workflow / pending |
+
+### Final validation record
+
+The final root commands passed on 2026-09-28 with SDK 10.0.401: `dotnet restore`,
+`dotnet build -c Debug`, `dotnet test -c Debug`, `dotnet build -c Release
+--no-restore`, and `dotnet test -c Release --no-build --no-restore`. The complete
+suite passed with 103 tests, 0 failures, and 0 skips. The Step 4 commit hash is
+reported in the final handoff because adding a commit's own hash to its contents
+would require rewriting the completed commit.
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

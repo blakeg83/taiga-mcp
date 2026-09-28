@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using TaigaMCP.Api;
 using TaigaMCP.Caching;
@@ -86,6 +87,95 @@ public sealed class IssueUpdateTests
             using var body = JsonDocument.Parse(patch.Body);
             Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("assigned_to").ValueKind);
             Assert.Equal(7, body.RootElement.GetProperty("version").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task UpdateIssueAsync_AllowsCommentOnlyUpdateWithoutSubject()
+    {
+        var handler = CreateUpdateHandler(null);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+            var api = new IssueApi(transport, new IssueMetadataCache(transport));
+
+            await api.UpdateIssueAsync(42, version: 7, comment: "Returned to triage.");
+
+            var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+            using var body = JsonDocument.Parse(patch.Body);
+            Assert.False(body.RootElement.TryGetProperty("subject", out _));
+            Assert.Equal("Returned to triage.", body.RootElement.GetProperty("comment").GetString());
+            Assert.Equal(7, body.RootElement.GetProperty("version").GetInt32());
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "{\"status\":[\"invalid synthetic-token\"]}", "400", "status")]
+    [InlineData(HttpStatusCode.Forbidden, "{\"detail\":\"secret synthetic-token\"}", "403", "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "{\"detail\":\"secret synthetic-token\"}", "404", "resource not found")]
+    [InlineData(HttpStatusCode.Conflict, "{\"detail\":\"Version conflict\"}", "409", "version")]
+    public async Task UpdateIssueAsync_PropagatesSafeHttpStatusAndCategory(
+        HttpStatusCode statusCode,
+        string errorBody,
+        string expectedStatus,
+        string expectedDetail)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Patch, "/api/v1/issues/42", errorBody, statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+            var api = new IssueApi(transport, new IssueMetadataCache(transport));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                api.UpdateIssueAsync(42, version: 7, status: 1));
+
+            Assert.Contains(expectedStatus, exception.Message);
+            Assert.Contains(expectedDetail, exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic-token", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateIssueAsync_MalformedSuccessResponseReportsUncertaintyWithoutRetry()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddTextRoute(HttpMethod.Patch, "/api/v1/issues/42", "not json");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+            var api = new IssueApi(transport, new IssueMetadataCache(transport));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                api.UpdateIssueAsync(42, version: 7, status: 1));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateIssueAsync_TransportFailureAttemptsOneWrite()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(HttpMethod.Patch, "/api/v1/issues/42", new HttpRequestException("secret synthetic-token"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+            var api = new IssueApi(transport, new IssueMetadataCache(transport));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                api.UpdateIssueAsync(42, version: 7, status: 1));
+
+            Assert.Contains("transport failure", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.DoesNotContain("synthetic-token", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
         }
     }
 

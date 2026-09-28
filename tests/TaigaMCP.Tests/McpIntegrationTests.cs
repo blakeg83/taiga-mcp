@@ -75,6 +75,17 @@ public sealed class McpIntegrationTests
         Assert.Equal(JsonValueKind.Null, assignedTo.ValueKind);
         Assert.Equal(2, body.GetProperty("version").GetInt32());
 
+        Assert.False((await Call("update_issue", new()
+        {
+            ["issueId"] = 42,
+            ["version"] = 3,
+            ["comment"] = "Returned to triage."
+        })).IsError == true);
+        body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Last(request => request.Method == "PATCH").Body);
+        Assert.False(body.TryGetProperty("subject", out _));
+        Assert.Equal("Returned to triage.", body.GetProperty("comment").GetString());
+        Assert.Equal(3, body.GetProperty("version").GetInt32());
+
         var count = taiga.Requests.Count;
         var invalid = await Call("update_issue", new() { ["issueId"] = 42, ["subject"] = null, ["version"] = 1 });
         Assert.True(invalid.IsError);
