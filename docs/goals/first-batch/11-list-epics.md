@@ -40,12 +40,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Verify epic-specific list contracts
 
-- [ ] Confirm supported query parameters in epic filters; do not assume every issue/task filter applies.
-- [ ] Define list fields id/ref/project/subject/status_id/status/assigned_to/color/tags/modified and optional version.
-- [ ] If closure requires metadata, resolve closed status IDs once per request/project and apply supported filtering; never infer closure from names.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_epics contracts`.
+- [x] Confirm supported query parameters in epic filters; do not assume every issue/task filter applies.
+- [x] Define list fields id/ref/project/subject/status_id/status/assigned_to/color/tags/modified and optional version.
+- [x] If closure requires metadata, resolve closed status IDs once per request/project and apply supported filtering; never infer closure from names.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_epics contracts`.
 
 ## Step 2: Implement EpicApi and registration
 
@@ -97,7 +97,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_epics contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, Debug build (0 warnings/errors), and sequential Debug test run passed (237 tests). Added a passing DTO/fixture contract check. On 2026-09-28, verified against pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`: `EpicViewSet.filter_fields` supports `project`, `assigned_to`, and `status__is_closed`; registered filter backends support status IDs, tags, and `q`; `EpicListSerializer` supplies `id`, `ref`, `project`, `modified_date`, `subject`, `color`, `version`, `status`, `assigned_to`, and `tags`. The implementation will use the verified `status__is_closed=false` flag for the default and omit it for explicit statuses or `includeClosed=true`; no status metadata lookup or name-based closure inference is needed. Source: https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py and https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py | Specify list_epics contracts / pending |
 | 2 | Not started | — | Implement list_epics API behavior / pending |
 | 3 | Not started | — | Expose list_epics MCP interface / pending |
 | 4 | Not started | — | Verify list_epics workflow / pending |

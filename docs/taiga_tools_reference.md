@@ -32,6 +32,22 @@ to the story and Taiga determines any effects on child tasks; the MCP tool does
 not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
 unsupported clear names, and set/clear collisions fail before HTTP; write
 failures are not replayed.
+The planned `list_epics` contract is now source-verified but is not exposed
+until its implementation goal is complete. Its intended signature is
+`list_epics(projectId, page=1, statusIds?, assignedTo?, tags?, query?,
+includeClosed=false)`, and it will always return the page envelope
+`{ items, page, total, next_page, has_more }`. The default wire filter is
+`status__is_closed=false`; nonempty `statusIds` or `includeClosed=true` omit
+that restriction. The allowlisted filters are `status`, `assigned_to`,
+`tags`, and `q`, with encoded values. Epic list items will expose
+`id`, `ref`, `project`, `subject`, `status_id`, `status`, `assigned_to`,
+`color`, `tags`, `modified`, and optional `version`; no related-story
+lookups or progress aggregation are part of this list operation.
+
+This contract was checked on 2026-09-28 against pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e` in the [epic API source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py)
+and [epic serializer source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py).
+
 See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
