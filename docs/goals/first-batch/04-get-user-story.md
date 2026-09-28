@@ -1,6 +1,6 @@
 # Goal 04: get_user_story
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -16,7 +16,40 @@ Prerequisites: [03-list-user-stories](03-list-user-stories.md). Read and follow 
 
 get_user_story(userStoryId) returns a detail object with id, ref, project, subject, description, status_id, status, assigned_to, tags, milestone, version, and available relationship metadata.
 
-API mapping: GET userstories/{userStoryId}.
+API mapping: GET userstories/{userStoryId}. The source evidence was checked on
+2026-09-28 at the pinned [`taiga-doc` endpoint definition](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/user-stories/endpoints.adoc)
+and the pinned [`taiga-back` user-story API](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py).
+
+The detail contract uses a separate DTO from the list result. `id` must be a
+positive numeric response identity and `version` must be present, numeric, and
+nonnegative; missing or malformed required fields are failures, never version
+zero defaults. Other core fields remain nullable and are omitted from public
+JSON when null, while an explicitly empty `tags` array remains `[]`. Taiga's
+tag/color arrays and the `epics`, `origin_issue`, and `origin_task` relationship
+objects are retained as response JSON so additive nested upstream fields are
+not discarded. Unknown top-level fields are ignored.
+
+Representative response fixture (relationship fields are optional):
+
+```json
+{
+  "id": 102,
+  "ref": 18,
+  "project": 12,
+  "subject": "Allow saved searches",
+  "description": "**Acceptance:** preserve Markdown and Unicode — ✓",
+  "status": 7,
+  "status_extra_info": {"name": "Ready"},
+  "assigned_to": null,
+  "tags": [["search", "#336699"], ["backend", null]],
+  "milestone": null,
+  "modified_date": "2026-09-28T12:00:00Z",
+  "version": 4,
+  "origin_issue": null,
+  "origin_task": null,
+  "epics": []
+}
+```
 
 Illustrative MCP arguments (IDs are placeholders):
 
@@ -39,12 +72,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define the detail response
 
-- [ ] Capture representative detail fixtures with null assignee/sprint, tags/colors, and optional relationships.
-- [ ] Keep a separate detail DTO or shared mapper that does not cause list calls to emit fabricated detail fields.
-- [ ] Specify required identity/version validation and additive unknown-field tolerance.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify get_user_story contracts`.
+- [x] Capture representative detail fixtures with null assignee/sprint, tags/colors, and optional relationships.
+- [x] Keep a separate detail DTO or shared mapper that does not cause list calls to emit fabricated detail fields.
+- [x] Specify required identity/version validation and additive unknown-field tolerance.
+- [x] Validate this step: baseline restore/build/test passed; the representative fixture is valid JSON; focused detail behavior cases are recorded for step 4 without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify get_user_story contracts`.
 
 ## Step 2: Implement detail retrieval
 
@@ -95,7 +128,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify get_user_story contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug --no-build` passed on 2026-09-28: 112 tests, 0 warnings/errors. Pinned `taiga-doc` revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` documents `GET /api/v1/userstories/{userStoryId}`; pinned backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the detail serializer's tags, epics, and origin fields. | Specify get_user_story contracts / pending |
 | 2 | Not started | — | Implement get_user_story API behavior / pending |
 | 3 | Not started | — | Expose get_user_story MCP interface / pending |
 | 4 | Not started | — | Verify get_user_story workflow / pending |
