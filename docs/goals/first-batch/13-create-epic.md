@@ -48,12 +48,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement epic POST
 
-- [ ] Add a create DTO and authenticated method that sends only supplied optional fields.
-- [ ] Reuse detail mapping for the returned server identity, version, and generated/default color.
-- [ ] Preserve project-module/permission validation and do not retry non-idempotent creation on errors.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement create_epic API behavior`.
+- [x] Add a create DTO and authenticated method that sends only supplied optional fields.
+- [x] Reuse detail mapping for the returned server identity, version, and generated/default color.
+- [x] Preserve project-module/permission validation and do not retry non-idempotent creation on errors.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement create_epic API behavior`.
 
 ## Step 3: Expose create_epic
 
@@ -95,8 +95,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet restore`, Debug build, and 261 tests passed. Pinned taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e` and taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` checked on 2026-09-28; fixture tests verify minimal omission and populated wire keys. Color format is delegated to Taiga because the model accepts a string up to 32 characters. Linking stories and requirement flags remain planned. | Specify create_epic contracts / pending |
-| 2 | Not started | — | Implement create_epic API behavior / pending |
+| 1 | Complete | Baseline `dotnet restore`, Debug build, and 261 tests passed. Pinned taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e` and taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` checked on 2026-09-28; fixture tests verify minimal omission and populated wire keys. Color format is delegated to Taiga because the model accepts a string up to 32 characters. Linking stories and requirement flags remain planned. | Specify create_epic contracts / b86376e |
+| 2 | Complete | `EpicCreateTests` cover minimal/default omission, populated serialization and mapping, explicit empty values, invalid inputs before HTTP, safe 400/403 failures, ambiguous transport failure without retry, and malformed success response. `dotnet test` focused create suite and Debug build passed. | Implement create_epic API behavior / pending |
 | 3 | Not started | — | Expose create_epic MCP interface / pending |
 | 4 | Not started | — | Verify create_epic workflow / pending |
 

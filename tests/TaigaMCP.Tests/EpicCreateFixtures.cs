@@ -21,6 +21,23 @@ internal static class EpicCreateFixtures
         }
         """;
 
+    public const string CreatedEpic = """
+        {
+          "id":301,
+          "ref":12,
+          "project":123,
+          "subject":"Saved search experience",
+          "description":"Group saved-search delivery work.",
+          "status":7,
+          "status_extra_info":{"name":"Ready"},
+          "assigned_to":42,
+          "color":"#336699",
+          "tags":[["search","#336699"],["saved",null]],
+          "modified_date":"2026-09-28T12:03:00Z",
+          "version":4
+        }
+        """;
+
     public static JsonElement Parse(string json)
         => JsonDocument.Parse(json).RootElement.Clone();
 }

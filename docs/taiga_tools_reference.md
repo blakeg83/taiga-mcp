@@ -55,8 +55,8 @@ Use the returned internal `id` with the `get_epic` command. Later story-linking
 commands will also take this internal epic ID; the displayed `ref` is for
 human-facing project context only.
 
-The `create_epic` contract is specified for goal 13 but remains planned until
-that goal's implementation and MCP verification are complete. Its signature is
+The `create_epic` domain API is implemented for goal 13; its MCP wrapper remains
+planned until the next step's discovery and invocation checks are complete. Its signature is
 `create_epic(projectId, subject, description?, status?, assigned_to?, color?,
 tags?)`. The request maps to `POST /api/v1/epics` with `project`, `subject`,
 `description`, `status`, `assigned_to`, `color`, and `tags`; omitted optional

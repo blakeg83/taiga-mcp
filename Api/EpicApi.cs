@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
@@ -21,6 +22,61 @@ public sealed class EpicApi
         using var request = new HttpRequestMessage(HttpMethod.Get, $"epics/{epicId}");
         using var document = await _transport.ReadAsync(request, cancellationToken);
         return MapEpicDetail(document.RootElement);
+    }
+
+    public async Task<EpicDetailDto> CreateEpicAsync(
+        int projectId,
+        string subject,
+        string? description = null,
+        int? status = null,
+        int? assigned_to = null,
+        string? color = null,
+        string[]? tags = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Required(subject, nameof(subject));
+        InputValidation.OptionalIds(
+            (status, nameof(status)),
+            (assigned_to, nameof(assigned_to)));
+
+        var payload = new EpicCreateDto
+        {
+            Project = projectId,
+            Subject = subject,
+            Description = description,
+            Status = status,
+            AssignedTo = assigned_to,
+            Color = color,
+            Tags = tags
+        };
+        var json = JsonSerializer.Serialize(
+            payload,
+            new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "epics")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            return MapEpicDetail(document.RootElement);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response mapping was cancelled. Read the epic before retrying.",
+                cancellationToken);
+        }
+        catch (Exception)
+        {
+            throw new TaigaRequestException(
+                "Taiga write may already have applied; response mapping failed. Read the epic before retrying.");
+        }
     }
 
     public async Task<IReadOnlyList<EpicDto>> ListEpicsAsync(
