@@ -29,7 +29,7 @@ public sealed class TransportTests
         using (http)
         using (var request = new HttpRequestMessage(HttpMethod.Get, "test"))
         {
-            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => new TaigaTransport(http, auth).ReadAsync(request));
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => new TaigaTransport(new TestHttpClientFactory(handler), auth).ReadAsync(request));
             Assert.Equal((HttpStatusCode)status, error.StatusCode);
             Assert.Contains("version: rejected", error.Message);
             Assert.DoesNotContain("secret", error.Message);
@@ -51,7 +51,7 @@ public sealed class TransportTests
         var (http, auth) = TaigaTestClient.Create(handler);
         using (http)
         using (var request = new HttpRequestMessage(new HttpMethod(method), "test"))
-        using (var doc = await new TaigaTransport(http, auth).ReadAsync(request))
+        using (var doc = await new TaigaTransport(new TestHttpClientFactory(handler), auth).ReadAsync(request))
         {
             Assert.True(content.Disposed);
             Assert.Equal(42, doc.RootElement.GetProperty("id").GetInt32());
@@ -71,7 +71,7 @@ public sealed class TransportTests
         using (http)
         using (var request = new HttpRequestMessage(new HttpMethod(method), "test"))
         {
-            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => new TaigaTransport(http, auth).ReadAsync(request));
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => new TaigaTransport(new TestHttpClientFactory(handler), auth).ReadAsync(request));
             Assert.Contains(message, error.Message);
             Assert.True(content.Disposed);
         }
@@ -87,7 +87,7 @@ public sealed class TransportTests
         using (var cancellation = new CancellationTokenSource())
         {
             cancellation.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new TaigaTransport(http, auth).ReadAsync(request, cancellation.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new TaigaTransport(new TestHttpClientFactory(handler), auth).ReadAsync(request, cancellation.Token));
             Assert.Empty(handler.Requests);
         }
     }
@@ -101,7 +101,7 @@ public sealed class TransportTests
         var (http, auth) = TaigaTestClient.Create(handler);
         using (http)
         {
-            var transport = new TaigaTransport(http, auth);
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
             var api = new IssueApi(transport, new IssueMetadataCache(transport));
             var error = await Assert.ThrowsAsync<TaigaRequestException>(() => api.UpdateIssueAsync(42, 3, subject: "Change"));
             Assert.Contains("may already have applied", error.Message);

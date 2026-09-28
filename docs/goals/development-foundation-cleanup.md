@@ -72,15 +72,15 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 4: coordinate authentication and correct HTTP lifetimes
 
-- [ ] Serialize initial login and token refresh with an async gate and recheck token state after acquiring it. Keep token and refresh-token state coherent.
-- [ ] On a 401, detect whether another request has already replaced the rejected token before starting another refresh. Permit at most one replay of the original request; if refresh fails, perform the existing full-login fallback within that bounded flow.
-- [ ] Stop mutating shared `HttpClient.DefaultRequestHeaders` during requests. Attach bearer tokens per request; auth and refresh requests must never receive the bearer header.
-- [ ] Preserve method, URI, content, content headers, and relevant request properties when replaying. Dispose retry requests and propagate cancellation while waiting for the auth gate.
-- [ ] Adjust DI so singleton token/cache state does not indefinitely capture a factory-created HTTP client. Use the named client factory at an appropriate operation boundary, or document an equivalent handler-lifetime strategy. Keep ownership explicit.
-- [ ] Test concurrent first calls with controlled barriers, simultaneous 401 responses, token reuse after another refresh, refresh rejection/full-login fallback, repeated 401, cancellation, and a PATCH replay retaining its original body/version. Avoid timing-dependent sleeps.
-- [ ] Assert writes are not replayed after ambiguous network failures; the bounded authentication replay applies only to a received 401 response.
-- [ ] Run auth/transport tests and the full integration suite.
-- [ ] Update docs/evidence and commit as `Coordinate authentication and HTTP client lifetimes`.
+- [x] Serialize initial login and token refresh with an async gate and recheck token state after acquiring it. Keep token and refresh-token state coherent.
+- [x] On a 401, detect whether another request has already replaced the rejected token before starting another refresh. Permit at most one replay of the original request; if refresh fails, perform the existing full-login fallback within that bounded flow.
+- [x] Stop mutating shared `HttpClient.DefaultRequestHeaders` during requests. Attach bearer tokens per request; auth and refresh requests must never receive the bearer header.
+- [x] Preserve method, URI, content, content headers, and relevant request properties when replaying. Dispose retry requests and propagate cancellation while waiting for the auth gate.
+- [x] Adjust DI so singleton token/cache state does not indefinitely capture a factory-created HTTP client. Use the named client factory at an appropriate operation boundary, or document an equivalent handler-lifetime strategy. Keep ownership explicit.
+- [x] Test concurrent first calls with controlled barriers, simultaneous 401 responses, token reuse after another refresh, refresh rejection/full-login fallback, repeated 401, cancellation, and a PATCH replay retaining its original body/version. Avoid timing-dependent sleeps.
+- [x] Assert writes are not replayed after ambiguous network failures; the bounded authentication replay applies only to a received 401 response.
+- [x] Run auth/transport tests and the full integration suite.
+- [x] Update docs/evidence and commit as `Coordinate authentication and HTTP client lifetimes`.
 
 ## Step 5: make metadata caching safe and refreshable
 
@@ -145,7 +145,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | 1. Baseline | Complete | Prerequisites 003fe00/b219e39 verified in history and 13 passing tests; root restore/Debug build/tests passed, zero warnings, no locks. SDK, package, caller/path audit and layer lifetimes recorded in docs/development.md. Existing reference matches all 11 signatures/shapes. | Document cleanup baseline and compatibility boundaries |
 | 2. Structure/serialization | Complete | Previous commit c77e1c0. Namespaces, unused facade removal, shared response policy and init-only DTO; domain plan references updated. Full Debug suite: 13 passed. | Simplify API layers and serialization conventions |
 | 3. Transport | Complete | Previous ffeba6b. Shared transport/disposal, cancellation and safe errors; 28 Debug tests passed including actual MCP safe errors/schema and write uncertainty. Details in developer guide. | Centralize Taiga HTTP handling and cancellation |
-| 4. Authentication | Not started | Pending | Pending |
+| 4. Authentication | Complete | Previous e2f9cc5. Gated coherent token state, bounded replay and per-operation factory clients. 33 Debug tests passed, including barrier-driven races and PATCH replay/ambiguity. | Coordinate authentication and HTTP client lifetimes |
 | 5. Cache | Not started | Pending | Pending |
 | 6. Contracts/configuration | Not started | Pending | Pending |
 | 7. Defaults/filters | Not started | Pending | Pending |

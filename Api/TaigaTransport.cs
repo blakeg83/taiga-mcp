@@ -9,7 +9,7 @@ public sealed class TaigaRequestException : HttpRequestException
         : base(message, null, status) { }
 }
 
-public sealed class TaigaTransport(HttpClient http, AuthClient auth)
+public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
 {
     // Caller owns the request and returned document; transport owns every response.
     public async Task<JsonDocument> ReadAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
@@ -18,6 +18,7 @@ public sealed class TaigaTransport(HttpClient http, AuthClient auth)
         var applied = false;
         try
         {
+            using var http = clients.CreateClient("taiga");
             using var response = await auth.SendAsync(http, request, cancellationToken);
             await EnsureSuccessAsync(response, cancellationToken);
             applied = write;

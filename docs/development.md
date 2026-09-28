@@ -85,3 +85,22 @@ error-detail change from the old unbounded PATCH body.
 Coverage adds GET/POST/PATCH response disposal, usable owned documents, seven
 HTTP error statuses, secret suppression, malformed JSON, pre-cancellation and
 write enrichment failure; all production schemas exclude cancellationToken.
+
+## Step 4: authentication and client lifetimes
+
+After `e2f9cc5`, AuthClient publishes an immutable token/refresh pair under an
+async gate. Waiting callers recheck state; a delayed 401 reuses a newer token.
+Only a received 401 permits one replay; rejected/malformed refresh responses
+fall back to login inside the same gate. Network exceptions do not replay writes.
+Headers are per request; auth/refresh never attach bearer headers. Replay copies
+method, URI, bytes/content headers, request headers, version/policy and options.
+AuthClient owns/disposes the gate; auth requests, responses and retries are scoped.
+The singleton transport retains IHttpClientFactory, creates/disposes a named
+client per operation, and lets the factory rotate pooled handlers. No singleton
+captures a factory-created HttpClient.
+
+`dotnet test -c Debug`: 33 passed. Controlled TaskCompletionSource barriers prove
+single initial login, concurrent 401 refresh coalescing, later token reuse and
+cancelled gate waits. PATCH tests prove refresh rejection/login fallback,
+bounded repeated 401, exact body/version/header/options replay, and no replay on
+ambiguous network failure. Production STDIO tests remain green.

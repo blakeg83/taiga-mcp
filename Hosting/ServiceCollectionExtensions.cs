@@ -30,9 +30,7 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton<AuthClient>();
-        services.AddSingleton<TaigaTransport>(sp =>
-            new TaigaTransport(sp.GetRequiredService<IHttpClientFactory>().CreateClient("taiga"),
-                sp.GetRequiredService<AuthClient>()));
+        services.AddSingleton<TaigaTransport>();
         services.AddSingleton<ProjectApi>();
         services.AddSingleton<IssueMetadataCache>();
         services.AddSingleton<IssueApi>();

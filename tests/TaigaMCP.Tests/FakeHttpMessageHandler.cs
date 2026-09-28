@@ -138,3 +138,11 @@ public static class TaigaTestClient
         return (client, auth);
     }
 }
+
+public sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+{
+    public HttpClient CreateClient(string name) => new(handler, disposeHandler: false)
+    {
+        BaseAddress = new Uri(TaigaTestClient.BaseUrl)
+    };
+}
