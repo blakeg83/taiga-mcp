@@ -127,6 +127,21 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/tasks", StringComparison.OrdinalIgnoreCase))
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "[{\"id\":203,\"ref\":17,\"project\":123,\"subject\":\"Integration task\",\"status\":11,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"user_story\":102,\"milestone\":55,\"modified_date\":\"2026-09-28T12:00:00Z\",\"version\":2}]",
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "false",
+                    ["x-pagination-count"] = "1",
+                    ["x-pagination-current"] = "1"
+                });
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/90")
         {
             await RespondAsync(

@@ -58,12 +58,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose task listing
 
-- [ ] Add TaskTools with McpServerToolType and list_tasks with informative parameter descriptions.
-- [ ] Return the page envelope consistently and preserve unknown pagination metadata as null.
-- [ ] Document story-only, sprint-only, and assigned-work examples with status precedence.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_tasks MCP interface`.
+- [x] Add TaskTools with McpServerToolType and list_tasks with informative parameter descriptions.
+- [x] Return the page envelope consistently and preserve unknown pagination metadata as null.
+- [x] Document story-only, sprint-only, and assigned-work examples with status precedence.
+- [x] Validate this step: MCP tools/list and actual tools/call coverage passed for list_tasks, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_tasks MCP interface`.
 
 ## Step 4: Verify task discovery and filtering
 
@@ -99,7 +99,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` reviewed 2026-09-28; pinned [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60) and [TaskListSerializer fields](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57) recorded. DTO and standalone/story-linked/closed/unavailable-label fixtures added. Baseline root build/test initially exposed a pre-existing missing `System.Text.Json` using; isolated build passed after the narrow test-harness fix. | Specify list_tasks contracts / pending |
 | 2 | Complete | `TaskApi` and `TaskListQueryBuilder` request `GET tasks` with `project`, `page`, `status`, `status__is_closed`, `user_story`, `milestone`, `assigned_to`, `tags`, and `q` only as applicable; values are encoded and one page is requested. Null parent/sprint/assignee values remain null, inline `status_extra_info.name` supplies labels, and no parent/status lookup is made. Positive input validation, HTTP/safe transport errors, malformed-list rejection, response disposal, and pagination header parsing reuse the foundation contracts. Focused isolated-output test run: 176 passed. | Implement list_tasks API behavior / pending |
-| 3 | Not started | — | Expose list_tasks MCP interface / pending |
+| 3 | Complete | Added assembly-discovered `list_tasks` with required `projectId`, optional `page`/filters, and an always-present page envelope. MCP integration verifies schema descriptions, required/optional binding, exact encoded query, parent/sprint mapping, null pagination values, and bearer authentication. | Expose list_tasks MCP interface / pending |
 | 4 | Not started | — | Verify list_tasks workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
