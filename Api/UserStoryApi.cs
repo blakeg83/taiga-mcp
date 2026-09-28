@@ -22,6 +22,27 @@ public sealed class UserStoryApi
             new UserStoryListOptions { Page = page },
             cancellationToken)).Items;
 
+    public async Task<UserStoryDetailDto> GetUserStoryAsync(
+        int userStoryId,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(userStoryId, nameof(userStoryId));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"userstories/{userStoryId}");
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        var userStory = document.RootElement;
+
+        var projectId = ReadDetailOptionalInt(userStory, "project");
+        var statusId = ReadDetailOptionalInt(userStory, "status");
+        var status = ReadStatusExtraInfoName(userStory);
+        if (status is null && statusId.HasValue && projectId is > 0)
+        {
+            var statusMap = await LoadStatusMapAsync(projectId.Value, cancellationToken);
+            status = statusMap.GetValueOrDefault(statusId.Value);
+        }
+
+        return MapUserStoryDetail(userStory, projectId, statusId, status);
+    }
+
     internal async Task<UserStoryListPage> ListUserStoriesPageAsync(
         int projectId,
         UserStoryListOptions options,
@@ -118,6 +139,101 @@ public sealed class UserStoryApi
             Milestone = ReadOptionalInt(userStory, "milestone"),
             Version = ReadOptionalInt(userStory, "version")
         };
+    }
+
+    private static UserStoryDetailDto MapUserStoryDetail(
+        JsonElement userStory,
+        int? projectId,
+        int? statusId,
+        string? status)
+    {
+        if (userStory.ValueKind != JsonValueKind.Object ||
+            !userStory.TryGetProperty("id", out var idElement) ||
+            idElement.ValueKind != JsonValueKind.Number ||
+            !idElement.TryGetInt32(out var id) ||
+            id <= 0)
+            throw new TaigaRequestException("Taiga returned invalid user story identity data.");
+
+        if (!userStory.TryGetProperty("version", out var versionElement) ||
+            versionElement.ValueKind != JsonValueKind.Number ||
+            !versionElement.TryGetInt32(out var version) ||
+            version < 0)
+            throw new TaigaRequestException("Taiga returned invalid user story version data.");
+
+        return new UserStoryDetailDto
+        {
+            Id = id,
+            Ref = ReadDetailOptionalInt(userStory, "ref"),
+            Project = projectId,
+            Subject = ReadDetailOptionalString(userStory, "subject"),
+            Description = ReadDetailOptionalString(userStory, "description"),
+            StatusId = statusId,
+            Status = status,
+            AssignedTo = ReadDetailOptionalInt(userStory, "assigned_to"),
+            Tags = ReadTags(userStory),
+            Milestone = ReadDetailOptionalInt(userStory, "milestone"),
+            Modified = ReadDetailOptionalString(userStory, "modified_date"),
+            Version = version,
+            OriginIssue = ReadDetailOptionalJson(userStory, "origin_issue"),
+            OriginTask = ReadDetailOptionalJson(userStory, "origin_task"),
+            Epics = ReadDetailOptionalJson(userStory, "epics")
+        };
+    }
+
+    private static string? ReadStatusExtraInfoName(JsonElement userStory)
+    {
+        if (!userStory.TryGetProperty("status_extra_info", out var extraInfo) ||
+            extraInfo.ValueKind != JsonValueKind.Object ||
+            !extraInfo.TryGetProperty("name", out var name) ||
+            name.ValueKind != JsonValueKind.String)
+            return null;
+
+        return name.GetString();
+    }
+
+    private static int? ReadDetailOptionalInt(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+            throw new TaigaRequestException($"Taiga returned invalid user story {propertyName} data.");
+
+        return number;
+    }
+
+    private static string? ReadDetailOptionalString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.String)
+            throw new TaigaRequestException($"Taiga returned invalid user story {propertyName} data.");
+
+        return value.GetString();
+    }
+
+    private static IReadOnlyList<JsonElement>? ReadTags(JsonElement userStory)
+    {
+        if (!userStory.TryGetProperty("tags", out var tags) ||
+            tags.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (tags.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid user story tags data.");
+
+        return tags.EnumerateArray().Select(tag => tag.Clone()).ToArray();
+    }
+
+    private static JsonElement? ReadDetailOptionalJson(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        return value.Clone();
     }
 
     private static int ReadInt(JsonElement element, string propertyName)

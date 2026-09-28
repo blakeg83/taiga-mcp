@@ -81,12 +81,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement detail retrieval
 
-- [ ] Add GetUserStoryAsync with positive-ID validation, authentication, success validation, and response disposal.
-- [ ] Map status ID and label from returned extra information or a project-scoped lookup; preserve ID when label is unavailable.
-- [ ] Return description unchanged, preserve nullable fields and tags, and avoid implicit additional relation/history requests.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement get_user_story API behavior`.
+- [x] Add `GetUserStoryAsync` with positive-ID validation, authentication, success validation, and response disposal.
+- [x] Map status ID and label from returned extra information or a project-scoped lookup; preserve ID when label is unavailable.
+- [x] Return description unchanged, preserve nullable fields and tags, and avoid implicit additional relation/history requests.
+- [x] Validate this step: `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug` passed with 120 tests; `dotnet build -c Debug --no-restore` passed with 0 warnings/errors.
+- [x] Update documentation now: the API uses the detail route, strict required identity/version parsing, optional status lookup, and safe transport errors; comments/tasks are not requested.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement get_user_story API behavior`.
 
 ## Step 3: Expose the detail tool
 
@@ -128,8 +128,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug --no-build` passed on 2026-09-28: 112 tests, 0 warnings/errors. Pinned `taiga-doc` revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` documents `GET /api/v1/userstories/{userStoryId}`; pinned backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the detail serializer's tags, epics, and origin fields. | Specify get_user_story contracts / pending |
-| 2 | Not started | — | Implement get_user_story API behavior / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug --no-build` passed on 2026-09-28: 112 tests, 0 warnings/errors. Pinned `taiga-doc` revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` documents `GET /api/v1/userstories/{userStoryId}`; pinned backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the detail serializer's tags, epics, and origin fields. | Specify get_user_story contracts / 70ece54 |
+| 2 | Complete | `UserStoryDetailTests` cover exact detail routing, authentication, status-extra-info and project lookup labels, Markdown/Unicode, nulls, empty tags, raw relationships, malformed identity/version, and pre-HTTP ID validation. Focused Debug tests: 120 passed. Debug build: 0 warnings/errors. | Implement get_user_story API behavior / pending |
 | 3 | Not started | — | Expose get_user_story MCP interface / pending |
 | 4 | Not started | — | Verify get_user_story workflow / pending |
 
