@@ -130,6 +130,15 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/102")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}");
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Post.Method && path == "/api/v1/userstories")
         {
             await RespondAsync(

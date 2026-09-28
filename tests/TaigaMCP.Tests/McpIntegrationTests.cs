@@ -42,12 +42,42 @@ public sealed class McpIntegrationTests
         Assert.False(createdStory.IsError == true);
         var createdStoryJson = JsonSerializer.Deserialize<JsonElement>(GetText(createdStory));
         Assert.Equal(102, createdStoryJson.GetProperty("id").GetInt32());
+        Assert.Equal(4, createdStoryJson.GetProperty("version").GetInt32());
+        Assert.Empty(createdStoryJson.GetProperty("tags").EnumerateArray());
+        Assert.False(createdStoryJson.TryGetProperty("assigned_to", out _));
+        Assert.False(createdStoryJson.TryGetProperty("milestone", out _));
         var createdStoryRequest = Assert.Single(taiga.Requests, request =>
             request.Method == "POST" && request.PathAndQuery == "/api/v1/userstories");
         var createdStoryBody = JsonSerializer.Deserialize<JsonElement>(createdStoryRequest.Body);
         Assert.Equal(new[] { "project", "subject" }, createdStoryBody.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.Equal(123, createdStoryBody.GetProperty("project").GetInt32());
         Assert.Equal("Created story", createdStoryBody.GetProperty("subject").GetString());
+        var populatedStory = await Call("create_user_story", new()
+        {
+            ["projectId"] = 123,
+            ["subject"] = "Created story",
+            ["description"] = "  Acceptance: the story can be reopened.  ",
+            ["status"] = 1,
+            ["assigned_to"] = 42,
+            ["tags"] = new[] { "search", "saved" },
+            ["milestoneId"] = 55
+        });
+        Assert.False(populatedStory.IsError == true);
+        var populatedBody = JsonSerializer.Deserialize<JsonElement>(
+            taiga.Requests.Last(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/userstories").Body);
+        Assert.Equal(
+            new[] { "assigned_to", "description", "milestone", "project", "status", "subject", "tags" },
+            populatedBody.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.Equal("  Acceptance: the story can be reopened.  ", populatedBody.GetProperty("description").GetString());
+        Assert.Equal(42, populatedBody.GetProperty("assigned_to").GetInt32());
+        Assert.Equal(55, populatedBody.GetProperty("milestone").GetInt32());
+        var readBack = await Call("get_user_story", new() { ["userStoryId"] = 102 });
+        Assert.False(readBack.IsError == true);
+        var readBackJson = JsonSerializer.Deserialize<JsonElement>(GetText(readBack));
+        Assert.Equal(102, readBackJson.GetProperty("id").GetInt32());
+        Assert.Equal(4, readBackJson.GetProperty("version").GetInt32());
+        Assert.Equal("Created story", readBackJson.GetProperty("subject").GetString());
+        Assert.Contains(taiga.Requests, request => request.Method == "GET" && request.PathAndQuery == "/api/v1/userstories/102");
         var detail = await Call("get_issue", new() { ["issueId"] = 42 });
         Assert.False(detail.IsError == true);
         Assert.False(JsonSerializer.Deserialize<JsonElement>(GetText(detail)).GetProperty("issue").TryGetProperty("assigned_to", out _));
@@ -106,6 +136,9 @@ public sealed class McpIntegrationTests
         Assert.Equal(3, body.GetProperty("version").GetInt32());
 
         var count = taiga.Requests.Count;
+        var invalidCreate = await Call("create_user_story", new() { ["projectId"] = 123, ["subject"] = " " });
+        Assert.True(invalidCreate.IsError);
+        Assert.Contains("subject must not be blank", GetText(invalidCreate));
         var invalid = await Call("update_issue", new() { ["issueId"] = 42, ["subject"] = null, ["version"] = 1 });
         Assert.True(invalid.IsError);
         Assert.Contains("requires a change", GetText(invalid));

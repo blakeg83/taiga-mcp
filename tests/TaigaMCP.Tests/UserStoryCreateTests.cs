@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
 using Xunit;
+using TaigaMCP.Tools;
 
 namespace TaigaMCP.Tests;
 
@@ -188,6 +190,76 @@ public sealed class UserStoryCreateTests
 
             Assert.Contains("may already have applied", exception.Message);
             Assert.DoesNotContain("secret connection details", exception.Message);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/userstories"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateUserStoryAsync_ReportsWrongProjectMilestoneAsSafeValidation()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/userstories",
+                "{\"milestone\":[\"The milestone must belong to the same project\"]}",
+                HttpStatusCode.BadRequest);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                api.CreateUserStoryAsync(12, "Allow saved searches", milestoneId: 55));
+
+            Assert.Contains("400", exception.Message);
+            Assert.Contains("milestone: rejected", exception.Message);
+            Assert.DoesNotContain("same project", exception.Message);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/userstories"));
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "validation failed")]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    public async Task CreateUserStoryTool_ReportsSafeHttpFailure(
+        HttpStatusCode statusCode,
+        string category)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/userstories",
+                "{\"detail\":\"secret create body\"}",
+                statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() =>
+                tools.CreateUserStory(12, "Allow saved searches"));
+
+            Assert.Contains(((int)statusCode).ToString(), exception.Message);
+            Assert.Contains(category, exception.Message);
+            Assert.DoesNotContain("secret create body", exception.Message);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/userstories"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateUserStoryTool_ReportsMappingFailureAsPotentiallyApplied()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Post, "/api/v1/userstories", "{\"project\":12}", HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() =>
+                tools.CreateUserStory(12, "Allow saved searches"));
+
+            Assert.Contains("may already have applied", exception.Message);
             Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/userstories"));
         }
     }

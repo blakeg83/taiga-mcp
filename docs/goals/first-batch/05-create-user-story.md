@@ -66,31 +66,31 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify creation and readback
 
-- [ ] Through MCP, create a minimal story and a populated story against fake HTTP and read each returned ID with get_user_story.
-- [ ] Assert omitted optional properties stay absent and sent text/tags are correctly serialized.
-- [ ] Cover whitespace-only subjects, wrong-project milestone validation, 403, 400, and lost response after one POST.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_user_story workflow`.
+- [x] Through MCP, create a minimal story and a populated story against fake HTTP and read each returned ID with get_user_story.
+- [x] Assert omitted optional properties stay absent and sent text/tags are correctly serialized.
+- [x] Cover whitespace-only subjects, wrong-project milestone validation, 403, 400, and lost response after one POST.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_user_story workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Minimal creation preserves server defaults.
-- [ ] Populated creation sends correct assignment/status/milestone keys.
-- [ ] Successful results contain server-generated identity/version and can be read back.
-- [ ] Failures never trigger duplicate create attempts.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Minimal creation preserves server defaults.
+- [x] Populated creation sends correct assignment/status/milestone keys.
+- [x] Successful results contain server-generated identity/version and can be read back.
+- [x] Failures never trigger duplicate create attempts.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can create backlog or sprint stories through MCP with accurate defaults, results, and failure reporting.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can create backlog or sprint stories through MCP with accurate defaults, results, and failure reporting.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
@@ -98,7 +98,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (124 passed) passed on 2026-09-28. Added passing minimal/populated JSON fixtures and inventory contract scope. Pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` checked 2026-09-28: `UserStoryValidator` accepts optional `tags` with an empty-list default; `UserStoryViewSet` maps creation through `userstories` and enforces project membership for status/milestone values. Request decisions: `project` and nonblank `subject` are required; null optionals are omitted; empty description/tags remain explicit; status/assignee/milestone IDs are positive locally and membership remains server validation; no create retry. README/reference/quickstart remain current until the MCP method is exposed. | Specify create_user_story contracts / fc75821 |
 | 2 | Complete | Added `UserStoryCreateDto` and authenticated `POST userstories` with explicit wire mapping, null omission, positive ID/subject validation, detail/status mapping, and ambiguous-write warnings. `dotnet test ... --filter FullyQualifiedName~UserStoryCreateTests` passed (11 tests); `dotnet build -c Debug --no-restore` passed with 0 warnings/errors on 2026-09-28. Public MCP documentation remains unchanged until Step 3 exposes the tool. | Implement create_user_story API behavior / aeb0d7a |
-| 3 | Complete | Added the `create_user_story` MCP method with required `projectId`/`subject`, optional `description`, `status`, `assigned_to`, `tags`, and `milestoneId`, plus descriptions for acceptance criteria and project-specific IDs. Updated README, quickstart, implemented reference, and inventory. Production STDIO `tools/list` and `tools/call` test passed on 2026-09-28, including minimal optional omission, JSON response parsing, and schema required/optional checks. | Expose create_user_story MCP interface / pending |
-| 4 | Not started | — | Verify create_user_story workflow / pending |
+| 3 | Complete | Added the `create_user_story` MCP method with required `projectId`/`subject`, optional `description`, `status`, `assigned_to`, `tags`, and `milestoneId`, plus descriptions for acceptance criteria and project-specific IDs. Updated README, quickstart, implemented reference, and inventory. Production STDIO `tools/list` and `tools/call` test passed on 2026-09-28, including minimal optional omission, JSON response parsing, and schema required/optional checks. | Expose create_user_story MCP interface / 1ca41c1 |
+| 4 | Complete | Production STDIO test now creates minimal and populated stories, checks null omission and supplied text/tags/assignment/status/milestone wire values, and reads the created ID back through `get_user_story`. Focused create tests cover whitespace-only subject, wrong-project milestone validation, safe 400/403 errors, malformed successful responses, and one POST on ambiguous transport failure. Root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed on 2026-09-28; no live Taiga writes were performed. | Verify create_user_story workflow / see final handoff |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
