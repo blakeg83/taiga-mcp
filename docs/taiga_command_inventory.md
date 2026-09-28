@@ -76,7 +76,7 @@ API/source basis: [epic endpoints](https://github.com/taigaio/taiga-doc/blob/mai
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
 | `list_user_stories` | Extend — delivered subset | `projectId, page?, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?`; backlog/sprint, status, assignment, tags, and text filters are delivered. Ordering, swimlane, and epic filters remain planned. |
-| `get_user_story` | New | `userStoryId`; retrieve full details, version, assignments, estimates, sprint, swimlane, and available epic/source relationships. |
+| `get_user_story` | Delivered subset | `userStoryId`; retrieve core detail fields, authoritative version, assignment, tags, sprint, and available epic/source relationships. Comments, tasks, estimates, and swimlane data remain deferred. |
 | `create_user_story` | New | `projectId, subject, fields?`; create a story with description, status, tags, assignment, estimates, sprint, swimlane, and supported requirement flags. Acceptance criteria can be recorded in the description or configured custom fields. |
 | `update_user_story` | New | `userStoryId, version, fields`; update supported fields, including description, assignments, blocking, due date, sprint, swimlane, and requirement flags. |
 | `delete_user_story` | New | `userStoryId`; delete the story and report Taiga's result, including any documented effects on child tasks for the deployed version. |
@@ -211,8 +211,8 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 11 tool names were inventoried from [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
-- [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset and optional page envelope; ordering, estimates, swimlane, and epic filters remain planned.
+- The current 12 tool names were inventoried from [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
+- [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset, optional page envelope, and goal 04 core detail read; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
 - Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. Shared wrappers can reuse underlying resource operations during a future implementation.
 - Structured arbitrary dependencies, time logging, and nested epics are not assumed to be native Taiga capabilities. External references or custom fields should not be presented as equivalent native relationships.

@@ -8,19 +8,19 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 11 tools:
+The current server exposes 12 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
   `list_issue_priorities`.
-- 1 user-story tool: `list_user_stories`.
+- 2 user-story tools: `list_user_stories` and `get_user_story`.
 
 The first-batch documents describe 15 additional or expanded functions. The
-`list_issues` and `list_user_stories` expansions are delivered; the remaining
-goal documents describe planned work until their individual checklists are
-complete. Story detail/create/update, epic, task, and cross-resource commands
-are not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
+`list_issues`, `list_user_stories`, and the core `get_user_story` detail read
+are delivered; the remaining goal documents describe planned work until their
+individual checklists are complete. Story create/update, epic, task, and
+cross-resource commands are not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
 
@@ -42,6 +42,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_priorities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_user_stories` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `milestoneId`, `backlogOnly=false`, `tags`, `query`, `includeClosed=false`, `includeArchived=false`, and `includePageInfo=false` optional | Bare array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`; with `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Explicit status IDs override automatic closed/archive restrictions. |
+| `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, origin_issue?, origin_task?, epics? }`. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -107,6 +108,10 @@ User-story and metadata results:
 ```
 
 ```json
+{"id":102,"ref":18,"project":12,"subject":"Allow saved searches","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status_id":7,"status":"Ready","tags":[["search","#336699"]],"version":4,"origin_issue":{"id":201,"ref":9,"subject":"Saved search"},"epics":[]}
+```
+
+```json
 {"items":[{"id":789,"ref":12,"project":123,"subject":"Ship the fix","status_id":1,"status":"Ready"}],"page":1,"total":null,"next_page":null,"has_more":null}
 ```
 
@@ -140,6 +145,13 @@ User-story and metadata results:
   the corresponding include flag is enabled; nonempty status IDs suppress
   both restrictions. The story list never infers filtering from translated
   status names.
+- `get_user_story` requests exactly `userstories/{userStoryId}`. It uses the
+  returned `status_extra_info.name` when present and otherwise performs one
+  project-scoped `userstory-statuses?project=...` lookup; if no usable project
+  or label exists, the numeric `status_id` is retained and the label remains
+  unknown. It preserves Markdown/Unicode descriptions, nullable assignment and
+  sprint fields, empty tag arrays, and the server's `epics`, `origin_issue`, and
+  `origin_task` JSON. It does not request comments, tasks, or history.
 - Issue and story labels are derived from project metadata calls. Story list
   results additionally preserve `project` and `status_id`, and expose
   `milestone` and `version` only when the list response supplies them. A
@@ -189,6 +201,11 @@ The following sources were checked on 2026-09-28:
   [`4d11baef9027f5598f6341d6eb4261de2840688e`](https://github.com/taigaio/taiga-back/tree/4d11baef9027f5598f6341d6eb4261de2840688e),
   the `main` ref observed on the date above. The OCC mixin is at
   [`taiga/projects/occ/mixins.py`](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/occ/mixins.py).
+- The story detail route and serializer fields were checked against pinned
+  `taiga-doc` revision
+  [`7455fd37cb164bbf80198c1517fd0ef414e2a7b9`](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/user-stories/endpoints.adoc)
+  and the pinned backend serializer at
+  [`4d11baef9027f5598f6341d6eb4261de2840688e`](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/serializers.py).
 - The installed C# MCP package is `ModelContextProtocol`
   `0.3.0-preview.4`. Its local package README/XML metadata provides
   `WithStdioServerTransport`, `WithToolsFromAssembly`,
