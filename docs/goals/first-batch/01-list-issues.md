@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Specify filters and compatibility
 
-- [ ] Capture the current array result and open-only query in baseline fixtures; make the intended corrected query explicit.
-- [ ] Verify each public filter's wire name and multi-value encoding from issue filter source; reject invalid IDs/pages before HTTP.
-- [ ] Define explicit-status precedence and missing-header behavior with tests; retain the cleanup's removal of unsupported status__is_archived issue filtering.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_issues contracts`.
+- [x] Capture the current array result and open-only query in baseline fixtures; make the intended corrected query explicit.
+- [x] Verify each public filter's wire name and multi-value encoding from issue filter source; reject invalid IDs/pages before HTTP.
+- [x] Define explicit-status precedence and missing-header behavior with tests; retain the cleanup's removal of unsupported status__is_archived issue filtering.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_issues contracts`.
 
 ## Step 2: Implement filtered paged retrieval
 
@@ -95,9 +95,25 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Execution record
 
+Step 1 evidence: the clean baseline `dotnet test -c Debug` passed 74 tests.
+The legacy fixture in `IssueListTests` confirms a bare JSON array and the
+corrected default query `project`, `page`, and
+`status__is_closed=false`. The filter contract was verified against Taiga
+revision `4d11baef9027f5598f6341d6eb4261de2840688e` on 2026-09-28:
+`AssignedToFilter`, `StatusesFilter`, `IssueTypesFilter`, `PrioritiesFilter`,
+`SeveritiesFilter`, `TagsFilter`, and `QFilter` use `assigned_to`, `status`,
+`type`, `priority`, `severity`, `tags`, and `q`; related IDs and tags are
+comma-separated values decoded by Taiga. Values will be percent-encoded by
+the client. `includeClosed=false` adds only `status__is_closed=false` when no
+explicit status IDs are supplied; explicit status IDs take precedence, and
+`includeClosed=true` removes the automatic restriction. Unsupported
+`status__is_archived` remains omitted. Missing or malformed pagination headers
+will produce explicit `null` metadata rather than fabricated zero or false
+values. No live Taiga requests were made.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_issues contracts / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug`: 74 passed. Contract/source decisions recorded above; legacy array fixture added. | Specify list_issues contracts / pending |
 | 2 | Not started | — | Implement list_issues API behavior / pending |
 | 3 | Not started | — | Expose list_issues MCP interface / pending |
 | 4 | Not started | — | Verify list_issues workflow / pending |
