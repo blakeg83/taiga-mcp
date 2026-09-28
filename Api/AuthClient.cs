@@ -28,7 +28,9 @@ public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClien
                 replacement = await AuthenticateAsync(http, "auth/refresh", new { refresh }, true, cancellationToken);
             replacement ??= await AuthenticateAsync(http, "auth", new
             {
-                type = "normal", username = options.Value.Username, password = options.Value.Password
+                type = "normal",
+                username = options.Value.Username,
+                password = options.Value.Password
             }, false, cancellationToken);
             Volatile.Write(ref _state, replacement);
             log.LogDebug("Taiga authentication state replaced");
@@ -48,7 +50,7 @@ public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClien
         {
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-            if (doc.RootElement.TryGetProperty("auth_token", out var token) && token.ValueKind == JsonValueKind.String &&
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("auth_token", out var token) && token.ValueKind == JsonValueKind.String &&
                 !string.IsNullOrWhiteSpace(token.GetString()))
             {
                 var nextRefresh = doc.RootElement.TryGetProperty("refresh", out var value) && value.ValueKind == JsonValueKind.String
@@ -80,7 +82,8 @@ public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClien
     {
         var clone = new HttpRequestMessage(request.Method, request.RequestUri)
         {
-            Version = request.Version, VersionPolicy = request.VersionPolicy
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy
         };
         try
         {

@@ -8,14 +8,16 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `list_issues(projectId, page)`: Page through issues for a project.
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
-- `update_issue(issueId, version, subject?, ...)`: Partially update an issue via PATCH; include `version`.
+- `update_issue(issueId, subject, version, ...)`: Partially update an issue via PATCH; include `version` and pass `subject=null` when changing other fields.
 - `list_issue_statuses(projectId)`: List available issue statuses for a project.
 - `list_issue_severities(projectId)`: List available issue severities for a project.
 - `list_issue_types(projectId)`: List available issue types for a project.
 - `list_issue_priorities(projectId)`: List available issue priorities for a project.
 
+- `list_user_stories(projectId, page)`: List one page of open, non-archived stories.
+
 ## Requirements
-- .NET 8 SDK
+- SDK selected by `global.json` (10.0.401, latest patch within that feature band) and .NET 8 runtime
 - Taiga account and credentials
 
 ## Build and Run
@@ -37,6 +39,7 @@ Set environment variables for the server process:
 - `TAIGA__BASEURL` (optional, default: `https://api.taiga.io/api/v1/`)
 - `TAIGA__USERNAME`
 - `TAIGA__PASSWORD`
+- `TAIGA__METADATATTLSECONDS` (optional positive integer, default 300)
 
 For Codex CLI, point the MCP server `command` to the published binary and pass the env vars. See the quickstart for a full `config.toml` example.
 
@@ -59,11 +62,32 @@ Notes:
 - Use the absolute path to your published binary for `command`.
 
 ## Development Notes
- - Entry point and DI/live tools: `Program.cs` registers domain APIs and
-   loads `[McpServerToolType]` classes from the `Tools/` folder.
-- Transport: STDIO; logging via `Microsoft.Extensions.Logging` to stderr.
-- HTTP: `HttpClient` with bearer auth token acquired via `/auth`.
 
+`Program.cs` creates the host; `Hosting/ServiceCollectionExtensions.cs` registers
+options, APIs and tools. Tools use concrete domain APIs and a shared transport
+with cancellation, safe errors and explicit disposal. Auth token state and the
+expiring metadata cache are singleton services; named HTTP clients are obtained
+per operation. STDIO carries MCP messages only; logging goes to stderr.
+
+See the [developer guide](docs/development.md) and the completed
+[foundation cleanup goal](docs/goals/development-foundation-cleanup.md).
+
+Windows PowerShell:
+
+```powershell
+dotnet restore
+dotnet build -c Debug
+dotnet test -c Debug
+$env:TAIGA__USERNAME = 'your-user'
+$env:TAIGA__PASSWORD = 'your-password'
+dotnet run --no-build
+```
+
+Tests use fake HTTP and synthetic credentials. CI restores, builds and tests
+Release on Windows. Publish long-running MCP servers to a separate versioned
+directory, for example `dotnet publish TaigaMCP.csproj -c Release -o C:\TaigaMCP\published\v1`.
+If a server locks normal outputs, use a unique external output directory for
+build/tests; do not stop that server. See the developer guide for the exact command.
 ## Implementation Planning
 
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.

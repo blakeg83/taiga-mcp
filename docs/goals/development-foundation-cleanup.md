@@ -1,6 +1,6 @@
 # Goal: prepare TaigaMCP for sustainable feature development
 
-Status: in progress; Step 1 baseline verified.
+Status: complete; all eight ordered implementation steps and local validation completed.
 
 ## Objective
 
@@ -115,40 +115,42 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 8: add development guardrails and verify the finished foundation
 
-- [ ] Add `.editorconfig` for four-space C#, UTF-8, final newlines, and namespace/style conventions. Verify formatting for changed files without sweeping unrelated changes into the commit.
-- [ ] Add `global.json` selecting an available SDK compatible with the current target and an explicit roll-forward policy. Document the decision without silently upgrading the runtime or package versions.
-- [ ] Add a GitHub Actions workflow installing the selected SDK and running restore, Release build, and Release tests without live credentials. Run on pull requests and pushes to the repository's verified default branch. Keep permissions minimal.
-- [ ] Update `AGENTS.md` and README to reflect actual startup/DI locations, existing tests, shared transport, namespaces, and how to add a tool. Add Windows PowerShell build/run examples and explain separate development/published outputs to avoid running-server locks.
-- [ ] Link `docs/development.md` and this goal from the README. Ensure feature plans reference the final infrastructure and still distinguish proposed behavior from implemented behavior.
-- [ ] Run root restore, Debug build/tests, and the Release commands used by CI. Verify strict STDOUT validation, all production tools, representative reads/writes, cancellation, auth races, cache expiry, and safe error cases remain covered.
-- [ ] Review the final diff and commit history for accidental schema drift, credentials, generated artifacts, temporary test mutations, unrelated edits, and unfinished checklist items. Record any checks that could not run; do not claim remote CI passed without observing it.
-- [ ] Complete the definition-of-done audit and execution record; commit as `Add development guardrails and finalize foundation cleanup`.
+- [x] Add `.editorconfig` for four-space C#, UTF-8, final newlines, and namespace/style conventions. Verify formatting for changed files without sweeping unrelated changes into the commit.
+- [x] Add `global.json` selecting an available SDK compatible with the current target and an explicit roll-forward policy. Document the decision without silently upgrading the runtime or package versions.
+- [x] Add a GitHub Actions workflow installing the selected SDK and running restore, Release build, and Release tests without live credentials. Run on pull requests and pushes to the repository's verified default branch. Keep permissions minimal.
+- [x] Update `AGENTS.md` and README to reflect actual startup/DI locations, existing tests, shared transport, namespaces, and how to add a tool. Add Windows PowerShell build/run examples and explain separate development/published outputs to avoid running-server locks.
+- [x] Link `docs/development.md` and this goal from the README. Ensure feature plans reference the final infrastructure and still distinguish proposed behavior from implemented behavior.
+- [x] Run root restore, Debug build/tests, and the Release commands used by CI. Verify strict STDOUT validation, all production tools, representative reads/writes, cancellation, auth races, cache expiry, and safe error cases remain covered.
+- [x] Review the final diff and commit history for accidental schema drift, credentials, generated artifacts, temporary test mutations, unrelated edits, and unfinished checklist items. Record any checks that could not run; do not claim remote CI passed without observing it.
+- [x] Complete the definition-of-done audit and execution record; commit as `Add development guardrails and finalize foundation cleanup`.
 
 ## Final definition of done
 
-- [ ] All eight steps completed in order, each with its own successful local commit and validation evidence.
-- [ ] Prerequisite protocol-output/null-response fixes are retained and pass.
-- [ ] One application and one test project remain, with clear namespaces and documented layer responsibilities; no unused aggregate API facade remains.
-- [ ] Domain APIs use shared HTTP handling with explicit disposal, end-to-end cancellation, consistent safe errors, and no ambiguous automatic write retries.
-- [ ] Authentication handles concurrent login/refresh without token races; HTTP client lifetimes are deliberate and tested.
-- [ ] Metadata caching has tested concurrency, expiry, isolation, failure recovery, and eviction behavior.
-- [ ] Existing MCP names and response shapes remain compatible. Intentional project-default, filter, validation, and error-detail changes are documented and tested.
-- [ ] Tool descriptions and configuration validation accurately describe runtime behavior. Future pagination/clearing features remain explicitly planned.
-- [ ] Local root build/tests and CI-equivalent Release checks pass, or a precise environmental blocker is reported with equivalent isolated-output evidence where possible.
-- [ ] CI configuration, SDK policy, formatting settings, and developer documentation are present and consistent.
-- [ ] No unrelated work, live Taiga mutations, generated artifacts, credentials, package upgrades, or unrequested structural framework was introduced.
+- [x] All eight steps completed in order, each with its own successful local commit and validation evidence.
+- [x] Prerequisite protocol-output/null-response fixes are retained and pass.
+- [x] One application and one test project remain, with clear namespaces and documented layer responsibilities; no unused aggregate API facade remains.
+- [x] Domain APIs use shared HTTP handling with explicit disposal, end-to-end cancellation, consistent safe errors, and no ambiguous automatic write retries.
+- [x] Authentication handles concurrent login/refresh without token races; HTTP client lifetimes are deliberate and tested.
+- [x] Metadata caching has tested concurrency, expiry, isolation, failure recovery, and eviction behavior.
+- [x] Existing MCP names and response shapes remain compatible. Intentional project-default, filter, validation, and error-detail changes are documented and tested.
+- [x] Tool descriptions and configuration validation accurately describe runtime behavior. Future pagination/clearing features remain explicitly planned.
+- [x] Local root build/tests and CI-equivalent Release checks pass, or a precise environmental blocker is reported with equivalent isolated-output evidence where possible.
+- [x] CI configuration, SDK policy, formatting settings, and developer documentation are present and consistent.
+- [x] No unrelated work, live Taiga mutations, generated artifacts, credentials, package upgrades, or unrequested structural framework was introduced.
 
 ## Execution record
 
 | Step | Status | Validation, decisions, and documentation evidence | Commit reference |
 | --- | --- | --- | --- |
-| 1. Baseline | Complete | Prerequisites 003fe00/b219e39 verified in history and 13 passing tests; root restore/Debug build/tests passed, zero warnings, no locks. SDK, package, caller/path audit and layer lifetimes recorded in docs/development.md. Existing reference matches all 11 signatures/shapes. | Document cleanup baseline and compatibility boundaries |
-| 2. Structure/serialization | Complete | Previous commit c77e1c0. Namespaces, unused facade removal, shared response policy and init-only DTO; domain plan references updated. Full Debug suite: 13 passed. | Simplify API layers and serialization conventions |
-| 3. Transport | Complete | Previous ffeba6b. Shared transport/disposal, cancellation and safe errors; 28 Debug tests passed including actual MCP safe errors/schema and write uncertainty. Details in developer guide. | Centralize Taiga HTTP handling and cancellation |
-| 4. Authentication | Complete | Previous e2f9cc5. Gated coherent token state, bounded replay and per-operation factory clients. 33 Debug tests passed, including barrier-driven races and PATCH replay/ambiguity. | Coordinate authentication and HTTP client lifetimes |
-| 5. Cache | Complete | Previous 9a2b80c. Immutable per-key coalesced snapshots, configurable TTL/clock and bounded idle eviction. 38 Debug tests passed with deterministic expiry/cancellation/recovery/isolation. | Add concurrent expiring metadata caching |
-| 6. Contracts/configuration | Complete | Previous 59ca19f. Validated binding/URL/TTL, documented SDK descriptions and no-HTTP input validation. 12 focused configuration tests and 65 full Debug tests passed; all tools invoked through MCP. | Standardize configuration and tool contracts |
-| 7. Defaults/filters | Complete | Previous 8a2b5ac. Pinned official Taiga filter/model evidence in developer guide; null member migration and flag-based filters documented. 70 Debug tests passed, including exact queries/custom labels and actual MCP default/legacy selection. | Remove account-specific defaults and status-name assumptions |
-| 8. Guardrails/final verification | Not started | Pending | Pending |
+| 1. Baseline | Complete | Prerequisites 003fe00/b219e39 verified in history and 13 passing tests; root restore/Debug build/tests passed, zero warnings, no locks. SDK, package, caller/path audit and layer lifetimes recorded in docs/development.md. Existing reference matches all 11 signatures/shapes. | `c77e1c0` — Document cleanup baseline and compatibility boundaries |
+| 2. Structure/serialization | Complete | Previous commit c77e1c0. Namespaces, unused facade removal, shared response policy and init-only DTO; domain plan references updated. Full Debug suite: 13 passed. | `ffeba6b` — Simplify API layers and serialization conventions |
+| 3. Transport | Complete | Previous ffeba6b. Shared transport/disposal, cancellation and safe errors; 28 Debug tests passed including actual MCP safe errors/schema and write uncertainty. Details in developer guide. | `e2f9cc5` — Centralize Taiga HTTP handling and cancellation |
+| 4. Authentication | Complete | Previous e2f9cc5. Gated coherent token state, bounded replay and per-operation factory clients. 33 Debug tests passed, including barrier-driven races and PATCH replay/ambiguity. | `9a2b80c` — Coordinate authentication and HTTP client lifetimes |
+| 5. Cache | Complete | Previous 9a2b80c. Immutable per-key coalesced snapshots, configurable TTL/clock and bounded idle eviction. 38 Debug tests passed with deterministic expiry/cancellation/recovery/isolation. | `59ca19f` — Add concurrent expiring metadata caching |
+| 6. Contracts/configuration | Complete | Previous 59ca19f. Validated binding/URL/TTL, documented SDK descriptions and no-HTTP input validation. 12 focused configuration tests and 65 full Debug tests passed; all tools invoked through MCP. | `8a2b5ac` — Standardize configuration and tool contracts |
+| 7. Defaults/filters | Complete | Previous 8a2b5ac. Pinned official Taiga filter/model evidence in developer guide; null member migration and flag-based filters documented. 70 Debug tests passed, including exact queries/custom labels and actual MCP default/legacy selection. | `c94eeb7` — Remove account-specific defaults and status-name assumptions |
+| 8. Guardrails/final verification | Complete | Previous c94eeb7. SDK 10.0.401/format/Windows CI; default master verified remotely. Root restore and Debug/Release builds passed (0 warnings); 74 tests passed in each configuration. SDK-8 workload repair interruption and SDK client cancellation experiment recorded in developer guide; final protocol cancellation passes. Final audit passed, no live/remote CI claims. | Add development guardrails and finalize foundation cleanup |
 
 Final handoff: list completed steps and commit hashes, exact checks and outcomes, intentional compatibility changes and migration examples, outstanding limitations, and the definition-of-done result. Do not claim live integration or remote CI success from mocked/local tests.
+
+Final evidence: [developer guide](../development.md#step-8-guardrails-and-final-verification-2026-09-28). All definition-of-done items satisfied locally. Final step hash is supplied in the handoff rather than self-recorded in its own commit.

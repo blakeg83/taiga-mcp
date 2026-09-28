@@ -6,44 +6,36 @@ This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C
 ---
 
 ## Prerequisites
-- .NET 8 SDK
-- WSL Ubuntu environment
+- SDK selected by `global.json` (10.0.401 with latestPatch) and .NET 8 runtime
+- Windows PowerShell or a Linux/WSL shell (the test contamination fixture currently requires Windows)
 - Node.js (for MCP Inspector)
 - Codex CLI installed
 - A Taiga account
 
 ---
 
-## 1. Create the MCP Server
-```bash
-dotnet new console -n TaigaMCP
-cd TaigaMCP
-dotnet add package ModelContextProtocol --prerelease
-dotnet add package Microsoft.Extensions.Hosting
+## 1. Build the existing server
+
+Clone this repository and run from its root; do not recreate the project or
+upgrade its pinned packages as part of setup.
+
+```powershell
+dotnet restore
+dotnet build -c Debug
+dotnet test -c Debug
 ```
 
- Edit **Program.cs** to:
- - Set up an `HttpClient` for Taiga API
- - Register domain APIs for projects, issues, and user stories
- - Define MCP tools in `[McpServerToolType]` classes under `Tools/`:
-  - `list_projects(member?, page)`
-  - `resolve_project(slug)`
-  - `list_issues(projectId, page)`
-  - `get_issue(issueId)`
-  - `create_issue(projectId, subject, …)`
-  - `update_issue(issueId, version, subject?, ...)` (version required; only send fields you want to change)
-  - `list_issue_statuses(projectId)`
-  - `list_issue_severities(projectId)`
-  - `list_issue_types(projectId)`
-  - `list_issue_priorities(projectId)`
+`Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
+configuration, named HTTP clients, the shared transport, domain APIs, cache and
+MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
+See the [implemented tool reference](taiga_tools_reference.md) for all 11 tools.
 
-Build:
-```bash
-dotnet build
-```
+For long-running MCP use, publish to a separate versioned directory. Keeping the
+published server apart from development outputs avoids executable/DLL locks.
+See the [developer guide](development.md) for temporary-output validation when
+an existing server already holds a build output open.
 
 ---
-
 ## 2. Configure Codex CLI
 Edit **~/.codex/config.toml** in WSL. Example:
 

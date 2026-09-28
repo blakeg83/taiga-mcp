@@ -12,7 +12,8 @@ public sealed class AuthenticationTests
 {
     private static AuthClient CreateAuth() => new(Options.Create(new TaigaOptions
     {
-        Username = "synthetic-user", Password = "synthetic-password"
+        Username = "synthetic-user",
+        Password = "synthetic-password"
     }), NullLogger<AuthClient>.Instance);
 
     [Fact]
@@ -134,7 +135,8 @@ public sealed class AuthenticationTests
         using var request = new HttpRequestMessage(HttpMethod.Patch, "issues/42")
         {
             Content = new StringContent("{\"version\":7,\"description\":\"\"}", Encoding.UTF8, "application/json"),
-            Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
+            Version = HttpVersion.Version20,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
         };
         request.Headers.Add("X-Test", "retained");
         request.Options.Set(new HttpRequestOptionsKey<string>("test"), "value");

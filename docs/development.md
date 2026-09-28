@@ -180,3 +180,58 @@ flag filtering for open Done/Archived and localized closed/archive statuses;
 returned labels remain mapped. Issue tests assert no redundant status fetch or
 archive query. MCP tests exercise omitted member and explicit legacy member 6;
 contract tests verify encoded member values. No live Taiga writes were performed.
+
+## Step 8: guardrails and final verification (2026-09-28)
+
+Previous step: `c94eeb7`. `.editorconfig` defines four-space C#, UTF-8/final
+newlines and file-scoped namespaces. Formatting was restricted to C# files
+changed by this cleanup. `global.json` pins the baseline SDK 10.0.401 with
+latestPatch and no prereleases; target net8.0 and all package versions remain
+unchanged. CI installs that SDK plus .NET 8 (runtime needed by app/tests), uses
+Windows for the existing cmd.exe contamination fixture, and grants contents:read
+only. `git ls-remote --symref origin HEAD` confirmed refs/heads/master, matching
+pull-request and master-push workflow triggers. Remote CI has not run here.
+
+The initial attempt to use installed SDK 8.0.131 triggered automatic mobile
+workload repair before tests: several local workload packages were installed by
+dotnet, and the command was interrupted during the next download. No repository
+packages/targets were changed. The final pin uses the already-working baseline
+SDK instead. The SDK-8 attempted run is not counted as a passing check.
+
+Final audit added a real MCP notifications/cancelled test reaching an in-flight
+HTTP send through ProjectTools, and tests for the 4096-byte error-body bound,
+response stream failures and post-write cancellation uncertainty. The installed
+SDK client's local token cancellation did not transmit a server cancellation in
+an initial experiment (that test timed out); the final test explicitly emits the
+protocol cancellation notification and passes. Clients must send that MCP
+notification to cancel server work. Cancellation stays OperationCanceledException;
+after successful writes its message warns of potentially applied changes.
+Auth refresh now also rejects non-object JSON cleanly. These small error-path
+fixes were discovered during the final definition-of-done audit.
+
+Final commands/results with SDK 10.0.401:
+
+| Command | Result |
+| --- | --- |
+| `dotnet format whitespace TaigaMCP.sln --no-restore --include <changed C# files>` | Applied only within cleanup-touched files. |
+| `dotnet format whitespace TaigaMCP.sln --no-restore --verify-no-changes --include <changed C# files>` | Passed. File list: `git diff --name-only f760583 -- '*.cs'` filtered to existing paths, plus untracked new C# files before commit. |
+| `dotnet restore` | Passed. |
+| `dotnet build -c Debug` | Passed; 0 warnings/errors. |
+| `dotnet test -c Debug` | 74 passed, 0 failed/skipped. |
+| `dotnet build -c Release --no-restore` | Passed; 0 warnings/errors. |
+| `dotnet test -c Release --no-build --no-restore` | 74 passed, 0 failed/skipped. |
+| `git diff --check` | Passed. |
+
+No output locks/workarounds were needed for the final run. Final tests cover all
+11 production tools, strict clean/contaminated STDOUT, null omission, request
+payloads, safe HTTP statuses, transport disposal/bounds/cancellation, auth races
+and bounded replay, cache expiry/coalescing/isolation/recovery/eviction, input
+validation, config precedence and changed filters/defaults. This is fake-HTTP
+and local MCP validation, not live Taiga or observed remote CI success.
+
+Definition-of-done audit: one application/one test project retained; no facade,
+new tools, envelopes, clearFields, package upgrades or structural frameworks.
+All eight steps have separate local commits, with no push/PR/merge or live writes.
+Diff/history review found no added generated output, temporary contamination,
+real credentials or unrelated edits. SDK first-run side effects are documented
+above. The Windows-only contamination test remains a portability limitation.

@@ -42,7 +42,11 @@ public sealed class McpIntegrationTests
 
         Assert.False((await Call("update_issue", new()
         {
-            ["issueId"] = 42, ["subject"] = null, ["version"] = 0, ["description"] = "", ["tags"] = Array.Empty<string>()
+            ["issueId"] = 42,
+            ["subject"] = null,
+            ["version"] = 0,
+            ["description"] = "",
+            ["tags"] = Array.Empty<string>()
         })).IsError == true);
         var body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Single(r => r.Method == "PATCH").Body);
         Assert.False(body.TryGetProperty("subject", out _));

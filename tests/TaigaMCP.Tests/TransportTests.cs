@@ -109,6 +109,72 @@ public sealed class TransportTests
         }
     }
 
+    [Fact]
+    public async Task ReadAsync_OversizedError_ReadsAtMost4096Bytes()
+    {
+        var stream = new ObservedStream(new byte[20000]);
+        var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Get, "/api/v1/test", _ =>
+            new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StreamContent(stream) });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Get, "test"))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => new TaigaTransport(new TestHttpClientFactory(handler), auth).ReadAsync(request));
+            Assert.Equal(HttpStatusCode.BadRequest, error.StatusCode);
+            Assert.Equal(4096, stream.BytesRead);
+            Assert.True(stream.Disposed);
+            Assert.True(error.Message.Length < 200);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadAsync_WriteResponseReadFailsOrCancels_ReportsUncertainty(bool cancel)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var stream = new ObservedStream([], () =>
+        {
+            if (cancel)
+            {
+                cancellation.Cancel();
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+            throw new IOException("unsafe upstream text");
+        });
+        var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Patch, "/api/v1/test", _ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Patch, "test"))
+        {
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+            var error = cancel
+                ? await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.ReadAsync(request, cancellation.Token))
+                : (Exception)await Assert.ThrowsAsync<TaigaRequestException>(() => transport.ReadAsync(request));
+            Assert.Contains("may already have applied", error.Message);
+            Assert.DoesNotContain("unsafe", error.Message);
+            Assert.True(stream.Disposed);
+        }
+    }
+
+    private sealed class ObservedStream(byte[] bytes, Action? beforeRead = null) : MemoryStream(bytes)
+    {
+        public int BytesRead { get; private set; }
+        public bool Disposed { get; private set; }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            beforeRead?.Invoke();
+            var count = await base.ReadAsync(buffer, cancellationToken);
+            BytesRead += count;
+            return count;
+        }
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
     private sealed class TrackingContent(string body) : StringContent(body, Encoding.UTF8, "application/json")
     {
         public bool Disposed { get; private set; }

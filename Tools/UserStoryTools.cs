@@ -16,8 +16,12 @@ public sealed class UserStoryTools
 
     [McpServerTool(Name = "list_user_stories")]
     [Description("List one page of open, non-archived user stories by internal project ID. Returns an array without pagination metadata.")]
-    public async Task<string> ListUserStories([Description("Positive internal project ID, not a slug.")] int projectId, [Description("Page number, starting at 1; requests one page only.")] int page = 1, CancellationToken cancellationToken = default)
-    => await ToolErrors.RunAsync(async () => {
+    public async Task<string> ListUserStories(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
         var stories = await _userStories.ListUserStoriesAsync(projectId, page, cancellationToken);
         return ToolResponseJson.Serialize(stories);
     });

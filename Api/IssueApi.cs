@@ -253,7 +253,10 @@ public sealed class IssueApi
             var priorities = await _cache.GetPrioritiesAsync(proj, cancellationToken);
             return MapIssue(el, statuses, severities, types, priorities);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException("Taiga write may already have applied; enrichment was cancelled. Read the entity before retrying.", cancellationToken);
+        }
         catch (Exception)
         {
             throw new TaigaRequestException("Taiga write may already have applied; response enrichment failed. Read the entity before retrying.");
@@ -311,16 +314,19 @@ public sealed class IssueApi
         try
         {
             var el = doc.RootElement;
-    
+
             int proj = el.TryGetProperty("project", out var pEl) && pEl.TryGetInt32(out var pVal) ? pVal : 0;
             var statuses = await _cache.GetStatusesAsync(proj, cancellationToken);
             var severities = await _cache.GetSeveritiesAsync(proj, cancellationToken);
             var types = await _cache.GetTypesAsync(proj, cancellationToken);
             var priorities = await _cache.GetPrioritiesAsync(proj, cancellationToken);
-    
+
             return MapIssue(el, statuses, severities, types, priorities);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException("Taiga write may already have applied; enrichment was cancelled. Read the entity before retrying.", cancellationToken);
+        }
         catch (Exception)
         {
             throw new TaigaRequestException("Taiga write may already have applied; response enrichment failed. Read the entity before retrying.");

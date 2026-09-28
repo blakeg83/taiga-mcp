@@ -27,8 +27,8 @@ public sealed record IssueUpdateDto
 
     [JsonPropertyName("tags")]
     public string[]? Tags { get; init; }
-    
-    [JsonPropertyName("comment")] 
+
+    [JsonPropertyName("comment")]
     public string? Comment { get; init; }
 
     [JsonPropertyName("version")]

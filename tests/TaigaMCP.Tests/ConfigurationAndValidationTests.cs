@@ -47,8 +47,10 @@ public sealed class ConfigurationTests
     {
         var values = new Dictionary<string, string>
         {
-            ["TAIGA__USERNAME"] = "synthetic-env-user", ["TAIGA__PASSWORD"] = "synthetic-env-password",
-            ["TAIGA__BASEURL"] = "http://localhost/api/v1", ["TAIGA__METADATATTLSECONDS"] = "123"
+            ["TAIGA__USERNAME"] = "synthetic-env-user",
+            ["TAIGA__PASSWORD"] = "synthetic-env-password",
+            ["TAIGA__BASEURL"] = "http://localhost/api/v1",
+            ["TAIGA__METADATATTLSECONDS"] = "123"
         };
         var original = values.Keys.ToDictionary(key => key, Environment.GetEnvironmentVariable);
         try
@@ -74,7 +76,9 @@ public sealed class ConfigurationTests
     {
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Taiga:BaseUrl"] = url, ["Taiga:Username"] = username, ["Taiga:Password"] = password,
+            ["Taiga:BaseUrl"] = url,
+            ["Taiga:Username"] = username,
+            ["Taiga:Password"] = password,
             ["Taiga:MetadataTtlSeconds"] = ttl.ToString()
         }).Build();
         return new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();

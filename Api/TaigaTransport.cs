@@ -25,6 +25,10 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
         }
+        catch (OperationCanceledException) when (write && applied)
+        {
+            throw new OperationCanceledException("Taiga write may already have applied; response reading was cancelled. Read the entity before retrying.", cancellationToken);
+        }
         catch (OperationCanceledException) { throw; }
         catch (TaigaRequestException) { throw; }
         catch (JsonException)
@@ -33,7 +37,7 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                 ? "Taiga write may already have applied; its response was invalid. Read the entity before retrying."
                 : "Taiga returned invalid JSON.");
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
             throw new TaigaRequestException(write
                 ? "Taiga transport failure; the write may already have applied. Read the entity before retrying."
