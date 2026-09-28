@@ -34,6 +34,7 @@ public sealed class McpIntegrationTests
         foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_epic", new() { ["epicId"] = 301 })).IsError == true);
+        Assert.True((await Call("get_epic", new() { ["epicId"] = 0 })).IsError == true);
         Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
         var createdStory = await Call("create_user_story", new()
         {
@@ -538,6 +539,26 @@ public sealed class McpIntegrationTests
                 request.Method == "GET" && request.PathAndQuery == "/api/v1/epics/301");
             Assert.Equal("Bearer integration-token", epicDetailRequest.Authorization);
             Assert.DoesNotContain(taiga.Requests, request => request.PathAndQuery.Contains("related_userstories", StringComparison.Ordinal));
+
+            taiga.EpicDetailStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenEpic = await client.CallToolAsync(
+                "get_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenEpic.IsError == true);
+            Assert.Contains("403", GetText(forbiddenEpic));
+            Assert.Contains("permission denied", GetText(forbiddenEpic), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic epic detail secret", GetText(forbiddenEpic));
+
+            taiga.EpicDetailStatusCode = System.Net.HttpStatusCode.NotFound;
+            var missingEpic = await client.CallToolAsync(
+                "get_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(missingEpic.IsError == true);
+            Assert.Contains("404", GetText(missingEpic));
+            Assert.Contains("resource not found", GetText(missingEpic), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic epic detail secret", GetText(missingEpic));
 
             var storyPage = await client.CallToolAsync(
                 "list_user_stories",

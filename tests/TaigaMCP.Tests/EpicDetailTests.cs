@@ -1,4 +1,8 @@
+using System.Net;
+using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -85,6 +89,49 @@ public sealed class EpicDetailTests
             Assert.Equal(99, epic.StatusId);
             Assert.Null(epic.Status);
             Assert.Single(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/epics/301"));
+        }
+    }
+
+    [Fact]
+    public async Task GetEpicTool_OmitsMissingOptionalSummaryAndUnknownFields()
+    {
+        var handler = EpicRoutes(
+            """{"id":301,"ref":12,"project":123,"subject":"Backlog","description":"","status":null,"assigned_to":null,"color":null,"tags":[],"version":0,"future_field":{"ignored":true}}""",
+            301);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(await new EpicTools(NewApi(handler, auth)).GetEpic(301));
+
+            Assert.Equal(0, json.GetProperty("version").GetInt32());
+            Assert.Equal(JsonValueKind.Array, json.GetProperty("tags").ValueKind);
+            Assert.Empty(json.GetProperty("tags").EnumerateArray());
+            Assert.False(json.TryGetProperty("assigned_to", out _));
+            Assert.False(json.TryGetProperty("color", out _));
+            Assert.False(json.TryGetProperty("user_stories_counts", out _));
+            Assert.False(json.TryGetProperty("future_field", out _));
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
+    public async Task GetEpicTool_ReportsSafeHttpFailures(HttpStatusCode statusCode, string category)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301",
+                "{\"detail\":\"secret epic credentials\"}",
+                statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<McpException>(() => new EpicTools(NewApi(handler, auth)).GetEpic(301));
+
+            Assert.Contains(((int)statusCode).ToString(), exception.Message);
+            Assert.Contains(category, exception.Message);
+            Assert.DoesNotContain("secret epic credentials", exception.Message);
         }
     }
 

@@ -1,6 +1,6 @@
 # Goal 12: get_epic
 
-Status: in progress on `codex/get-epic`.
+Status: complete on `codex/get-epic`.
 
 ## Objective
 
@@ -66,30 +66,30 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify detail and failures
 
-- [ ] Invoke through MCP and assert full content/version and exact resource route.
-- [ ] Test Unicode/Markdown, null fields, optional summary omission, and unknown server properties.
-- [ ] Cover invalid ID, 403/404, missing required version, and no accidental relation fetching.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify get_epic workflow`.
+- [x] Invoke through MCP and assert full content/version and exact resource route.
+- [x] Test Unicode/Markdown, null fields, optional summary omission, and unknown server properties.
+- [x] Cover invalid ID, 403/404, missing required version, and no accidental relation fetching.
+- [x] Validate this step: root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test` passed; acceptance cases below are covered.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify get_epic workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Epic identity/version and description are authoritative.
-- [ ] Unavailable optional summaries are not fabricated.
-- [ ] A detail read makes no hidden write or full-tree traversal.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Epic identity/version and description are authoritative.
+- [x] Unavailable optional summaries are not fabricated.
+- [x] A detail read makes no hidden write or full-tree traversal.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Agents can inspect an epic and obtain reliable identity/context for subsequent comments or story linking.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Agents can inspect an epic and obtain reliable identity/context for subsequent comments or story linking.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
@@ -106,11 +106,21 @@ color, tags, modified timestamp, and server summary values are optional;
 labels are used without a metadata lookup, and no related-story traversal or
 computed progress is part of this goal.
 
+Final verification on 2026-09-28 used fake HTTP and synthetic credentials only;
+no live Taiga writes or reads were performed. The focused epic suite passed 11
+tests and the MCP integration suite passed 8 tests. Root `dotnet restore`
+passed, `dotnet build -c Debug --no-restore` passed with zero warnings/errors,
+and `dotnet test -c Debug --no-build --no-restore` passed all `261` tests.
+The final edge tests cover exact `/api/v1/epics/301` routing, authoritative
+Markdown/version mapping, null/empty optional values, omitted summaries,
+unknown fields, invalid IDs and response versions, no relation traversal, and
+safe protocol-visible 403/404 errors without upstream secret text.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline passed; pinned route/serializer evidence recorded; detail fixture and DTO contract added. | Specify get_epic contracts / `33f4f24` |
 | 2 | Complete | Focused domain tests (`8`) and Debug build passed; exact route, mapping, validation, and no-relation-read behavior documented. | Implement get_epic API behavior / `32b2323` |
-| 3 | In progress | Real STDIO `tools/list`/`tools/call` integration passed (`8` tests); schema, response example, internal-ID workflow, summaries, and deferred links documented. | Expose get_epic MCP interface / pending |
-| 4 | Not started | — | Verify get_epic workflow / pending |
+| 3 | Complete | Real STDIO `tools/list`/`tools/call` integration passed (`8` tests); schema, response example, internal-ID workflow, summaries, and deferred links documented. | Expose get_epic MCP interface / `05bbe77` |
+| 4 | Complete | Final edge coverage and root validation passed; README/reference/quickstart/inventory and deferred-scope notes finalized. | Verify get_epic workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

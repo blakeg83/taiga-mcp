@@ -377,6 +377,14 @@ An update returns the server's authoritative detail, for example:
   come only from inline `status_extra_info.name`; an unavailable label leaves
   the numeric `status_id` intact. Listing makes no status-metadata, related
   story, or progress requests.
+- `get_epic` requests exactly `epics/{epicId}` and returns one detail object.
+  It validates positive `epicId` input and required positive `id`, `ref`, and
+  `project` plus nonnegative `version` in the response. It preserves
+  Markdown/Unicode descriptions, nullable assignment and color, tags, inline
+  status labels, numeric status IDs, and optional server summaries including
+  `user_stories_counts`; unknown properties and unavailable summaries are not
+  fabricated. It performs no status-metadata, relationship, history, or
+  progress reads.
 - `get_task` requests exactly `tasks/{taskId}` and returns one detail object.
   It validates positive `taskId` input and required positive `id`, `ref`, and
   `project` plus nonnegative `version` in the response. It preserves Markdown,

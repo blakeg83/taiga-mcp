@@ -43,6 +43,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicListStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicDetailStatusCode { get; set; } = HttpStatusCode.OK;
+
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
     public static FakeTaigaHttpServer Start()
@@ -185,6 +187,12 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/epics/301")
         {
+            if (EpicDetailStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicDetailStatusCode, "{\"detail\":\"synthetic epic detail secret\"}");
+                return;
+            }
+
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.OK,
