@@ -179,3 +179,14 @@ description/tags, pass `subject: null` and the current `version`; use
 fields unchanged. Empty updates and negative versions are rejected before HTTP.
 A write error saying it may already have applied requires reading the entity
 before deciding whether to retry. See [development conventions](development.md).
+
+## Intentional list behavior changes
+
+`list_projects` now defaults to `member=null` (no member filter). To retain the
+previous account-specific selection, call `list_projects(member="6")`, or send
+`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
+Story lists use Taiga's `status__is_closed=false` and
+`status__is_archived=false`; English labels such as Done/Archived no longer
+exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
+issue archive filtering and redundant status-exclusion requests were removed.
+These are behavior corrections, not behavior-preserving refactoring.

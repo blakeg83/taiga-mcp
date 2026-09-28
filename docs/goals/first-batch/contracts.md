@@ -4,7 +4,7 @@ These are proposed implementation decisions for this batch, not descriptions of 
 
 ## Compatibility and layering
 
-- Keep every existing MCP name, parameter name, default that matters to callers, and response shape unless an additive opt-in is specified below.
+- Preserve the post-cleanup MCP baseline: all names/response shapes, member=null project default, flag-based story filtering and open-only issue filtering. The cleanup intentionally changed the old member=6 and label-based defaults; later goals preserve this corrected baseline unless an additive opt-in is specified below.
 - Existing list tools return arrays by default. Add includePageInfo=false; when true, return the page envelope below. New list tools always return the envelope.
 - Existing issue response status/type/priority/severity properties are labels. Keep them and add status_id/type_id/priority_id/severity_id, rather than changing their types. Story status labels likewise remain compatible.
 - New resource DTOs use explicit JSON property names: id, ref, project, subject, status_id, status, assigned_to, and modified. Detail DTOs include description and version. Nullable fields remain nullable; never manufacture ID/version zero from absent required data.

@@ -73,24 +73,7 @@ public sealed class IssueApi
         var severities = await _cache.GetSeveritiesAsync(projectId, cancellationToken);
         var types = await _cache.GetTypesAsync(projectId, cancellationToken);
         var priorities = await _cache.GetPrioritiesAsync(projectId, cancellationToken);
-        using var rejReq = new HttpRequestMessage(HttpMethod.Get, $"issue-statuses?project={projectId}&is_closed=true");
-        using var rejDoc = await _transport.ReadAsync(rejReq, cancellationToken);
-        var rejectedIds = rejDoc.RootElement.EnumerateArray()
-            .Select(el => el.TryGetProperty("id", out var id) && id.TryGetInt32(out var iv) ? iv : (int?)null)
-            .Where(id => id.HasValue)
-            .Select(id => id!.Value)
-            .ToList();
-
-        var q = new List<string>
-        {
-            $"project={projectId}",
-            $"page={page}",
-            "status__is_closed=false",
-            "status__is_archived=false"
-        };
-        foreach (var id in rejectedIds) q.Add($"exclude_status={id}");
-
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"issues?{string.Join("&", q)}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"issues?project={projectId}&page={page}&status__is_closed=false");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var items = new List<IssueDto>(64);
         foreach (var it in doc.RootElement.EnumerateArray())

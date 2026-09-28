@@ -105,13 +105,13 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 7: remove account-specific defaults and label-dependent filters
 
-- [ ] Change `list_projects`'s default `member` from `"6"` to `null`, meaning no member filter. Preserve explicit member filtering and URL encoding. Document how existing users retain the old behavior by passing `member="6"` explicitly.
-- [ ] Replace story exclusions based on English names `Done`/`Archived` with verified API flags/status metadata. Preserve the intended default of excluding closed/archived stories without treating labels as workflow semantics.
-- [ ] Verify existing issue list filters against pinned Taiga documentation/source. Remove unsupported or redundant restrictions while preserving the documented open-issue behavior; record the evidence. Do not invent issue archival support.
-- [ ] Test omitted versus explicit project member and custom/localized story status names. Include an open status named `Done` and a closed status with a different name so the tests prove labels no longer control inclusion.
-- [ ] Assert generated HTTP queries and returned mapping, and exercise the changed project default through actual MCP invocation. Replace tests that hardcode the old default with explicit compatibility/migration tests.
-- [ ] Update README, tool reference, quickstart, and affected batch contracts/goals with an explicit behavior-change note. These changes are intentional and must not be described as behavior-preserving refactoring.
-- [ ] Run the full suite; update evidence and commit as `Remove account-specific defaults and status-name assumptions`.
+- [x] Change `list_projects`'s default `member` from `"6"` to `null`, meaning no member filter. Preserve explicit member filtering and URL encoding. Document how existing users retain the old behavior by passing `member="6"` explicitly.
+- [x] Replace story exclusions based on English names `Done`/`Archived` with verified API flags/status metadata. Preserve the intended default of excluding closed/archived stories without treating labels as workflow semantics.
+- [x] Verify existing issue list filters against pinned Taiga documentation/source. Remove unsupported or redundant restrictions while preserving the documented open-issue behavior; record the evidence. Do not invent issue archival support.
+- [x] Test omitted versus explicit project member and custom/localized story status names. Include an open status named `Done` and a closed status with a different name so the tests prove labels no longer control inclusion.
+- [x] Assert generated HTTP queries and returned mapping, and exercise the changed project default through actual MCP invocation. Replace tests that hardcode the old default with explicit compatibility/migration tests.
+- [x] Update README, tool reference, quickstart, and affected batch contracts/goals with an explicit behavior-change note. These changes are intentional and must not be described as behavior-preserving refactoring.
+- [x] Run the full suite; update evidence and commit as `Remove account-specific defaults and status-name assumptions`.
 
 ## Step 8: add development guardrails and verify the finished foundation
 
@@ -148,7 +148,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | 4. Authentication | Complete | Previous e2f9cc5. Gated coherent token state, bounded replay and per-operation factory clients. 33 Debug tests passed, including barrier-driven races and PATCH replay/ambiguity. | Coordinate authentication and HTTP client lifetimes |
 | 5. Cache | Complete | Previous 9a2b80c. Immutable per-key coalesced snapshots, configurable TTL/clock and bounded idle eviction. 38 Debug tests passed with deterministic expiry/cancellation/recovery/isolation. | Add concurrent expiring metadata caching |
 | 6. Contracts/configuration | Complete | Previous 59ca19f. Validated binding/URL/TTL, documented SDK descriptions and no-HTTP input validation. 12 focused configuration tests and 65 full Debug tests passed; all tools invoked through MCP. | Standardize configuration and tool contracts |
-| 7. Defaults/filters | Not started | Pending | Pending |
+| 7. Defaults/filters | Complete | Previous 8a2b5ac. Pinned official Taiga filter/model evidence in developer guide; null member migration and flag-based filters documented. 70 Debug tests passed, including exact queries/custom labels and actual MCP default/legacy selection. | Remove account-specific defaults and status-name assumptions |
 | 8. Guardrails/final verification | Not started | Pending | Pending |
 
 Final handoff: list completed steps and commit hashes, exact checks and outcomes, intentional compatibility changes and migration examples, outstanding limitations, and the definition-of-done result. Do not claim live integration or remote CI success from mocked/local tests.

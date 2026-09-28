@@ -15,8 +15,8 @@ public sealed class ProjectTools
     }
 
     [McpServerTool(Name = "list_projects")]
-    [Description("List one page of projects; member is an optional member ID filter (currently defaults to 6). Returns an array without pagination metadata.")]
-    public async Task<string> ListProjects([Description("Member ID filter; null or empty means no filter.")] string? member = "6", [Description("Page number, starting at 1; requests one page only.")] int page = 1, CancellationToken cancellationToken = default)
+    [Description("List one page of projects; member is an optional member ID filter (default null means no member filter). Returns an array without pagination metadata.")]
+    public async Task<string> ListProjects([Description("Member ID filter; null or empty means no filter.")] string? member = null, [Description("Page number, starting at 1; requests one page only.")] int page = 1, CancellationToken cancellationToken = default)
     => await ToolErrors.RunAsync(async () => {
         var projects = await _projects.ListProjectsAsync(member, page, cancellationToken);
         return ToolResponseJson.Serialize(projects);

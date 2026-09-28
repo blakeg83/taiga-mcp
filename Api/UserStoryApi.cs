@@ -19,7 +19,6 @@ public sealed class UserStoryApi
         InputValidation.Positive(page, nameof(page));
         using var stReq = new HttpRequestMessage(HttpMethod.Get, $"userstory-statuses?project={projectId}");
         using var stDoc = await _transport.ReadAsync(stReq, cancellationToken);
-        var excludeIds = new List<int>();
         var statusMap = new Dictionary<int, string>();
         foreach (var st in stDoc.RootElement.EnumerateArray())
         {
@@ -28,11 +27,7 @@ public sealed class UserStoryApi
             if (st.TryGetProperty("id", out var idProp) && idProp.TryGetInt32(out var id))
             {
                 statusMap[id] = name;
-                if (string.Equals(name, "Done", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(name, "Archived", StringComparison.OrdinalIgnoreCase))
-                {
-                    excludeIds.Add(id);
-                }
+
             }
         }
 
@@ -43,8 +38,6 @@ public sealed class UserStoryApi
             "status__is_archived=false",
             "status__is_closed=false"
         };
-        foreach (var id in excludeIds)
-            q.Add($"exclude_status={id}");
 
         using var usReq = new HttpRequestMessage(HttpMethod.Get, $"userstories?{string.Join("&", q)}");
         using var doc = await _transport.ReadAsync(usReq, cancellationToken);

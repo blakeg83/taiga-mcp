@@ -41,7 +41,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 - [ ] Capture the current array result and open-only query in baseline fixtures; make the intended corrected query explicit.
 - [ ] Verify each public filter's wire name and multi-value encoding from issue filter source; reject invalid IDs/pages before HTTP.
-- [ ] Define explicit-status precedence and missing-header behavior with tests; do not carry forward unsupported status__is_archived issue filtering.
+- [ ] Define explicit-status precedence and missing-header behavior with tests; retain the cleanup's removal of unsupported status__is_archived issue filtering.
 - [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
 - [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_issues contracts`.

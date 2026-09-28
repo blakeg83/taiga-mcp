@@ -156,3 +156,27 @@ binding/CLI precedence with and without it. Full `dotnet test -c Debug` passed
 65 tests afterwards: 14 invalid-input/no-HTTP cases plus configuration and real
 MCP calls of all 11 production tools, descriptions/schema, explicit null, omitted
 create fields, empty string/array, version zero, validation errors and null output.
+
+## Step 7: verified list behavior changes
+
+After `8a2b5ac`, member defaults to null; pass `member="6"` to preserve the old
+selection. Story filtering uses server flags only, with no English-label
+exclusions. Issue filtering retains only status__is_closed=false, dropping the
+unsupported archival parameter and redundant status lookup/exclusions.
+
+Verified 2026-09-28 against official taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e` (not a claimed deployed version):
+
+- [IssueViewSet filter_fields](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/issues/api.py#L58-L61)
+  supports project and status__is_closed, not status__is_archived.
+- [UserStoryViewSet filter_fields](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py#L69-L75)
+  supports both status flags.
+- [Status models](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/models.py#L546-L556)
+  define independent story closed/archive booleans; IssueStatus has only is_closed
+  (lines 750-758). Names are labels, not semantics.
+
+`dotnet test -c Debug`: 70 passed. Fake routes assert exact queries and simulate
+flag filtering for open Done/Archived and localized closed/archive statuses;
+returned labels remain mapped. Issue tests assert no redundant status fetch or
+archive query. MCP tests exercise omitted member and explicit legacy member 6;
+contract tests verify encoded member values. No live Taiga writes were performed.

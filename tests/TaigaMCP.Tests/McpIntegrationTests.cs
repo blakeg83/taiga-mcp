@@ -116,8 +116,12 @@ public sealed class McpIntegrationTests
 
             var projectRequest = Assert.Single(taiga.Requests, request => request.PathAndQuery.StartsWith("/api/v1/projects", StringComparison.Ordinal));
             Assert.Equal("Bearer integration-token", projectRequest.Authorization);
-            Assert.Contains("member=6", projectRequest.PathAndQuery);
+            Assert.DoesNotContain("member=", projectRequest.PathAndQuery);
             Assert.Contains("page=1", projectRequest.PathAndQuery);
+
+            var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
+            Assert.False(legacy.IsError == true);
+            Assert.Contains("member=6", taiga.Requests.Last().PathAndQuery);
 
             taiga.ProjectsStatusCode = System.Net.HttpStatusCode.InternalServerError;
             var failed = await client.CallToolAsync(

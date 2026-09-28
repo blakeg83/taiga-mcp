@@ -30,9 +30,9 @@ show the JSON contents, not an MCP `content` wrapper.
 
 | Tool | Parameters and defaults | Current result |
 | --- | --- | --- |
-| `list_projects` | `member` string?, default `"6"`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
+| `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
-| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects. The current API requests open, non-archived work. |
+| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects. The current API requests open issues; issue archival is not a supported status filter. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId`, `subject`, and `version` required by the current method signature; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, and `comment` optional | One issue object returned by Taiga after the PATCH. |
@@ -251,3 +251,14 @@ Credentials must be nonblank. `TAIGA__BASEURL` accepts an absolute HTTP/HTTPS UR
 without credentials/query/fragment and normalizes a trailing slash.
 `TAIGA__METADATATTLSECONDS` is positive, defaults to 300, and controls metadata
 refresh. See [development](development.md) for lifetimes and future contracts.
+
+## Intentional list behavior changes
+
+`list_projects` now defaults to `member=null` (no member filter). To retain the
+previous account-specific selection, call `list_projects(member="6")`, or send
+`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
+Story lists use Taiga's `status__is_closed=false` and
+`status__is_archived=false`; English labels such as Done/Archived no longer
+exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
+issue archive filtering and redundant status-exclusion requests were removed.
+These are behavior corrections, not behavior-preserving refactoring.

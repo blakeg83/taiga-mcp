@@ -48,7 +48,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement filters and page mapping
 
-- [ ] Reuse goal 01 query/page helpers and add story-specific options; remove Done/Archived string matching.
+- [ ] Reuse goal 01 query/page helpers and add story-specific options; retain the cleanup's flag-based filtering (Done/Archived string matching is already removed).
 - [ ] Apply closed/archive restrictions only when not overridden by explicit statuses; omit those restrictions when corresponding include flags are enabled.
 - [ ] Add project, status_id, milestone, and a nullable version when present to list mapping; do not invent version when the list response omits it.
 - [ ] Keep existing DTO JSON fields and domain callers compatible.
