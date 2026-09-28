@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; listing tasks and projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; and creating, reading, and listing tasks and projects.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 16 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 17 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -100,6 +100,29 @@ assign it, provide project-specific internal IDs:
 Taiga applies project defaults for omitted optional fields. The returned JSON
 contains the server-created story detail, including its `id`, `ref`, and
 `version`. Status, assignee, and milestone membership are validated by Taiga.
+
+### Create a task
+
+Create a standalone task with project defaults, or select a sprint explicitly:
+
+```json
+{"projectId":123,"subject":"Capture deployment checklist"}
+{"projectId":123,"subject":"Prepare release notes","milestoneId":55}
+```
+
+To break down a story, provide its internal ID. The server reads the parent,
+validates the project, and returns the authoritative inherited sprint. Omit
+`milestoneId` for inheritance; if supplied, it must match the parent's sprint
+and is omitted from the wire request. Ordinary creation uses `POST /tasks`, so
+it does not inherit the sprint-only restriction of Taiga's native bulk-create
+endpoint:
+
+```json
+{"projectId":123,"subject":"Implement saved-search endpoint","userStoryId":102,"description":"Acceptance: preserve the search filters.","status":11,"assigned_to":42,"tags":["search"]}
+```
+
+The response is the created task detail with server-generated `id`, `ref`, and
+`version`, plus the resulting parent and sprint.
 
 ### Update a user story
 

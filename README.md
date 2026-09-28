@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, and create/read/update user stories and list tasks via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, create/read/update user stories, and create/list/read tasks via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -22,6 +22,7 @@ wire filters and envelope fields.
 - `list_user_stories(projectId, page, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?)`: List one page of backlog or sprint stories with explicit status/assignment/text filters; the default is an array and `includePageInfo` opts into pagination metadata.
 - `list_tasks(projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of standalone or story-linked tasks. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
 - `get_task(taskId)`: Retrieve one task detail object by its positive internal ID, including the authoritative version, Markdown description, status/assignment, parent story, sprint, tags, due-date, and blocking fields.
+- `create_task(projectId, subject, userStoryId?, milestoneId?, description?, status?, assigned_to?, tags?)`: Create one standalone or story-linked task. A story-linked task validates its parent and inherits the parent's sprint; a matching `milestoneId` is redundant. Omitted optional fields use Taiga project defaults.
 - `get_user_story(userStoryId)`: Retrieve a story by its positive internal ID (not its displayed `#ref`), including its authoritative version, Markdown description, status/assignment, tags, sprint, and available epic/source relationships.
 - `create_user_story(projectId, subject, description?, status?, assigned_to?, tags?, milestoneId?)`: Create one backlog or sprint story. Put acceptance criteria in `description`; omitted optional fields use Taiga project defaults, and the result includes the server-generated ID, ref, and version.
 - `update_user_story(userStoryId, version, subject?, description?, status?, assigned_to?, tags?, milestoneId?, comment?, clearFields?)`: Versioned story update. Omitted fields stay unchanged; use `clearFields=["assigned_to"]` to unassign or `clearFields=["milestone"]` to return a story to the backlog. Empty description/tags are explicit clears.

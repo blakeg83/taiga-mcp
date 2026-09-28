@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
@@ -7,10 +8,89 @@ namespace TaigaMCP.Api;
 public sealed class TaskApi
 {
     private readonly TaigaTransport _transport;
+    private readonly UserStoryApi _userStories;
 
     public TaskApi(TaigaTransport transport)
+        : this(transport, new UserStoryApi(transport))
+    {
+    }
+
+    public TaskApi(TaigaTransport transport, UserStoryApi userStories)
     {
         _transport = transport;
+        _userStories = userStories;
+    }
+
+    public async Task<TaskDetailDto> CreateTaskAsync(
+        int projectId,
+        string subject,
+        int? userStoryId = null,
+        int? milestoneId = null,
+        string? description = null,
+        int? status = null,
+        int? assigned_to = null,
+        string[]? tags = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Required(subject, nameof(subject));
+        InputValidation.OptionalIds(
+            (userStoryId, nameof(userStoryId)),
+            (milestoneId, nameof(milestoneId)),
+            (status, nameof(status)),
+            (assigned_to, nameof(assigned_to)));
+
+        var effectiveMilestoneId = milestoneId;
+        if (userStoryId.HasValue)
+        {
+            var parent = await _userStories.GetUserStoryAsync(userStoryId.Value, cancellationToken);
+            if (parent.Project != projectId)
+                throw new ArgumentException("userStoryId must belong to projectId.");
+
+            if (milestoneId.HasValue && parent.Milestone != milestoneId)
+                throw new ArgumentException("milestoneId must match the parent story milestone.");
+
+            effectiveMilestoneId = null;
+        }
+
+        var payload = new TaskCreateDto
+        {
+            Project = projectId,
+            Subject = subject,
+            Description = description,
+            Status = status,
+            AssignedTo = assigned_to,
+            Tags = tags,
+            UserStory = userStoryId,
+            Milestone = effectiveMilestoneId
+        };
+        var json = JsonSerializer.Serialize(
+            payload,
+            new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "tasks")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            return MapTaskDetail(document.RootElement);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response mapping was cancelled. Read the task before retrying.",
+                cancellationToken);
+        }
+        catch (Exception)
+        {
+            throw new TaigaRequestException(
+                "Taiga write may already have applied; response mapping failed. Read the task before retrying.");
+        }
     }
 
     public async Task<TaskDetailDto> GetTaskAsync(

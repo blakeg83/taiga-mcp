@@ -35,6 +35,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode UserStoryUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode TaskCreateStatusCode { get; set; } = HttpStatusCode.Created;
+
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
     public static FakeTaigaHttpServer Start()
@@ -153,6 +155,17 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/tasks/204")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                {"id":204,"ref":18,"project":123,"subject":"Integration child task","description":"Acceptance: complete the saved-search endpoint.","status":11,"status_extra_info":{"name":"Ready"},"assigned_to":42,"user_story":103,"milestone":55,"tags":[["search","#336699"]],"modified_date":"2026-09-28T12:01:00Z","version":1,"is_closed":false}
+                """);
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/90")
         {
             await RespondAsync(
@@ -199,6 +212,38 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 context.Response,
                 HttpStatusCode.Created,
                 createdStory);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Post.Method && path == "/api/v1/tasks")
+        {
+            if (TaskCreateStatusCode != HttpStatusCode.Created)
+            {
+                await RespondAsync(
+                    context.Response,
+                    TaskCreateStatusCode,
+                    "{\"status\":[\"synthetic task secret\"]}");
+                return;
+            }
+
+            var create = JsonNode.Parse(body)?.AsObject();
+            var userStoryId = create?["user_story"]?.GetValue<int>();
+            var milestoneId = create?["milestone"]?.GetValue<int>();
+            var responseBody = userStoryId == 103
+                ? """
+                  {"id":204,"ref":18,"project":123,"subject":"Integration child task","description":"Acceptance: complete the saved-search endpoint.","status":11,"status_extra_info":{"name":"Ready"},"assigned_to":42,"user_story":103,"milestone":55,"tags":[["search","#336699"]],"modified_date":"2026-09-28T12:01:00Z","version":1,"is_closed":false}
+                  """
+                : milestoneId == 55
+                    ? """
+                      {"id":206,"ref":20,"project":123,"subject":"Standalone sprint task","description":"","status":11,"status_extra_info":{"name":"Ready"},"assigned_to":null,"user_story":null,"milestone":55,"tags":[],"modified_date":"2026-09-28T12:02:00Z","version":1,"is_closed":false}
+                      """
+                    : """
+                      {"id":205,"ref":19,"project":123,"subject":"Standalone task","description":"","status":11,"status_extra_info":{"name":"Ready"},"assigned_to":null,"user_story":null,"milestone":null,"tags":[],"modified_date":"2026-09-28T12:02:00Z","version":1,"is_closed":false}
+                      """;
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.Created,
+                responseBody);
             return;
         }
 
