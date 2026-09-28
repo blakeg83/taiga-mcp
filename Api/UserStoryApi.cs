@@ -30,6 +30,7 @@ public sealed class UserStoryApi
         using var request = new HttpRequestMessage(HttpMethod.Get, $"userstories/{userStoryId}");
         using var document = await _transport.ReadAsync(request, cancellationToken);
         var userStory = document.RootElement;
+        ValidateDetailIdentityAndVersion(userStory);
 
         var projectId = ReadDetailOptionalInt(userStory, "project");
         var statusId = ReadDetailOptionalInt(userStory, "status");
@@ -147,18 +148,12 @@ public sealed class UserStoryApi
         int? statusId,
         string? status)
     {
-        if (userStory.ValueKind != JsonValueKind.Object ||
-            !userStory.TryGetProperty("id", out var idElement) ||
-            idElement.ValueKind != JsonValueKind.Number ||
-            !idElement.TryGetInt32(out var id) ||
-            id <= 0)
-            throw new TaigaRequestException("Taiga returned invalid user story identity data.");
+        ValidateDetailIdentityAndVersion(userStory);
 
-        if (!userStory.TryGetProperty("version", out var versionElement) ||
-            versionElement.ValueKind != JsonValueKind.Number ||
-            !versionElement.TryGetInt32(out var version) ||
-            version < 0)
-            throw new TaigaRequestException("Taiga returned invalid user story version data.");
+        if (!userStory.TryGetProperty("id", out var idElement) ||
+            !idElement.TryGetInt32(out var id))
+            throw new TaigaRequestException("Taiga returned invalid user story identity data.");
+        var version = userStory.GetProperty("version").GetInt32();
 
         return new UserStoryDetailDto
         {
@@ -178,6 +173,22 @@ public sealed class UserStoryApi
             OriginTask = ReadDetailOptionalJson(userStory, "origin_task"),
             Epics = ReadDetailOptionalJson(userStory, "epics")
         };
+    }
+
+    private static void ValidateDetailIdentityAndVersion(JsonElement userStory)
+    {
+        if (userStory.ValueKind != JsonValueKind.Object ||
+            !userStory.TryGetProperty("id", out var idElement) ||
+            idElement.ValueKind != JsonValueKind.Number ||
+            !idElement.TryGetInt32(out var id) ||
+            id <= 0)
+            throw new TaigaRequestException("Taiga returned invalid user story identity data.");
+
+        if (!userStory.TryGetProperty("version", out var versionElement) ||
+            versionElement.ValueKind != JsonValueKind.Number ||
+            !versionElement.TryGetInt32(out var version) ||
+            version < 0)
+            throw new TaigaRequestException("Taiga returned invalid user story version data.");
     }
 
     private static string? ReadStatusExtraInfoName(JsonElement userStory)

@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
 using TaigaMCP.Tools;
 using Xunit;
@@ -145,6 +147,72 @@ public sealed class UserStoryDetailTests
             await Assert.ThrowsAsync<ArgumentException>(() => api.GetUserStoryAsync(0));
 
             Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task GetUserStoryAsync_PreservesStatusIdWhenLabelIsUnavailable()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                """{"id":102,"project":12,"status":77,"version":1}""")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/userstory-statuses", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var story = await api.GetUserStoryAsync(102);
+
+            Assert.Equal(77, story.StatusId);
+            Assert.Null(story.Status);
+            Assert.Single(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/userstory-statuses"));
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
+    public async Task GetUserStoryTool_ReportsSafeHttpFailures(HttpStatusCode statusCode, string category)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                "{\"detail\":\"secret story body\"}",
+                statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.GetUserStory(102));
+
+            Assert.Contains(((int)statusCode).ToString(), exception.Message);
+            Assert.Contains(category, exception.Message);
+            Assert.DoesNotContain("secret story body", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task GetUserStoryTool_ReportsTransportFailureInsteadOfEmptyStory()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                new HttpRequestException("secret connection details"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.GetUserStory(102));
+
+            Assert.Contains("transport failure", exception.Message);
+            Assert.DoesNotContain("secret connection details", exception.Message);
         }
     }
 }

@@ -1,6 +1,6 @@
 # Goal 04: get_user_story
 
-Status: in progress.
+Status: complete.
 
 ## Objective
 
@@ -105,30 +105,30 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify story detail behavior
 
-- [ ] Invoke through MCP and assert exact URI, parsed detail fields, and returned version.
-- [ ] Cover null fields, Unicode/Markdown description, absent optional relationships, unknown added properties, and malformed required fields.
-- [ ] Verify 403/404 and transport failures are tool failures rather than empty story objects.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify get_user_story workflow`.
+- [x] Invoke through MCP and assert exact URI, parsed detail fields, and returned version.
+- [x] Cover null fields, Unicode/Markdown description, absent optional relationships, unknown added properties, and malformed required fields.
+- [x] Verify 403/404 and transport failures are tool failures rather than empty story objects.
+- [x] Validate this step: root restore passed; Debug build passed with 0 warnings/errors; Debug tests passed with 124 tests; Release build passed with 0 warnings/errors; Release tests passed with 124 tests.
+- [x] Update documentation now: README, tool reference, quickstart, inventory, and this goal describe the delivered core detail read and explicitly retain deferred comments/tasks/estimates/swimlane behavior as planned.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify get_user_story workflow`.
 
 ## Acceptance scenarios
 
-- [ ] The result contains the exact server version and numeric status ID.
-- [ ] Null parent/assignment values and Markdown are preserved.
-- [ ] A missing story or invalid payload cannot masquerade as a valid version-zero story.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] The result contains the exact server version and numeric status ID.
+- [x] Null parent/assignment values and Markdown are preserved.
+- [x] A missing story or invalid payload cannot masquerade as a valid version-zero story.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] An agent can read a story and obtain sufficient authoritative data for the planned update command.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] An agent can read a story and obtain sufficient authoritative data for the planned update command.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
@@ -137,6 +137,11 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug --no-build` passed on 2026-09-28: 112 tests, 0 warnings/errors. Pinned `taiga-doc` revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` documents `GET /api/v1/userstories/{userStoryId}`; pinned backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the detail serializer's tags, epics, and origin fields. | Specify get_user_story contracts / 70ece54 |
 | 2 | Complete | `UserStoryDetailTests` cover exact detail routing, authentication, status-extra-info and project lookup labels, Markdown/Unicode, nulls, empty tags, raw relationships, malformed identity/version, and pre-HTTP ID validation. Focused Debug tests: 120 passed. Debug build: 0 warnings/errors. | Implement get_user_story API behavior / ce991dd |
 | 3 | Complete | 6 MCP integration tests passed. They discover 12 tools, verify `get_user_story` requires only `userStoryId`, call it through STDIO, assert exact `/api/v1/userstories/90` routing, bearer auth, JSON detail, and version 4; list behavior remains covered. | Expose get_user_story MCP interface / pending |
-| 4 | Not started | — | Verify get_user_story workflow / pending |
+| 4 | Complete | `UserStoryDetailTests` cover 12 domain/tool cases, including exact URI, version/status mapping, null/empty fields, unknown nested properties, malformed required data, 403/404, and transport errors. MCP integration tests cover the real STDIO call. Root restore passed; Debug build/test passed with 0 warnings/errors and 124 tests; Release build/test passed with 0 warnings/errors and 124 tests. No live Taiga reads or writes were performed. | Verify get_user_story workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
+
+Final verification notes: the delivered scope is the core detail read only. Comments,
+tasks, estimates, swimlanes, and broader epic operations remain planned for later
+goals. All validation used fake HTTP, synthetic credentials, and local MCP sessions;
+no live Taiga project was modified.
