@@ -1,6 +1,6 @@
 # Goal 07: list_tasks
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -40,12 +40,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Specify task query and response contracts
 
-- [ ] Verify task-specific filter names/encoding rather than copying every story filter.
-- [ ] Define list DTO fields: id/ref/project/subject/status_id/status/assigned_to/user_story/milestone/modified and optional version.
-- [ ] Add fixtures for standalone and story-linked tasks, including closed statuses and unavailable labels.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_tasks contracts`.
+- [x] Verify task-specific filter names/encoding rather than copying every story filter.
+- [x] Define list DTO fields: id/ref/project/subject/status_id/status/assigned_to/user_story/milestone/modified and optional version.
+- [x] Add fixtures for standalone and story-linked tasks, including closed statuses and unavailable labels.
+- [x] Validate this step: isolated Debug build passed after the pre-existing `JsonValueKind` using fix; focused contract fixture checks are recorded for Step 2.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify list_tasks contracts`.
 
 ## Step 2: Implement TaskApi and DI
 
@@ -97,7 +97,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_tasks contracts / pending |
+| 1 | Complete | Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` reviewed 2026-09-28; pinned [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60) and [TaskListSerializer fields](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57) recorded. DTO and standalone/story-linked/closed/unavailable-label fixtures added. Baseline root build/test initially exposed a pre-existing missing `System.Text.Json` using; isolated build passed after the narrow test-harness fix. | Specify list_tasks contracts / pending |
 | 2 | Not started | — | Implement list_tasks API behavior / pending |
 | 3 | Not started | — | Expose list_tasks MCP interface / pending |
 | 4 | Not started | — | Verify list_tasks workflow / pending |
