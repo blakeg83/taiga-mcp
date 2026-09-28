@@ -189,7 +189,9 @@ Update Taiga issue 67890 with version 4 and clearFields=["assigned_to"]
 
 For task edits, first use `list_tasks` to identify the internal task ID, then
 call `get_task` and use its fresh `version` with the planned `update_task`
-command. `get_task` accepts the internal ID, not the displayed `#ref`.
+command. `get_task` accepts the internal ID, not the displayed `#ref`. Goal 10
+will support explicit assignment clearing with `clearFields=["assigned_to"]`
+and explicit unblock/note clearing with `isBlocked=false, blockedNote=""`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Goal 10: update_task
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define task edit cases
 
-- [ ] Reuse presence-aware PATCH conventions with fixtures for omitted fields, explicit unassignment, false isBlocked, and empty tags/description.
-- [ ] Define blocking behavior: setting/unsetting the boolean does not implicitly overwrite the note; callers explicitly clear it when desired.
-- [ ] Validate version, at least one actual change, and assignment set/clear conflicts before HTTP.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_task contracts`.
+- [x] Reuse presence-aware PATCH conventions with fixtures for omitted fields, explicit unassignment, false isBlocked, and empty tags/description.
+- [x] Define blocking behavior: setting/unsetting the boolean does not implicitly overwrite the note; callers explicitly clear it when desired.
+- [x] Validate version, at least one actual change, and assignment set/clear conflicts before HTTP.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify update_task contracts`.
 
 ## Step 2: Implement task PATCH
 
@@ -96,9 +96,18 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify update_task contracts / pending |
+| 1 | Complete | Baseline restore passed; baseline test run passed 214 tests. The concurrent baseline build hit a SourceLink output lock, so a serial build rerun is required. Contract payload tests passed. Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked on 2026-09-28; task model fields, versioned update path, and detail serializer support the scoped PATCH. No deployed-version claim; no live Taiga writes. Goal/reference docs updated with omitted-vs-explicit semantics and planned examples. | Specify update_task contracts / pending |
 | 2 | Not started | — | Implement update_task API behavior / pending |
 | 3 | Not started | — | Expose update_task MCP interface / pending |
 | 4 | Not started | — | Verify update_task workflow / pending |
+
+### Step 1 decisions and planned examples
+
+- `TaskUpdateDto` builds a presence-aware PATCH body. Omitted nullable inputs are absent; `description=""`, `tags=[]`, `is_blocked=false`, and `blocked_note=""` are explicit values.
+- `assigned_to` is the only clearable field. `clearFields=["assigned_to"]` emits JSON `null`; supplying an assignee and clearing it together is invalid.
+- Changing `is_blocked` never changes `blocked_note`. Callers clear the note explicitly with `blocked_note=""`.
+- The version is always included unchanged and updates require at least one selected field or a nonblank comment. No write retry or parent/sprint mutation is planned.
+
+Pinned source evidence used for this contract: [task model at revision 4d11baef9027f5598f6341d6eb4261de2840688e](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/models.py), [task viewset](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py), and [task serializers](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py), verified 2026-09-28. These are upstream source references, not deployment evidence.
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

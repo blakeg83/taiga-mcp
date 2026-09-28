@@ -119,6 +119,24 @@ obtain a fresh authoritative `version`, and pass that version to the planned
 `update_task` command; this read does not load comments, attachments, or the
 parent object.
 
+### Planned `update_task` contract
+
+Goal 10 will expose `update_task(taskId, version, subject?, description?,
+status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?)`.
+Until that goal is complete, this section is a planned contract rather than an
+available MCP tool. Omitted fields remain unchanged; `description=""`,
+`tags=[]`, `isBlocked=false`, and `blockedNote=""` are explicit updates.
+`clearFields` accepts only `assigned_to`, and emits `assigned_to: null` for an
+explicit unassignment. Setting or clearing `isBlocked` does not implicitly
+change `blockedNote`. The caller supplies the nonnegative version from a fresh
+`get_task` result, and a PATCH returns the server's authoritative task detail.
+
+Planned workflow example:
+
+```json
+{"taskId":203,"version":2,"isBlocked":false,"blockedNote":"","comment":"Dependency resolved."}
+```
+
 ## Representative sanitized JSON
 
 Project and lookup results:
