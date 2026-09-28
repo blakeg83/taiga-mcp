@@ -13,6 +13,16 @@ public sealed class TaskApi
         _transport = transport;
     }
 
+    public async Task<TaskDetailDto> GetTaskAsync(
+        int taskId,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(taskId, nameof(taskId));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"tasks/{taskId}");
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        return MapTaskDetail(document.RootElement);
+    }
+
     public async Task<IReadOnlyList<TaskDto>> ListTasksAsync(
         int projectId,
         int page = 1,
@@ -83,6 +93,100 @@ public sealed class TaskApi
             Modified = ReadOptionalString(task, "modified_date"),
             Version = ReadOptionalNonnegativeInt(task, "version")
         };
+    }
+
+    private static TaskDetailDto MapTaskDetail(JsonElement task)
+    {
+        ValidateDetailIdentityAndVersion(task);
+
+        return new TaskDetailDto
+        {
+            Id = ReadRequiredPositiveInt(task, "id"),
+            Ref = ReadRequiredPositiveInt(task, "ref"),
+            Project = ReadRequiredPositiveInt(task, "project"),
+            Subject = ReadDetailOptionalString(task, "subject"),
+            Description = ReadDetailOptionalString(task, "description"),
+            StatusId = ReadDetailOptionalPositiveInt(task, "status"),
+            Status = ReadStatusName(task),
+            AssignedTo = ReadDetailOptionalPositiveInt(task, "assigned_to"),
+            UserStory = ReadDetailOptionalPositiveInt(task, "user_story"),
+            Milestone = ReadDetailOptionalPositiveInt(task, "milestone"),
+            Tags = ReadTags(task),
+            Modified = ReadDetailOptionalString(task, "modified_date"),
+            DueDate = ReadDetailOptionalString(task, "due_date"),
+            DueDateReason = ReadDetailOptionalString(task, "due_date_reason"),
+            DueDateStatus = ReadDetailOptionalString(task, "due_date_status"),
+            IsBlocked = ReadOptionalBoolean(task, "is_blocked"),
+            BlockedNote = ReadDetailOptionalString(task, "blocked_note"),
+            IsClosed = ReadOptionalBoolean(task, "is_closed"),
+            Version = task.GetProperty("version").GetInt32()
+        };
+    }
+
+    private static void ValidateDetailIdentityAndVersion(JsonElement task)
+    {
+        if (task.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid task detail data.");
+
+        ReadRequiredPositiveInt(task, "id");
+        ReadRequiredPositiveInt(task, "ref");
+        ReadRequiredPositiveInt(task, "project");
+
+        if (!task.TryGetProperty("version", out var version) ||
+            version.ValueKind != JsonValueKind.Number ||
+            !version.TryGetInt32(out var number) ||
+            number < 0)
+            throw new TaigaRequestException("Taiga returned invalid task version data.");
+    }
+
+    private static int? ReadDetailOptionalPositiveInt(JsonElement task, string propertyName)
+    {
+        if (!task.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid task {propertyName} data.");
+
+        return number;
+    }
+
+    private static string? ReadDetailOptionalString(JsonElement task, string propertyName)
+    {
+        if (!task.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.String)
+            throw new TaigaRequestException($"Taiga returned invalid task {propertyName} data.");
+
+        return value.GetString();
+    }
+
+    private static bool? ReadOptionalBoolean(JsonElement task, string propertyName)
+    {
+        if (!task.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            throw new TaigaRequestException($"Taiga returned invalid task {propertyName} data.");
+
+        return value.GetBoolean();
+    }
+
+    private static IReadOnlyList<JsonElement>? ReadTags(JsonElement task)
+    {
+        if (!task.TryGetProperty("tags", out var tags) ||
+            tags.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (tags.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid task tags data.");
+
+        return tags.EnumerateArray().Select(tag => tag.Clone()).ToArray();
     }
 
     private static string? ReadStatusName(JsonElement task)

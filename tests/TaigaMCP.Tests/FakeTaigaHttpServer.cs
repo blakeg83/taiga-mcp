@@ -142,6 +142,17 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/tasks/203")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                {"id":203,"ref":17,"project":123,"subject":"Integration task","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status":11,"status_extra_info":{"name":"Ready","color":"#00aa00","is_closed":false},"assigned_to":null,"user_story":102,"milestone":55,"tags":[["search","#336699"]],"modified_date":"2026-09-28T12:00:00Z","version":2,"due_date":"2026-10-15","due_date_reason":"Release readiness review","due_date_status":"set","is_blocked":false,"blocked_note":"","is_closed":false,"future_field":"ignored"}
+                """);
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/90")
         {
             await RespondAsync(

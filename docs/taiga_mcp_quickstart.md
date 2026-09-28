@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 15 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 16 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -152,6 +152,7 @@ Call the tool list_user_stories with projectId=12345 and backlogOnly=true
 Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
 Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
+Call the tool get_task with taskId=203
 Call the tool get_user_story with userStoryId=102
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345
@@ -162,6 +163,10 @@ Create a Taiga issue in project 12345 with subject "Bug"
 Update Taiga issue 67890 setting subject "Fix title" with version 3
 Update Taiga issue 67890 with version 4 and clearFields=["assigned_to"]
 ```
+
+For task edits, first use `list_tasks` to identify the internal task ID, then
+call `get_task` and use its fresh `version` with the planned `update_task`
+command. `get_task` accepts the internal ID, not the displayed `#ref`.
 
 ---
 

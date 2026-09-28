@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 15 tools:
+The current server exposes 16 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -16,12 +16,12 @@ The current server exposes 15 tools:
   `list_issue_priorities`.
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
-- 1 task tool: `list_tasks`.
+- 2 task tools: `list_tasks` and `get_task`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Epic, task detail/create/update, and cross-
+individual checklists are complete. Epic, task create/update, and cross-
 resource commands are not exposed by this server yet. `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -58,11 +58,30 @@ show the JSON contents, not an MCP `content` wrapper.
 | `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, and `version`. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
+| `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
 spelling for compatibility. The MCP SDK schema and runtime binding are
 verified by the integration tests added by this foundation goal.
+
+### `get_task` contract
+
+The signature is `get_task(taskId)`, where `taskId` is the positive
+internal task ID rather than the displayed `#ref`. It requests exactly
+`GET /api/v1/tasks/{taskId}` and return one detail object rather than a page
+envelope. The required identity/version fields are `id`, `ref`, `project`, and
+`version`; optional fields include `subject`, Markdown `description`,
+`status_id`/`status`, `assigned_to`, `user_story`, `milestone`, `tags`,
+`modified`, `due_date`, `due_date_reason`, `due_date_status`, `is_blocked`,
+and `blocked_note`. Unknown upstream fields are ignored. Comments,
+attachments, and parent-detail requests are outside this command.
+The concrete `TaskApi.GetTaskAsync` implementation and `get_task` MCP tool
+follow this wire contract.
+For a later edit, use `list_tasks` to find the internal ID, call `get_task` to
+obtain a fresh authoritative `version`, and pass that version to the planned
+`update_task` command; this read does not load comments, attachments, or the
+parent object.
 
 ## Representative sanitized JSON
 
@@ -128,6 +147,12 @@ Task list results:
 {"items":[{"id":203,"ref":17,"project":12,"subject":"Implement saved-search endpoint","status_id":11,"status":"Ready","assigned_to":42,"user_story":102,"milestone":55,"modified":"2026-09-28T12:00:00Z","version":2}],"page":1,"total":null,"next_page":null,"has_more":null}
 ```
 
+Task detail result:
+
+```json
+{"id":203,"ref":17,"project":12,"subject":"Implement saved-search endpoint","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status_id":11,"status":"Ready","user_story":102,"milestone":55,"tags":[["search","#336699"]],"due_date":"2026-10-15","due_date_reason":"Release readiness review","due_date_status":"set","is_blocked":false,"version":2}
+```
+
 ```json
 {"id":102,"ref":18,"project":12,"subject":"Allow saved searches","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status_id":7,"status":"Ready","tags":[["search","#336699"]],"version":4,"origin_issue":{"id":201,"ref":9,"subject":"Saved search"},"epics":[]}
 ```
@@ -184,6 +209,12 @@ An update returns the server's authoritative detail, for example:
   from inline `status_extra_info.name`; an unavailable label leaves the
   numeric `status_id` intact. Standalone tasks preserve null parent/sprint
   values, and listing makes no parent or detail requests.
+- `get_task` requests exactly `tasks/{taskId}` and returns one detail object.
+  It validates positive `taskId` input and required positive `id`, `ref`, and
+  `project` plus nonnegative `version` in the response. It preserves Markdown,
+  colored tags, nullable assignment/parent/sprint fields, numeric status IDs,
+  due-date and blocking fields, and ignores unfamiliar upstream fields. It
+  performs no metadata, parent, history, comment, or attachment reads.
 - `get_user_story` requests exactly `userstories/{userStoryId}`. It uses the
   returned `status_extra_info.name` when present and otherwise performs one
   project-scoped `userstory-statuses?project=...` lookup; if no usable project
@@ -249,6 +280,7 @@ The following sources were checked on 2026-09-28:
 - Task listing was checked against the same pinned backend revision in the
   [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60)
   and [TaskListSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57).
+- Task detail was checked on 2026-09-28 against the pinned [task GET route](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/tasks/endpoints.adoc#L191-L199), [detail command](https://raw.githubusercontent.com/taigaio/taiga-doc/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/generated/tasks-get-cmd.adoc), and backend [TaskSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L59-L73). The backend's task serializer supplies description and the shared task serializer supplies parent/sprint IDs, tags, version, blocking, and due-date fields. This is pinned source evidence, not a deployed-version claim.
 - The story detail route and serializer fields were checked against pinned
   `taiga-doc` revision
   [`7455fd37cb164bbf80198c1517fd0ef414e2a7b9`](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/user-stories/endpoints.adoc)

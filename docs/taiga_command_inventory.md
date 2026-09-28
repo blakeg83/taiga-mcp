@@ -96,7 +96,7 @@ API/source basis: [story endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
 | `list_tasks` | New — delivered subset | `projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with supported parent story, sprint, status, assignee, tag, and text filters, including closed tasks when requested. Detail, date, sort, and arbitrary export filters remain planned. |
-| `get_task` | New | `taskId`; retrieve description, status, assignee, parent story, sprint, tags, due date, blocking information, and version. |
+| `get_task` | Delivered subset | `taskId`; retrieve description, status, assignee, parent story, sprint, tags, due date, blocking information, and version. Comments, attachments, and parent details remain deferred. |
 | `create_task` | New | `projectId, subject, userStoryId?, milestoneId?, fields?`; create a story task or standalone task. Story-linked tasks inherit their story's sprint. |
 | `update_task` | New | `taskId, version, fields`; edit task content, status, assignment, tags, blocking, due date, and Taiga's `is_iocaine` flag. |
 | `delete_task` | New | `taskId`; delete the task and report the result. |
