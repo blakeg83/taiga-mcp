@@ -48,12 +48,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement task PATCH
 
-- [ ] Build a minimal body with the caller's version, whitelisted edits, and exact mapped blocking keys.
-- [ ] Ensure nullable bool false is serialized and omitted bool is absent; never infer completion from an English status label.
-- [ ] Reuse detail mapping and safe error handling; do not implicitly patch parent story or sprint.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement update_task API behavior`.
+- [x] Build a minimal body with the caller's version, whitelisted edits, and exact mapped blocking keys.
+- [x] Ensure nullable bool false is serialized and omitted bool is absent; never infer completion from an English status label.
+- [x] Reuse detail mapping and safe error handling; do not implicitly patch parent story or sprint.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement update_task API behavior`.
 
 ## Step 3: Expose task edits
 
@@ -96,8 +96,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline restore passed; baseline test run passed 214 tests. The concurrent baseline build hit a SourceLink output lock, so a serial build rerun is required. Contract payload tests passed. Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked on 2026-09-28; task model fields, versioned update path, and detail serializer support the scoped PATCH. No deployed-version claim; no live Taiga writes. Goal/reference docs updated with omitted-vs-explicit semantics and planned examples. | Specify update_task contracts / pending |
-| 2 | Not started | — | Implement update_task API behavior / pending |
+| 1 | Complete | Baseline restore passed; baseline test run passed 214 tests. The concurrent baseline build hit a SourceLink output lock, so a serial baseline build rerun passed. Contract payload tests passed. Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked on 2026-09-28; task model fields, versioned update path, and detail serializer support the scoped PATCH. No deployed-version claim; no live Taiga writes. Goal/reference docs updated with omitted-vs-explicit semantics and planned examples. | Specify update_task contracts / a2e0b72 |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~TaskUpdateTests`: 19 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Task PATCH tests cover omitted/set/clear assignment, empty description/tags, `is_blocked=false`, empty `blocked_note`, comment-only updates, invalid inputs, safe 400/409 errors, malformed success, and no retry. Domain API now maps the authoritative task detail; MCP exposure remains Step 3. | Implement update_task API behavior / pending |
 | 3 | Not started | — | Expose update_task MCP interface / pending |
 | 4 | Not started | — | Verify update_task workflow / pending |
 

@@ -103,6 +103,69 @@ public sealed class TaskApi
         return MapTaskDetail(document.RootElement);
     }
 
+    public async Task<TaskDetailDto> UpdateTaskAsync(
+        int taskId,
+        int version,
+        string? subject = null,
+        string? description = null,
+        int? status = null,
+        int? assigned_to = null,
+        string[]? tags = null,
+        bool? isBlocked = null,
+        string? blockedNote = null,
+        string? comment = null,
+        string[]? clearFields = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(taskId, nameof(taskId));
+        InputValidation.OptionalIds((status, nameof(status)), (assigned_to, nameof(assigned_to)));
+        if (version < 0) throw new ArgumentException("version must be nonnegative.");
+        if (subject is not null) InputValidation.Required(subject, nameof(subject));
+
+        var clearAssignedTo = ValidateClearFields(clearFields, assigned_to);
+        if (subject is null && description is null && status is null && assigned_to is null &&
+            tags is null && isBlocked is null && blockedNote is null && !clearAssignedTo &&
+            string.IsNullOrWhiteSpace(comment))
+            throw new ArgumentException("An update requires a change or a nonblank comment.");
+
+        var payload = new TaskUpdateDto
+        {
+            Subject = subject,
+            Description = description,
+            Status = status,
+            AssignedTo = assigned_to,
+            Tags = tags,
+            IsBlocked = isBlocked,
+            BlockedNote = blockedNote,
+            Comment = comment,
+            Version = version
+        };
+        var json = JsonSerializer.Serialize(payload.ToPatchPayload(clearAssignedTo));
+
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"tasks/{taskId}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            return MapTaskDetail(document.RootElement);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response mapping was cancelled. Read the task before retrying.",
+                cancellationToken);
+        }
+        catch (Exception)
+        {
+            throw new TaigaRequestException(
+                "Taiga write may already have applied; response mapping failed. Read the task before retrying.");
+        }
+    }
+
     public async Task<IReadOnlyList<TaskDto>> ListTasksAsync(
         int projectId,
         int page = 1,
@@ -152,6 +215,25 @@ public sealed class TaskApi
             (options.UserStoryId, nameof(options.UserStoryId)),
             (options.MilestoneId, nameof(options.MilestoneId)),
             (options.AssignedTo, nameof(options.AssignedTo)));
+    }
+
+    private static bool ValidateClearFields(string[]? clearFields, int? assignedTo)
+    {
+        if (clearFields is null) return false;
+
+        var clearAssignedTo = false;
+        foreach (var field in clearFields)
+        {
+            if (!string.Equals(field, "assigned_to", StringComparison.Ordinal))
+                throw new ArgumentException($"clearFields contains unsupported field '{field}'.");
+
+            clearAssignedTo = true;
+        }
+
+        if (clearAssignedTo && assignedTo.HasValue)
+            throw new ArgumentException("assigned_to cannot be set and cleared in the same update.");
+
+        return clearAssignedTo;
     }
 
     private static TaskDto MapTask(JsonElement task)

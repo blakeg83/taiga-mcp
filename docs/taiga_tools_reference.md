@@ -123,8 +123,9 @@ parent object.
 
 Goal 10 will expose `update_task(taskId, version, subject?, description?,
 status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?)`.
-Until that goal is complete, this section is a planned contract rather than an
-available MCP tool. Omitted fields remain unchanged; `description=""`,
+The domain API now implements this PATCH contract; MCP exposure remains Step 3.
+Until that goal is complete, this section is a planned public tool rather than
+an available MCP tool. Omitted fields remain unchanged; `description=""`,
 `tags=[]`, `isBlocked=false`, and `blockedNote=""` are explicit updates.
 `clearFields` accepts only `assigned_to`, and emits `assigned_to: null` for an
 explicit unassignment. Setting or clearing `isBlocked` does not implicitly
