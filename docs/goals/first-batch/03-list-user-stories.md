@@ -1,6 +1,6 @@
 # Goal 03: list_user_stories
 
-Status: in progress.
+Status: complete.
 
 ## Objective
 
@@ -115,39 +115,60 @@ the page envelope. The previous API commit is `9b82294`.
 
 ## Step 4: Verify backlog and sprint workflows
 
-- [ ] Invoke legacy listing and an explicit closed/archived status query through MCP.
-- [ ] Cover backlogOnly, a sprint filter, invalid combinations, encoded tags/text, and server-order preservation.
-- [ ] Verify custom status names, empty/later pages, unknown headers, missing optional version, and inaccessible projects.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify list_user_stories workflow`.
+- [x] Invoke legacy listing and an explicit closed/archived status query through MCP.
+- [x] Cover backlogOnly, a sprint filter, invalid combinations, encoded tags/text, and server-order preservation.
+- [x] Verify custom status names, empty/later pages, unknown headers, missing optional version, and inaccessible projects.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify list_user_stories workflow`.
+
+Step 4 verification (2026-09-28): the real MCP workflow covered the legacy
+array call and an explicit `statusIds=[2,3]` call whose fixtures use custom
+closed/archived names (`Terminado` and `Guardado`); the wire query was
+`status=2%2C3` and no English-name filtering was involved. Domain fixtures
+covered backlog null-milestone selection, sprint `milestone=55`, the invalid
+selector combination, encoded tags/text, server order, empty page 4,
+malformed/cross-origin pagination headers, missing list versions, and a safe
+403 permission failure with upstream detail suppressed.
+
+Required root validation passed: `dotnet restore`; `dotnet build -c Debug`
+with 0 warnings/errors; `dotnet test -c Debug` with 111 passed; and the
+Release build/test pair with 0 warnings/errors and 111 passed. All checks use
+synthetic credentials and fake HTTP; no live Taiga project was modified.
 
 ## Acceptance scenarios
 
-- [ ] Closed and archived stories are accessible on explicit request, independent of translated names.
-- [ ] Backlog and sprint queries have unambiguous validated semantics.
-- [ ] Legacy output remains compatible; opt-in metadata is accurate.
-- [ ] Optional missing list versions are not emitted as usable version zero.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Closed and archived stories are accessible on explicit request, independent of translated names.
+- [x] Backlog and sprint queries have unambiguous validated semantics.
+- [x] Legacy output remains compatible; opt-in metadata is accurate.
+- [x] Optional missing list versions are not emitted as usable version zero.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can inspect both current and historical backlog/sprint work with predictable filtering and pagination.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can inspect both current and historical backlog/sprint work with predictable filtering and pagination.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet test -c Debug --no-restore`: 103 passed. Pinned source revision and status/backlog decisions recorded above; baseline fixtures added. | Specify list_user_stories contracts / completed locally |
-| 2 | Complete | Focused story tests: 6 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Full Debug suite: 109 passed. Wire behavior and nullable mapping documented above; previous step `7c2d584`. | Implement list_user_stories API behavior / completed locally |
-| 3 | Complete | MCP `tools/list` schema and real STDIO `tools/call` validation pass, including optional filters, `backlogOnly`, encoded values, and the opt-in envelope. Previous step `9b82294`. | Expose list_user_stories MCP interface / completed locally |
-| 4 | Not started | — | Verify list_user_stories workflow / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug --no-restore`: 103 passed. Pinned source revision and status/backlog decisions recorded above; baseline fixtures added. | Specify list_user_stories contracts / `7c2d584` |
+| 2 | Complete | Focused story tests: 6 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Full Debug suite: 109 passed. Wire behavior and nullable mapping documented above; previous step `7c2d584`. | Implement list_user_stories API behavior / `9b82294` |
+| 3 | Complete | MCP `tools/list` schema and real STDIO `tools/call` validation pass, including optional filters, `backlogOnly`, encoded values, and the opt-in envelope. Previous step `9b82294`. | Expose list_user_stories MCP interface / `8ae12d6` |
+| 4 | Complete | Root restore, Debug/Release builds, and Debug/Release tests passed; final suite 111 passed in each configuration. Mock-only verification; no live writes. Previous step `8ae12d6`. | Verify list_user_stories workflow / completed locally |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
+
+Final record: the approved additive contract keeps the legacy array output,
+adds opt-in page metadata and story list fields, and defers ordering,
+estimates, swimlane, and epic filters. The upstream evidence is pinned above;
+no deployed-version claim or live smoke test was available. The four local
+step commits are `7c2d584`, `9b82294`, `8ae12d6`, and the final verification
+commit created for this step.

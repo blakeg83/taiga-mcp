@@ -217,7 +217,7 @@ public sealed class McpIntegrationTests
                 {
                     ["projectId"] = 123,
                     ["page"] = 2,
-                    ["statusIds"] = new[] { 1 },
+                    ["statusIds"] = new[] { 2, 3 },
                     ["assignedTo"] = 42,
                     ["backlogOnly"] = true,
                     ["tags"] = new[] { "a&b" },
@@ -235,7 +235,7 @@ public sealed class McpIntegrationTests
             Assert.False(storyEnvelope.GetProperty("items")[0].TryGetProperty("version", out _));
             var storyRequest = taiga.Requests.Last(request => request.PathAndQuery.Contains("/api/v1/userstories", StringComparison.Ordinal));
             Assert.Equal(
-                "/api/v1/userstories?project=123&page=2&status=1&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
+                "/api/v1/userstories?project=123&page=2&status=2%2C3&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 storyRequest.PathAndQuery);
 
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);

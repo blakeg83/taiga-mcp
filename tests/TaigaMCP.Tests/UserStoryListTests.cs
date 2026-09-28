@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
 using TaigaMCP.Tools;
 using Xunit;
@@ -187,6 +189,66 @@ public sealed class UserStoryListTests
 
             Assert.False(json[0].TryGetProperty("version", out _));
             Assert.Equal(10, json[0].GetProperty("status_id").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoriesPage_PreservesServerOrderAndUnknownEmptyPageMetadata()
+    {
+        var orderedHandler = StoryRoutes("[{\"id\":92,\"ref\":2,\"project\":123},{\"id\":91,\"ref\":1,\"project\":123}]");
+        var (orderedHttp, orderedAuth) = TaigaTestClient.Create(orderedHandler);
+        using (orderedHttp)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(orderedHandler), orderedAuth));
+
+            var page = await api.ListUserStoriesPageAsync(123, new UserStoryListOptions { Page = 2 });
+
+            Assert.Equal(new[] { 92, 91 }, page.Items.Select(item => item.Id));
+        }
+
+        var emptyHandler = StoryRoutes(
+            "[]",
+            new Dictionary<string, string>
+            {
+                ["x-paginated"] = "true",
+                ["x-pagination-count"] = "not-a-number",
+                ["x-pagination-next"] = "https://evil.example/userstories?page=8"
+            });
+        var (emptyHttp, emptyAuth) = TaigaTestClient.Create(emptyHandler);
+        using (emptyHttp)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(emptyHandler), emptyAuth));
+
+            var page = await api.ListUserStoriesPageAsync(123, new UserStoryListOptions { Page = 4 });
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStories_InaccessibleProjectIsSafeToolFailure()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstory-statuses",
+                "{\"detail\":\"secret project data\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.ListUserStories(123));
+
+            Assert.Contains("403", exception.Message);
+            Assert.Contains("permission denied", exception.Message);
+            Assert.DoesNotContain("secret project data", exception.Message);
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/userstories"));
         }
     }
 
