@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 13 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 14 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -100,6 +100,25 @@ assign it, provide project-specific internal IDs:
 Taiga applies project defaults for omitted optional fields. The returned JSON
 contains the server-created story detail, including its `id`, `ref`, and
 `version`. Status, assignee, and milestone membership are validated by Taiga.
+
+### Update a user story
+
+Read the story first and pass its returned `version` to the update. Omitted
+fields remain unchanged; use exact wire names in `clearFields` for explicit
+nulls:
+
+```json
+{"userStoryId":102,"version":4,"clearFields":["milestone"],"comment":"Move back to backlog."}
+```
+
+`milestoneId` places a story in a sprint, `clearFields=["milestone"]` returns
+it to the backlog, and `clearFields=["assigned_to"]` unassigns it. Empty
+`description` or `tags` values are explicit clears. The returned `version` and
+other fields are authoritative; the server is not blindly retried after a
+conflict or ambiguous write failure. `status` is a project-specific internal
+status ID, so use an open or closed status ID from Taiga to reopen or close a
+story. Only the primary assignee is supported; multiple assignees remain
+planned.
 
 ### CLI Mode
 ```bash

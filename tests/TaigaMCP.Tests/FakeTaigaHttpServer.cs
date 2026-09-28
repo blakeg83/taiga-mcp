@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace TaigaMCP.Tests;
 
@@ -16,6 +17,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _listenTask;
     private readonly ConcurrentQueue<RecordedTaigaRequest> _requests = [];
+    private readonly object _storyLock = new();
+    private string _userStory102 = "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created backlog story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}";
 
     private FakeTaigaHttpServer(HttpListener listener, string baseUrl)
     {
@@ -28,6 +31,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public string BaseUrl { get; }
 
     public HttpStatusCode ProjectsStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public HttpStatusCode UserStoryUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
@@ -132,10 +137,13 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/102")
         {
+            string story;
+            lock (_storyLock)
+                story = _userStory102;
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.OK,
-                "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created backlog story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}");
+                story);
             return;
         }
 
@@ -164,6 +172,64 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 context.Response,
                 HttpStatusCode.Created,
                 createdStory);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Patch.Method && path == "/api/v1/userstories/102")
+        {
+            if (UserStoryUpdateStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(
+                    context.Response,
+                    UserStoryUpdateStatusCode,
+                    "{\"detail\":\"synthetic update secret\"}");
+                return;
+            }
+
+            var patch = JsonNode.Parse(body)?.AsObject();
+            if (patch is null || !patch.TryGetPropertyValue("version", out var versionNode) ||
+                versionNode is null || versionNode.GetValueKind() != JsonValueKind.Number)
+            {
+                await RespondAsync(context.Response, HttpStatusCode.BadRequest, "{\"version\":[\"invalid version\"]}");
+                return;
+            }
+
+            string responseBody;
+            HttpStatusCode responseStatus;
+            lock (_storyLock)
+            {
+                var story = JsonNode.Parse(_userStory102)!.AsObject();
+                var currentVersion = story["version"]!.GetValue<int>();
+                var requestedVersion = versionNode.GetValue<int>();
+                if (requestedVersion != currentVersion)
+                {
+                    responseStatus = HttpStatusCode.Conflict;
+                    responseBody = "{\"detail\":\"version conflict\"}";
+                }
+                else
+                {
+                    foreach (var field in new[] { "subject", "description", "status", "assigned_to", "tags", "milestone" })
+                    {
+                        if (patch.ContainsKey(field))
+                            story[field] = patch[field]?.DeepClone();
+                    }
+
+                    if (patch.TryGetPropertyValue("status", out var statusNode) && statusNode is not null)
+                    {
+                        story["status_extra_info"] = new JsonObject
+                        {
+                            ["name"] = statusNode.GetValue<int>() == 2 ? "In Progress" : "Ready"
+                        };
+                    }
+
+                    story["version"] = currentVersion + 1;
+                    _userStory102 = story.ToJsonString();
+                    responseStatus = HttpStatusCode.OK;
+                    responseBody = _userStory102;
+                }
+            }
+
+            await RespondAsync(context.Response, responseStatus, responseBody);
             return;
         }
 
