@@ -35,7 +35,7 @@ API basis: [Taiga REST API: projects, users, memberships, roles, and resource lo
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_issues` | Extend | `projectId, filters?, orderBy?, page?`; filter by status, type, severity, priority, assignee, owner, tags, sprint, and supported dates/text. Allow completed issues; the current implementation always requests open work. |
+| `list_issues` | Extend — delivered subset | `projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?`; supports status, type, severity, priority, assignee, tags, and text filters plus an opt-in page envelope. Date, owner, sprint, sort, and all-page export behavior remain planned. |
 | `get_issue` | Extend | `issueId, includeComments?`; retain existing issue/comment retrieval and expose full useful fields, including metadata IDs, tags, sprint, due date, blocking information, and version. |
 | `create_issue` | Extend | `projectId, subject, fields?`; retain description, classification, assignment, and tags; add supported sprint, due-date, blocking, and watcher fields. |
 | `update_issue` | Extend | `issueId, version, fields, comment?`; update supported issue fields, including explicit unassignment and clearing optional values. Existing null omission prevents clearing an assignee. |

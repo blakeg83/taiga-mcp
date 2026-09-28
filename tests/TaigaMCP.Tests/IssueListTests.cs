@@ -149,6 +149,57 @@ public sealed class IssueListTests
         }
     }
 
+    [Fact]
+    public async Task ToolKeepsLegacyArrayAndOptInEnvelopeItemsIdentical()
+    {
+        var handler = IssueRoutes(
+            "[{\"id\":42,\"project\":123,\"subject\":\"Closed\",\"status\":8}]",
+            new Dictionary<string, string>
+            {
+                ["x-paginated"] = "true",
+                ["x-pagination-count"] = "4",
+                ["x-pagination-next"] = "/api/v1/issues?page=2"
+            });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new IssueTools(NewApi(handler, auth));
+            var array = JsonSerializer.Deserialize<JsonElement>(await tools.ListIssues(123, page: 1, statusIds: [8]));
+            var envelope = JsonSerializer.Deserialize<JsonElement>(await tools.ListIssues(
+                123,
+                page: 1,
+                statusIds: [8],
+                includePageInfo: true));
+
+            Assert.Equal(JsonValueKind.Array, array.ValueKind);
+            Assert.Equal(array.GetRawText(), envelope.GetProperty("items").GetRawText());
+            Assert.Equal(1, envelope.GetProperty("page").GetInt32());
+            Assert.Equal(4, envelope.GetProperty("total").GetInt32());
+            Assert.Equal(2, envelope.GetProperty("next_page").GetInt32());
+            Assert.True(envelope.GetProperty("has_more").GetBoolean());
+            Assert.DoesNotContain(handler.Requests, item => item.Uri.Query.Contains("status__is_closed", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task EnvelopeWritesUnknownPaginationAsExplicitNull()
+    {
+        var handler = IssueRoutes("[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var result = JsonSerializer.Deserialize<JsonElement>(await new IssueTools(NewApi(handler, auth))
+                .ListIssues(123, includePageInfo: true));
+
+            Assert.True(result.TryGetProperty("total", out var total));
+            Assert.Equal(JsonValueKind.Null, total.ValueKind);
+            Assert.True(result.TryGetProperty("next_page", out var next));
+            Assert.Equal(JsonValueKind.Null, next.ValueKind);
+            Assert.True(result.TryGetProperty("has_more", out var more));
+            Assert.Equal(JsonValueKind.Null, more.ValueKind);
+        }
+    }
+
     private static IssueApi NewApi(FakeHttpMessageHandler handler, TaigaMCP.Api.AuthClient auth)
     {
         var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);

@@ -109,6 +109,7 @@ Look for `taiga` in the MCP servers list.
 List projects I belong to
 Call the tool list_projects with member=6 and page=1
 Call the tool list_issues with projectId=12345 and page=1
+Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345
 Call the tool list_issue_severities with projectId=12345

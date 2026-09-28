@@ -108,6 +108,16 @@ public sealed class McpIntegrationTests
 
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+            var issueProperties = listIssues.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Contains("statusIds", issueProperties);
+            Assert.Contains("assignedTo", issueProperties);
+            Assert.Contains("typeId", issueProperties);
+            Assert.Contains("priorityId", issueProperties);
+            Assert.Contains("severityId", issueProperties);
+            Assert.Contains("tags", issueProperties);
+            Assert.Contains("query", issueProperties);
+            Assert.Contains("includeClosed", issueProperties);
+            Assert.Contains("includePageInfo", issueProperties);
 
             var result = await client.CallToolAsync(
                 "list_projects",
@@ -122,6 +132,24 @@ public sealed class McpIntegrationTests
             Assert.Equal("Bearer integration-token", projectRequest.Authorization);
             Assert.DoesNotContain("member=", projectRequest.PathAndQuery);
             Assert.Contains("page=1", projectRequest.PathAndQuery);
+
+            var issuePage = await client.CallToolAsync(
+                "list_issues",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["statusIds"] = new[] { 1 },
+                    ["includePageInfo"] = true
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(issuePage.IsError == true);
+            var page = JsonSerializer.Deserialize<JsonElement>(GetText(issuePage));
+            Assert.Equal(JsonValueKind.Object, page.ValueKind);
+            Assert.Equal(JsonValueKind.Array, page.GetProperty("items").ValueKind);
+            Assert.True(page.TryGetProperty("total", out var total));
+            Assert.Equal(JsonValueKind.Null, total.ValueKind);
+            var issueRequest = taiga.Requests.Last(request => request.PathAndQuery.Contains("/api/v1/issues", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/issues?project=123&page=1&status=1", issueRequest.PathAndQuery);
 
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);

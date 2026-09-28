@@ -15,15 +15,37 @@ public sealed class IssueTools
     }
 
     [McpServerTool(Name = "list_issues")]
-    [Description("List one page of open issues by internal project ID; returns an array without pagination metadata.")]
+    [Description("List one page of project issues. By default only open issues are returned as the legacy array; explicit statusIds or includeClosed=true can retrieve closed issues. Set includePageInfo=true for the page envelope.")]
     public async Task<string> ListIssues(
         [Description("Positive internal project ID, not a slug.")] int projectId,
         [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        [Description("Optional positive internal issue status IDs. When nonempty, these override the default open-only filter.")] int[]? statusIds = null,
+        [Description("Optional positive internal assignee user ID.")] int? assignedTo = null,
+        [Description("Optional positive internal issue type ID.")] int? typeId = null,
+        [Description("Optional positive internal issue priority ID.")] int? priorityId = null,
+        [Description("Optional positive internal issue severity ID.")] int? severityId = null,
+        [Description("Optional issue tags; values are sent as Taiga's encoded multi-value filter.")] string[]? tags = null,
+        [Description("Optional text query searched by Taiga.")] string? query = null,
+        [Description("Include closed issues when true. Explicit nonempty statusIds take precedence.")] bool includeClosed = false,
+        [Description("Return an object with items and pagination metadata instead of the legacy array.")] bool includePageInfo = false,
         CancellationToken cancellationToken = default)
     => await ToolErrors.RunAsync(async () =>
     {
-        var issues = await _issues.ListIssuesAsync(projectId, page, cancellationToken);
-        return ToolResponseJson.Serialize(issues);
+        var result = await _issues.ListIssuesPageAsync(projectId, new IssueListOptions
+        {
+            Page = page,
+            StatusIds = statusIds,
+            AssignedTo = assignedTo,
+            TypeId = typeId,
+            PriorityId = priorityId,
+            SeverityId = severityId,
+            Tags = tags,
+            Query = query,
+            IncludeClosed = includeClosed
+        }, cancellationToken);
+        return includePageInfo
+            ? ToolResponseJson.SerializePage(result.Items, result.Page, result.Total, result.NextPage, result.HasMore)
+            : ToolResponseJson.Serialize(result.Items);
     });
 
     [McpServerTool(Name = "get_issue")]

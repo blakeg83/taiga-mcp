@@ -58,12 +58,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose the extended MCP tool
 
-- [ ] Append optional arguments without renaming projectId/page or changing existing defaults.
-- [ ] Add tool/parameter descriptions explaining filters, internal IDs, status precedence, and opt-in pagination.
-- [ ] Serialize the existing array by default and the envelope only when includePageInfo=true; keep unknown metadata explicit null.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_issues MCP interface`.
+- [x] Append optional arguments without renaming projectId/page or changing existing defaults.
+- [x] Add tool/parameter descriptions explaining filters, internal IDs, status precedence, and opt-in pagination.
+- [x] Serialize the existing array by default and the envelope only when includePageInfo=true; keep unknown metadata explicit null.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_issues MCP interface`.
 
 ## Step 4: Verify triage workflows
 
@@ -123,11 +123,22 @@ become zero. The focused `IssueListTests` run passed 6 tests and
 implementation does not fetch issue details per list item. No live Taiga
 requests were made.
 
+Step 3 evidence: commit `1097f1b` provided the page API. `IssueTools.ListIssues`
+now appends `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`,
+`tags`, `query`, `includeClosed`, and `includePageInfo` after the preserved
+`projectId` and `page` parameters. The default remains a bare array. The
+envelope contains `items`, `page`, `total`, `next_page`, and `has_more`, with
+unknown metadata serialized as explicit `null`. The MCP tools/list schema and
+an actual STDIO tools/call were verified by
+`ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure`,
+and the focused issue-list suite passed 8 tests. No live Taiga requests were
+made.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 74 passed. Contract/source decisions recorded above; legacy array fixture added. | Specify list_issues contracts / pending |
 | 2 | Complete | `IssueListTests`: 6 passed; `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Filter, ID, validation, and pagination-header behavior documented above. | Implement list_issues API behavior / pending |
-| 3 | Not started | — | Expose list_issues MCP interface / pending |
+| 3 | Complete | MCP discovery and real STDIO call passed; `IssueListTests`: 8 passed. README, quickstart, reference, and inventory now document the delivered interface. | Expose list_issues MCP interface / pending |
 | 4 | Not started | — | Verify list_issues workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

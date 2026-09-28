@@ -32,7 +32,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | --- | --- | --- |
 | `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
-| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects, including nullable `status_id`, `type_id`, `priority_id`, and `severity_id`. The current API requests open issues; issue archival is not a supported status filter. |
+| `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId`, `subject`, and `version` required by the current method signature; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, and `comment` optional | One issue object returned by Taiga after the PATCH. |
@@ -79,6 +79,16 @@ Issue list/detail results:
 
 ```json
 {
+  "items":[{"id":456,"ref":7,"project":123,"subject":"Fix login","status":"Open","status_id":1}],
+  "page":1,
+  "total":null,
+  "next_page":null,
+  "has_more":null
+}
+```
+
+```json
+{
   "issue":{"id":456,"ref":7,"project":123,"subject":"Fix login","version":3},
   "comments":[{
     "id":"history-entry",
@@ -111,9 +121,10 @@ User-story and metadata results:
   statuses or `includeClosed=true` are selected. Invalid positive-ID/page
   inputs fail before HTTP. The expanded MCP arguments and opt-in page
   envelope are documented here once the tool exposure step is complete.
-- The current list methods return bare arrays and do not expose page metadata.
-  The first-batch contract proposes an opt-in page envelope while preserving
-  the array default; this is planned until the relevant goal implements it.
+- Current list methods request one page and return bare arrays. `list_issues`
+  additionally supports the opt-in page envelope; missing or malformed
+  pagination headers remain explicit `null` values rather than being treated
+  as zero totals or a completed result.
 - Issue and story labels are derived from project metadata calls. The current
   DTOs preserve labels for compatibility and do not expose all source IDs.
 - The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
