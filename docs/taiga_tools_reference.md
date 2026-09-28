@@ -75,6 +75,8 @@ envelope. The required identity/version fields are `id`, `ref`, `project`, and
 `modified`, `due_date`, `due_date_reason`, `due_date_status`, `is_blocked`,
 and `blocked_note`. Unknown upstream fields are ignored. Comments,
 attachments, and parent-detail requests are outside this command.
+The concrete `TaskApi.GetTaskAsync` implementation now follows this wire
+contract; MCP exposure is completed in the next step.
 
 ## Representative sanitized JSON
 

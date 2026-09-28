@@ -48,12 +48,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement task detail retrieval
 
-- [ ] Add GetTaskAsync with ID validation, auth, success validation, and response disposal.
-- [ ] Reuse list mapping where safe, add detail fields, and retain numeric status even when no label is available.
-- [ ] Return the server's parent/sprint values and current version without additional parent/history calls.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement get_task API behavior`.
+- [x] Add GetTaskAsync with ID validation, auth, success validation, and response disposal.
+- [x] Reuse list mapping where safe, add detail fields, and retain numeric status even when no label is available.
+- [x] Return the server's parent/sprint values and current version without additional parent/history calls.
+- [x] Validate this step: focused task-detail tests and Debug build passed.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement get_task API behavior`.
 
 ## Step 3: Expose the detail tool
 
@@ -97,7 +97,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (181 passed) passed before changes. Added standalone/story-linked fixture contracts, required identity/version malformed cases, and unknown-field tolerance. Verified 2026-09-28 against taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` and taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e`; no live Taiga calls. | Specify get_task contracts / pending |
-| 2 | Not started | — | Implement get_task API behavior / pending |
+| 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore` passed (188 tests, 0 failures) and included standalone/story-linked mapping, null parent/sprint, Markdown/tags/colors, due-date/blocking fields, status-label absence, required-field rejection, invalid ID, malformed object, auth/request count, and no extra reads. Debug build passed with 0 warnings/errors. HTTP route is `GET tasks/{taskId}`; transport owns response disposal; no live calls. | Implement get_task API behavior / pending |
 | 3 | Not started | — | Expose get_task MCP interface / pending |
 | 4 | Not started | — | Verify get_task workflow / pending |
 
