@@ -64,6 +64,11 @@ Notes:
 - Transport: STDIO; logging via `Microsoft.Extensions.Logging` to stderr.
 - HTTP: `HttpClient` with bearer auth token acquired via `/auth`.
 
+## Implementation Planning
+
+- [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
+- [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. These are plans, not implemented capabilities.
+
 ## Quickstart & Examples
 For end-to-end setup (Codex config, MCP Inspector, troubleshooting), see:
 
