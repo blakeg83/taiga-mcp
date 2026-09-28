@@ -20,8 +20,8 @@ The current server exposes 14 tools:
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Story update, epic, task, and
-cross-resource commands are not exposed by this server yet. `update_user_story`
+individual checklists are complete. Epic, task, and cross-resource commands
+are not exposed by this server yet. `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
 `clearFields` containing only the wire names `assigned_to` and `milestone`.
