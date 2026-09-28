@@ -181,6 +181,26 @@ public sealed class EpicListTests
         }
     }
 
+    [Fact]
+    public async Task ListEpicsTool_ReturnsEnvelopeWithExplicitNullPaginationValues()
+    {
+        var handler = EpicRoutes(EpicListFixtures.OpenAndClosed);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(await new EpicTools(NewApi(handler, auth))
+                .ListEpics(123, page: 4));
+
+            Assert.Equal(JsonValueKind.Object, json.ValueKind);
+            Assert.Equal(4, json.GetProperty("page").GetInt32());
+            Assert.True(json.GetProperty("total").ValueKind == JsonValueKind.Null);
+            Assert.True(json.GetProperty("next_page").ValueKind == JsonValueKind.Null);
+            Assert.True(json.GetProperty("has_more").ValueKind == JsonValueKind.Null);
+            Assert.Equal(301, json.GetProperty("items")[0].GetProperty("id").GetInt32());
+            Assert.False(json.GetProperty("items")[1].TryGetProperty("assigned_to", out _));
+        }
+    }
+
     private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
         => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
 

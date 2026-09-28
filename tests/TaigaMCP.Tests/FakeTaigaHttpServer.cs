@@ -41,6 +41,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode TaskUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicListStatusCode { get; set; } = HttpStatusCode.OK;
+
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
     public static FakeTaigaHttpServer Start()
@@ -157,6 +159,27 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 context.Response,
                 HttpStatusCode.OK,
                 task);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/epics", StringComparison.OrdinalIgnoreCase))
+        {
+            if (EpicListStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicListStatusCode, "{\"detail\":\"synthetic epic failure\"}");
+                return;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "[{\"id\":301,\"ref\":12,\"project\":123,\"subject\":\"Integration epic\",\"status\":7,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":42,\"color\":\"#336699\",\"tags\":[[\"search\",\"#336699\"]],\"modified_date\":\"2026-09-28T12:03:00Z\",\"version\":4}]",
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "false",
+                    ["x-pagination-count"] = "1",
+                    ["x-pagination-current"] = "1"
+                });
             return;
         }
 

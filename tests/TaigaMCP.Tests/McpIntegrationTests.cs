@@ -31,7 +31,7 @@ public sealed class McpIntegrationTests
             Assert.DoesNotContain("member=", taiga.Requests.Last().PathAndQuery);
         }
         Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
-        foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
+        foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
         var createdStory = await Call("create_user_story", new()
@@ -326,6 +326,7 @@ public sealed class McpIntegrationTests
                 "get_issue",
                 "get_task",
                 "get_user_story",
+                "list_epics",
                 "list_issue_priorities",
                 "list_issue_severities",
                 "list_issue_statuses",
@@ -388,6 +389,15 @@ public sealed class McpIntegrationTests
             var taskRequired = listTasks.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, taskRequired);
+
+            var listEpics = Assert.Single(tools, tool => tool.Name == "list_epics");
+            var epicProperties = listEpics.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "projectId", "page", "statusIds", "assignedTo", "tags", "query", "includeClosed" },
+                epicProperties);
+            var epicRequired = listEpics.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, epicRequired);
 
             var getUserStory = Assert.Single(tools, tool => tool.Name == "get_user_story");
             var getUserStoryProperties = getUserStory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -479,6 +489,30 @@ public sealed class McpIntegrationTests
             Assert.Equal(JsonValueKind.Null, total.ValueKind);
             var issueRequest = taiga.Requests.Last(request => request.PathAndQuery.Contains("/api/v1/issues", StringComparison.Ordinal));
             Assert.Equal("/api/v1/issues?project=123&page=1&status=1", issueRequest.PathAndQuery);
+
+            var epicPage = await client.CallToolAsync(
+                "list_epics",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 3,
+                    ["statusIds"] = new[] { 7 },
+                    ["assignedTo"] = 42,
+                    ["tags"] = new[] { "a&b" },
+                    ["query"] = "fix & revisión",
+                    ["includeClosed"] = true
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(epicPage.IsError == true);
+            var epicEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(epicPage));
+            Assert.Equal(JsonValueKind.Object, epicEnvelope.ValueKind);
+            Assert.Equal(3, epicEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(301, epicEnvelope.GetProperty("items")[0].GetProperty("id").GetInt32());
+            Assert.Equal("#336699", epicEnvelope.GetProperty("items")[0].GetProperty("color").GetString());
+            var epicRequest = taiga.Requests.Last(request => request.PathAndQuery.Contains("/api/v1/epics", StringComparison.Ordinal));
+            Assert.Equal(
+                "/api/v1/epics?project=123&page=3&status=7&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
+                epicRequest.PathAndQuery);
 
             var storyPage = await client.CallToolAsync(
                 "list_user_stories",

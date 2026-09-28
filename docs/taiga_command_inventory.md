@@ -54,7 +54,7 @@ API/source basis: [issue endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_epics` | New — domain API implemented, MCP wrapper pending | `projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with verified status, assignee, tag, and text filters, including closed epics when requested. Related-story progress aggregation remains planned. |
+| `list_epics` | New — delivered subset | `projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with verified status, assignee, tag, and text filters, including closed epics when requested. Related-story progress aggregation remains planned. |
 | `get_epic` | New | `epicId`; retrieve description, status, assignment, color, tags, version, and available progress information. |
 | `create_epic` | New | `projectId, subject, fields?`; create an epic with description, status, assignee, color, tags, and requirement flags. |
 | `update_epic` | New | `epicId, version, fields`; edit epic fields, including status, assignment, color, and ordering. |
@@ -214,5 +214,5 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 - The current 13 tool names were inventoried from [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset, optional page envelope, and goal 04 core detail read; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
-- Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. `EpicApi` now implements the domain listing contract, while the `list_epics` MCP wrapper and later epic operations remain planned. Shared wrappers can reuse underlying resource operations during a future implementation.
+- Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. `EpicApi` and `EpicTools` now deliver the `list_epics` subset; later epic operations remain planned. Shared wrappers can reuse underlying resource operations during a future implementation.
 - Structured arbitrary dependencies, time logging, and nested epics are not assumed to be native Taiga capabilities. External references or custom fields should not be presented as equivalent native relationships.

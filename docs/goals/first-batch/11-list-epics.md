@@ -58,12 +58,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose epic discovery
 
-- [ ] Add EpicTools and the list_epics MCP method with descriptions and correct optional defaults.
-- [ ] Return the envelope and expose missing totals/next-page state as unknown.
-- [ ] Document how a returned epic ID is used for get_epic and later story linking.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_epics MCP interface`.
+- [x] Add EpicTools and the list_epics MCP method with descriptions and correct optional defaults.
+- [x] Return the envelope and expose missing totals/next-page state as unknown.
+- [x] Document how a returned epic ID is used for get_epic and later story linking.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_epics MCP interface`.
 
 ## Step 4: Verify epic listing
 
@@ -99,7 +99,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, Debug build (0 warnings/errors), and sequential Debug test run passed (237 tests). Added a passing DTO/fixture contract check. On 2026-09-28, verified against pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`: `EpicViewSet.filter_fields` supports `project`, `assigned_to`, and `status__is_closed`; registered filter backends support status IDs, tags, and `q`; `EpicListSerializer` supplies `id`, `ref`, `project`, `modified_date`, `subject`, `color`, `version`, `status`, `assigned_to`, and `tags`. The implementation will use the verified `status__is_closed=false` flag for the default and omit it for explicit statuses or `includeClosed=true`; no status metadata lookup or name-based closure inference is needed. Source: https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py and https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py | Specify list_epics contracts / pending |
 | 2 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused `EpicListTests` passed 8 tests. `EpicApi` uses `TaigaTransport.ReadWithHeadersAsync`, requests one encoded page, maps inline status labels without metadata/detail lookups, preserves numeric status IDs/color/tags/nullable assignment, parses trusted pagination headers, and rejects invalid IDs/pages, malformed arrays, and malformed epic fields before/at mapping. Previous commit: `f6146cc`. | Implement list_epics API behavior / pending |
-| 3 | Not started | — | Expose list_epics MCP interface / pending |
+| 3 | Complete | The real STDIO MCP integration test now discovers `list_epics`, verifies its required/optional schema, calls it with every optional filter, and asserts the exact encoded request and page envelope. Focused `EpicListTests` plus the integration build/test path pass; the tool returns explicit `null` pagination metadata when headers are absent. Previous commit: `057540f`. | Expose list_epics MCP interface / pending |
 | 4 | Not started | — | Verify list_epics workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

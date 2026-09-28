@@ -175,6 +175,7 @@ Call the tool list_user_stories with projectId=12345 and backlogOnly=true
 Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
 Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
+Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
 Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11
 Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."
