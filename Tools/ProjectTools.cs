@@ -17,7 +17,7 @@ public sealed class ProjectTools
     }
 
     [McpServerTool(Name = "list_projects")]
-    public async Task<string> ListProjects(string? member = "me", int page = 1)
+    public async Task<string> ListProjects(string? member = "6", int page = 1)
     {
         var projects = await _projects.ListProjectsAsync(member, page);
         return JsonSerializer.Serialize(projects, JsonOpts);

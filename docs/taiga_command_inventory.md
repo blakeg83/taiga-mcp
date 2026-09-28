@@ -17,7 +17,7 @@ Detailed agent goal documents for the first 15-function implementation batch are
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_projects` | Existing | `member?, page?`; list accessible projects, including the existing `member=me` option. |
+| `list_projects` | Existing | `member?, page?`; list accessible projects, using the configured numeric member ID when filtering by a user. |
 | `resolve_project` | Existing | `slug`; return the internal project ID. |
 | `get_project` | New | `projectId`; return project details, enabled modules, defaults, and available permission information needed to interpret work items. |
 | `get_current_user` | New | No arguments; return the authenticated user's ID for assignment, ownership, and personal filters. |

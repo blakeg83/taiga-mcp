@@ -95,7 +95,7 @@ Click **Connect** → call tools interactively.
 npx @modelcontextprotocol/inspector --cli ./bin/Release/net8.0/linux-x64/publish/TaigaMCP \
   --method tools/call \
   --tool-name list_projects \
-  --tool-arg member=me
+  --tool-arg member=6
 ```
 
 ---
@@ -115,7 +115,7 @@ Look for `taiga` in the MCP servers list.
 ### Try tools
 ```
 List projects I belong to
-Call the tool list_projects with member=me and page=1
+Call the tool list_projects with member=6 and page=1
 Call the tool list_issues with projectId=12345 and page=1
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345
