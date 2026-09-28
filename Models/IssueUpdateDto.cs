@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssueUpdateDto
 {
     [JsonPropertyName("subject")]
@@ -25,11 +27,10 @@ public sealed record IssueUpdateDto
 
     [JsonPropertyName("tags")]
     public string[]? Tags { get; init; }
-    
-    [JsonPropertyName("comment")] 
+
+    [JsonPropertyName("comment")]
     public string? Comment { get; init; }
 
     [JsonPropertyName("version")]
     public required int Version { get; init; }
 }
-

@@ -30,9 +30,9 @@ show the JSON contents, not an MCP `content` wrapper.
 
 | Tool | Parameters and defaults | Current result |
 | --- | --- | --- |
-| `list_projects` | `member` string?, default `"6"`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
+| `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
-| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects. The current API requests open, non-archived work. |
+| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects. The current API requests open issues; issue archival is not a supported status filter. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId`, `subject`, and `version` required by the current method signature; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, and `comment` optional | One issue object returned by Taiga after the PATCH. |
@@ -68,7 +68,6 @@ Issue list/detail results:
   "severity":"Normal",
   "type":"Bug",
   "priority":"Normal",
-  "assigned_to":null,
   "modified":"2026-09-28T12:00:00Z",
   "version":3
 }]
@@ -106,17 +105,19 @@ User-story and metadata results:
   the array default; this is planned until the relevant goal implements it.
 - Issue and story labels are derived from project metadata calls. The current
   DTOs preserve labels for compatibility and do not expose all source IDs.
+- The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
+  null-valued response properties such as an unassigned issue's `assigned_to`
+  are omitted from current tool JSON. This response omission is distinct from
+  the planned page envelope, whose missing pagination values are explicit JSON
+  `null`, and from planned request-side `clearFields`, which will deliberately
+  encode JSON null to clear a nullable field.
 - Nullable create/update fields are serialized with `WhenWritingNull`, so an
   omitted or null update value is currently indistinguishable from “leave it
   unchanged.” Explicit clearing is a planned contract change owned by the
   update goals. The current `tags` array is sent when non-null, including an
   empty array.
 - `update_issue` sends the caller-supplied `version` in the PATCH body and
-  does not refresh and retry on a version error. Non-success responses are
-  surfaced as `HttpRequestException` by the current domain API; the current
-  update message includes the HTTP status and response body. Future error
-  handling must retain safe validation details without exposing credentials or
-  unbounded response data.
+  does not refresh and retry on a version error. Non-success responses retain HTTP status/category and allowlisted rejected field names through safe MCP errors. Arbitrary upstream text is not echoed; at most 4096 error bytes are read. Writes whose responses cannot be mapped report that they may already have applied. Cancellation propagates separately.
 - The isolated contract suite includes version-related fixtures for both a
   400 field-validation response and a 409 conflict response. These fixtures
   verify propagation of each status; they do not claim that every stale
@@ -189,14 +190,19 @@ listener, and uses `McpClientFactory.CreateAsync` with the installed
 `0.3.0-preview.4` SDK. It verifies the complete 11-name `tools/list` result,
 the required/optional schema entries, a real `list_projects` `tools/call`, and
 that a fake HTTP 500 is returned as a tool result with `IsError=true`. The
-fixture parses the returned text as JSON, which also proves that server logs do
-not corrupt STDOUT protocol output. A separate test-only stream server probes
-argument binding for explicit `false`, an empty array, an explicit null, and a
-missing required integer; the probe type is compiled only in the test project.
+fixture also tees the child process's raw STDOUT before the SDK sees it and
+validates every nonblank line as a JSON-RPC 2.0 request, notification, or
+response. A separate negative test rejects blank lines, plain-text logs, and
+JSON values that are not MCP messages. The end-to-end contamination test runs
+a temporary copied application behind a launcher that writes a plain-text
+startup line; the strict fixture fails before the SDK can accept the session.
+A separate test-only stream server probes argument binding for explicit
+`false`, an empty array, an explicit null, and a missing required integer; the
+probe type is compiled only in the test project.
 
-Final validation on 2026-09-28 used the repository root and an explicit
-temporary output directory because two pre-existing `TaigaMCP.exe` processes
-held the default apphost file:
+The original foundation validation on 2026-09-28 used the repository root and
+an explicit temporary output directory because pre-existing `TaigaMCP.exe`
+processes held the default apphost file:
 
 ```text
 dotnet restore
@@ -205,8 +211,54 @@ dotnet test TaigaMCP.sln -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation-fina
 ```
 
 Restore passed; the alternate-output solution build passed with 0 warnings and
-the solution test run passed all 8 tests. The default `dotnet build -c Debug`
-and `dotnet test` commands were also run and stopped before compilation/test
-execution when MSBuild could not replace the locked default apphost. No server
-process was stopped, and no generated `bin/`, `obj/`, `.vs/`, credential, or
-live Taiga payload was added to the commit.
+the solution test run passed all 8 tests. The default commands were also run
+and stopped before compilation/test execution when MSBuild could not replace
+the locked default apphost. No server process was stopped, and no generated
+`bin/`, `obj/`, `.vs/`, credential, or live Taiga payload was added to the
+foundation commits.
+
+The corrected review validation reran the root commands after the output lock
+was no longer present:
+
+```text
+dotnet restore
+dotnet build -c Debug
+dotnet test
+```
+
+All three commands passed; the Debug build had 0 warnings and the solution
+test run passed all 13 tests. The focused strict STDIO run also passed its 5
+integration tests, including the expected failure of the contaminated
+temporary-copy experiment. The nullable issue contract was verified through
+the real `IssueTools.GetIssue` path, with `assigned_to` absent from the public
+JSON when the upstream value is null.
+
+Cleanup compatibility: production C# types now live in `TaigaMCP.Api`,
+`TaigaMCP.Tools`, and other folder namespaces. The unused aggregate facade is
+removed; internal consumers use domain APIs. MCP signatures, defaults, JSON
+property names and response omission are unchanged at this stage.
+
+## Input validation and configuration
+
+Positive internal IDs and pages >= 1 are required. Slugs and supplied subjects
+must be nonblank. Update versions must be >= 0; an update needs a real change
+or nonblank comment. Empty description/tag arrays remain valid. These are
+intentional validation changes: invalid calls now fail before contacting Taiga.
+`update_issue.subject` remains required but nullable; pass null for other edits.
+Cancellation is injected by MCP and is not a tool argument.
+
+Credentials must be nonblank. `TAIGA__BASEURL` accepts an absolute HTTP/HTTPS URL
+without credentials/query/fragment and normalizes a trailing slash.
+`TAIGA__METADATATTLSECONDS` is positive, defaults to 300, and controls metadata
+refresh. See [development](development.md) for lifetimes and future contracts.
+
+## Intentional list behavior changes
+
+`list_projects` now defaults to `member=null` (no member filter). To retain the
+previous account-specific selection, call `list_projects(member="6")`, or send
+`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
+Story lists use Taiga's `status__is_closed=false` and
+`status__is_archived=false`; English labels such as Done/Archived no longer
+exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
+issue archive filtering and redundant status-exclusion requests were removed.
+These are behavior corrections, not behavior-preserving refactoring.

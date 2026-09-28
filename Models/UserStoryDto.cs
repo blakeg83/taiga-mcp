@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record UserStoryDto
 {
     [JsonPropertyName("id")]
@@ -20,4 +22,3 @@ public sealed record UserStoryDto
     [JsonPropertyName("modified")]
     public string? Modified { get; init; }
 }
-

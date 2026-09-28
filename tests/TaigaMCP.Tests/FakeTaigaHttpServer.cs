@@ -121,6 +121,25 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        string? payload = path switch
+        {
+            "/api/v1/resolver" => "{\"project\":123}",
+            "/api/v1/issues/42" => "{\"id\":42,\"ref\":7,\"project\":123,\"subject\":\"Test\",\"version\":1}",
+            "/api/v1/issues" when request.HttpMethod == "POST" => "{\"id\":42,\"project\":123,\"subject\":\"Created\",\"version\":1}",
+            "/api/v1/issues" => "[{\"id\":42,\"project\":123,\"subject\":\"Test\",\"version\":1}]",
+            "/api/v1/issue-statuses" => "[{\"id\":1,\"name\":\"Open\",\"is_closed\":false}]",
+            "/api/v1/userstory-statuses" => "[{\"id\":1,\"name\":\"Ready\",\"is_closed\":false,\"is_archived\":false}]",
+            "/api/v1/userstories" => "[{\"id\":90,\"ref\":2,\"subject\":\"Story\",\"status\":1}]",
+            "/api/v1/severities" or "/api/v1/priorities" or "/api/v1/issue-types" => "[{\"id\":1,\"name\":\"Normal\"}]",
+            "/api/v1/history/issue/42" => "[]",
+            _ => null
+        };
+        if (payload is not null)
+        {
+            await RespondAsync(context.Response, HttpStatusCode.OK, payload);
+            return;
+        }
+
         await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"not found\"}");
     }
 

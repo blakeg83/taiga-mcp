@@ -1,3 +1,5 @@
+using TaigaMCP.Api;
+using TaigaMCP.Config;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
@@ -135,4 +137,12 @@ public static class TaigaTestClient
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return (client, auth);
     }
+}
+
+public sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
+{
+    public HttpClient CreateClient(string name) => new(handler, disposeHandler: false)
+    {
+        BaseAddress = new Uri(TaigaTestClient.BaseUrl)
+    };
 }

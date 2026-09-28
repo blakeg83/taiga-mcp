@@ -1,15 +1,13 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.ComponentModel;
+using TaigaMCP.Api;
 using ModelContextProtocol.Server;
+
+namespace TaigaMCP.Tools;
 
 [McpServerToolType]
 public sealed class UserStoryTools
 {
     private readonly UserStoryApi _userStories;
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
 
     public UserStoryTools(UserStoryApi userStories)
     {
@@ -17,9 +15,14 @@ public sealed class UserStoryTools
     }
 
     [McpServerTool(Name = "list_user_stories")]
-    public async Task<string> ListUserStories(int projectId, int page = 1)
+    [Description("List one page of open, non-archived user stories by internal project ID. Returns an array without pagination metadata.")]
+    public async Task<string> ListUserStories(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
     {
-        var stories = await _userStories.ListUserStoriesAsync(projectId, page);
-        return JsonSerializer.Serialize(stories, JsonOpts);
-    }
+        var stories = await _userStories.ListUserStoriesAsync(projectId, page, cancellationToken);
+        return ToolResponseJson.Serialize(stories);
+    });
 }

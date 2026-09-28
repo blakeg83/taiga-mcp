@@ -1,27 +1,26 @@
+using TaigaMCP.Models;
 using System.Text.Json;
+
+namespace TaigaMCP.Api;
 
 /// <summary>Project operations.</summary>
 public sealed class ProjectApi
 {
-    private readonly HttpClient _http;
-    private readonly AuthClient _auth;
+    private readonly TaigaTransport _transport;
 
-    public ProjectApi(HttpClient http, AuthClient auth)
+    public ProjectApi(TaigaTransport transport)
     {
-        _http = http;
-        _auth = auth;
+        _transport = transport;
     }
 
-    public async Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member, int page)
+    public async Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member, int page, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(page, nameof(page));
         var url = string.IsNullOrEmpty(member)
             ? $"projects?page={page}"
             : $"projects?member={Uri.EscapeDataString(member)}&page={page}";
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        var res = await _auth.SendAsync(_http, req);
-        res.EnsureSuccessStatusCode();
-
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        using var doc = await _transport.ReadAsync(req, cancellationToken);
         JsonElement root = doc.RootElement;
         JsonElement list = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("results", out var results)
             ? results
@@ -40,12 +39,11 @@ public sealed class ProjectApi
         return items;
     }
 
-    public async Task<int> ResolveProjectIdAsync(string slug)
+    public async Task<int> ResolveProjectIdAsync(string slug, CancellationToken cancellationToken = default)
     {
+        InputValidation.Required(slug, nameof(slug));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"resolver?project={Uri.EscapeDataString(slug)}");
-        var res = await _auth.SendAsync(_http, req);
-        res.EnsureSuccessStatusCode();
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+        using var doc = await _transport.ReadAsync(req, cancellationToken);
         return doc.RootElement.GetProperty("project").GetInt32();
     }
 }

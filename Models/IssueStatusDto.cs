@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssueStatusDto
 {
     [JsonPropertyName("id")]
@@ -14,4 +16,3 @@ public sealed record IssueStatusDto
     [JsonPropertyName("is_closed")]
     public bool IsClosed { get; init; }
 }
-

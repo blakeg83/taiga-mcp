@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record ProjectDto
 {
     [JsonPropertyName("id")]
@@ -11,4 +13,3 @@ public sealed record ProjectDto
     [JsonPropertyName("name")]
     public string? Name { get; init; }
 }
-

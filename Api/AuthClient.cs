@@ -2,107 +2,102 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Net;
 using System.Net.Http.Headers;
-using System.Text;
+using System.Net.Http.Json;
 using System.Text.Json;
+using TaigaMCP.Config;
 
-public sealed class AuthClient
+namespace TaigaMCP.Api;
+
+public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClient> log) : IDisposable
 {
-    private readonly TaigaOptions _cfg;
-    private readonly ILogger<AuthClient> _log;
-    private string? _token;
-    private string? _refresh;
+    private sealed record TokenState(string Token, string? Refresh);
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private TokenState? _state;
 
-    public AuthClient(IOptions<TaigaOptions> opts, ILogger<AuthClient> log)
+    private async Task<TokenState> GetStateAsync(HttpClient http, TokenState? rejected, CancellationToken cancellationToken)
     {
-        _cfg = opts.Value;
-        _log = log;
-    }
-
-    public async Task EnsureAuthAsync(HttpClient http)
-    {
-        if (!string.IsNullOrEmpty(_token))
+        var state = Volatile.Read(ref _state);
+        if (state is not null && !ReferenceEquals(state, rejected)) return state;
+        await _gate.WaitAsync(cancellationToken);
+        try
         {
-            // Token present; per-request headers are set in SendAsync.
-            return;
+            state = _state;
+            if (state is not null && !ReferenceEquals(state, rejected)) return state;
+            TokenState? replacement = null;
+            if (state?.Refresh is { Length: > 0 } refresh)
+                replacement = await AuthenticateAsync(http, "auth/refresh", new { refresh }, true, cancellationToken);
+            replacement ??= await AuthenticateAsync(http, "auth", new
+            {
+                type = "normal",
+                username = options.Value.Username,
+                password = options.Value.Password
+            }, false, cancellationToken);
+            Volatile.Write(ref _state, replacement);
+            log.LogDebug("Taiga authentication state replaced");
+            return replacement!;
         }
-
-        // Ensure auth endpoints are called without any Authorization header.
-        http.DefaultRequestHeaders.Authorization = null;
-        _log.LogDebug("Auth: logging in via /auth");
-        var body = JsonSerializer.Serialize(new { type = "normal", username = _cfg.Username, password = _cfg.Password });
-        using var res = await http.PostAsync("auth", new StringContent(body, Encoding.UTF8, "application/json"));
-        res.EnsureSuccessStatusCode();
-
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        _token = doc.RootElement.GetProperty("auth_token").GetString()
-                 ?? throw new InvalidOperationException("Taiga auth_token missing");
-        _refresh = doc.RootElement.TryGetProperty("refresh", out var r) ? r.GetString() : null;
-        _log.LogInformation("Auth: login succeeded");
+        finally { _gate.Release(); }
     }
 
-    public async Task<HttpResponseMessage> SendAsync(HttpClient http, HttpRequestMessage req)
+    private static async Task<TokenState?> AuthenticateAsync(HttpClient http, string path, object payload,
+        bool refresh, CancellationToken cancellationToken)
     {
-        await EnsureAuthAsync(http);
-
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
-        var res = await http.SendAsync(req);
-        if (res.StatusCode != HttpStatusCode.Unauthorized) return res;
-
-        // token expired -> try refresh then one retry
-        _log.LogDebug("Auth: 401 received; attempting refresh via /auth/refresh");
-        res.Dispose();
-        if (await TryRefreshAsync(http))
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(payload) };
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (refresh && !response.IsSuccessStatusCode) return null;
+        await TaigaTransport.EnsureSuccessAsync(response, cancellationToken);
+        try
         {
-            var retry = await CloneAsync(req);
-            retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
-            _log.LogDebug("Auth: refresh succeeded; retrying original request once");
-            return await http.SendAsync(retry);
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("auth_token", out var token) && token.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(token.GetString()))
+            {
+                var nextRefresh = doc.RootElement.TryGetProperty("refresh", out var value) && value.ValueKind == JsonValueKind.String
+                    ? value.GetString() : null;
+                return new TokenState(token.GetString()!, nextRefresh);
+            }
         }
-
-        // fallback: full re-login then retry
-        _token = null;
-        _log.LogDebug("Auth: refresh failed; attempting full re-login via /auth");
-        await EnsureAuthAsync(http);
-        var retry2 = await CloneAsync(req);
-        retry2.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
-        _log.LogDebug("Auth: re-login succeeded; retrying original request once");
-        return await http.SendAsync(retry2);
+        catch (JsonException) { }
+        if (refresh) return null;
+        throw new TaigaRequestException("Taiga authentication returned an invalid token response.");
     }
 
-    private async Task<bool> TryRefreshAsync(HttpClient http)
+    // Caller owns original request and returned response. Only received 401s permit a replay.
+    public async Task<HttpResponseMessage> SendAsync(HttpClient http, HttpRequestMessage request,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_refresh)) return false;
-
-        // Ensure refresh is called without any Authorization header.
-        http.DefaultRequestHeaders.Authorization = null;
-        _log.LogDebug("Auth: calling /auth/refresh");
-        var payload = JsonSerializer.Serialize(new { refresh = _refresh });
-        using var res = await http.PostAsync("auth/refresh", new StringContent(payload, Encoding.UTF8, "application/json"));
-        if (!res.IsSuccessStatusCode)
-        {
-            _log.LogDebug("Auth: /auth/refresh failed with status {Status}", (int)res.StatusCode);
-            return false;
-        }
-
-        using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
-        _token = doc.RootElement.GetProperty("auth_token").GetString();
-        if (doc.RootElement.TryGetProperty("refresh", out var r)) _refresh = r.GetString();
-        var ok = !string.IsNullOrEmpty(_token);
-        if (ok) _log.LogInformation("Auth: token refresh succeeded");
-        else _log.LogDebug("Auth: refresh response missing auth_token");
-        return ok;
+        var state = await GetStateAsync(http, null, cancellationToken);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", state.Token);
+        var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.StatusCode != HttpStatusCode.Unauthorized) return response;
+        response.Dispose();
+        var replacement = await GetStateAsync(http, state, cancellationToken);
+        using var retry = await CloneAsync(request, cancellationToken);
+        retry.Headers.Authorization = new AuthenticationHeaderValue("Bearer", replacement.Token);
+        return await http.SendAsync(retry, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
     }
 
-    private static async Task<HttpRequestMessage> CloneAsync(HttpRequestMessage req)
+    private static async Task<HttpRequestMessage> CloneAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        var clone = new HttpRequestMessage(req.Method, req.RequestUri);
-        foreach (var h in req.Headers) clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
-        if (req.Content is not null)
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri)
         {
-            var bytes = await req.Content.ReadAsByteArrayAsync();
-            clone.Content = new ByteArrayContent(bytes);
-            foreach (var h in req.Content.Headers) clone.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy
+        };
+        try
+        {
+            foreach (var header in request.Headers) clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            foreach (var option in request.Options) clone.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
+            if (request.Content is not null)
+            {
+                clone.Content = new ByteArrayContent(await request.Content.ReadAsByteArrayAsync(cancellationToken));
+                foreach (var header in request.Content.Headers) clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+            return clone;
         }
-        return clone;
+        catch { clone.Dispose(); throw; }
     }
+
+    public void Dispose() => _gate.Dispose();
 }

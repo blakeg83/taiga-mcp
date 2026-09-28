@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+namespace TaigaMCP.Models;
+
 public sealed record IssuePriorityDto
 {
     [JsonPropertyName("id")]

@@ -49,7 +49,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement EpicApi and registration
 
-- [ ] Create the authenticated domain API and register it with the existing named HttpClient and AuthClient.
+- [ ] Create EpicApi accepting TaigaTransport; register it in Hosting/ServiceCollectionExtensions.cs and pass CancellationToken through every call.
 - [ ] Reuse query/page logic and preserve numeric status IDs, color, tags, and nullable assignment.
 - [ ] Keep one-page behavior and avoid related-story/detail lookups for every epic.
 - [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
