@@ -189,10 +189,15 @@ listener, and uses `McpClientFactory.CreateAsync` with the installed
 `0.3.0-preview.4` SDK. It verifies the complete 11-name `tools/list` result,
 the required/optional schema entries, a real `list_projects` `tools/call`, and
 that a fake HTTP 500 is returned as a tool result with `IsError=true`. The
-fixture parses the returned text as JSON, which also proves that server logs do
-not corrupt STDOUT protocol output. A separate test-only stream server probes
-argument binding for explicit `false`, an empty array, an explicit null, and a
-missing required integer; the probe type is compiled only in the test project.
+fixture also tees the child process's raw STDOUT before the SDK sees it and
+validates every nonblank line as a JSON-RPC 2.0 request, notification, or
+response. A separate negative test rejects blank lines, plain-text logs, and
+JSON values that are not MCP messages. The end-to-end contamination test runs
+a temporary copied application behind a launcher that writes a plain-text
+startup line; the strict fixture fails before the SDK can accept the session.
+A separate test-only stream server probes argument binding for explicit
+`false`, an empty array, an explicit null, and a missing required integer; the
+probe type is compiled only in the test project.
 
 Final validation on 2026-09-28 used the repository root and an explicit
 temporary output directory because two pre-existing `TaigaMCP.exe` processes

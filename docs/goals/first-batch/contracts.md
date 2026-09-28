@@ -56,5 +56,7 @@ omits the `required` property when no parameters are required. Defaults and
 nullable parameters therefore need runtime call tests in addition to schema
 inspection. The test-only probe confirmed that explicit `false`, empty arrays,
 and explicit nulls survive binding, while omitting a required integer produces
-a tool failure. The production STDIO fixture confirmed that application
-logging remains off protocol STDOUT.
+a tool failure. The production STDIO fixture now tees raw child STDOUT before
+the SDK sees it and validates every emitted line as a JSON-RPC 2.0 message;
+negative tests reject blank, plain-text, and non-message JSON lines, and a
+temporary contaminated application copy fails the end-to-end session.
