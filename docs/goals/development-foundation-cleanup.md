@@ -84,14 +84,14 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 5: make metadata caching safe and refreshable
 
-- [ ] Replace unsynchronized nested dictionaries with concurrency-safe cache entries keyed by metadata kind and project ID. Return read-only snapshots rather than mutable cached dictionaries.
-- [ ] Coalesce simultaneous loads for the same key while allowing unrelated projects/kinds to load independently. A concurrent dictionary alone does not guarantee a single fetch.
-- [ ] Add a configurable positive metadata TTL, defaulting to five minutes, through `TaigaOptions`. Document its environment variable and startup validation.
-- [ ] Inject `TimeProvider` or an equivalent clock so expiry tests do not sleep. Expired values should be refreshed; failures must not be stored permanently or silently represented as current data.
-- [ ] Ensure failed/cancelled loads release coordination state and allow a later request to retry. Bound retained expired entries or document and implement eviction so old projects do not accumulate forever.
-- [ ] Test cache hits, expiry, concurrent same-key loads, project isolation, failure followed by success, cancellation, and immunity to caller mutation.
-- [ ] Run cache tests plus representative issue reads/writes through fake HTTP.
-- [ ] Update docs/evidence and commit as `Add concurrent expiring metadata caching`.
+- [x] Replace unsynchronized nested dictionaries with concurrency-safe cache entries keyed by metadata kind and project ID. Return read-only snapshots rather than mutable cached dictionaries.
+- [x] Coalesce simultaneous loads for the same key while allowing unrelated projects/kinds to load independently. A concurrent dictionary alone does not guarantee a single fetch.
+- [x] Add a configurable positive metadata TTL, defaulting to five minutes, through `TaigaOptions`. Document its environment variable and startup validation.
+- [x] Inject `TimeProvider` or an equivalent clock so expiry tests do not sleep. Expired values should be refreshed; failures must not be stored permanently or silently represented as current data.
+- [x] Ensure failed/cancelled loads release coordination state and allow a later request to retry. Bound retained expired entries or document and implement eviction so old projects do not accumulate forever.
+- [x] Test cache hits, expiry, concurrent same-key loads, project isolation, failure followed by success, cancellation, and immunity to caller mutation.
+- [x] Run cache tests plus representative issue reads/writes through fake HTTP.
+- [x] Update docs/evidence and commit as `Add concurrent expiring metadata caching`.
 
 ## Step 6: establish configuration and tool-boundary conventions
 
@@ -146,7 +146,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | 2. Structure/serialization | Complete | Previous commit c77e1c0. Namespaces, unused facade removal, shared response policy and init-only DTO; domain plan references updated. Full Debug suite: 13 passed. | Simplify API layers and serialization conventions |
 | 3. Transport | Complete | Previous ffeba6b. Shared transport/disposal, cancellation and safe errors; 28 Debug tests passed including actual MCP safe errors/schema and write uncertainty. Details in developer guide. | Centralize Taiga HTTP handling and cancellation |
 | 4. Authentication | Complete | Previous e2f9cc5. Gated coherent token state, bounded replay and per-operation factory clients. 33 Debug tests passed, including barrier-driven races and PATCH replay/ambiguity. | Coordinate authentication and HTTP client lifetimes |
-| 5. Cache | Not started | Pending | Pending |
+| 5. Cache | Complete | Previous 9a2b80c. Immutable per-key coalesced snapshots, configurable TTL/clock and bounded idle eviction. 38 Debug tests passed with deterministic expiry/cancellation/recovery/isolation. | Add concurrent expiring metadata caching |
 | 6. Contracts/configuration | Not started | Pending | Pending |
 | 7. Defaults/filters | Not started | Pending | Pending |
 | 8. Guardrails/final verification | Not started | Pending | Pending |

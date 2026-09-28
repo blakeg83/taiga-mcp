@@ -18,10 +18,10 @@ public sealed class IssueApi
     }
     private static IssueDto MapIssue(
         JsonElement it,
-        Dictionary<int, string> statuses,
-        Dictionary<int, string> severities,
-        Dictionary<int, string> types,
-        Dictionary<int, string> priorities)
+        IReadOnlyDictionary<int, string> statuses,
+        IReadOnlyDictionary<int, string> severities,
+        IReadOnlyDictionary<int, string> types,
+        IReadOnlyDictionary<int, string> priorities)
     {
         int sid = it.TryGetProperty("status", out var sEl)
             && sEl.ValueKind != JsonValueKind.Null

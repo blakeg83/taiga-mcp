@@ -104,3 +104,22 @@ single initial login, concurrent 401 refresh coalescing, later token reuse and
 cancelled gate waits. PATCH tests prove refresh rejection/login fallback,
 bounded repeated 401, exact body/version/header/options replay, and no replay on
 ambiguous network failure. Production STDIO tests remain green.
+
+## Step 5: metadata caching
+
+After `9a2b80c`, metadata is keyed by kind/project with one cancellable load gate
+per entry. A short dictionary lock pins active/waiting entries; HTTP runs outside
+that lock so unrelated keys load independently. Frozen dictionaries prevent
+caller mutation. Injected TimeProvider drives expiry without sleeping in tests.
+`TAIGA__METADATATTLSECONDS` sets a positive integer TTL (default 300 seconds);
+startup validation rejects zero/negative values. Failed/cancelled loads never
+become current values and release their gate for a subsequent attempt. A cancelled
+waiter does not cancel another caller's load. Idle entries are capped at 256;
+access/completion sweeps expired idle entries and evicts oldest idle entries over
+that cap. Active entries remain pinned; at rest retained entries are bounded even
+when no later traffic triggers expiry cleanup.
+
+`dotnet test -c Debug`: 38 passed. Cache tests cover hits, exact-boundary expiry,
+immutable old snapshots, coalescing, kind/project isolation, loader and waiter
+cancellation, failure recovery and capacity eviction. Existing fake-HTTP issue
+read/write and production MCP tests passed.

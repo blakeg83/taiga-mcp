@@ -19,6 +19,7 @@ public static class ServiceCollectionExtensions
             .Bind(config.GetSection("Taiga"))
             .Validate(o => !string.IsNullOrEmpty(o.Username) && !string.IsNullOrEmpty(o.Password),
                 "Taiga credentials are required")
+            .Validate(o => o.MetadataTtlSeconds > 0, "Taiga metadata TTL must be positive")
             .ValidateOnStart();
 
         services.AddHttpClient("taiga", (sp, client) =>
@@ -29,6 +30,7 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         });
 
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<AuthClient>();
         services.AddSingleton<TaigaTransport>();
         services.AddSingleton<ProjectApi>();
