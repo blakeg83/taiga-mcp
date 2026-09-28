@@ -74,12 +74,18 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose compatible tool arguments
 
-- [ ] Ensure MCP lists issueId/version as required and subject as optional; retain snake_case assigned_to and all old argument names.
-- [ ] Thread clearFields through IssueApi without widening unrelated APIs.
-- [ ] Document a read-current-version then update flow and how callers resolve version rejection.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose update_issue MCP interface`.
+- [x] Ensure MCP lists issueId/version as required and subject as optional; retain snake_case assigned_to and all old argument names.
+- [x] Thread clearFields through IssueApi without widening unrelated APIs.
+- [x] Document a read-current-version then update flow and how callers resolve version rejection.
+- [x] Validate this step: MCP tools/list schema and actual tools/call tests cover required/optional binding, status-only updates without subject, and explicit unassignment.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose update_issue MCP interface`.
+
+### Step 3 interface record
+
+- The emitted schema requires only `issueId` and `version`; `subject` is optional/nullable. Existing names, including `assigned_to`, remain unchanged and `clearFields` is optional with a default of null.
+- MCP integration tests invoke a status-only update without `subject` and an explicit unassignment through `clearFields=["assigned_to"]`, then inspect the recorded PATCH bodies.
+- Caller workflow: read the issue with `get_issue`, take its returned `version`, send only the desired changes (omitting `subject` when unchanged), and read again after a version rejection or an error that says the write may already have applied. Do not blind-retry an ambiguous write.
 
 ## Step 4: Verify issue editing end to end
 
@@ -116,7 +122,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline restore/build/test passed: 90 tests, 0 failures; contract/source record above | Specify update_issue contracts / pending |
 | 2 | Complete | Focused update/API/validation tests: 13 passed; Debug build: 0 warnings/errors | Implement update_issue API behavior / pending |
-| 3 | Not started | — | Expose update_issue MCP interface / pending |
+| 3 | Complete | MCP integration tests passed: 6; schema and status-only/clear calls verified | Expose update_issue MCP interface / pending |
 | 4 | Not started | — | Verify update_issue workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

@@ -43,7 +43,6 @@ public sealed class McpIntegrationTests
         Assert.False((await Call("update_issue", new()
         {
             ["issueId"] = 42,
-            ["subject"] = null,
             ["version"] = 0,
             ["description"] = "",
             ["tags"] = Array.Empty<string>()
@@ -53,6 +52,28 @@ public sealed class McpIntegrationTests
         Assert.Equal("", body.GetProperty("description").GetString());
         Assert.Equal(0, body.GetProperty("tags").GetArrayLength());
         Assert.Equal(0, body.GetProperty("version").GetInt32());
+
+        Assert.False((await Call("update_issue", new()
+        {
+            ["issueId"] = 42,
+            ["version"] = 1,
+            ["status"] = 1
+        })).IsError == true);
+        body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Last(request => request.Method == "PATCH").Body);
+        Assert.False(body.TryGetProperty("subject", out _));
+        Assert.Equal(1, body.GetProperty("status").GetInt32());
+        Assert.Equal(1, body.GetProperty("version").GetInt32());
+
+        Assert.False((await Call("update_issue", new()
+        {
+            ["issueId"] = 42,
+            ["version"] = 2,
+            ["clearFields"] = new[] { "assigned_to" }
+        })).IsError == true);
+        body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Last(request => request.Method == "PATCH").Body);
+        Assert.True(body.TryGetProperty("assigned_to", out var assignedTo));
+        Assert.Equal(JsonValueKind.Null, assignedTo.ValueKind);
+        Assert.Equal(2, body.GetProperty("version").GetInt32());
 
         var count = taiga.Requests.Count;
         var invalid = await Call("update_issue", new() { ["issueId"] = 42, ["subject"] = null, ["version"] = 1 });
@@ -118,6 +139,15 @@ public sealed class McpIntegrationTests
             Assert.Contains("query", issueProperties);
             Assert.Contains("includeClosed", issueProperties);
             Assert.Contains("includePageInfo", issueProperties);
+
+            var updateIssue = Assert.Single(tools, tool => tool.Name == "update_issue");
+            var updateProperties = updateIssue.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Contains("subject", updateProperties);
+            Assert.Contains("clearFields", updateProperties);
+            var updateRequired = updateIssue.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()).ToArray();
+            Assert.Contains("issueId", updateRequired);
+            Assert.Contains("version", updateRequired);
+            Assert.DoesNotContain("subject", updateRequired);
 
             var result = await client.CallToolAsync(
                 "list_projects",
