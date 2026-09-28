@@ -10,6 +10,11 @@ public sealed class TaskApi
     private readonly TaigaTransport _transport;
     private readonly UserStoryApi _userStories;
 
+    public TaskApi(TaigaTransport transport)
+        : this(transport, new UserStoryApi(transport))
+    {
+    }
+
     public TaskApi(TaigaTransport transport, UserStoryApi userStories)
     {
         _transport = transport;

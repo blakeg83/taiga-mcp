@@ -69,6 +69,26 @@ public sealed class TaskCreateTests
     }
 
     [Fact]
+    public async Task CreateTaskAsync_SendsExplicitEmptyDescriptionAndTags()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Post, "/api/v1/tasks", TaskCreateFixtures.CreatedTask, HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            await NewApi(handler, auth).CreateTaskAsync(
+                12,
+                "Capture deployment checklist",
+                description: "",
+                tags: []);
+
+            using var body = JsonDocument.Parse(Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/tasks")).Body);
+            Assert.Equal("", body.RootElement.GetProperty("description").GetString());
+            Assert.Empty(body.RootElement.GetProperty("tags").EnumerateArray());
+        }
+    }
+
+    [Fact]
     public async Task CreateTaskAsync_ValidatesParentAndOmitsMatchingMilestone()
     {
         var handler = new FakeHttpMessageHandler()
@@ -175,6 +195,47 @@ public sealed class TaskCreateTests
                 NewApi(handler, auth).CreateTaskAsync(12, "Capture saved-search requirements", userStoryId: 103, milestoneId: 55));
 
             Assert.DoesNotContain(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/tasks"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateTaskAsync_ReportsParentLookupDenialWithoutPost()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/userstories/102", "{\"detail\":\"secret parent data\"}", HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).CreateTaskAsync(12, "Implement saved-search endpoint", userStoryId: 102));
+
+            Assert.Contains("403", exception.Message);
+            Assert.Contains("permission denied", exception.Message);
+            Assert.DoesNotContain("secret parent data", exception.Message);
+            Assert.DoesNotContain(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/tasks"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateTaskAsync_ReportsServerStatusAndAssigneeValidationSafely()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/tasks",
+                "{\"status\":[\"secret status reason\"],\"assigned_to\":[\"secret assignee reason\"]}",
+                HttpStatusCode.BadRequest);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).CreateTaskAsync(12, "Capture deployment checklist", status: 11, assigned_to: 42));
+
+            Assert.Contains("status: rejected", exception.Message);
+            Assert.Contains("assigned_to: rejected", exception.Message);
+            Assert.DoesNotContain("secret status reason", exception.Message);
+            Assert.DoesNotContain("secret assignee reason", exception.Message);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/tasks"));
         }
     }
 

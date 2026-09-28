@@ -1,6 +1,6 @@
 # Goal 09: create_task
 
-Status: in progress.
+Status: delivered.
 
 ## Objective
 
@@ -112,31 +112,31 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify creation workflows
 
-- [ ] Create a parent-linked task through MCP and read it back using get_task; verify inherited sprint in the returned object.
-- [ ] Test standalone creation with and without a sprint, parent mismatch, wrong project, null parent sprint, and invalid subject.
-- [ ] Cover server status/assignee validation, parent lookup denial, transport failure, and one-POST-only behavior.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] Create a parent-linked task through MCP and read it back using get_task; verify inherited sprint in the returned object.
+- [x] Test standalone creation with and without a sprint, parent mismatch, wrong project, null parent sprint, and invalid subject.
+- [x] Cover server status/assignee validation, parent lookup denial, transport failure, and one-POST-only behavior.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_task workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Both story-linked and standalone tasks can be created.
-- [ ] A mismatched parent project or explicit sprint causes no create request.
-- [ ] Returned parent/sprint/version reflect server state.
-- [ ] Minimal tasks use configured project defaults.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Both story-linked and standalone tasks can be created.
+- [x] A mismatched parent project or explicit sprint causes no create request.
+- [x] Returned parent/sprint/version reflect server state.
+- [x] Minimal tasks use configured project defaults.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can break down stories or capture standalone tasks with unambiguous parent/sprint behavior.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can break down stories or capture standalone tasks with unambiguous parent/sprint behavior.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
@@ -148,7 +148,7 @@ No live Taiga project was used.
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned backend source reviewed; contract decisions and JSON fixtures recorded. Focused fixture tests passed (3); no failing production suite was introduced. | Specify create_task contracts / `b8d8937` |
 | 2 | Complete | `TaskCreateTests` passed (16); `dotnet build -c Debug` passed with 0 warnings/errors. Added `TaskCreateDto`, injected `UserStoryApi` parent validation, one-POST creation, authoritative response mapping, and safe ambiguous-write errors. | Implement create_task API behavior / `d6cbe9b` |
-| 3 | Complete | Production STDIO `tools/list` and `tools/call` passed; schema exposes the 8 public arguments with only `projectId` and `subject` required. Reference, README, quickstart, and inventory now document the delivered subset. | Expose create_task MCP interface / pending |
-| 4 | Not started | — | Verify create_task workflow / pending |
+| 3 | Complete | Production STDIO `tools/list` and `tools/call` passed; schema exposes the 8 public arguments with only `projectId` and `subject` required. Reference, README, quickstart, and inventory now document the delivered subset. | Expose create_task MCP interface / `b56767c` |
+| 4 | Complete | Root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed: 213 tests, 0 warnings/errors. Focused domain and real STDIO tests cover parent inheritance/read-back, standalone sprint choices, mismatches, null-parent sprint, invalid input, safe validation/denial/transport/mapping errors, and one POST. Verification is fake HTTP plus real MCP; no live Taiga writes. | Verify create_task workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

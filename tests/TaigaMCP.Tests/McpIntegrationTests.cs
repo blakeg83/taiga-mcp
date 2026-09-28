@@ -579,6 +579,18 @@ public sealed class McpIntegrationTests
             Assert.Equal(103, createTaskBody.RootElement.GetProperty("user_story").GetInt32());
             Assert.False(createTaskBody.RootElement.TryGetProperty("milestone", out _));
 
+            var createdTaskReadBack = await client.CallToolAsync(
+                "get_task",
+                new Dictionary<string, object?> { ["taskId"] = 204 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(createdTaskReadBack.IsError == true);
+            var createdTaskReadBackJson = JsonSerializer.Deserialize<JsonElement>(GetText(createdTaskReadBack));
+            Assert.Equal(204, createdTaskReadBackJson.GetProperty("id").GetInt32());
+            Assert.Equal(103, createdTaskReadBackJson.GetProperty("user_story").GetInt32());
+            Assert.Equal(55, createdTaskReadBackJson.GetProperty("milestone").GetInt32());
+            Assert.Equal(1, createdTaskReadBackJson.GetProperty("version").GetInt32());
+            Assert.Single(taiga.Requests, request => request.Method == "GET" && request.PathAndQuery == "/api/v1/tasks/204");
+
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);
             Assert.Contains("member=6", taiga.Requests.Last().PathAndQuery);
