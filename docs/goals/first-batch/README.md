@@ -27,6 +27,8 @@ The 15 functions below prioritize the daily cycle of finding work, reading its c
 
 ## How to use these documents
 
+Foundation review follow-up: [Goal 00 review fixes](00-foundation-review-fixes.md) addresses PR #31's protocol-output verification and nullable-response documentation findings. Complete it before relying on the foundation's STDOUT-cleanliness evidence.
+
 Assign one goal document to a coding agent, along with access to this repository. Tell it to read [the execution instructions](execution-instructions.md), [the shared contracts](contracts.md), and the linked prerequisites before editing. Implement in the order above by default. Documents are task specifications, not instructions to start separate chats or delegate automatically.
 
 Each function has its own objective, bounded scope, target interface, four implementation steps, acceptance scenarios, and definition of done. All completion boxes deliberately start unchecked. The foundation is a prerequisite goal, not a sixteenth public function.
