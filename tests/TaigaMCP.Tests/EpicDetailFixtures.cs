@@ -25,4 +25,24 @@ internal static class EpicDetailFixtures
           "future_detail_field":{"ignored":true}
         }
         """;
+
+    public const string MissingVersion = """
+        {"id":301,"ref":12,"project":123,"description":"Missing version"}
+        """;
+
+    public const string InvalidIdentity = """
+        {"id":0,"ref":12,"project":123,"version":4}
+        """;
+
+    public const string InvalidReference = """
+        {"id":301,"ref":0,"project":123,"version":4}
+        """;
+
+    public const string InvalidProject = """
+        {"id":301,"ref":12,"project":0,"version":4}
+        """;
+
+    public const string InvalidVersion = """
+        {"id":301,"ref":12,"project":123,"version":-1}
+        """;
 }

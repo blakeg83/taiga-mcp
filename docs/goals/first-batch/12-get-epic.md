@@ -48,12 +48,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement epic retrieval
 
-- [ ] Add GetEpicAsync with validated ID, authentication, status checking, and disposed responses.
-- [ ] Reuse list mapping for common fields and add authoritative description/version.
-- [ ] Do not automatically call related_userstories or history; preserve numeric status if label lookup is unavailable.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement get_epic API behavior`.
+- [x] Add GetEpicAsync with validated ID, authentication, status checking, and disposed responses.
+- [x] Reuse list mapping for common fields and add authoritative description/version.
+- [x] Do not automatically call related_userstories or history; preserve numeric status if label lookup is unavailable.
+- [x] Validate this step: focused domain tests passed (`8` tests); Debug build passed with zero warnings/errors.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement get_epic API behavior`.
 
 ## Step 3: Expose epic detail
 
@@ -108,8 +108,8 @@ computed progress is part of this goal.
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | In progress | Baseline passed; pinned route/serializer evidence recorded; detail fixture and DTO contract added. | Specify get_epic contracts / pending |
-| 2 | Not started | — | Implement get_epic API behavior / pending |
+| 1 | Complete | Baseline passed; pinned route/serializer evidence recorded; detail fixture and DTO contract added. | Specify get_epic contracts / `33f4f24` |
+| 2 | In progress | Focused domain tests (`8`) and Debug build passed; exact route, mapping, validation, and no-relation-read behavior documented. | Implement get_epic API behavior / pending |
 | 3 | Not started | — | Expose get_epic MCP interface / pending |
 | 4 | Not started | — | Verify get_epic workflow / pending |
 

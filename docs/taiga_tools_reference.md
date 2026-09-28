@@ -78,6 +78,10 @@ and taiga-doc revision
 `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` ([epic endpoints](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/epics/endpoints.adoc)).
 This is pinned source evidence, not a deployed-version claim.
 
+The domain `EpicApi.GetEpicAsync` now implements this wire mapping and
+validation; the public `get_epic` MCP wrapper is delivered in the next goal
+step.
+
 See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
