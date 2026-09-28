@@ -291,6 +291,9 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                             task[field] = patch[field]?.DeepClone();
                     }
 
+                    if (task["is_blocked"]?.GetValue<bool>() == false)
+                        task["blocked_note"] = string.Empty;
+
                     if (patch.TryGetPropertyValue("status", out var statusNode) && statusNode is not null)
                     {
                         task["status_extra_info"] = new JsonObject

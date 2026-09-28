@@ -60,7 +60,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
-| `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
+| `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -128,9 +128,11 @@ tags?, isBlocked?, blockedNote?, comment?, clearFields?)`. Omitted fields remain
 unchanged; `description=""`,
 `tags=[]`, `isBlocked=false`, and `blockedNote=""` are explicit updates.
 `clearFields` accepts only `assigned_to`, and emits `assigned_to: null` for an
-explicit unassignment. Setting or clearing `isBlocked` does not implicitly
-change `blockedNote`. The caller supplies the nonnegative version from a fresh
-`get_task` result, and a PATCH returns the server's authoritative task detail.
+explicit unassignment. The client keeps omitted fields absent and does not add
+compensating writes, but Taiga's task save clears `blocked_note` whenever
+`isBlocked=false`, whether the note is omitted or nonempty. The caller supplies
+the nonnegative version from a fresh `get_task` result, and a PATCH returns the
+server's authoritative task detail.
 
 Unblock workflow example:
 

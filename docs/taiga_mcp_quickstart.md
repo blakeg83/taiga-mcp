@@ -194,7 +194,9 @@ call `get_task` and use its fresh `version` with `update_task`. `get_task`
 accepts the internal ID, not the displayed `#ref`. Use
 `clearFields=["assigned_to"]` to unassign, and pass
 `isBlocked=false, blockedNote=""` when both the blocker and its note should be
-cleared. Changing `isBlocked` alone does not overwrite the note.
+cleared. The request keeps omitted fields absent, but Taiga clears
+`blocked_note` on save whenever the task is unblocked, including if a nonempty
+note is supplied.
 
 ---
 

@@ -802,23 +802,27 @@ public sealed class McpIntegrationTests
                 ["isBlocked"] = false
             });
             Assert.False(unblockedWithoutNote.IsError == true, GetText(unblockedWithoutNote));
-            var retainedNote = JsonSerializer.Deserialize<JsonElement>(GetText(unblockedWithoutNote));
-            Assert.False(retainedNote.GetProperty("is_blocked").GetBoolean());
-            Assert.Equal("Waiting for the dependency.", retainedNote.GetProperty("blocked_note").GetString());
+            var clearedByServer = JsonSerializer.Deserialize<JsonElement>(GetText(unblockedWithoutNote));
+            Assert.False(clearedByServer.GetProperty("is_blocked").GetBoolean());
+            Assert.Equal(string.Empty, clearedByServer.GetProperty("blocked_note").GetString());
             AssertTaskPatch(taiga, ["is_blocked", "version"]);
 
-            var unblocked = await Call("update_task", new()
+            var unblockedWithNonemptyNote = await Call("update_task", new()
             {
                 ["taskId"] = 203,
                 ["version"] = 7,
                 ["isBlocked"] = false,
-                ["blockedNote"] = string.Empty
+                ["blockedNote"] = "This note cannot persist while unblocked."
             });
-            Assert.False(unblocked.IsError == true, GetText(unblocked));
-            var clearedBlock = JsonSerializer.Deserialize<JsonElement>(GetText(unblocked));
-            Assert.False(clearedBlock.GetProperty("is_blocked").GetBoolean());
-            Assert.Equal(string.Empty, clearedBlock.GetProperty("blocked_note").GetString());
-            AssertTaskPatch(taiga, ["blocked_note", "is_blocked", "version"]);
+            Assert.False(unblockedWithNonemptyNote.IsError == true, GetText(unblockedWithNonemptyNote));
+            var clearedNonemptyNote = JsonSerializer.Deserialize<JsonElement>(GetText(unblockedWithNonemptyNote));
+            Assert.False(clearedNonemptyNote.GetProperty("is_blocked").GetBoolean());
+            Assert.Equal(string.Empty, clearedNonemptyNote.GetProperty("blocked_note").GetString());
+            using (var nonemptyNoteBody = GetLastTaskPatchDocument(taiga))
+            {
+                AssertPatchProperties(nonemptyNoteBody.RootElement, "blocked_note", "is_blocked", "version");
+                Assert.Equal("This note cannot persist while unblocked.", nonemptyNoteBody.RootElement.GetProperty("blocked_note").GetString());
+            }
 
             var comment = await Call("update_task", new()
             {

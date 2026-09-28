@@ -40,7 +40,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 ## Step 1: Define task edit cases
 
 - [x] Reuse presence-aware PATCH conventions with fixtures for omitted fields, explicit unassignment, false isBlocked, and empty tags/description.
-- [x] Define blocking behavior: setting/unsetting the boolean does not implicitly overwrite the note; callers explicitly clear it when desired.
+- [x] Define blocking behavior: the client preserves request presence semantics, while the pinned Taiga save hook clears `blocked_note` whenever `is_blocked=false`, including for omitted or nonempty notes.
 - [x] Validate version, at least one actual change, and assignment set/clear conflicts before HTTP.
 - [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
 - [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
@@ -76,7 +76,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 ## Acceptance scenarios
 
 - [x] Task state/assignment edits send only selected changes.
-- [x] isBlocked=false reaches the API; omission leaves blocking untouched.
+- [x] isBlocked=false reaches the API; omission leaves the request field untouched, while Taiga's authoritative save clears the note for an unblocked task.
 - [x] Unassignment and empty collections/text preserve intentional clearing semantics.
 - [x] The server result/version is returned without automatic parent changes or write retries.
 - [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
@@ -99,15 +99,24 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | 1 | Complete | Baseline restore passed; baseline test run passed 214 tests. The concurrent baseline build hit a SourceLink output lock, so a serial baseline build rerun passed. Contract payload tests passed. Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked on 2026-09-28; task model fields, versioned update path, and detail serializer support the scoped PATCH. No deployed-version claim; no live Taiga writes. Goal/reference docs updated with omitted-vs-explicit semantics and planned examples. | Specify update_task contracts / a2e0b72 |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~TaskUpdateTests`: 19 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Task PATCH tests cover omitted/set/clear assignment, empty description/tags, `is_blocked=false`, empty `blocked_note`, comment-only updates, invalid inputs, safe 400/409 errors, malformed success, and no retry. Domain API maps the authoritative task detail; no parent/sprint mutation is sent. | Implement update_task API behavior / 4dec867 |
 | 3 | Complete | The real STDIO integration test passed: `tools/list` exposes `update_task` with required `taskId`/`version` and all optional fields, and `tools/call` bound explicit `false`, empty arrays/strings, and explicit null omission. The fake server observed an exact PATCH body and returned valid JSON text. README, quickstart, reference, and inventory now describe the public tool. | Expose update_task MCP interface / c4e9674 |
-| 4 | Complete | `dotnet restore`: passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. `dotnet test -c Debug --no-build --no-restore`: 237 passed. Release build/test also passed with 0 warnings/errors and 237 tests. Focused MCP workflow and domain update suites passed (1 and 22 tests). Fake HTTP only; no live Taiga writes. | Verify update_task workflow / final handoff |
+| 4 | Complete | `dotnet restore`: passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. `dotnet test -c Debug --no-build --no-restore`: 237 passed. Release build/test also passed with 0 warnings/errors and 237 tests. Focused MCP workflow and domain update suites passed (1 and 22 tests); the review correction additionally models Taiga's unblocked-note clearing behavior. Fake HTTP only; no live Taiga writes. | Verify update_task workflow / final handoff |
 
 ### Step 1 decisions and planned examples
 
 - `TaskUpdateDto` builds a presence-aware PATCH body. Omitted nullable inputs are absent; `description=""`, `tags=[]`, `is_blocked=false`, and `blocked_note=""` are explicit values.
 - `assigned_to` is the only clearable field. `clearFields=["assigned_to"]` emits JSON `null`; supplying an assignee and clearing it together is invalid.
-- Changing `is_blocked` never changes `blocked_note`. Callers clear the note explicitly with `blocked_note=""`.
+- The client never adds a compensating write. The pinned Taiga `BlockedMixin` pre-save hook clears `blocked_note` whenever `is_blocked=false`, so an omitted or nonempty note cannot survive an unblocked save; `blockedNote=""` remains the explicit caller intent for clearing it.
 - The version is always included unchanged and updates require at least one selected field or a nonblank comment. No write retry or parent/sprint mutation is planned.
 
-Pinned source evidence used for this contract: [task model at revision 4d11baef9027f5598f6341d6eb4261de2840688e](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/models.py), [task viewset](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py), and [task serializers](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py), verified 2026-09-28. These are upstream source references, not deployment evidence.
+Pinned source evidence used for this contract: [task model at revision 4d11baef9027f5598f6341d6eb4261de2840688e](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/models.py), [task viewset](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py), [task serializers](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py), and the [BlockedMixin pre-save hook](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/mixins/blocked.py#L22-L26), verified 2026-09-28. These are upstream source references, not deployment evidence.
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
+
+### Post-completion source correction
+
+Review against the pinned revision confirmed that `BlockedMixin` clears
+`blocked_note` in `pre_save` whenever `is_blocked` is false. The client still
+sends only selected fields and returns the server response; it does not issue
+an extra note write. The fake integration server and MCP workflow now model and
+assert that both an omitted note and a nonempty note return as empty when the
+saved task is unblocked.

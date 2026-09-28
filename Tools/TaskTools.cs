@@ -53,7 +53,7 @@ public sealed class TaskTools
     });
 
     [McpServerTool(Name = "update_task")]
-    [Description("Update one task using the caller-supplied version. Omitted nullable fields stay unchanged; empty description or tags are explicit clears, and isBlocked=false is sent explicitly. Use clearFields=[\"assigned_to\"] to unassign. Setting or clearing isBlocked does not change blockedNote; pass blockedNote=\"\" to clear the note. Requires a change or nonblank comment and does not automatically retry version conflicts. Parent story, sprint, due dates, and iocaine are not included.")]
+    [Description("Update one task using the caller-supplied version. Omitted nullable fields stay unchanged; empty description or tags are explicit clears, and isBlocked=false is sent explicitly. Use clearFields=[\"assigned_to\"] to unassign. The client does not add a compensating note write; Taiga clears blockedNote whenever a task is saved unblocked, including when a note is omitted or nonempty. Pass blockedNote=\"\" when clearing it explicitly. Requires a change or nonblank comment and does not automatically retry version conflicts. Parent story, sprint, due dates, and iocaine are not included.")]
     public async Task<string> UpdateTask(
         [Description("Positive internal task ID, not the displayed #ref.")] int taskId,
         [Description("Required current task version, zero or greater; forwarded unchanged to Taiga.")] int version,
@@ -62,8 +62,8 @@ public sealed class TaskTools
         [Description("Optional positive internal task status ID; null leaves it unchanged.")] int? status = null,
         [Description("Optional positive internal assignee user ID; null leaves it unchanged, while clearFields can unassign.")] int? assigned_to = null,
         [Description("Tags; null leaves them unchanged, while an empty array clears them.")] string[]? tags = null,
-        [Description("Optional blocking flag; null leaves it unchanged, while false explicitly unblocks the task.")] bool? isBlocked = null,
-        [Description("Optional blocking note; null leaves it unchanged, while an empty string clears the note. Changing isBlocked does not change this field.")] string? blockedNote = null,
+        [Description("Optional blocking flag; null leaves it unchanged, while false explicitly unblocks the task. Taiga clears the note when the saved task is unblocked.")] bool? isBlocked = null,
+        [Description("Optional blocking note; null omits this request field and an empty string sends an explicit clear. Taiga clears any note when the saved task is unblocked, even if this is nonempty.")] string? blockedNote = null,
         [Description("Optional comment; a comment-only update requires nonblank text.")] string? comment = null,
         [Description("Optional fields to clear explicitly; only assigned_to is accepted, using this exact wire name.")] string[]? clearFields = null,
         CancellationToken cancellationToken = default)
