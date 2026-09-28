@@ -59,6 +59,18 @@ parent project, parent sprint mismatch, parent lookup denial, server status or
 assignee rejection, transport failure, response mapping failure, and exactly
 one task POST.
 
+## Step 2 implementation notes
+
+`TaskApi.CreateTaskAsync` validates positive IDs and nonblank subjects before
+any HTTP call. It serializes `project`, `subject`, optional `description`,
+`status`, `assigned_to`, `tags`, `user_story`, and the effective standalone
+`milestone`, omitting nulls while preserving empty strings and arrays. A
+story-linked call uses the injected `UserStoryApi` for the parent lookup, then
+issues one `POST /api/v1/tasks` and maps the response with the existing
+authoritative task-detail mapper. HTTP failures are safe transport errors;
+ambiguous transport or response-mapping failures explicitly say the write may
+already have applied and do not trigger a second create.
+
 ## Files and integration points
 
 - `Api/TaskApi.cs`
@@ -72,21 +84,21 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define parent and sprint rules
 
-- [ ] Specify standalone-unscheduled, standalone-sprint, and story-linked creation fixtures.
-- [ ] If a parent is supplied, validate its project; if an explicit milestone differs from the parent's milestone, reject before POST.
-- [ ] When parent and milestone agree, omit the redundant milestone from creation and let the server inherit it; document races are still server-validated.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify create_task contracts`.
+- [x] Specify standalone-unscheduled, standalone-sprint, and story-linked creation fixtures.
+- [x] If a parent is supplied, validate its project; if an explicit milestone differs from the parent's milestone, reject before POST.
+- [x] When parent and milestone agree, omit the redundant milestone from creation and let the server inherit it; document races are still server-validated.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify create_task contracts`.
 
 ## Step 2: Implement task creation
 
-- [ ] Add validated create payloads preserving omitted defaults and mapping parent/assignment/tag fields.
-- [ ] Reuse UserStoryApi for optional parent validation through DI or a focused domain helper; avoid calling MCP tools from other tools.
-- [ ] POST once and return authoritative task detail, including the resulting inherited milestone and version.
-- [ ] Report successful-write/failed-response cases accurately without retrying creation.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] Add validated create payloads preserving omitted defaults and mapping parent/assignment/tag fields.
+- [x] Reuse UserStoryApi for optional parent validation through DI or a focused domain helper; avoid calling MCP tools from other tools.
+- [x] POST once and return authoritative task detail, including the resulting inherited milestone and version.
+- [x] Report successful-write/failed-response cases accurately without retrying creation.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
 - [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement create_task API behavior`.
 
 ## Step 3: Expose create_task
@@ -134,8 +146,8 @@ No live Taiga project was used.
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Pinned backend source reviewed; contract decisions and JSON fixtures recorded. Focused fixture tests passed (3); no failing production suite was introduced. | Specify create_task contracts / pending |
-| 2 | Not started | — | Implement create_task API behavior / pending |
+| 1 | Complete | Pinned backend source reviewed; contract decisions and JSON fixtures recorded. Focused fixture tests passed (3); no failing production suite was introduced. | Specify create_task contracts / `b8d8937` |
+| 2 | Complete | `TaskCreateTests` passed (16); `dotnet build -c Debug` passed with 0 warnings/errors. Added `TaskCreateDto`, injected `UserStoryApi` parent validation, one-POST creation, authoritative response mapping, and safe ambiguous-write errors. | Implement create_task API behavior / pending |
 | 3 | Not started | — | Expose create_task MCP interface / pending |
 | 4 | Not started | — | Verify create_task workflow / pending |
 

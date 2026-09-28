@@ -247,7 +247,10 @@ public sealed class TaskListTests
     }
 
     private static TaskApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
-        => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+    {
+        var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+        return new TaskApi(transport, new UserStoryApi(transport));
+    }
 
     private static FakeHttpMessageHandler TaskRoutes(string tasks)
         => new FakeHttpMessageHandler()
