@@ -45,3 +45,16 @@ These are proposed implementation decisions for this batch, not descriptions of 
 - The dedicated comment command returns kind, id, returned version, and comment_submitted=true only after a successful update. That flag means submission succeeded, not that a history-entry identifier was obtained.
 
 Concurrency source: [Taiga OCC mixin](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/occ/mixins.py). API verification starting point: [official REST API](https://docs.taiga.io/api.html). Pin the actual reference used in the implementation evidence.
+
+## Foundation verification notes
+
+The installed `ModelContextProtocol` `0.3.0-preview.4` SDK was verified with
+the test project on 2026-09-28. A successful `CallToolAsync` response can have
+`CallToolResult.IsError == null`; a tool execution failure is represented by a
+result with `IsError == true` and text content. The SDK's generated schema
+omits the `required` property when no parameters are required. Defaults and
+nullable parameters therefore need runtime call tests in addition to schema
+inspection. The test-only probe confirmed that explicit `false`, empty arrays,
+and explicit nulls survive binding, while omitting a required integer produces
+a tool failure. The production STDIO fixture confirmed that application
+logging remains off protocol STDOUT.

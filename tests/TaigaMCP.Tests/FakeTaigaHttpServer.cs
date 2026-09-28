@@ -1,0 +1,148 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Text;
+
+namespace TaigaMCP.Tests;
+
+public sealed record RecordedTaigaRequest(
+    string Method,
+    string PathAndQuery,
+    string? Authorization,
+    string Body);
+
+public sealed class FakeTaigaHttpServer : IAsyncDisposable
+{
+    private readonly HttpListener _listener;
+    private readonly CancellationTokenSource _shutdown = new();
+    private readonly Task _listenTask;
+    private readonly ConcurrentQueue<RecordedTaigaRequest> _requests = [];
+
+    private FakeTaigaHttpServer(HttpListener listener, string baseUrl)
+    {
+        _listener = listener;
+        BaseUrl = baseUrl;
+        _listener.Start();
+        _listenTask = ListenAsync();
+    }
+
+    public string BaseUrl { get; }
+
+    public HttpStatusCode ProjectsStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
+
+    public static FakeTaigaHttpServer Start()
+    {
+        var portProbe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        portProbe.Start();
+        var port = ((System.Net.IPEndPoint)portProbe.LocalEndpoint).Port;
+        portProbe.Stop();
+
+        var listener = new HttpListener();
+        var baseUrl = $"http://127.0.0.1:{port}/api/v1/";
+        listener.Prefixes.Add(baseUrl);
+        return new FakeTaigaHttpServer(listener, baseUrl);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _shutdown.Cancel();
+        _listener.Stop();
+        try
+        {
+            await _listenTask;
+        }
+        catch (HttpListenerException) when (_shutdown.IsCancellationRequested)
+        {
+        }
+        catch (ObjectDisposedException) when (_shutdown.IsCancellationRequested)
+        {
+        }
+
+        _listener.Close();
+        _shutdown.Dispose();
+    }
+
+    private async Task ListenAsync()
+    {
+        while (!_shutdown.IsCancellationRequested)
+        {
+            HttpListenerContext context;
+            try
+            {
+                context = await _listener.GetContextAsync();
+            }
+            catch (HttpListenerException) when (_shutdown.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (ObjectDisposedException) when (_shutdown.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await HandleAsync(context);
+        }
+    }
+
+    private async Task HandleAsync(HttpListenerContext context)
+    {
+        var request = context.Request;
+        using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+        var body = await reader.ReadToEndAsync();
+        _requests.Enqueue(new RecordedTaigaRequest(
+            request.HttpMethod,
+            request.Url?.PathAndQuery ?? string.Empty,
+            request.Headers["Authorization"],
+            body));
+
+        var path = request.Url?.AbsolutePath ?? string.Empty;
+        if (request.HttpMethod == HttpMethod.Post.Method && path.EndsWith("/auth", StringComparison.OrdinalIgnoreCase))
+        {
+            await RespondAsync(context.Response, HttpStatusCode.OK, "{\"auth_token\":\"integration-token\",\"refresh\":\"integration-refresh\"}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/projects", StringComparison.OrdinalIgnoreCase))
+        {
+            if (ProjectsStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, ProjectsStatusCode, "{\"detail\":\"synthetic upstream failure\"}");
+                return;
+            }
+
+            var headers = new Dictionary<string, string>
+            {
+                ["x-paginated"] = "false",
+                ["x-pagination-count"] = "1",
+                ["x-pagination-current"] = "1"
+            };
+            await RespondAsync(context.Response, HttpStatusCode.OK, "[{\"id\":123,\"slug\":\"demo\",\"name\":\"Demo\"}]", headers);
+            return;
+        }
+
+        await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"not found\"}");
+    }
+
+    private static async Task RespondAsync(
+        HttpListenerResponse response,
+        HttpStatusCode statusCode,
+        string body,
+        IReadOnlyDictionary<string, string>? headers = null)
+    {
+        var bytes = Encoding.UTF8.GetBytes(body);
+        response.StatusCode = (int)statusCode;
+        response.ContentType = "application/json";
+        response.ContentLength64 = bytes.Length;
+        if (headers is not null)
+        {
+            foreach (var header in headers)
+            {
+                response.Headers[header.Key] = header.Value;
+            }
+        }
+
+        await response.OutputStream.WriteAsync(bytes);
+        response.Close();
+    }
+}

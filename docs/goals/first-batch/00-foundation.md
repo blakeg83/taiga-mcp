@@ -32,12 +32,12 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 
 ## Step 3: prove public schema and invocation behavior
 
-- [ ] Add an integration fixture using the installed MCP SDK or STDIO protocol with a fake Taiga endpoint; verify tools/list contains all existing tool names.
-- [ ] Invoke an existing read tool through MCP and assert its returned text parses as the expected JSON shape.
-- [ ] Prove argument binding for optional values, empty arrays, explicit false, and required integers using existing tools where possible and a test-only tool for missing cases; do not ship a probe tool.
-- [ ] Verify protocol output stays clean and a failed HTTP request is represented as a tool failure.
-- [ ] Document the chosen test approach, schema/null limitations, and any necessary changes to contracts.md; run focused integration tests.
-- [ ] Commit this step as: Verify MCP discovery and argument binding.
+- [x] Add an integration fixture using the installed MCP SDK or STDIO protocol with a fake Taiga endpoint; verify tools/list contains all existing tool names.
+- [x] Invoke an existing read tool through MCP and assert its returned text parses as the expected JSON shape.
+- [x] Prove argument binding for optional values, empty arrays, explicit false, and required integers using existing tools where possible and a test-only tool for missing cases; do not ship a probe tool.
+- [x] Verify protocol output stays clean and a failed HTTP request is represented as a tool failure.
+- [x] Document the chosen test approach, schema/null limitations, and any necessary changes to contracts.md; run focused integration tests.
+- [x] Commit this step as: Verify MCP discovery and argument binding.
 
 ## Step 4: finalize reusable conventions and handoff
 
@@ -61,8 +61,8 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 | Step | Status | Evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | `docs/taiga_tools_reference.md`; README link; inventory distinction; baseline and source versions recorded above. | `8a2f57d` — Document batch contracts and baseline |
-| 2 | Complete | `tests/TaigaMCP.Tests`; solution registration; fake HTTP fixture; four focused contract tests; fixture commands documented in the tool reference. | Add isolated Taiga API contract tests |
-| 3 | Not started | — | — |
+| 2 | Complete | `tests/TaigaMCP.Tests`; solution registration; fake HTTP fixture; four focused contract tests; fixture commands documented in the tool reference. | `7e1ba57` — Add isolated Taiga API contract tests |
+| 3 | Complete | STDIO integration against a fake Taiga listener; all 11 tool names; read invocation JSON; upstream failure result; test-only argument probe; SDK/schema notes in `contracts.md`. | Verify MCP discovery and argument binding |
 | 4 | Not started | — | — |
 
 Source/date: official Taiga REST API documentation and Taiga backend `main` at `4d11baef9027f5598f6341d6eb4261de2840688e`, plus installed ModelContextProtocol `0.3.0-preview.4` package metadata and SDK tag `15f8e89ac3aedb2bb4fa9232f6093f092b2ce956`, checked 2026-09-28.

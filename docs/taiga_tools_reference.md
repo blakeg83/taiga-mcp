@@ -178,3 +178,14 @@ temporary output directory without stopping that process:
 ```text
 dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation\ -p:UseAppHost=false
 ```
+
+The MCP integration fixture launches the built application with
+`StdioClientTransport`, points its configured base URL at a local fake HTTP
+listener, and uses `McpClientFactory.CreateAsync` with the installed
+`0.3.0-preview.4` SDK. It verifies the complete 11-name `tools/list` result,
+the required/optional schema entries, a real `list_projects` `tools/call`, and
+that a fake HTTP 500 is returned as a tool result with `IsError=true`. The
+fixture parses the returned text as JSON, which also proves that server logs do
+not corrupt STDOUT protocol output. A separate test-only stream server probes
+argument binding for explicit `false`, an empty array, an explicit null, and a
+missing required integer; the probe type is compiled only in the test project.
