@@ -46,8 +46,10 @@ The approved behavior is:
 - A story-linked task performs a parent story lookup before `POST`. The parent
   must belong to `projectId`; an explicit `milestoneId` must equal the parent's
   milestone, including the null case. A matching milestone is redundant and is
-  omitted from the task request so Taiga remains authoritative. A parent sprint
-  changing between the lookup and POST is still rejected by the server.
+  omitted from the task request so Taiga remains authoritative. If the parent
+  sprint changes between the lookup and POST, the server uses the parent's
+  sprint at save time; the client cannot guarantee that it is the sprint seen
+  during the earlier lookup.
 - Optional `description`, `status`, `assigned_to`, and `tags` are serialized
   only when supplied; empty strings and arrays remain explicit. No bulk,
   due-date, blocker, iocaine, or cross-project behavior is included.
@@ -99,7 +101,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 - [x] Report successful-write/failed-response cases accurately without retrying creation.
 - [x] Validate this step: run domain request/response tests for this behavior and Debug build.
 - [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement create_task API behavior`.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement create_task API behavior`.
 
 ## Step 3: Expose create_task
 
@@ -108,7 +110,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 - [x] Keep TaskApi construction/DI consistent if a parent lookup dependency is added.
 - [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
 - [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_task MCP interface`.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_task MCP interface`.
 
 ## Step 4: Verify creation workflows
 
@@ -117,7 +119,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 - [x] Cover server status/assignee validation, parent lookup denial, transport failure, and one-POST-only behavior.
 - [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
 - [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_task workflow`.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_task workflow`.
 
 ## Acceptance scenarios
 
@@ -149,6 +151,6 @@ No live Taiga project was used.
 | 1 | Complete | Pinned backend source reviewed; contract decisions and JSON fixtures recorded. Focused fixture tests passed (3); no failing production suite was introduced. | Specify create_task contracts / `b8d8937` |
 | 2 | Complete | `TaskCreateTests` passed (16); `dotnet build -c Debug` passed with 0 warnings/errors. Added `TaskCreateDto`, injected `UserStoryApi` parent validation, one-POST creation, authoritative response mapping, and safe ambiguous-write errors. | Implement create_task API behavior / `d6cbe9b` |
 | 3 | Complete | Production STDIO `tools/list` and `tools/call` passed; schema exposes the 8 public arguments with only `projectId` and `subject` required. Reference, README, quickstart, and inventory now document the delivered subset. | Expose create_task MCP interface / `b56767c` |
-| 4 | Complete | Root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed: 213 tests, 0 warnings/errors. Focused domain and real STDIO tests cover parent inheritance/read-back, standalone sprint choices, mismatches, null-parent sprint, invalid input, safe validation/denial/transport/mapping errors, and one POST. Verification is fake HTTP plus real MCP; no live Taiga writes. | Verify create_task workflow / pending |
+| 4 | Complete | Root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed: 214 tests, 0 warnings/errors. Focused domain and real STDIO tests cover parent inheritance/read-back, standalone sprint choices, mismatches, null-parent sprint, invalid input, safe validation/denial/transport/mapping errors, and one POST. Verification is fake HTTP plus real MCP; no live Taiga writes. | Verify create_task workflow / `c867e83` |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

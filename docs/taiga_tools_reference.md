@@ -85,8 +85,9 @@ For a story-linked task, the server reads the parent story before creation to
 validate its project. If `milestoneId` is omitted, the parent's current sprint
 is authoritative. If it is supplied, it must equal the parent's sprint,
 including the null case; a matching value is omitted from the POST and Taiga
-still validates the relationship at save time. A parent changing between the
-lookup and POST is therefore a server-side race, not a client-side guarantee.
+still validates the relationship at save time. If the parent changes sprint
+between the lookup and POST, Taiga uses the parent's sprint at save time; the
+client cannot guarantee that it is the sprint observed during the lookup.
 
 ```json
 {"projectId":12,"subject":"Implement saved-search endpoint","userStoryId":102}

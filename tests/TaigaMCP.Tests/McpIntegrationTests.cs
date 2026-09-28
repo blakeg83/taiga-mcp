@@ -591,6 +591,88 @@ public sealed class McpIntegrationTests
             Assert.Equal(1, createdTaskReadBackJson.GetProperty("version").GetInt32());
             Assert.Single(taiga.Requests, request => request.Method == "GET" && request.PathAndQuery == "/api/v1/tasks/204");
 
+            var standaloneTask = await client.CallToolAsync(
+                "create_task",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = "Standalone task"
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(standaloneTask.IsError == true);
+            var standaloneTaskJson = JsonSerializer.Deserialize<JsonElement>(GetText(standaloneTask));
+            Assert.Equal(205, standaloneTaskJson.GetProperty("id").GetInt32());
+            Assert.False(standaloneTaskJson.TryGetProperty("user_story", out _));
+            Assert.False(standaloneTaskJson.TryGetProperty("milestone", out _));
+            using var standaloneTaskBody = JsonDocument.Parse(
+                taiga.Requests.Last(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/tasks").Body);
+            Assert.Equal(
+                new[] { "project", "subject" },
+                standaloneTaskBody.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+
+            var explicitTask = await client.CallToolAsync(
+                "create_task",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = "Explicit task values",
+                    ["userStoryId"] = null,
+                    ["milestoneId"] = null,
+                    ["description"] = "",
+                    ["tags"] = Array.Empty<string>()
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(explicitTask.IsError == true);
+            using var explicitTaskBody = JsonDocument.Parse(
+                taiga.Requests.Last(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/tasks").Body);
+            Assert.Equal("", explicitTaskBody.RootElement.GetProperty("description").GetString());
+            Assert.Empty(explicitTaskBody.RootElement.GetProperty("tags").EnumerateArray());
+            Assert.False(explicitTaskBody.RootElement.TryGetProperty("user_story", out _));
+            Assert.False(explicitTaskBody.RootElement.TryGetProperty("milestone", out _));
+
+            var sprintTask = await client.CallToolAsync(
+                "create_task",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = "Standalone sprint task",
+                    ["milestoneId"] = 55
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(sprintTask.IsError == true);
+            var sprintTaskJson = JsonSerializer.Deserialize<JsonElement>(GetText(sprintTask));
+            Assert.Equal(55, sprintTaskJson.GetProperty("milestone").GetInt32());
+            using var sprintTaskBody = JsonDocument.Parse(
+                taiga.Requests.Last(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/tasks").Body);
+            Assert.Equal(55, sprintTaskBody.RootElement.GetProperty("milestone").GetInt32());
+
+            var taskPostCount = taiga.Requests.Count(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/tasks");
+            var invalidTask = await client.CallToolAsync(
+                "create_task",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = " "
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(invalidTask.IsError);
+            Assert.Contains("subject must not be blank", GetText(invalidTask));
+            Assert.Equal(taskPostCount, taiga.Requests.Count(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/tasks"));
+
+            taiga.TaskCreateStatusCode = System.Net.HttpStatusCode.BadRequest;
+            var failedTask = await client.CallToolAsync(
+                "create_task",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = "Server rejected task"
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(failedTask.IsError);
+            Assert.Contains("400", GetText(failedTask));
+            Assert.Contains("status: rejected", GetText(failedTask));
+            Assert.DoesNotContain("synthetic task secret", GetText(failedTask));
+
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);
             Assert.Contains("member=6", taiga.Requests.Last().PathAndQuery);

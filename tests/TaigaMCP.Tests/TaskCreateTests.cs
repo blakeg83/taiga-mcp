@@ -115,6 +115,35 @@ public sealed class TaskCreateTests
         }
     }
 
+    [Fact]
+    public async Task CreateTaskAsync_AllowsUnscheduledParentWithoutMilestone()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/userstories/103", TaskCreateFixtures.ParentStoryWithoutSprint)
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/tasks",
+                """
+                {"id":205,"ref":19,"project":12,"subject":"Capture saved-search requirements","user_story":103,"milestone":null,"version":1}
+                """,
+                HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var task = await NewApi(handler, auth).CreateTaskAsync(
+                12,
+                "Capture saved-search requirements",
+                userStoryId: 103);
+
+            Assert.Equal(103, task.UserStory);
+            Assert.Null(task.Milestone);
+            using var body = JsonDocument.Parse(
+                Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/tasks")).Body);
+            Assert.Equal(103, body.RootElement.GetProperty("user_story").GetInt32());
+            Assert.False(body.RootElement.TryGetProperty("milestone", out _));
+        }
+    }
+
     [Theory]
     [InlineData(0, "valid", null, null, null, null)]
     [InlineData(12, " ", null, null, null, null)]
