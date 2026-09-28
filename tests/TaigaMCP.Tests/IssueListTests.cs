@@ -111,6 +111,30 @@ public sealed class IssueListTests
         }
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("#fragment")]
+    [InlineData("//evil.example/api/v1/issues?page=9")]
+    public async Task PageMetadataRejectsInheritedOrCrossOriginContinuations(string continuation)
+    {
+        var handler = IssueRoutes(
+            "[]",
+            new Dictionary<string, string>
+            {
+                ["x-paginated"] = "true",
+                ["x-pagination-next"] = continuation
+            });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListIssuesPageAsync(123, new IssueListOptions { Page = 3 });
+
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
     [Fact]
     public async Task ClassificationIdsSurviveUnknownLabels()
     {

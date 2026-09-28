@@ -155,6 +155,7 @@ public sealed class IssueApi
     private static int? ParseNextPage(string value, Uri requestUri)
     {
         value = value.Trim();
+        if (value.Length == 0 || value.StartsWith('#')) return null;
         if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var directPage))
             return directPage > 0 ? directPage : null;
         if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var candidate)) return null;
@@ -171,9 +172,12 @@ public sealed class IssueApi
         else
         {
             resolved = new Uri(requestUri, candidate);
-            if (!string.Equals(resolved.AbsolutePath, requestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
-                return null;
         }
+
+        if (!string.Equals(resolved.Scheme, requestUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(resolved.Authority, requestUri.Authority, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(resolved.AbsolutePath, requestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+            return null;
 
         foreach (var part in resolved.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {

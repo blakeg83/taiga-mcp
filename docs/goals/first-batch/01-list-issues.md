@@ -147,11 +147,18 @@ passed. All verification used fake HTTP or the local STDIO MCP fixture; no
 live Taiga requests or writes were made. Deferred date, owner, sprint, sort,
 and all-page export filters remain in the inventory.
 
+Post-completion review hardening: continuation parsing now rejects empty,
+whitespace-only, fragment-only, and cross-origin network-path values instead
+of inheriting or exposing an unsafe page. Same-origin continuation forms remain
+covered. The focused suite passed 16 tests after this correction; the full
+Debug and Release suites each passed 90 tests, with zero build warnings or
+errors and formatting verification passing.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 74 passed. Contract/source decisions recorded above; legacy array fixture added. | Specify list_issues contracts / `4281680` |
 | 2 | Complete | `IssueListTests`: 6 passed; `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Filter, ID, validation, and pagination-header behavior documented above. | Implement list_issues API behavior / `1097f1b` |
 | 3 | Complete | MCP discovery and real STDIO call passed; `IssueListTests`: 8 passed. README, quickstart, reference, and inventory now document the delivered interface. | Expose list_issues MCP interface / `1e320ab` |
-| 4 | Complete | Final root Debug/Release matrix: 86 tests passed in each configuration; formatting and diff checks passed; edge cases documented above. | Verify list_issues workflow / pending |
+| 4 | Complete | Final root Debug/Release matrix: 86 tests passed in each configuration; post-review correction reran both suites at 90 passed; formatting and diff checks passed. | Verify list_issues workflow / `cad0369` |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
