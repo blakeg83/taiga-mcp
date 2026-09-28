@@ -57,12 +57,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose create_epic
 
-- [ ] Add the MCP method with required projectId/subject and descriptions for project-specific status/assignee IDs.
-- [ ] Document minimal and customized examples and a follow-up link_user_story_to_epic call.
-- [ ] Ensure no implicit project configuration change enables epics behind the user's request.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_epic MCP interface`.
+- [x] Add the MCP method with required projectId/subject and descriptions for project-specific status/assignee IDs.
+- [x] Document minimal and customized examples and a follow-up link_user_story_to_epic call.
+- [x] Ensure no implicit project configuration change enables epics behind the user's request.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_epic MCP interface`.
 
 ## Step 4: Verify epic creation and readback
 
@@ -97,7 +97,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, Debug build, and 261 tests passed. Pinned taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e` and taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` checked on 2026-09-28; fixture tests verify minimal omission and populated wire keys. Color format is delegated to Taiga because the model accepts a string up to 32 characters. Linking stories and requirement flags remain planned. | Specify create_epic contracts / b86376e |
 | 2 | Complete | `EpicCreateTests` cover minimal/default omission, populated serialization and mapping, explicit empty values, invalid inputs before HTTP, safe 400/403 failures, ambiguous transport failure without retry, and malformed success response. `dotnet test` focused create suite and Debug build passed. | Implement create_epic API behavior / pending |
-| 3 | Not started | — | Expose create_epic MCP interface / pending |
+| 3 | Complete | MCP integration verifies `tools/list` exposes `create_epic` with required `projectId`/`subject` and optional fields, plus minimal and populated `tools/call` requests and returned identity/version. README, quickstart, reference, and inventory now describe the implemented scope and planned separate linking. | Expose create_epic MCP interface / pending |
 | 4 | Not started | — | Verify create_epic workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

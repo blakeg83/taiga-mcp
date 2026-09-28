@@ -35,6 +35,43 @@ public sealed class McpIntegrationTests
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_epic", new() { ["epicId"] = 301 })).IsError == true);
         Assert.True((await Call("get_epic", new() { ["epicId"] = 0 })).IsError == true);
+        var createdEpic = await Call("create_epic", new()
+        {
+            ["projectId"] = 123,
+            ["subject"] = "Integration epic"
+        });
+        Assert.False(createdEpic.IsError == true);
+        var createdEpicJson = JsonSerializer.Deserialize<JsonElement>(GetText(createdEpic));
+        Assert.Equal(301, createdEpicJson.GetProperty("id").GetInt32());
+        Assert.Equal(12, createdEpicJson.GetProperty("ref").GetInt32());
+        Assert.Equal(4, createdEpicJson.GetProperty("version").GetInt32());
+        var createdEpicRequest = Assert.Single(taiga.Requests, request =>
+            request.Method == "POST" && request.PathAndQuery == "/api/v1/epics");
+        var createdEpicBody = JsonSerializer.Deserialize<JsonElement>(createdEpicRequest.Body);
+        Assert.Equal(new[] { "project", "subject" }, createdEpicBody.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(123, createdEpicBody.GetProperty("project").GetInt32());
+        Assert.Equal("Integration epic", createdEpicBody.GetProperty("subject").GetString());
+        var populatedEpic = await Call("create_epic", new()
+        {
+            ["projectId"] = 123,
+            ["subject"] = "Integration epic",
+            ["description"] = "  Group saved-search delivery work.  ",
+            ["status"] = 7,
+            ["assigned_to"] = 42,
+            ["color"] = "#336699",
+            ["tags"] = new[] { "search", "saved" }
+        });
+        Assert.False(populatedEpic.IsError == true);
+        var populatedEpicBody = JsonSerializer.Deserialize<JsonElement>(
+            taiga.Requests.Last(request => request.Method == "POST" && request.PathAndQuery == "/api/v1/epics").Body);
+        Assert.Equal(
+            new[] { "assigned_to", "color", "description", "project", "status", "subject", "tags" },
+            populatedEpicBody.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
+        Assert.Equal("  Group saved-search delivery work.  ", populatedEpicBody.GetProperty("description").GetString());
+        Assert.Equal(7, populatedEpicBody.GetProperty("status").GetInt32());
+        Assert.Equal(42, populatedEpicBody.GetProperty("assigned_to").GetInt32());
+        Assert.Equal("#336699", populatedEpicBody.GetProperty("color").GetString());
+        Assert.Equal(new[] { "search", "saved" }, populatedEpicBody.GetProperty("tags").EnumerateArray().Select(tag => tag.GetString()));
         Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
         var createdStory = await Call("create_user_story", new()
         {
@@ -322,6 +359,7 @@ public sealed class McpIntegrationTests
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
             var expectedNames = new[]
             {
+                "create_epic",
                 "create_issue",
                 "create_task",
                 "create_user_story",
@@ -415,6 +453,15 @@ public sealed class McpIntegrationTests
             var getEpicRequired = getEpic.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "epicId" }, getEpicRequired);
+
+            var createEpic = Assert.Single(tools, tool => tool.Name == "create_epic");
+            var createEpicProperties = createEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "projectId", "subject", "description", "status", "assigned_to", "color", "tags" },
+                createEpicProperties);
+            var createEpicRequired = createEpic.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId", "subject" }, createEpicRequired);
 
             var getTask = Assert.Single(tools, tool => tool.Name == "get_task");
             var getTaskProperties = getTask.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();

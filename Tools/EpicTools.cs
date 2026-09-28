@@ -25,6 +25,31 @@ public sealed class EpicTools
         return ToolResponseJson.Serialize(result);
     });
 
+    [McpServerTool(Name = "create_epic")]
+    [Description("Create one epic for a project. Omitted description, status, assignee, color, and tags let Taiga apply project defaults; status and assignee are project-specific internal IDs. This creates only the epic: story linking, requirement flags, bulk creation, and custom fields are not included.")]
+    public async Task<string> CreateEpic(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Nonblank epic subject; meaningful whitespace is preserved.")] string subject,
+        [Description("Optional epic description; empty string is sent explicitly.")] string? description = null,
+        [Description("Optional positive internal epic status ID; null lets Taiga choose the project default.")] int? status = null,
+        [Description("Optional positive internal assignee user ID; null lets Taiga choose the project default.")] int? assigned_to = null,
+        [Description("Optional epic color string; null lets Taiga generate its default color. Taiga validates the accepted format.")] string? color = null,
+        [Description("Optional epic tags; null lets Taiga apply its default, while an empty array is sent explicitly.")] string[]? tags = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var epic = await _epics.CreateEpicAsync(
+            projectId,
+            subject,
+            description,
+            status,
+            assigned_to,
+            color,
+            tags,
+            cancellationToken);
+        return ToolResponseJson.Serialize(epic);
+    });
+
     [McpServerTool(Name = "list_epics")]
     [Description("List one page of epics in a project. By default only epics with open statuses are returned; explicit statusIds take precedence over includeClosed. Filters are project-scoped and allowlisted; the result always uses the items/page/total/next_page/has_more envelope. Related stories, progress aggregation, sorting, and all-page fetching are not included.")]
     public async Task<string> ListEpics(
