@@ -1,5 +1,6 @@
 using TaigaMCP.Models;
 using TaigaMCP.Caching;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -23,38 +24,31 @@ public sealed class IssueApi
         IReadOnlyDictionary<int, string> types,
         IReadOnlyDictionary<int, string> priorities)
     {
-        int sid = it.TryGetProperty("status", out var sEl)
-            && sEl.ValueKind != JsonValueKind.Null
-            && sEl.TryGetInt32(out var sVal)
-            ? sVal
-            : 0;
-        int sev = it.TryGetProperty("severity", out var sevEl)
-            && sevEl.ValueKind != JsonValueKind.Null
-            && sevEl.TryGetInt32(out var sevVal)
-            ? sevVal
-            : 0;
-        int typ = it.TryGetProperty("type", out var tEl)
-            && tEl.ValueKind != JsonValueKind.Null
-            && tEl.TryGetInt32(out var tVal)
-            ? tVal
-            : 0;
-        int pri = it.TryGetProperty("priority", out var pEl)
-            && pEl.ValueKind != JsonValueKind.Null
-            && pEl.TryGetInt32(out var pVal)
-            ? pVal
-            : 0;
+        if (it.ValueKind != JsonValueKind.Object ||
+            !it.TryGetProperty("id", out var idElement) ||
+            !idElement.TryGetInt32(out var id))
+            throw new TaigaRequestException("Taiga returned invalid issue data.");
+
+        int? sid = ReadOptionalInt(it, "status");
+        int? sev = ReadOptionalInt(it, "severity");
+        int? typ = ReadOptionalInt(it, "type");
+        int? pri = ReadOptionalInt(it, "priority");
 
         return new IssueDto
         {
-            Id = it.GetProperty("id").GetInt32(),
+            Id = id,
             Ref = it.TryGetProperty("ref", out var r) && r.TryGetInt32(out var rv) ? rv : 0,
             Project = it.TryGetProperty("project", out var projEl) && projEl.TryGetInt32(out var projVal) ? projVal : 0,
             Subject = it.TryGetProperty("subject", out var sub) ? sub.GetString() : null,
             Description = it.TryGetProperty("description", out var desc) ? desc.GetString() : null,
-            Status = statuses.TryGetValue(sid, out var sName) ? sName : null,
-            Severity = severities.TryGetValue(sev, out var sevName) ? sevName : null,
-            Type = types.TryGetValue(typ, out var tName) ? tName : null,
-            Priority = priorities.TryGetValue(pri, out var pName) ? pName : null,
+            Status = sid.HasValue && statuses.TryGetValue(sid.Value, out var sName) ? sName : null,
+            StatusId = sid,
+            Severity = sev.HasValue && severities.TryGetValue(sev.Value, out var sevName) ? sevName : null,
+            SeverityId = sev,
+            Type = typ.HasValue && types.TryGetValue(typ.Value, out var tName) ? tName : null,
+            TypeId = typ,
+            Priority = pri.HasValue && priorities.TryGetValue(pri.Value, out var pName) ? pName : null,
+            PriorityId = pri,
             AssignedTo = it.TryGetProperty("assigned_to", out var a)
                 && a.ValueKind != JsonValueKind.Null
                 && a.TryGetInt32(out var av)
@@ -65,23 +59,135 @@ public sealed class IssueApi
         };
     }
 
+    private static int? ReadOptionalInt(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) &&
+           value.ValueKind != JsonValueKind.Null &&
+           value.TryGetInt32(out var number)
+            ? number
+            : null;
+
     public async Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page, CancellationToken cancellationToken = default)
+        => (await ListIssuesPageAsync(projectId, new IssueListOptions { Page = page }, cancellationToken)).Items;
+
+    internal async Task<IssueListPage> ListIssuesPageAsync(
+        int projectId,
+        IssueListOptions options,
+        CancellationToken cancellationToken = default)
     {
         InputValidation.Positive(projectId, nameof(projectId));
-        InputValidation.Positive(page, nameof(page));
+        InputValidation.Positive(options.Page, nameof(options.Page));
+        ValidateListOptions(options);
         var statuses = await _cache.GetStatusesAsync(projectId, cancellationToken);
         var severities = await _cache.GetSeveritiesAsync(projectId, cancellationToken);
         var types = await _cache.GetTypesAsync(projectId, cancellationToken);
         var priorities = await _cache.GetPrioritiesAsync(projectId, cancellationToken);
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"issues?project={projectId}&page={page}&status__is_closed=false");
-        using var doc = await _transport.ReadAsync(req, cancellationToken);
+        using var req = new HttpRequestMessage(HttpMethod.Get, IssueListQueryBuilder.Build(projectId, options));
+        using var response = await _transport.ReadWithHeadersAsync(req, cancellationToken);
+        using var doc = response.Document;
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid issue list data.");
+
         var items = new List<IssueDto>(64);
         foreach (var it in doc.RootElement.EnumerateArray())
-        {
             items.Add(MapIssue(it, statuses, severities, types, priorities));
+
+        var nextHeader = TryGetHeader(response.Headers, "x-pagination-next", out var nextValue);
+        var nextPage = nextHeader ? ParseNextPage(nextValue, response.RequestUri) : null;
+        var hasMore = nextHeader && nextPage is null
+            ? null
+            : nextPage.HasValue
+                ? true
+                : ParseHasMore(response.Headers, hasContinuationHeader: nextHeader);
+        return new IssueListPage(
+            items,
+            options.Page,
+            ParseNonnegativeHeader(response.Headers, "x-pagination-count"),
+            nextPage,
+            hasMore);
+    }
+
+    private static void ValidateListOptions(IssueListOptions options)
+    {
+        if (options.StatusIds is not null)
+            foreach (var id in options.StatusIds)
+                InputValidation.Positive(id, "statusIds");
+        InputValidation.OptionalIds(
+            (options.AssignedTo, nameof(options.AssignedTo)),
+            (options.TypeId, nameof(options.TypeId)),
+            (options.PriorityId, nameof(options.PriorityId)),
+            (options.SeverityId, nameof(options.SeverityId)));
+    }
+
+    private static bool TryGetHeader(
+        IReadOnlyDictionary<string, string[]> headers,
+        string name,
+        out string value)
+    {
+        if (headers.TryGetValue(name, out var values) && values.FirstOrDefault() is { } first)
+        {
+            value = first;
+            return true;
         }
 
-        return items;
+        value = string.Empty;
+        return false;
+    }
+
+    private static int? ParseNonnegativeHeader(IReadOnlyDictionary<string, string[]> headers, string name)
+        => TryGetHeader(headers, name, out var value) &&
+           int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) &&
+           number >= 0
+            ? number
+            : null;
+
+    private static bool? ParseHasMore(
+        IReadOnlyDictionary<string, string[]> headers,
+        bool hasContinuationHeader)
+    {
+        if (hasContinuationHeader) return null;
+        return TryGetHeader(headers, "x-paginated", out var value) &&
+               bool.TryParse(value, out var paginated) &&
+               !paginated
+            ? false
+            : null;
+    }
+
+    private static int? ParseNextPage(string value, Uri requestUri)
+    {
+        value = value.Trim();
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var directPage))
+            return directPage > 0 ? directPage : null;
+        if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var candidate)) return null;
+
+        Uri resolved;
+        if (candidate.IsAbsoluteUri)
+        {
+            if (!string.Equals(candidate.Scheme, requestUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(candidate.Authority, requestUri.Authority, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(candidate.AbsolutePath, requestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+                return null;
+            resolved = candidate;
+        }
+        else
+        {
+            resolved = new Uri(requestUri, candidate);
+            if (!string.Equals(resolved.AbsolutePath, requestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+                return null;
+        }
+
+        foreach (var part in resolved.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pieces = part.Split('=', 2);
+            if (!string.Equals(Uri.UnescapeDataString(pieces[0]), "page", StringComparison.OrdinalIgnoreCase) ||
+                pieces.Length != 2)
+                continue;
+            var pageValue = Uri.UnescapeDataString(pieces[1]);
+            return int.TryParse(pageValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var page) && page > 0
+                ? page
+                : null;
+        }
+
+        return null;
     }
 
     public async Task<IssueDto> GetIssueAsync(int issueId, CancellationToken cancellationToken = default)

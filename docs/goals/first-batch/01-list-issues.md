@@ -48,13 +48,13 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement filtered paged retrieval
 
-- [ ] Add an internal list-options model and encoded query builder; retain a forwarding overload for current domain callers.
-- [ ] Remove unconditional closed-status exclusions when includeClosed=true or explicit statuses are supplied; retain the default open-only view.
-- [ ] Capture pagination headers before disposing the response; add metadata IDs to mapping without changing existing label properties.
-- [ ] Implement an internal page result shared by array and envelope modes; do not issue one detail request per issue.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_issues API behavior`.
+- [x] Add an internal list-options model and encoded query builder; retain a forwarding overload for current domain callers.
+- [x] Remove unconditional closed-status exclusions when includeClosed=true or explicit statuses are supplied; retain the default open-only view.
+- [x] Capture pagination headers before disposing the response; add metadata IDs to mapping without changing existing label properties.
+- [x] Implement an internal page result shared by array and envelope modes; do not issue one detail request per issue.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_issues API behavior`.
 
 ## Step 3: Expose the extended MCP tool
 
@@ -111,10 +111,22 @@ explicit status IDs are supplied; explicit status IDs take precedence, and
 will produce explicit `null` metadata rather than fabricated zero or false
 values. No live Taiga requests were made.
 
+Step 2 evidence: commit `4281680` was the Step 1 base. The internal
+`IssueListOptions` and query builder now map the public filters to Taiga's
+allowlisted wire names and encode values. Empty status/tag collections are
+treated as no filter; nonempty explicit statuses suppress the default
+open-only flag. `TaigaTransport` snapshots response headers before disposing
+the response, and `IssueListPage` is shared by the future array/envelope tool
+paths. Classification IDs are nullable so absent upstream fields do not
+become zero. The focused `IssueListTests` run passed 6 tests and
+`dotnet build -c Debug --no-restore` passed with zero warnings/errors. The
+implementation does not fetch issue details per list item. No live Taiga
+requests were made.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 74 passed. Contract/source decisions recorded above; legacy array fixture added. | Specify list_issues contracts / pending |
-| 2 | Not started | — | Implement list_issues API behavior / pending |
+| 2 | Complete | `IssueListTests`: 6 passed; `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Filter, ID, validation, and pagination-header behavior documented above. | Implement list_issues API behavior / pending |
 | 3 | Not started | — | Expose list_issues MCP interface / pending |
 | 4 | Not started | — | Verify list_issues workflow / pending |
 

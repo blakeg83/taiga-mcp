@@ -32,7 +32,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | --- | --- | --- |
 | `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
-| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects. The current API requests open issues; issue archival is not a supported status filter. |
+| `list_issues` | `projectId` integer, required; `page` integer, default `1` | Array of issue summary objects, including nullable `status_id`, `type_id`, `priority_id`, and `severity_id`. The current API requests open issues; issue archival is not a supported status filter. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId`, `subject`, and `version` required by the current method signature; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, and `comment` optional | One issue object returned by Taiga after the PATCH. |
@@ -65,9 +65,13 @@ Issue list/detail results:
   "project":123,
   "subject":"Fix login",
   "status":"Open",
+  "status_id":1,
   "severity":"Normal",
+  "severity_id":2,
   "type":"Bug",
+  "type_id":3,
   "priority":"Normal",
+  "priority_id":4,
   "modified":"2026-09-28T12:00:00Z",
   "version":3
 }]
@@ -100,6 +104,13 @@ User-story and metadata results:
   with `Uri.EscapeDataString`; the existing issue and story filters are fixed
   query names assembled by the domain APIs, not arbitrary caller-provided
   query fragments.
+- Issue list requests use Taiga's verified `status`, `assigned_to`, `type`,
+  `priority`, `severity`, `tags`, and `q` filters. ID and tag collections are
+  comma-separated in the wire value and then percent-encoded. The default
+  `status__is_closed=false` restriction is omitted when nonempty explicit
+  statuses or `includeClosed=true` are selected. Invalid positive-ID/page
+  inputs fail before HTTP. The expanded MCP arguments and opt-in page
+  envelope are documented here once the tool exposure step is complete.
 - The current list methods return bare arrays and do not expose page metadata.
   The first-batch contract proposes an opt-in page envelope while preserving
   the array default; this is planned until the relevant goal implements it.
