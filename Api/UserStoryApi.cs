@@ -127,7 +127,7 @@ public sealed class UserStoryApi
 
     private static int? ReadOptionalInt(JsonElement element, string propertyName)
         => element.TryGetProperty(propertyName, out var value) &&
-           value.ValueKind != JsonValueKind.Null &&
+           value.ValueKind == JsonValueKind.Number &&
            value.TryGetInt32(out var number)
             ? number
             : null;

@@ -193,6 +193,21 @@ public sealed class UserStoryListTests
     }
 
     [Fact]
+    public async Task ListUserStoriesPage_NonnumericOptionalVersionIsOmittedRatherThanFailing()
+    {
+        var handler = StoryRoutes("[{\"id\":90,\"project\":123,\"status\":10,\"version\":\"unknown\"}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var json = JsonSerializer.Deserialize<JsonElement>(await tools.ListUserStories(123));
+
+            Assert.False(json[0].TryGetProperty("version", out _));
+        }
+    }
+
+    [Fact]
     public async Task ListUserStoriesPage_PreservesServerOrderAndUnknownEmptyPageMetadata()
     {
         var orderedHandler = StoryRoutes("[{\"id\":92,\"ref\":2,\"project\":123},{\"id\":91,\"ref\":1,\"project\":123}]");

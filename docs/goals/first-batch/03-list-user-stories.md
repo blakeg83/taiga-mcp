@@ -171,4 +171,6 @@ adds opt-in page metadata and story list fields, and defers ordering,
 estimates, swimlane, and epic filters. The upstream evidence is pinned above;
 no deployed-version claim or live smoke test was available. The four local
 step commits are `7c2d584`, `9b82294`, `8ae12d6`, and the final verification
-commit created for this step.
+commit `136d815`. A post-completion review also added a numeric-kind guard for
+optional integer fields and a regression test for a nonnumeric list version;
+that follow-up is committed separately after rerunning validation.
