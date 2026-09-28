@@ -1,6 +1,6 @@
 # Goal 08: get_task
 
-Status: in progress.
+Status: complete.
 
 ## Objective
 
@@ -66,39 +66,39 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify detail correctness
 
-- [ ] Invoke via MCP and assert one task detail request plus required authentication/metadata work only.
-- [ ] Cover standalone/null fields, rich text, optional blocking/due date, 404, 403, invalid IDs, and missing required version.
-- [ ] Verify no task is returned on a malformed response and list_tasks behavior stays unchanged.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify get_task workflow`.
+- [x] Invoke via MCP and assert one task detail request plus required authentication/metadata work only.
+- [x] Cover standalone/null fields, rich text, optional blocking/due date, 404, 403, invalid IDs, and missing required version.
+- [x] Verify no task is returned on a malformed response and list_tasks behavior stays unchanged.
+- [x] Validate this step: root restore, Debug build, and full test suite passed; acceptance cases below are covered.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify get_task workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Task version and IDs match the server.
-- [ ] Standalone tasks keep null story/sprint values.
-- [ ] Errors cannot produce a fake empty task.
-- [ ] Detail retrieval does not silently trigger unrelated data fetches.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Task version and IDs match the server.
+- [x] Standalone tasks keep null story/sprint values.
+- [x] Errors cannot produce a fake empty task.
+- [x] Detail retrieval does not silently trigger unrelated data fetches.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Agents can inspect a task and obtain reliable context/version for a later update.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Agents can inspect a task and obtain reliable context/version for a later update.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (181 passed) passed before changes. Added standalone/story-linked fixture contracts, required identity/version malformed cases, and unknown-field tolerance. Verified 2026-09-28 against taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` and taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e`; no live Taiga calls. | Specify get_task contracts / pending |
-| 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore` passed (188 tests, 0 failures) and included standalone/story-linked mapping, null parent/sprint, Markdown/tags/colors, due-date/blocking fields, status-label absence, required-field rejection, invalid ID, malformed object, auth/request count, and no extra reads. Debug build passed with 0 warnings/errors. HTTP route is `GET tasks/{taskId}`; transport owns response disposal; no live calls. | Implement get_task API behavior / pending |
-| 3 | Complete | Production MCP discovery now reports `get_task` with required `taskId`; the STDIO integration test calls it against fake HTTP and verifies a detail object, authoritative IDs/version/Markdown, exact `/api/v1/tasks/203` route, bearer auth, and no page envelope. Focused suite passed with 188 tests after exposure. Documentation updated in the reference, README, quickstart, and inventory. | Expose get_task MCP interface / pending |
-| 4 | Not started | — | Verify get_task workflow / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (181 passed) passed before changes. Added standalone/story-linked fixture contracts, required identity/version malformed cases, and unknown-field tolerance. Verified 2026-09-28 against taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` and taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e`; no live Taiga calls. | Specify get_task contracts / `8a93920` |
+| 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore` passed (188 tests, 0 failures) and included standalone/story-linked mapping, null parent/sprint, Markdown/tags/colors, due-date/blocking fields, status-label absence, required-field rejection, invalid ID, malformed object, auth/request count, and no extra reads. Debug build passed with 0 warnings/errors. HTTP route is `GET tasks/{taskId}`; transport owns response disposal; no live calls. | Implement get_task API behavior / `0117f9c` |
+| 3 | Complete | Production MCP discovery now reports `get_task` with required `taskId`; the STDIO integration test calls it against fake HTTP and verifies a detail object, authoritative IDs/version/Markdown, exact `/api/v1/tasks/203` route, bearer auth, and no page envelope. Focused suite passed with 188 tests after exposure. Documentation updated in the reference, README, quickstart, and inventory. | Expose get_task MCP interface / `febba3a` |
+| 4 | Complete | Full root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed: 191 tests, 0 failures, 0 skipped, 0 build warnings/errors. Focused task tests cover safe 403/404 and transport failures without secret leakage; existing MCP STDIO coverage verifies discovery/invocation, one authenticated detail request, no metadata/parent/history reads, valid detail JSON, malformed response rejection, and unchanged list behavior. No live Taiga calls or writes. | Verify get_task workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

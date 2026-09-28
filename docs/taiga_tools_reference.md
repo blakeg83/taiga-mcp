@@ -68,7 +68,7 @@ verified by the integration tests added by this foundation goal.
 ### `get_task` contract
 
 The signature is `get_task(taskId)`, where `taskId` is the positive
-internal task ID rather than the displayed `#ref`. It will request exactly
+internal task ID rather than the displayed `#ref`. It requests exactly
 `GET /api/v1/tasks/{taskId}` and return one detail object rather than a page
 envelope. The required identity/version fields are `id`, `ref`, `project`, and
 `version`; optional fields include `subject`, Markdown `description`,

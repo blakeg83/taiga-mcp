@@ -1,5 +1,8 @@
+using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -120,6 +123,51 @@ public sealed class TaskDetailTests
             var exception = await Assert.ThrowsAsync<TaigaRequestException>(() => NewApi(handler, auth).GetTaskAsync(203));
 
             Assert.Contains("invalid task detail", exception.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
+    public async Task GetTaskTool_ReportsSafeHttpFailures(HttpStatusCode statusCode, string category)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks/203",
+                "{\"detail\":\"secret task credentials\"}",
+                statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new TaskTools(NewApi(handler, auth));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.GetTask(203));
+
+            Assert.Contains(((int)statusCode).ToString(), exception.Message);
+            Assert.Contains(category, exception.Message);
+            Assert.DoesNotContain("secret task credentials", exception.Message);
+            Assert.Single(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/tasks/203"));
+        }
+    }
+
+    [Fact]
+    public async Task GetTaskTool_ReportsTransportFailureInsteadOfEmptyTask()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks/203",
+                new HttpRequestException("secret connection details"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new TaskTools(NewApi(handler, auth));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.GetTask(203));
+
+            Assert.Contains("transport failure", exception.Message);
+            Assert.DoesNotContain("secret connection details", exception.Message);
         }
     }
 
