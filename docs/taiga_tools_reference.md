@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 19 tools:
+The current server exposes 20 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -17,13 +17,13 @@ The current server exposes 19 tools:
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
 - 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
-- 1 epic tool: `list_epics`.
+- 2 epic tools: `list_epics` and `get_epic`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Epic detail and cross-resource commands
-remain planned. `update_user_story`
+individual checklists are complete. Cross-resource commands remain planned.
+`update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
 `clearFields` containing only the wire names `assigned_to` and `milestone`.
@@ -33,8 +33,8 @@ to the story and Taiga determines any effects on child tasks; the MCP tool does
 not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
 unsupported clear names, and set/clear collisions fail before HTTP; write
 failures are not replayed.
-The `list_epics` contract is source-verified and its domain API/MCP wrapper are
-implemented. Its signature is
+The `list_epics` and `get_epic` contracts are source-verified and their
+domain APIs/MCP wrappers are implemented. `list_epics` has the signature
 `list_epics(projectId, page=1, statusIds?, assignedTo?, tags?, query?,
 includeClosed=false)`, and it will always return the page envelope
 `{ items, page, total, next_page, has_more }`. The default wire filter is
@@ -51,9 +51,36 @@ This contract was checked on 2026-09-28 against pinned taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e` in the [epic API source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py)
 and [epic serializer source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py).
 
-Use the returned internal `id` with the planned `get_epic` command when that
-goal is delivered. Later story-linking commands will also take this internal
-epic ID; the displayed `ref` is for human-facing project context only.
+Use the returned internal `id` with the `get_epic` command. Later story-linking
+commands will also take this internal epic ID; the displayed `ref` is for
+human-facing project context only.
+
+### `get_epic` contract
+
+The signature is `get_epic(epicId)`. It performs one authenticated `GET
+/api/v1/epics/{epicId}` detail read. The result exposes the authoritative
+`id`, `ref`, `project`, `version`, description, subject, status ID/label,
+assignment, color, tags, and modified timestamp. It also preserves
+server-supplied scalar context (`is_closed`, `is_blocked`, `blocked_note`,
+`client_requirement`, and `team_requirement`) and the optional raw
+`user_stories_counts` summary when the server provides it. Missing optional
+values are omitted from tool JSON; unknown upstream fields are ignored.
+
+The client will preserve Markdown/Unicode description text and the numeric
+status ID even when no inline status label is available. It will not fetch
+related stories, history, comments, or status metadata, and it will not
+compute progress. The detail mapping was checked on 2026-09-28
+against taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e` ([epic API](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py),
+[epic serializers](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py),
+[epic model](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/models.py))
+and taiga-doc revision
+`7455fd37cb164bbf80198c1517fd0ef414e2a7b9` ([epic endpoints](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/epics/endpoints.adoc)).
+This is pinned source evidence, not a deployed-version claim.
+
+The public `get_epic` wrapper now exposes the domain mapping with the
+signature `get_epic(epicId)`. It accepts the positive internal epic ID, not the
+displayed `#ref`, and returns one detail object rather than a page envelope.
 
 See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
@@ -82,6 +109,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `list_epics` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with epic items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, color?, tags?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
+| `get_epic` | `epicId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, color?, tags?, modified?, is_closed?, is_blocked?, blocked_note?, client_requirement?, team_requirement?, user_stories_counts?, version }`. `epicId` is the internal ID, not displayed `#ref`; related stories and computed progress are not loaded. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 | `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
@@ -107,13 +135,35 @@ The result is always an envelope, even for an empty page:
 {"items":[{"id":301,"ref":12,"project":123,"subject":"Saved search epic","status_id":7,"status":"Ready","assigned_to":42,"color":"#336699","tags":[["search","#336699"]],"modified":"2026-09-28T12:03:00Z","version":4}],"page":1,"total":null,"next_page":null,"has_more":null}
 ```
 
-The `id` is the internal epic identifier for the planned `get_epic` and
+The `id` is the internal epic identifier for the `get_epic` and future
 story-linking commands; `ref` is the displayed project reference.
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
 spelling for compatibility. The MCP SDK schema and runtime binding are
 verified by the integration tests added by this foundation goal.
+
+### `get_epic` usage
+
+Start with `list_epics` to obtain a project-scoped page, then pass the item's
+internal `id` to `get_epic`; the displayed `ref` is not accepted as the detail
+identifier:
+
+```json
+{"projectId":123,"page":1,"includeClosed":false}
+{"epicId":301}
+```
+
+The result is one detail object, for example:
+
+```json
+{"id":301,"ref":12,"project":123,"subject":"Saved search epic","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status_id":7,"status":"Ready","color":"#336699","tags":[["search","#336699"]],"is_closed":false,"is_blocked":true,"client_requirement":true,"team_requirement":false,"user_stories_counts":{"total":3,"closed":1},"version":4}
+```
+
+Optional null properties such as `assigned_to` and `blocked_note` are omitted
+from tool JSON. Use the returned `version` for a later versioned edit. This
+read does not enumerate linked stories, fetch history/comments, or calculate
+progress.
 
 ### `create_task` contract
 
@@ -327,6 +377,14 @@ An update returns the server's authoritative detail, for example:
   come only from inline `status_extra_info.name`; an unavailable label leaves
   the numeric `status_id` intact. Listing makes no status-metadata, related
   story, or progress requests.
+- `get_epic` requests exactly `epics/{epicId}` and returns one detail object.
+  It validates positive `epicId` input and required positive `id`, `ref`, and
+  `project` plus nonnegative `version` in the response. It preserves
+  Markdown/Unicode descriptions, nullable assignment and color, tags, inline
+  status labels, numeric status IDs, and optional server summaries including
+  `user_stories_counts`; unknown properties and unavailable summaries are not
+  fabricated. It performs no status-metadata, relationship, history, or
+  progress reads.
 - `get_task` requests exactly `tasks/{taskId}` and returns one detail object.
   It validates positive `taskId` input and required positive `id`, `ref`, and
   `project` plus nonnegative `version` in the response. It preserves Markdown,

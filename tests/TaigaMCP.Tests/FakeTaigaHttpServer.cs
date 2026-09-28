@@ -43,6 +43,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicListStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicDetailStatusCode { get; set; } = HttpStatusCode.OK;
+
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
     public static FakeTaigaHttpServer Start()
@@ -180,6 +182,23 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                     ["x-pagination-count"] = "1",
                     ["x-pagination-current"] = "1"
                 });
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/epics/301")
+        {
+            if (EpicDetailStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicDetailStatusCode, "{\"detail\":\"synthetic epic detail secret\"}");
+                return;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                {"id":301,"ref":12,"project":123,"subject":"Integration epic","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":null,"color":"#336699","tags":[["search","#336699"]],"modified_date":"2026-09-28T12:03:00Z","is_closed":false,"is_blocked":true,"blocked_note":"Waiting for the saved-search API.","client_requirement":true,"team_requirement":false,"user_stories_counts":{"total":3,"closed":1},"version":4,"future_detail_field":{"ignored":true}}
+                """);
             return;
         }
 

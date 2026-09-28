@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; and creating, reading, and listing tasks and projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; creating, reading, and listing tasks; and listing and reading epics and projects.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 17 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 20 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -124,6 +124,21 @@ endpoint:
 The response is the created task detail with server-generated `id`, `ref`, and
 `version`, plus the resulting parent and sprint.
 
+### Read an epic
+
+Use `list_epics` to obtain a project-scoped page. Pass an item's internal `id`
+to `get_epic`; the displayed `ref` is not accepted as the detail identifier:
+
+```json
+{"projectId":123,"page":1,"includeClosed":false}
+{"epicId":301}
+```
+
+The detail result preserves the server's description, status, assignment,
+color, tags, version, and optional summary fields such as
+`user_stories_counts`. It does not enumerate related stories or calculate
+progress. Use the returned internal epic ID for later story-linking commands.
+
 ### Update a user story
 
 Read the story first and pass its returned `version` to the update. Omitted
@@ -176,6 +191,7 @@ Call the tool list_user_stories with projectId=12345, milestoneId=678, and inclu
 Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
+Call the tool get_epic with epicId=301
 Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11
 Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."

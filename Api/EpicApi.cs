@@ -13,6 +13,16 @@ public sealed class EpicApi
         _transport = transport;
     }
 
+    public async Task<EpicDetailDto> GetEpicAsync(
+        int epicId,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(epicId, nameof(epicId));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"epics/{epicId}");
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        return MapEpicDetail(document.RootElement);
+    }
+
     public async Task<IReadOnlyList<EpicDto>> ListEpicsAsync(
         int projectId,
         int page = 1,
@@ -82,6 +92,49 @@ public sealed class EpicApi
         };
     }
 
+    private static EpicDetailDto MapEpicDetail(JsonElement epic)
+    {
+        ValidateDetailIdentityAndVersion(epic);
+
+        return new EpicDetailDto
+        {
+            Id = ReadRequiredPositiveInt(epic, "id"),
+            Ref = ReadRequiredPositiveInt(epic, "ref"),
+            Project = ReadRequiredPositiveInt(epic, "project"),
+            Subject = ReadOptionalString(epic, "subject"),
+            Description = ReadOptionalString(epic, "description"),
+            StatusId = ReadOptionalPositiveInt(epic, "status"),
+            Status = ReadStatusName(epic),
+            AssignedTo = ReadOptionalPositiveInt(epic, "assigned_to"),
+            Color = ReadOptionalString(epic, "color"),
+            Tags = ReadTags(epic),
+            Modified = ReadOptionalString(epic, "modified_date"),
+            IsClosed = ReadOptionalBoolean(epic, "is_closed"),
+            IsBlocked = ReadOptionalBoolean(epic, "is_blocked"),
+            BlockedNote = ReadOptionalString(epic, "blocked_note"),
+            ClientRequirement = ReadOptionalBoolean(epic, "client_requirement"),
+            TeamRequirement = ReadOptionalBoolean(epic, "team_requirement"),
+            UserStoriesCounts = ReadOptionalJson(epic, "user_stories_counts"),
+            Version = epic.GetProperty("version").GetInt32()
+        };
+    }
+
+    private static void ValidateDetailIdentityAndVersion(JsonElement epic)
+    {
+        if (epic.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid epic detail data.");
+
+        ReadRequiredPositiveInt(epic, "id");
+        ReadRequiredPositiveInt(epic, "ref");
+        ReadRequiredPositiveInt(epic, "project");
+
+        if (!epic.TryGetProperty("version", out var version) ||
+            version.ValueKind != JsonValueKind.Number ||
+            !version.TryGetInt32(out var number) ||
+            number < 0)
+            throw new TaigaRequestException("Taiga returned invalid epic version data.");
+    }
+
     private static string? ReadStatusName(JsonElement epic)
     {
         if (!epic.TryGetProperty("status_extra_info", out var extraInfo) ||
@@ -142,6 +195,27 @@ public sealed class EpicApi
             throw new TaigaRequestException($"Taiga returned invalid epic {propertyName} data.");
 
         return number;
+    }
+
+    private static bool? ReadOptionalBoolean(JsonElement epic, string propertyName)
+    {
+        if (!epic.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            throw new TaigaRequestException($"Taiga returned invalid epic {propertyName} data.");
+
+        return value.GetBoolean();
+    }
+
+    private static JsonElement? ReadOptionalJson(JsonElement epic, string propertyName)
+    {
+        if (!epic.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        return value.Clone();
     }
 
     private static string? ReadOptionalString(JsonElement epic, string propertyName)

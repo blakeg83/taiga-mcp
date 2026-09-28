@@ -33,6 +33,8 @@ public sealed class McpIntegrationTests
         Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
         foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
+        Assert.False((await Call("get_epic", new() { ["epicId"] = 301 })).IsError == true);
+        Assert.True((await Call("get_epic", new() { ["epicId"] = 0 })).IsError == true);
         Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
         var createdStory = await Call("create_user_story", new()
         {
@@ -323,6 +325,7 @@ public sealed class McpIntegrationTests
                 "create_issue",
                 "create_task",
                 "create_user_story",
+                "get_epic",
                 "get_issue",
                 "get_task",
                 "get_user_story",
@@ -405,6 +408,13 @@ public sealed class McpIntegrationTests
             var getUserStoryRequired = getUserStory.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "userStoryId" }, getUserStoryRequired);
+
+            var getEpic = Assert.Single(tools, tool => tool.Name == "get_epic");
+            var getEpicProperties = getEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "epicId" }, getEpicProperties);
+            var getEpicRequired = getEpic.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "epicId" }, getEpicRequired);
 
             var getTask = Assert.Single(tools, tool => tool.Name == "get_task");
             var getTaskProperties = getTask.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -513,6 +523,42 @@ public sealed class McpIntegrationTests
             Assert.Equal(
                 "/api/v1/epics?project=123&page=3&status=7&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 epicRequest.PathAndQuery);
+
+            var epicDetail = await client.CallToolAsync(
+                "get_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(epicDetail.IsError == true);
+            var epicDetailJson = JsonSerializer.Deserialize<JsonElement>(GetText(epicDetail));
+            Assert.Equal(301, epicDetailJson.GetProperty("id").GetInt32());
+            Assert.Equal("**Acceptance:** preserve Markdown and Unicode — ✓", epicDetailJson.GetProperty("description").GetString());
+            Assert.Equal(4, epicDetailJson.GetProperty("version").GetInt32());
+            Assert.Equal(3, epicDetailJson.GetProperty("user_stories_counts").GetProperty("total").GetInt32());
+            Assert.False(epicDetailJson.TryGetProperty("assigned_to", out _));
+            var epicDetailRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "GET" && request.PathAndQuery == "/api/v1/epics/301");
+            Assert.Equal("Bearer integration-token", epicDetailRequest.Authorization);
+            Assert.DoesNotContain(taiga.Requests, request => request.PathAndQuery.Contains("related_userstories", StringComparison.Ordinal));
+
+            taiga.EpicDetailStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenEpic = await client.CallToolAsync(
+                "get_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenEpic.IsError == true);
+            Assert.Contains("403", GetText(forbiddenEpic));
+            Assert.Contains("permission denied", GetText(forbiddenEpic), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic epic detail secret", GetText(forbiddenEpic));
+
+            taiga.EpicDetailStatusCode = System.Net.HttpStatusCode.NotFound;
+            var missingEpic = await client.CallToolAsync(
+                "get_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(missingEpic.IsError == true);
+            Assert.Contains("404", GetText(missingEpic));
+            Assert.Contains("resource not found", GetText(missingEpic), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic epic detail secret", GetText(missingEpic));
 
             var storyPage = await client.CallToolAsync(
                 "list_user_stories",
