@@ -40,7 +40,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_priorities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
-| `list_user_stories` | `projectId` integer, required; `page` integer, default `1` | Array of `{ id, ref, subject, status, assigned_to, modified }`. The current API excludes closed and archived stories. |
+| `list_user_stories` | `projectId` integer, required; `page` integer, default `1` | Array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`. The current public signature is still the legacy two-argument form; the expanded filters and optional page envelope are delivered in the next interface step. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -125,8 +125,10 @@ User-story and metadata results:
   additionally supports the opt-in page envelope; missing or malformed
   pagination headers remain explicit `null` values rather than being treated
   as zero totals or a completed result.
-- Issue and story labels are derived from project metadata calls. The current
-  DTOs preserve labels for compatibility and do not expose all source IDs.
+- Issue and story labels are derived from project metadata calls. Story list
+  results additionally preserve `project` and `status_id`, and expose
+  `milestone` and `version` only when the list response supplies them. A
+  missing list version is not fabricated as zero.
 - The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
   null-valued response properties such as an unassigned issue's `assigned_to`
   are omitted from current tool JSON. This response omission is distinct from

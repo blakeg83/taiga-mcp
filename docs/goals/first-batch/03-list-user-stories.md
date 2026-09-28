@@ -64,13 +64,32 @@ and positive project/page validation without introducing a failing test suite.
 
 ## Step 2: Implement filters and page mapping
 
-- [ ] Reuse goal 01 query/page helpers and add story-specific options; retain the cleanup's flag-based filtering (Done/Archived string matching is already removed).
-- [ ] Apply closed/archive restrictions only when not overridden by explicit statuses; omit those restrictions when corresponding include flags are enabled.
-- [ ] Add project, status_id, milestone, and a nullable version when present to list mapping; do not invent version when the list response omits it.
-- [ ] Keep existing DTO JSON fields and domain callers compatible.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_user_stories API behavior`.
+- [x] Reuse goal 01 query/page helpers and add story-specific options; retain the cleanup's flag-based filtering (Done/Archived string matching is already removed).
+- [x] Apply closed/archive restrictions only when not overridden by explicit statuses; omit those restrictions when corresponding include flags are enabled.
+- [x] Add project, status_id, milestone, and a nullable version when present to list mapping; do not invent version when the list response omits it.
+- [x] Keep existing DTO JSON fields and domain callers compatible.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_user_stories API behavior`.
+
+Step 2 implementation and validation (2026-09-28): the API now uses the shared
+pagination parser from the issue-list prerequisite and one encoded
+`userstories` request per call. Nonempty `statusIds` maps to `status` and
+suppresses both automatic status-flag restrictions. Otherwise
+`includeClosed` controls `status__is_closed=false` and `includeArchived`
+controls `status__is_archived=false`. `assignedTo`, `milestoneId`, `tags`, and
+`query` map to `assigned_to`, `milestone`, `tags`, and `q`; `backlogOnly` maps
+to `milestone__isnull=true`. Invalid IDs and the milestone/backlog conflict
+fail before metadata or story HTTP requests.
+
+List mapping retains the existing fields and adds nullable `project`,
+`status_id`, `milestone`, and `version`. A missing or nonnumeric upstream
+version remains null and is omitted by the public serializer; version zero is
+preserved when explicitly returned. Status labels are metadata labels only and
+never participate in filtering. Unknown or unsafe pagination continuation
+URLs remain unknown through the shared parser. Focused story tests passed 6,
+`dotnet build -c Debug --no-restore` passed with 0 warnings/errors, and the
+full suite passed 109 tests. Step 1 commit: `7c2d584`.
 
 ## Step 3: Wire the public story list
 
@@ -114,7 +133,7 @@ and positive project/page validation without introducing a failing test suite.
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug --no-restore`: 103 passed. Pinned source revision and status/backlog decisions recorded above; baseline fixtures added. | Specify list_user_stories contracts / completed locally |
-| 2 | Not started | — | Implement list_user_stories API behavior / pending |
+| 2 | Complete | Focused story tests: 6 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Full Debug suite: 109 passed. Wire behavior and nullable mapping documented above; previous step `7c2d584`. | Implement list_user_stories API behavior / completed locally |
 | 3 | Not started | — | Expose list_user_stories MCP interface / pending |
 | 4 | Not started | — | Verify list_user_stories workflow / pending |
 
