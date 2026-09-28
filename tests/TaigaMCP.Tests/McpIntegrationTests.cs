@@ -155,6 +155,21 @@ public sealed class McpIntegrationTests
             Assert.Contains("includeClosed", issueProperties);
             Assert.Contains("includePageInfo", issueProperties);
 
+            var listUserStories = Assert.Single(tools, tool => tool.Name == "list_user_stories");
+            var storyProperties = listUserStories.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Contains("statusIds", storyProperties);
+            Assert.Contains("assignedTo", storyProperties);
+            Assert.Contains("milestoneId", storyProperties);
+            Assert.Contains("backlogOnly", storyProperties);
+            Assert.Contains("tags", storyProperties);
+            Assert.Contains("query", storyProperties);
+            Assert.Contains("includeClosed", storyProperties);
+            Assert.Contains("includeArchived", storyProperties);
+            Assert.Contains("includePageInfo", storyProperties);
+            var storyRequired = listUserStories.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, storyRequired);
+
             var updateIssue = Assert.Single(tools, tool => tool.Name == "update_issue");
             var updateProperties = updateIssue.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
             Assert.Contains("subject", updateProperties);
@@ -195,6 +210,33 @@ public sealed class McpIntegrationTests
             Assert.Equal(JsonValueKind.Null, total.ValueKind);
             var issueRequest = taiga.Requests.Last(request => request.PathAndQuery.Contains("/api/v1/issues", StringComparison.Ordinal));
             Assert.Equal("/api/v1/issues?project=123&page=1&status=1", issueRequest.PathAndQuery);
+
+            var storyPage = await client.CallToolAsync(
+                "list_user_stories",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 2,
+                    ["statusIds"] = new[] { 1 },
+                    ["assignedTo"] = 42,
+                    ["backlogOnly"] = true,
+                    ["tags"] = new[] { "a&b" },
+                    ["query"] = "fix & revisión",
+                    ["includeClosed"] = true,
+                    ["includeArchived"] = true,
+                    ["includePageInfo"] = true
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(storyPage.IsError == true);
+            var storyEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(storyPage));
+            Assert.Equal(JsonValueKind.Object, storyEnvelope.ValueKind);
+            Assert.Equal(2, storyEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(JsonValueKind.Array, storyEnvelope.GetProperty("items").ValueKind);
+            Assert.False(storyEnvelope.GetProperty("items")[0].TryGetProperty("version", out _));
+            var storyRequest = taiga.Requests.Last(request => request.PathAndQuery.Contains("/api/v1/userstories", StringComparison.Ordinal));
+            Assert.Equal(
+                "/api/v1/userstories?project=123&page=2&status=1&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
+                storyRequest.PathAndQuery);
 
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);

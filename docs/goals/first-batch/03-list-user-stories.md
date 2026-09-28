@@ -93,12 +93,25 @@ full suite passed 109 tests. Step 1 commit: `7c2d584`.
 
 ## Step 3: Wire the public story list
 
-- [ ] Expose optional parameters through UserStoryTools with descriptions for backlog selection and status precedence.
-- [ ] Keep legacy array output and add the opt-in envelope; do not fetch all stories or individual details automatically.
-- [ ] Document that get_user_story supplies a reliable current version for updates.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_user_stories MCP interface`.
+- [x] Expose optional parameters through UserStoryTools with descriptions for backlog selection and status precedence.
+- [x] Keep legacy array output and add the opt-in envelope; do not fetch all stories or individual details automatically.
+- [x] Document that get_user_story supplies a reliable current version for updates.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose list_user_stories MCP interface`.
+
+Step 3 interface and validation (2026-09-28): the public signature is
+`list_user_stories(projectId, page=1, statusIds?, assignedTo?, milestoneId?,
+backlogOnly=false, tags?, query?, includeClosed=false, includeArchived=false,
+includePageInfo=false)`. It returns the legacy array unless
+`includePageInfo=true`, which returns `{ items, page, total, next_page,
+has_more }` with unknown pagination values represented as JSON null. The tool
+does not aggregate pages or fetch individual story details. `get_user_story`
+will be the authoritative source for a current version before a later update.
+
+The real MCP integration test validates the generated schema, required
+`projectId`, optional/default argument binding, an encoded backlog query, and
+the page envelope. The previous API commit is `9b82294`.
 
 ## Step 4: Verify backlog and sprint workflows
 
@@ -134,7 +147,7 @@ full suite passed 109 tests. Step 1 commit: `7c2d584`.
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug --no-restore`: 103 passed. Pinned source revision and status/backlog decisions recorded above; baseline fixtures added. | Specify list_user_stories contracts / completed locally |
 | 2 | Complete | Focused story tests: 6 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Full Debug suite: 109 passed. Wire behavior and nullable mapping documented above; previous step `7c2d584`. | Implement list_user_stories API behavior / completed locally |
-| 3 | Not started | — | Expose list_user_stories MCP interface / pending |
+| 3 | Complete | MCP `tools/list` schema and real STDIO `tools/call` validation pass, including optional filters, `backlogOnly`, encoded values, and the opt-in envelope. Previous step `9b82294`. | Expose list_user_stories MCP interface / completed locally |
 | 4 | Not started | — | Verify list_user_stories workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

@@ -110,6 +110,8 @@ List projects I belong to
 Call the tool list_projects with member=6 and page=1
 Call the tool list_issues with projectId=12345 and page=1
 Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true
+Call the tool list_user_stories with projectId=12345 and backlogOnly=true
+Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345
 Call the tool list_issue_severities with projectId=12345
@@ -183,7 +185,10 @@ before deciding whether to retry. See [development conventions](development.md).
 previous account-specific selection, call `list_projects(member="6")`, or send
 `{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
 Story lists use Taiga's `status__is_closed=false` and
-`status__is_archived=false`; English labels such as Done/Archived no longer
-exclude open statuses. Issue lists use `status__is_closed=false` only: unsupported
-issue archive filtering and redundant status-exclusion requests were removed.
-These are behavior corrections, not behavior-preserving refactoring.
+`status__is_archived=false` by default; nonempty status IDs override both,
+and include flags selectively remove them. `backlogOnly=true` uses
+`milestone__isnull=true`, while `milestoneId` selects a sprint. English labels
+such as Done/Archived never determine filtering. Issue lists use
+`status__is_closed=false` only: unsupported issue archive filtering and
+redundant status-exclusion requests were removed. These are behavior
+corrections, not behavior-preserving refactoring.
