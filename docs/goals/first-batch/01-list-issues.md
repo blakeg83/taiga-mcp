@@ -1,6 +1,6 @@
 # Goal 01: list_issues
 
-Status: planned.
+Status: complete.
 
 ## Objective
 
@@ -67,31 +67,31 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify triage workflows
 
-- [ ] Invoke through MCP with only legacy arguments, then with a closed-status filter and includePageInfo=true.
-- [ ] Assert request encoding for spaces, Unicode, ampersands, and multiple tags/statuses; verify filters cannot escape their query values.
-- [ ] Cover empty pages, later pages, missing/malformed headers, null assignment, unknown status labels, 403, and malformed server responses.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify list_issues workflow`.
+- [x] Invoke through MCP with only legacy arguments, then with a closed-status filter and includePageInfo=true.
+- [x] Assert request encoding for spaces, Unicode, ampersands, and multiple tags/statuses; verify filters cannot escape their query values.
+- [x] Cover empty pages, later pages, missing/malformed headers, null assignment, unknown status labels, 403, and malformed server responses.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify list_issues workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Legacy projectId/page invocation still returns an array.
-- [ ] A custom-named closed status is retrievable without hardcoded names or contradictory exclusions.
-- [ ] Array and envelope modes contain identical items; missing total/continuation is not misreported as zero/complete.
-- [ ] Numeric classification IDs survive even when a display label is unavailable.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Legacy projectId/page invocation still returns an array.
+- [x] A custom-named closed status is retrievable without hardcoded names or contradictory exclusions.
+- [x] Array and envelope modes contain identical items; missing total/continuation is not misreported as zero/complete.
+- [x] Numeric classification IDs survive even when a display label is unavailable.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can find both active and completed issues and reuse returned IDs for updates without breaking the original list interface.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can find both active and completed issues and reuse returned IDs for updates without breaking the original list interface.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
@@ -134,11 +134,24 @@ an actual STDIO tools/call were verified by
 and the focused issue-list suite passed 8 tests. No live Taiga requests were
 made.
 
+Step 4 evidence: commit `1e320ab` provided the MCP interface. The final edge
+cases cover an empty later page, custom/localized closed status, null
+assignment omission, unknown and malformed continuation headers, forbidden
+responses, malformed issue-list JSON, encoded Unicode/space/ampersand values,
+and identical array/envelope items. Required root validation passed:
+`dotnet restore`; `dotnet build -c Debug` (0 warnings/errors);
+`dotnet test -c Debug` (86 passed); `dotnet build -c Release --no-restore`
+(0 warnings/errors); and `dotnet test -c Release --no-build --no-restore`
+(86 passed). Changed C# formatting verification and `git diff --check` also
+passed. All verification used fake HTTP or the local STDIO MCP fixture; no
+live Taiga requests or writes were made. Deferred date, owner, sprint, sort,
+and all-page export filters remain in the inventory.
+
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet test -c Debug`: 74 passed. Contract/source decisions recorded above; legacy array fixture added. | Specify list_issues contracts / pending |
-| 2 | Complete | `IssueListTests`: 6 passed; `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Filter, ID, validation, and pagination-header behavior documented above. | Implement list_issues API behavior / pending |
-| 3 | Complete | MCP discovery and real STDIO call passed; `IssueListTests`: 8 passed. README, quickstart, reference, and inventory now document the delivered interface. | Expose list_issues MCP interface / pending |
-| 4 | Not started | — | Verify list_issues workflow / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug`: 74 passed. Contract/source decisions recorded above; legacy array fixture added. | Specify list_issues contracts / `4281680` |
+| 2 | Complete | `IssueListTests`: 6 passed; `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Filter, ID, validation, and pagination-header behavior documented above. | Implement list_issues API behavior / `1097f1b` |
+| 3 | Complete | MCP discovery and real STDIO call passed; `IssueListTests`: 8 passed. README, quickstart, reference, and inventory now document the delivered interface. | Expose list_issues MCP interface / `1e320ab` |
+| 4 | Complete | Final root Debug/Release matrix: 86 tests passed in each configuration; formatting and diff checks passed; edge cases documented above. | Verify list_issues workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

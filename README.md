@@ -97,7 +97,7 @@ build/tests; do not stop that server. See the developer guide for the exact comm
 
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
-- [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. These are plans, not implemented capabilities.
+- [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. The `list_issues` expansion is delivered; the remaining entries are plans.
 
 ## Debug Logging
 - Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.

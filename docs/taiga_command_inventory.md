@@ -4,7 +4,7 @@ Reviewed September 28, 2026. This inventory includes the 11 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
-Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). These plans cover a defined subset of this inventory and remain unimplemented until their checklists are completed.
+Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). The `list_issues` expansion is delivered; the remaining planned entries remain unimplemented until their checklists are completed.
 
 ## Scope and notation
 

@@ -16,12 +16,12 @@ The current server exposes 11 tools:
   `list_issue_priorities`.
 - 1 user-story tool: `list_user_stories`.
 
-The first-batch documents describe 15 additional or expanded functions. They
-are planned work until their individual goal checklists are complete. Epic,
-task, richer user-story, pagination-envelope, and cross-resource commands are
-not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
-and [first-batch plan index](goals/first-batch/README.md) for that planned
-coverage.
+The first-batch documents describe 15 additional or expanded functions. The
+`list_issues` expansion is delivered; the remaining goal documents describe
+planned work until their individual checklists are complete. Epic, task,
+richer user-story, and cross-resource commands are not exposed by this server
+yet. See the [command inventory](taiga_command_inventory.md) and [first-batch
+plan index](goals/first-batch/README.md) for the remaining planned coverage.
 
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.

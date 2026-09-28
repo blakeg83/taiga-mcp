@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net;
 using TaigaMCP.Api;
 using TaigaMCP.Caching;
 using TaigaMCP.Tools;
@@ -189,14 +190,88 @@ public sealed class IssueListTests
         using (http)
         {
             var result = JsonSerializer.Deserialize<JsonElement>(await new IssueTools(NewApi(handler, auth))
-                .ListIssues(123, includePageInfo: true));
+                .ListIssues(123, page: 4, includePageInfo: true));
 
+            Assert.Equal(4, result.GetProperty("page").GetInt32());
+            Assert.Empty(result.GetProperty("items").EnumerateArray());
             Assert.True(result.TryGetProperty("total", out var total));
             Assert.Equal(JsonValueKind.Null, total.ValueKind);
             Assert.True(result.TryGetProperty("next_page", out var next));
             Assert.Equal(JsonValueKind.Null, next.ValueKind);
             Assert.True(result.TryGetProperty("has_more", out var more));
             Assert.Equal(JsonValueKind.Null, more.ValueKind);
+        }
+    }
+
+    [Fact]
+    public async Task NullAssignmentIsOmittedFromListIssueJson()
+    {
+        var handler = IssueRoutes("[{\"id\":42,\"project\":123,\"assigned_to\":null}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var result = JsonSerializer.Deserialize<JsonElement>(await new IssueTools(NewApi(handler, auth))
+                .ListIssues(123));
+
+            Assert.False(result[0].TryGetProperty("assigned_to", out _));
+        }
+    }
+
+    [Fact]
+    public async Task CustomNamedClosedStatusIsReturnedThroughExplicitStatusFilter()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-statuses", "[{\"id\":77,\"name\":\"Terminado\",\"is_closed\":true}]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/severities", "[]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-types", "[]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/priorities", "[]")
+            .AddRoute(HttpMethod.Get, "/api/v1/issues", request =>
+            {
+                Assert.Equal("?project=123&page=1&status=77", request.Uri.Query);
+                return AuthenticationTests.Json("[{\"id\":42,\"project\":123,\"status\":77}]");
+            });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var result = JsonSerializer.Deserialize<JsonElement>(await new IssueTools(NewApi(handler, auth))
+                .ListIssues(123, statusIds: [77], includePageInfo: true));
+
+            var item = Assert.Single(result.GetProperty("items").EnumerateArray());
+            Assert.Equal("Terminado", item.GetProperty("status").GetString());
+            Assert.Equal(77, item.GetProperty("status_id").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task ForbiddenIssueListIsReportedAsSafeStatusError()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-statuses", "[]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/severities", "[]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-types", "[]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/priorities", "[]")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issues", "{\"detail\":\"secret credentials must not leak\"}", HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => NewApi(handler, auth).ListIssuesAsync(123, 1));
+
+            Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
+            Assert.Contains("permission denied", error.Message);
+            Assert.DoesNotContain("secret", error.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task MalformedIssueListResponseIsRejected()
+    {
+        var handler = IssueRoutes("{\"not\":\"an array\"}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => NewApi(handler, auth).ListIssuesAsync(123, 1));
+
+            Assert.Contains("invalid issue list", error.Message);
         }
     }
 
