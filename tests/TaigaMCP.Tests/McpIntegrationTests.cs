@@ -31,7 +31,7 @@ public sealed class McpIntegrationTests
             Assert.DoesNotContain("member=", taiga.Requests.Last().PathAndQuery);
         }
         Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
-        foreach (var name in new[] { "list_issues", "list_user_stories", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
+        foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
         var createdStory = await Call("create_user_story", new()
@@ -330,6 +330,7 @@ public sealed class McpIntegrationTests
                 "list_issue_types",
                 "list_issues",
                 "list_projects",
+                "list_tasks",
                 "list_user_stories",
                 "resolve_project",
                 "update_issue",
@@ -375,6 +376,15 @@ public sealed class McpIntegrationTests
             var storyRequired = listUserStories.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, storyRequired);
+
+            var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
+            var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "projectId", "page", "userStoryId", "milestoneId", "statusIds", "assignedTo", "tags", "query", "includeClosed" },
+                taskProperties);
+            var taskRequired = listTasks.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, taskRequired);
 
             var getUserStory = Assert.Single(tools, tool => tool.Name == "get_user_story");
             var getUserStoryProperties = getUserStory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -480,6 +490,37 @@ public sealed class McpIntegrationTests
             Assert.Equal("**Ready**", detail.GetProperty("description").GetString());
             var storyDetailRequest = Assert.Single(taiga.Requests, request => request.PathAndQuery == "/api/v1/userstories/90");
             Assert.Equal("Bearer integration-token", storyDetailRequest.Authorization);
+
+            var taskPage = await client.CallToolAsync(
+                "list_tasks",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 2,
+                    ["userStoryId"] = 102,
+                    ["milestoneId"] = 55,
+                    ["statusIds"] = new[] { 11 },
+                    ["assignedTo"] = 42,
+                    ["tags"] = new[] { "a&b" },
+                    ["query"] = "fix & revisión",
+                    ["includeClosed"] = true
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(taskPage.IsError == true);
+            var taskEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(taskPage));
+            Assert.Equal(JsonValueKind.Object, taskEnvelope.ValueKind);
+            Assert.Equal(2, taskEnvelope.GetProperty("page").GetInt32());
+            var task = Assert.Single(taskEnvelope.GetProperty("items").EnumerateArray());
+            Assert.Equal(203, task.GetProperty("id").GetInt32());
+            Assert.Equal(102, task.GetProperty("user_story").GetInt32());
+            Assert.Equal(55, task.GetProperty("milestone").GetInt32());
+            Assert.True(taskEnvelope.GetProperty("total").GetInt32() == 1);
+            var taskRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/tasks", StringComparison.Ordinal));
+            Assert.Equal(
+                "/api/v1/tasks?project=123&page=2&status=11&user_story=102&milestone=55&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
+                taskRequest.PathAndQuery);
+            Assert.Equal("Bearer integration-token", taskRequest.Authorization);
 
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);

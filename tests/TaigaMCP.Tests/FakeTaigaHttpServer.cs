@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace TaigaMCP.Tests;
@@ -123,6 +124,21 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 ["x-pagination-current"] = "1"
             };
             await RespondAsync(context.Response, HttpStatusCode.OK, "[{\"id\":123,\"slug\":\"demo\",\"name\":\"Demo\"}]", headers);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/tasks", StringComparison.OrdinalIgnoreCase))
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "[{\"id\":203,\"ref\":17,\"project\":123,\"subject\":\"Integration task\",\"status\":11,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"user_story\":102,\"milestone\":55,\"modified_date\":\"2026-09-28T12:00:00Z\",\"version\":2}]",
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "false",
+                    ["x-pagination-count"] = "1",
+                    ["x-pagination-current"] = "1"
+                });
             return;
         }
 

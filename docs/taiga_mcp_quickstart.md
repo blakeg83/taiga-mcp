@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; and listing projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; listing tasks and projects.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 14 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 15 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -150,6 +150,8 @@ Call the tool list_issues with projectId=12345 and page=1
 Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true
 Call the tool list_user_stories with projectId=12345 and backlogOnly=true
 Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
+Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
+Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool get_user_story with userStoryId=102
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345

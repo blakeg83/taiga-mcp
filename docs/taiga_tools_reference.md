@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 14 tools:
+The current server exposes 15 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -16,12 +16,13 @@ The current server exposes 14 tools:
   `list_issue_priorities`.
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
+- 1 task tool: `list_tasks`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Epic, task, and cross-resource commands
-are not exposed by this server yet. `update_user_story`
+individual checklists are complete. Epic, task detail/create/update, and cross-
+resource commands are not exposed by this server yet. `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
 `clearFields` containing only the wire names `assigned_to` and `milestone`.
@@ -56,6 +57,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, origin_issue?, origin_task?, epics? }`. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
 | `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, and `version`. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
+| `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -120,6 +122,12 @@ User-story and metadata results:
 [{"id":789,"ref":12,"project":123,"subject":"Ship the fix","status_id":1,"status":"Ready","assigned_to":42,"modified":"2026-09-28T12:02:00Z","milestone":55,"version":7}]
 ```
 
+Task list results:
+
+```json
+{"items":[{"id":203,"ref":17,"project":12,"subject":"Implement saved-search endpoint","status_id":11,"status":"Ready","assigned_to":42,"user_story":102,"milestone":55,"modified":"2026-09-28T12:00:00Z","version":2}],"page":1,"total":null,"next_page":null,"has_more":null}
+```
+
 ```json
 {"id":102,"ref":18,"project":12,"subject":"Allow saved searches","description":"**Acceptance:** preserve Markdown and Unicode — ✓","status_id":7,"status":"Ready","tags":[["search","#336699"]],"version":4,"origin_issue":{"id":201,"ref":9,"subject":"Saved search"},"epics":[]}
 ```
@@ -168,6 +176,14 @@ An update returns the server's authoritative detail, for example:
   the corresponding include flag is enabled; nonempty status IDs suppress
   both restrictions. The story list never infers filtering from translated
   status names.
+- `list_tasks` maps `statusIds`, `userStoryId`, `milestoneId`, `assignedTo`,
+  `tags`, and `query` to Taiga's allowlisted `status`, `user_story`,
+  `milestone`, `assigned_to`, `tags`, and `q` filters. With no explicit status
+  IDs, `includeClosed=false` sends `status__is_closed=false`; explicit statuses
+  or `includeClosed=true` omit that restriction. Task status labels come only
+  from inline `status_extra_info.name`; an unavailable label leaves the
+  numeric `status_id` intact. Standalone tasks preserve null parent/sprint
+  values, and listing makes no parent or detail requests.
 - `get_user_story` requests exactly `userstories/{userStoryId}`. It uses the
   returned `status_extra_info.name` when present and otherwise performs one
   project-scoped `userstory-statuses?project=...` lookup; if no usable project
@@ -230,6 +246,9 @@ The following sources were checked on 2026-09-28:
   [`4d11baef9027f5598f6341d6eb4261de2840688e`](https://github.com/taigaio/taiga-back/tree/4d11baef9027f5598f6341d6eb4261de2840688e),
   the `main` ref observed on the date above. The OCC mixin is at
   [`taiga/projects/occ/mixins.py`](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/occ/mixins.py).
+- Task listing was checked against the same pinned backend revision in the
+  [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60)
+  and [TaskListSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57).
 - The story detail route and serializer fields were checked against pinned
   `taiga-doc` revision
   [`7455fd37cb164bbf80198c1517fd0ef414e2a7b9`](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/user-stories/endpoints.adoc)

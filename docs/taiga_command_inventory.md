@@ -1,10 +1,10 @@
 # Taiga command inventory
 
-Reviewed September 28, 2026. This inventory includes the 11 commands already
+Reviewed September 28, 2026. This inventory includes the 15 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
-Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). The `list_issues` expansion is delivered; the remaining planned entries remain unimplemented until their checklists are completed.
+Detailed agent goal documents for the first 15-function implementation batch are in [the first-batch plan index](goals/first-batch/README.md). The `list_issues` expansion and `list_tasks` are delivered subsets; the remaining planned entries remain unimplemented until their checklists are completed.
 
 ## Scope and notation
 
@@ -95,7 +95,7 @@ API/source basis: [story endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_tasks` | New | `projectId, userStoryId?, milestoneId?, filters?, orderBy?, page?`; list story tasks or standalone tasks with supported status, assignee, tag, and text filters. |
+| `list_tasks` | New — delivered subset | `projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with supported parent story, sprint, status, assignee, tag, and text filters, including closed tasks when requested. Detail, date, sort, and arbitrary export filters remain planned. |
 | `get_task` | New | `taskId`; retrieve description, status, assignee, parent story, sprint, tags, due date, blocking information, and version. |
 | `create_task` | New | `projectId, subject, userStoryId?, milestoneId?, fields?`; create a story task or standalone task. Story-linked tasks inherit their story's sprint. |
 | `update_task` | New | `taskId, version, fields`; edit task content, status, assignment, tags, blocking, due date, and Taiga's `is_iocaine` flag. |
