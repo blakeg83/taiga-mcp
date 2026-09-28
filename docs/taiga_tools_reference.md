@@ -161,3 +161,20 @@ boundary, a queued/route-based response handler that records each request, a
 synthetic auth response, and no live endpoint access. Later goals should add
 only fixtures that assert their actual serialized request, response mapping,
 pagination, or error behavior.
+
+The reusable fixture lives in `tests/TaigaMCP.Tests/FakeHttpMessageHandler.cs`.
+It matches method and path, captures headers/body/query strings, and can return
+JSON/text responses, response headers, HTTP failures, or transport exceptions.
+`TaigaTestClient` registers a synthetic `/auth` route and creates the real
+`AuthClient` with synthetic credentials. The focused command is:
+
+```text
+dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug
+```
+
+If a local TaigaMCP server process holds the normal output files, use a
+temporary output directory without stopping that process:
+
+```text
+dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation\ -p:UseAppHost=false
+```

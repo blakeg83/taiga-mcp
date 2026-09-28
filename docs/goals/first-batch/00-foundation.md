@@ -23,12 +23,12 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 
 ## Step 2: add isolated HTTP contract testing
 
-- [ ] Create tests/TaigaMCP.Tests targeting net8.0 with xUnit and a reference to the application; add it to TaigaMCP.sln. Reuse the existing application test-file exclusion.
-- [ ] Add a queue/route-based fake HttpMessageHandler that captures method, URI, headers, and body and can return headers, JSON, failures, or transport exceptions.
-- [ ] Construct real domain APIs with a fake HTTP client and AuthClient configured with synthetic credentials; return a synthetic token from /auth.
-- [ ] Add meaningful baseline tests for issue comment filtering, issue version forwarding, story list mapping, and bearer attachment. Avoid testing only that the fake itself returns queued data.
-- [ ] Run the tests and build; document commands and fixture conventions in the tool reference and this goal.
-- [ ] Commit this step as: Add isolated Taiga API contract tests.
+- [x] Create tests/TaigaMCP.Tests targeting net8.0 with xUnit and a reference to the application; add it to TaigaMCP.sln. Reuse the existing application test-file exclusion.
+- [x] Add a queue/route-based fake HttpMessageHandler that captures method, URI, headers, and body and can return headers, JSON, failures, or transport exceptions.
+- [x] Construct real domain APIs with a fake HTTP client and AuthClient configured with synthetic credentials; return a synthetic token from /auth.
+- [x] Add meaningful baseline tests for issue comment filtering, issue version forwarding, story list mapping, and bearer attachment. Avoid testing only that the fake itself returns queued data.
+- [x] Run the tests and build; document commands and fixture conventions in the tool reference and this goal.
+- [x] Commit this step as: Add isolated Taiga API contract tests.
 
 ## Step 3: prove public schema and invocation behavior
 
@@ -60,8 +60,8 @@ Repository facts: .NET 8; ModelContextProtocol 0.3.0-preview.4; no test project 
 
 | Step | Status | Evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | `docs/taiga_tools_reference.md`; README link; inventory distinction; baseline and source versions recorded above. | Document batch contracts and baseline |
-| 2 | Not started | — | — |
+| 1 | Complete | `docs/taiga_tools_reference.md`; README link; inventory distinction; baseline and source versions recorded above. | `8a2f57d` — Document batch contracts and baseline |
+| 2 | Complete | `tests/TaigaMCP.Tests`; solution registration; fake HTTP fixture; four focused contract tests; fixture commands documented in the tool reference. | Add isolated Taiga API contract tests |
 | 3 | Not started | — | — |
 | 4 | Not started | — | — |
 
@@ -69,4 +69,4 @@ Source/date: official Taiga REST API documentation and Taiga backend `main` at `
 
 Baseline: restore passed; the initial Debug build was blocked by four pre-existing server processes holding the apphost executable; `dotnet test` passed with no tests discovered. Development builds use `-p:UseAppHost=false` while those processes remain.
 
-Deviation: the current source uses concrete domain APIs and bare-array list results, so this foundation records the compatibility gap rather than changing public behavior before the function-specific goals. Remaining work is the isolated fixture, SDK integration proof, and final reusable verification conventions.
+Deviation: the current source uses concrete domain APIs and bare-array list results, so this foundation records the compatibility gap rather than changing public behavior before the function-specific goals. Step 2 validation passed with 4 tests using a temporary output directory because the normal app output is held by pre-existing TaigaMCP processes. Remaining work is the SDK integration proof and final reusable verification conventions.
