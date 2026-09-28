@@ -24,7 +24,7 @@ Illustrative MCP arguments (IDs are placeholders):
 {"projectId":12,"subject":"Allow saved searches","description":"Acceptance: saved searches can be reopened."}
 ```
 
-Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/userstories/validators.py). Before implementing, record a pinned upstream revision or deployed-version evidence; a floating main branch is not a deployment guarantee.
+Primary verification source: [Taiga validator at pinned revision](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/validators.py). The pinned backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` and its user-story API/serializer were checked on 2026-09-28; this is source evidence, not a claim about the deployed Taiga version.
 
 ## Files and integration points
 
@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Specify creation defaults
 
-- [ ] Add minimal and populated request fixtures; verify project defaults apply when optional fields are omitted.
-- [ ] Validate positive IDs and nonblank subject without stripping meaningful description whitespace.
-- [ ] Specify tags wire representation from the API and avoid unintentionally sending empty values for omitted options.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify create_user_story contracts`.
+- [x] Add minimal and populated request fixtures; verify project defaults apply when optional fields are omitted.
+- [x] Validate positive IDs and nonblank subject without stripping meaningful description whitespace.
+- [x] Specify tags wire representation from the API and avoid unintentionally sending empty values for omitted options.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify create_user_story contracts`.
 
 ## Step 2: Implement story creation
 
@@ -96,7 +96,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify create_user_story contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (124 passed) passed on 2026-09-28. Added passing minimal/populated JSON fixtures and inventory contract scope. Pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` checked 2026-09-28: `UserStoryValidator` accepts optional `tags` with an empty-list default; `UserStoryViewSet` maps creation through `userstories` and enforces project membership for status/milestone values. Request decisions: `project` and nonblank `subject` are required; null optionals are omitted; empty description/tags remain explicit; status/assignee/milestone IDs are positive locally and membership remains server validation; no create retry. README/reference/quickstart remain current until the MCP method is exposed. | Specify create_user_story contracts / pending |
 | 2 | Not started | — | Implement create_user_story API behavior / pending |
 | 3 | Not started | — | Expose create_user_story MCP interface / pending |
 | 4 | Not started | — | Verify create_user_story workflow / pending |
