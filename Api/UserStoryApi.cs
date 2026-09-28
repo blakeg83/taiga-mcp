@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
@@ -42,6 +43,72 @@ public sealed class UserStoryApi
         }
 
         return MapUserStoryDetail(userStory, projectId, statusId, status);
+    }
+
+    public async Task<UserStoryDetailDto> CreateUserStoryAsync(
+        int projectId,
+        string subject,
+        string? description = null,
+        int? status = null,
+        int? assigned_to = null,
+        string[]? tags = null,
+        int? milestoneId = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Required(subject, nameof(subject));
+        InputValidation.OptionalIds(
+            (status, nameof(status)),
+            (assigned_to, nameof(assigned_to)),
+            (milestoneId, nameof(milestoneId)));
+
+        var payload = new UserStoryCreateDto
+        {
+            Project = projectId,
+            Subject = subject,
+            Description = description,
+            Status = status,
+            AssignedTo = assigned_to,
+            Tags = tags,
+            Milestone = milestoneId
+        };
+        var json = JsonSerializer.Serialize(
+            payload,
+            new JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "userstories")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            var userStory = document.RootElement;
+            var project = ReadDetailOptionalInt(userStory, "project");
+            var statusId = ReadDetailOptionalInt(userStory, "status");
+            var storyStatus = ReadStatusExtraInfoName(userStory);
+            if (storyStatus is null && statusId.HasValue && project is > 0)
+            {
+                var statusMap = await LoadStatusMapAsync(project.Value, cancellationToken);
+                storyStatus = statusMap.GetValueOrDefault(statusId.Value);
+            }
+
+            return MapUserStoryDetail(userStory, project, statusId, storyStatus);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response enrichment was cancelled. Read the entity before retrying.",
+                cancellationToken);
+        }
+        catch (Exception)
+        {
+            throw new TaigaRequestException(
+                "Taiga write may already have applied; response enrichment failed. Read the entity before retrying.");
+        }
     }
 
     internal async Task<UserStoryListPage> ListUserStoriesPageAsync(

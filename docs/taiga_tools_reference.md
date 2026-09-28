@@ -8,18 +8,19 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 12 tools:
+The current server exposes 13 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
   `list_issue_priorities`.
-- 2 user-story tools: `list_user_stories` and `get_user_story`.
+- 3 user-story tools: `list_user_stories`, `get_user_story`, and
+  `create_user_story`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Story create/update, epic, task, and
+individual checklists are complete. Story update, epic, task, and
 cross-resource commands are not exposed by this server yet. See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
@@ -43,6 +44,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issue_priorities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_user_stories` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `milestoneId`, `backlogOnly=false`, `tags`, `query`, `includeClosed=false`, `includeArchived=false`, and `includePageInfo=false` optional | Bare array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`; with `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Explicit status IDs override automatic closed/archive restrictions. |
 | `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, origin_issue?, origin_task?, epics? }`. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
+| `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, and `version`. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -112,6 +114,10 @@ User-story and metadata results:
 ```
 
 ```json
+{"id":102,"ref":18,"project":12,"subject":"Allow saved searches","description":"Acceptance: saved searches can be reopened.","status_id":7,"status":"Ready","assigned_to":42,"tags":[["search","#336699"]],"milestone":55,"version":4}
+```
+
+```json
 {"items":[{"id":789,"ref":12,"project":123,"subject":"Ship the fix","status_id":1,"status":"Ready"}],"page":1,"total":null,"next_page":null,"has_more":null}
 ```
 
@@ -161,7 +167,13 @@ User-story and metadata results:
   are omitted from current tool JSON. This response omission is distinct from
   the page envelope, whose missing pagination values are explicit JSON `null`.
 - Nullable create/update fields use separate request policies. Create fields
-  still omit nulls so project defaults apply. For `update_issue`, omitted or
+  still omit nulls so project defaults apply. `create_user_story` sends
+  `project`, `subject`, and only supplied `description`, `status`,
+  `assigned_to`, `tags`, and `milestone` values; `milestoneId` maps to Taiga's
+  `milestone`. Empty description strings and empty tag arrays remain explicit.
+  It validates positive IDs and a nonblank subject without trimming supplied
+  text, lets Taiga validate project membership, and never retries a POST after
+  a transport or response-enrichment failure. For `update_issue`, omitted or
   null optional values leave fields unchanged; `description=""` and `tags=[]`
   remain explicit values; and `clearFields=["assigned_to"]` deliberately
   emits JSON `"assigned_to":null` to unassign. Supplying an assignee and

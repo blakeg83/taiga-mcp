@@ -25,6 +25,31 @@ public sealed class UserStoryTools
         return ToolResponseJson.Serialize(result);
     });
 
+    [McpServerTool(Name = "create_user_story")]
+    [Description("Create one user story for a project. Put acceptance criteria in description; omitted optional fields let Taiga apply project defaults. Use milestoneId to place the story in a sprint. Estimates, multiple assignees, swimlanes, epic links, bulk creation, and custom fields are not included.")]
+    public async Task<string> CreateUserStory(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Nonblank story subject; meaningful whitespace is preserved.")] string subject,
+        [Description("Optional story description; acceptance criteria belong here. Empty string is sent explicitly.")] string? description = null,
+        [Description("Optional positive internal user-story status ID; null lets Taiga choose the project default.")] int? status = null,
+        [Description("Optional positive internal assignee user ID; null lets Taiga choose the project default.")] int? assigned_to = null,
+        [Description("Optional story tags; null lets Taiga apply its default, while an empty array is sent explicitly.")] string[]? tags = null,
+        [Description("Optional positive internal milestone ID; null creates a backlog story and a value places it in that sprint.")] int? milestoneId = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var story = await _userStories.CreateUserStoryAsync(
+            projectId,
+            subject,
+            description,
+            status,
+            assigned_to,
+            tags,
+            milestoneId,
+            cancellationToken);
+        return ToolResponseJson.Serialize(story);
+    });
+
     [McpServerTool(Name = "list_user_stories")]
     [Description("List one page of project user stories. By default only stories with open, non-archived statuses are returned; explicit statusIds take precedence over includeClosed and includeArchived. Set backlogOnly=true for stories with no milestone, or milestoneId for one sprint; those two selectors cannot be combined. Returns an array unless includePageInfo=true.")]
     public async Task<string> ListUserStories(

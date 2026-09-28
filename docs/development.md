@@ -31,7 +31,7 @@ will depend on that infrastructure; no aggregate facade is required.
 
 ## Compatibility and caller audit
 
-The [tool reference](taiga_tools_reference.md) inventories all 11 current names,
+The [tool reference](taiga_tools_reference.md) inventories all current names,
 parameter names/defaults and representative JSON. Null response properties are
 omitted; request null omission is a separate policy. Step 7 deliberately changes
 member default `"6"` to null and removes English-label-based story exclusions.
