@@ -1,7 +1,8 @@
 using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
-using TaigaMCP.Models;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -149,6 +150,99 @@ public sealed class TaskListTests
             var error = await Assert.ThrowsAsync<TaigaRequestException>(() => NewApi(handler, auth).ListTasksAsync(12));
 
             Assert.Contains("invalid task list", error.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListTasksPage_EmptyPageKeepsUnknownPaginationMetadataNull()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks",
+                "[]",
+                headers: new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "not-a-number",
+                    ["x-pagination-next"] = "https://evil.example/tasks?page=8"
+                });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListTasksPageAsync(
+                12,
+                new TaskListOptions { Page = 4 });
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListTasksTool_ReturnsEnvelopeAndExplicitNullPaginationValues()
+    {
+        var handler = TaskRoutes(TaskListFixtures.Standalone);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var result = JsonSerializer.Deserialize<JsonElement>(await new TaskTools(NewApi(handler, auth))
+                .ListTasks(12, page: 4));
+
+            Assert.Equal(JsonValueKind.Object, result.ValueKind);
+            Assert.Equal(4, result.GetProperty("page").GetInt32());
+            Assert.True(result.TryGetProperty("total", out var total));
+            Assert.Equal(JsonValueKind.Null, total.ValueKind);
+            Assert.True(result.TryGetProperty("next_page", out var next));
+            Assert.Equal(JsonValueKind.Null, next.ValueKind);
+            Assert.True(result.TryGetProperty("has_more", out var hasMore));
+            Assert.Equal(JsonValueKind.Null, hasMore.ValueKind);
+            Assert.False(result.GetProperty("items")[0].TryGetProperty("assigned_to", out _));
+            Assert.False(result.GetProperty("items")[0].TryGetProperty("user_story", out _));
+            Assert.False(result.GetProperty("items")[0].TryGetProperty("milestone", out _));
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
+    public async Task ListTasksTool_ReportsSafeHttpFailures(HttpStatusCode statusCode, string category)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks",
+                "{\"detail\":\"secret task credentials\"}",
+                statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<McpException>(() => new TaskTools(NewApi(handler, auth)).ListTasks(12));
+
+            Assert.Contains(((int)statusCode).ToString(), error.Message);
+            Assert.Contains(category, error.Message);
+            Assert.DoesNotContain("secret task credentials", error.Message);
+            Assert.Single(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/tasks"));
+        }
+    }
+
+    [Fact]
+    public async Task ListTasksPage_AllowsStoryAndSprintSelectorsIndependently()
+    {
+        var handler = TaskRoutes("[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = NewApi(handler, auth);
+            await api.ListTasksPageAsync(12, new TaskListOptions { UserStoryId = 102 });
+            await api.ListTasksPageAsync(12, new TaskListOptions { MilestoneId = 55 });
+
+            var requests = handler.Requests.Where(item => item.Uri.AbsolutePath.EndsWith("/tasks")).ToArray();
+            Assert.Equal("?project=12&page=1&status__is_closed=false&user_story=102", requests[0].Uri.Query);
+            Assert.Equal("?project=12&page=1&status__is_closed=false&milestone=55", requests[1].Uri.Query);
         }
     }
 
