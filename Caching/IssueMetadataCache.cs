@@ -22,8 +22,8 @@ public sealed class IssueMetadataCache
     {
         if (cache.TryGetValue(projectId, out var m)) return m;
 
-        await _auth.EnsureAuthAsync(_http);
-        var res = await _http.GetAsync($"{path}?project={projectId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{path}?project={projectId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());

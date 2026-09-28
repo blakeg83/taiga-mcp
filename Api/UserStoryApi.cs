@@ -14,9 +14,8 @@ public sealed class UserStoryApi
 
     public async Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var stRes = await _http.GetAsync($"userstory-statuses?project={projectId}");
+        using var stReq = new HttpRequestMessage(HttpMethod.Get, $"userstory-statuses?project={projectId}");
+        var stRes = await _auth.SendAsync(_http, stReq);
         stRes.EnsureSuccessStatusCode();
         using var stDoc = JsonDocument.Parse(await stRes.Content.ReadAsStringAsync());
         var excludeIds = new List<int>();
@@ -46,7 +45,8 @@ public sealed class UserStoryApi
         foreach (var id in excludeIds)
             q.Add($"exclude_status={id}");
 
-        var usRes = await _http.GetAsync($"userstories?{string.Join("&", q)}");
+        using var usReq = new HttpRequestMessage(HttpMethod.Get, $"userstories?{string.Join("&", q)}");
+        var usRes = await _auth.SendAsync(_http, usReq);
         usRes.EnsureSuccessStatusCode();
         using var doc = JsonDocument.Parse(await usRes.Content.ReadAsStringAsync());
         var items = new List<UserStoryDto>();

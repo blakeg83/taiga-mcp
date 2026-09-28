@@ -69,6 +69,12 @@ Notes:
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
 - [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. These are plans, not implemented capabilities.
 
+## Debug Logging
+- Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.
+- Example:
+  - `Logging__LogLevel__Default=Debug TAIGA__USERNAME=you@example.com TAIGA__PASSWORD=secret dotnet run`
+- These logs include auth refresh/relogin breadcrumbs without exposing secrets.
+
 ## Quickstart & Examples
 For end-to-end setup (Codex config, MCP Inspector, troubleshooting), see:
 

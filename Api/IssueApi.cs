@@ -65,14 +65,12 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page)
     {
-        await _auth.EnsureAuthAsync(_http);
-
         var statuses = await _cache.GetStatusesAsync(projectId);
         var severities = await _cache.GetSeveritiesAsync(projectId);
         var types = await _cache.GetTypesAsync(projectId);
         var priorities = await _cache.GetPrioritiesAsync(projectId);
-
-        var rejected = await _http.GetAsync($"issue-statuses?project={projectId}&is_closed=true");
+        using var rejReq = new HttpRequestMessage(HttpMethod.Get, $"issue-statuses?project={projectId}&is_closed=true");
+        var rejected = await _auth.SendAsync(_http, rejReq);
         rejected.EnsureSuccessStatusCode();
         using var rejDoc = JsonDocument.Parse(await rejected.Content.ReadAsStringAsync());
         var rejectedIds = rejDoc.RootElement.EnumerateArray()
@@ -90,7 +88,8 @@ public sealed class IssueApi
         };
         foreach (var id in rejectedIds) q.Add($"exclude_status={id}");
 
-        var res = await _http.GetAsync($"issues?{string.Join("&", q)}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"issues?{string.Join("&", q)}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -105,9 +104,8 @@ public sealed class IssueApi
 
     public async Task<IssueDto> GetIssueAsync(int issueId)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var res = await _http.GetAsync($"issues/{issueId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"issues/{issueId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -122,9 +120,8 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueCommentDto>> GetIssueCommentsAsync(int issueId)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var res = await _http.GetAsync($"history/issue/{issueId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"history/issue/{issueId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -161,9 +158,8 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var res = await _http.GetAsync($"issue-statuses?project={projectId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"issue-statuses?project={projectId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -184,9 +180,8 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueSeverityDto>> ListIssueSeveritiesAsync(int projectId)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var res = await _http.GetAsync($"severities?project={projectId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"severities?project={projectId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -207,9 +202,8 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueTypeDto>> ListIssueTypesAsync(int projectId)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var res = await _http.GetAsync($"issue-types?project={projectId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"issue-types?project={projectId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -230,9 +224,8 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssuePriorityDto>> ListIssuePrioritiesAsync(int projectId)
     {
-        await _auth.EnsureAuthAsync(_http);
-
-        var res = await _http.GetAsync($"priorities?project={projectId}");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"priorities?project={projectId}");
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -256,8 +249,6 @@ public sealed class IssueApi
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags)
     {
-        await _auth.EnsureAuthAsync(_http);
-
         var payload = new IssueCreateDto
         {
             Project = projectId,
@@ -274,7 +265,11 @@ public sealed class IssueApi
             payload,
             new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull }
         );
-        var res = await _http.PostAsync("issues", new StringContent(json, Encoding.UTF8, "application/json"));
+        using var req = new HttpRequestMessage(HttpMethod.Post, "issues")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        var res = await _auth.SendAsync(_http, req);
         res.EnsureSuccessStatusCode();
 
         using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
@@ -300,8 +295,6 @@ public sealed class IssueApi
         string[]? tags = null,
         string? comment = null)
     {
-        await _auth.EnsureAuthAsync(_http);
-
         var payload = new IssueUpdateDto
         {
             Subject = subject,
@@ -329,7 +322,7 @@ public sealed class IssueApi
         };
         req.Headers.Accept.ParseAdd("application/json");
 
-        var res = await _http.SendAsync(req);
+        var res = await _auth.SendAsync(_http, req);
         var body = await res.Content.ReadAsStringAsync();
 
         if (!res.IsSuccessStatusCode)
