@@ -57,12 +57,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose story edits through MCP
 
-- [ ] Add update_user_story with required userStoryId/version and explicit descriptions for clearing/unassignment.
-- [ ] Document closure/reopening by status ID and examples for returning a story to the backlog.
-- [ ] Keep create/list/detail schemas compatible and document the primary-assignee-only limit.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose update_user_story MCP interface`.
+- [x] Add update_user_story with required userStoryId/version and explicit descriptions for clearing/unassignment.
+- [x] Document closure/reopening by status ID and examples for returning a story to the backlog.
+- [x] Keep create/list/detail schemas compatible and document the primary-assignee-only limit.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose update_user_story MCP interface`.
 
 ## Step 4: Verify read-modify-read flows
 
@@ -98,7 +98,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed on 2026-09-28: 141 tests, 0 warnings/errors. Contract fixtures validate omitted fields, explicit assignment/sprint nulls, empty description/tags, and comment-only payloads. Taiga source verified at pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e` on 2026-09-28: `UserStoryViewSet.update` routes through the standard update at `PATCH userstories/{id}`; the serializer exposes `subject`, `description`, `status`, `assigned_to`, `tags`, `milestone`, `comment`, and `version`; OCC permits non-overlapping stale edits and rejects overlapping conflicts through field validation. Source: https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py | Specify update_user_story contracts / pending |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~UserStoryUpdateTests` passed 18 tests; `dotnet build -c Debug` passed with 0 warnings/errors. The concrete API sends `PATCH userstories/{id}` with exactly the supplied non-null fields plus the caller's version; `clearFields` emits wire null for `assigned_to` or `milestone`, while `milestoneId` maps to `milestone`. It validates positive IDs, nonnegative versions, nonblank subjects, update presence, and set/clear collisions before HTTP. HTTP failures retain safe status/category/rejected-field details, and writes are never replayed after validation, transport, or response-mapping failures. | Implement update_user_story API behavior / pending |
-| 3 | Not started | — | Expose update_user_story MCP interface / pending |
+| 3 | Complete | The real STDIO integration test now discovers 14 tools, verifies `update_user_story` schema properties and required `userStoryId`/`version`, calls it with `clearFields=["milestone"]` and a comment, and asserts the PATCH body and authoritative JSON result. README, reference, quickstart, and inventory now describe the delivered signature and deferred fields. | Expose update_user_story MCP interface / pending |
 | 4 | Not started | — | Verify update_user_story workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

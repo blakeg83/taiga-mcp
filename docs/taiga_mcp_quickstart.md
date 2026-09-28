@@ -101,6 +101,25 @@ Taiga applies project defaults for omitted optional fields. The returned JSON
 contains the server-created story detail, including its `id`, `ref`, and
 `version`. Status, assignee, and milestone membership are validated by Taiga.
 
+### Update a user story
+
+Read the story first and pass its returned `version` to the update. Omitted
+fields remain unchanged; use exact wire names in `clearFields` for explicit
+nulls:
+
+```json
+{"userStoryId":102,"version":4,"clearFields":["milestone"],"comment":"Move back to backlog."}
+```
+
+`milestoneId` places a story in a sprint, `clearFields=["milestone"]` returns
+it to the backlog, and `clearFields=["assigned_to"]` unassigns it. Empty
+`description` or `tags` values are explicit clears. The returned `version` and
+other fields are authoritative; the server is not blindly retried after a
+conflict or ambiguous write failure. `status` is a project-specific internal
+status ID, so use an open or closed status ID from Taiga to reopen or close a
+story. Only the primary assignee is supported; multiple assignees remain
+planned.
+
 ### CLI Mode
 ```bash
 npx @modelcontextprotocol/inspector --cli ./bin/Release/net8.0/linux-x64/publish/TaigaMCP \

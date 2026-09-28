@@ -8,32 +8,29 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 13 tools:
+The current server exposes 14 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
   `list_issue_priorities`.
-- 3 user-story tools: `list_user_stories`, `get_user_story`, and
-  `create_user_story`.
+- 4 user-story tools: `list_user_stories`, `get_user_story`,
+  `create_user_story`, and `update_user_story`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, and the core `get_user_story` detail read
 are delivered; the remaining goal documents describe planned work until their
 individual checklists are complete. Story update, epic, task, and
-cross-resource commands are not exposed by this server yet. The planned
-`update_user_story` contract uses `userStoryId`, a nonnegative `version`,
-optional `subject`, `description`, `status`, `assigned_to`, `tags`,
-`milestoneId`, and `comment`, plus `clearFields` containing only the wire
-names `assigned_to` and `milestone`. Omitted nullable fields remain untouched;
-explicit clear fields send JSON null; `description=""` and `tags=[]` are
-explicit clears. A sprint move is sent once to the story and Taiga determines
-any effects on child tasks; the MCP tool will not patch child tasks separately.
-The domain API implementation now sends the supplied nonnegative version and
-returns Taiga's authoritative updated detail, but the public MCP tool remains
-planned until the interface step is complete. Invalid IDs, blank subjects,
-empty updates, unsupported clear names, and set/clear collisions fail before
-HTTP; write failures are not replayed.
+cross-resource commands are not exposed by this server yet. `update_user_story`
+uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
+`status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
+`clearFields` containing only the wire names `assigned_to` and `milestone`.
+Omitted nullable fields remain untouched; explicit clear fields send JSON null;
+`description=""` and `tags=[]` are explicit clears. A sprint move is sent once
+to the story and Taiga determines any effects on child tasks; the MCP tool does
+not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
+unsupported clear names, and set/clear collisions fail before HTTP; write
+failures are not replayed.
 See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
@@ -58,6 +55,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_user_stories` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `milestoneId`, `backlogOnly=false`, `tags`, `query`, `includeClosed=false`, `includeArchived=false`, and `includePageInfo=false` optional | Bare array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`; with `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Explicit status IDs override automatic closed/archive restrictions. |
 | `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, origin_issue?, origin_task?, epics? }`. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
 | `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, and `version`. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
+| `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
 
 Parameter names are the public names generated from the C# method signatures;
 the issue update method intentionally retains the existing `assigned_to`
@@ -128,6 +126,12 @@ User-story and metadata results:
 
 ```json
 {"id":102,"ref":18,"project":12,"subject":"Allow saved searches","description":"Acceptance: saved searches can be reopened.","status_id":7,"status":"Ready","assigned_to":42,"tags":[["search","#336699"]],"milestone":55,"version":4}
+```
+
+An update returns the server's authoritative detail, for example:
+
+```json
+{"id":102,"ref":18,"project":12,"subject":"Allow saved searches","status_id":7,"status":"Ready","version":5}
 ```
 
 ```json

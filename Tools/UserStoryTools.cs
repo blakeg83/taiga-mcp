@@ -50,6 +50,37 @@ public sealed class UserStoryTools
         return ToolResponseJson.Serialize(story);
     });
 
+    [McpServerTool(Name = "update_user_story")]
+    [Description("Update one user story using the caller-supplied version. Omitted nullable fields stay unchanged; empty description or tags are explicit clears. Use clearFields=[\"assigned_to\"] to unassign or [\"milestone\"] to return the story to the backlog. milestoneId selects a sprint. Requires a change or nonblank comment and does not automatically retry version conflicts.")]
+    public async Task<string> UpdateUserStory(
+        [Description("Positive internal user story ID, not the displayed #ref.")] int userStoryId,
+        [Description("Required current story version, zero or greater; forwarded unchanged to Taiga.")] int version,
+        [Description("Optional nonblank subject; omission or null leaves it unchanged.")] string? subject = null,
+        [Description("Description; null leaves it unchanged, while an empty string clears it.")] string? description = null,
+        [Description("Optional positive internal user-story status ID; null leaves it unchanged.")] int? status = null,
+        [Description("Optional positive internal assignee user ID; null leaves it unchanged, while clearFields can unassign.")] int? assigned_to = null,
+        [Description("Tags; null leaves them unchanged, while an empty array clears them.")] string[]? tags = null,
+        [Description("Optional positive internal milestone ID; null leaves it unchanged, while clearFields can remove the sprint.")] int? milestoneId = null,
+        [Description("Optional comment; a comment-only update requires nonblank text.")] string? comment = null,
+        [Description("Optional fields to clear explicitly; only assigned_to and milestone are accepted, using these exact wire names.")] string[]? clearFields = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var story = await _userStories.UpdateUserStoryAsync(
+            userStoryId,
+            version,
+            subject,
+            description,
+            status,
+            assigned_to,
+            tags,
+            milestoneId,
+            comment,
+            clearFields,
+            cancellationToken);
+        return ToolResponseJson.Serialize(story);
+    });
+
     [McpServerTool(Name = "list_user_stories")]
     [Description("List one page of project user stories. By default only stories with open, non-archived statuses are returned; explicit statusIds take precedence over includeClosed and includeArchived. Set backlogOnly=true for stories with no milestone, or milestoneId for one sprint; those two selectors cannot be combined. Returns an array unless includePageInfo=true.")]
     public async Task<string> ListUserStories(

@@ -99,6 +99,26 @@ public sealed class McpIntegrationTests
         Assert.Equal(55, populatedReadBackJson.GetProperty("milestone").GetInt32());
         Assert.Contains(taiga.Requests, request => request.Method == "GET" && request.PathAndQuery == "/api/v1/userstories/102");
         Assert.Contains(taiga.Requests, request => request.Method == "GET" && request.PathAndQuery == "/api/v1/userstories/103");
+
+        var updatedStory = await Call("update_user_story", new()
+        {
+            ["userStoryId"] = 102,
+            ["version"] = 4,
+            ["clearFields"] = new[] { "milestone" },
+            ["comment"] = "Move back to backlog."
+        });
+        Assert.False(updatedStory.IsError == true);
+        var updatedStoryJson = JsonSerializer.Deserialize<JsonElement>(GetText(updatedStory));
+        Assert.Equal(102, updatedStoryJson.GetProperty("id").GetInt32());
+        Assert.Equal(5, updatedStoryJson.GetProperty("version").GetInt32());
+        Assert.False(updatedStoryJson.TryGetProperty("milestone", out _));
+        var updatedStoryRequest = Assert.Single(taiga.Requests, request =>
+            request.Method == "PATCH" && request.PathAndQuery == "/api/v1/userstories/102");
+        var updatedStoryBody = JsonSerializer.Deserialize<JsonElement>(updatedStoryRequest.Body);
+        AssertPatchProperties(updatedStoryBody, "comment", "milestone", "version");
+        Assert.Equal(JsonValueKind.Null, updatedStoryBody.GetProperty("milestone").ValueKind);
+        Assert.Equal(4, updatedStoryBody.GetProperty("version").GetInt32());
+
         var detail = await Call("get_issue", new() { ["issueId"] = 42 });
         Assert.False(detail.IsError == true);
         Assert.False(JsonSerializer.Deserialize<JsonElement>(GetText(detail)).GetProperty("issue").TryGetProperty("assigned_to", out _));
@@ -113,7 +133,7 @@ public sealed class McpIntegrationTests
             ["description"] = "",
             ["tags"] = Array.Empty<string>()
         })).IsError == true);
-        var body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Single(r => r.Method == "PATCH").Body);
+        var body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Single(r => r.Method == "PATCH" && r.PathAndQuery == "/api/v1/issues/42").Body);
         AssertPatchProperties(body, "description", "tags", "version");
         Assert.False(body.TryGetProperty("subject", out _));
         Assert.Equal("", body.GetProperty("description").GetString());
@@ -198,7 +218,8 @@ public sealed class McpIntegrationTests
                 "list_projects",
                 "list_user_stories",
                 "resolve_project",
-                "update_issue"
+                "update_issue",
+                "update_user_story"
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
 
@@ -256,6 +277,15 @@ public sealed class McpIntegrationTests
             var createUserStoryRequired = createUserStory.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId", "subject" }, createUserStoryRequired);
+
+            var updateUserStory = Assert.Single(tools, tool => tool.Name == "update_user_story");
+            var updateUserStoryProperties = updateUserStory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "userStoryId", "version", "subject", "description", "status", "assigned_to", "tags", "milestoneId", "comment", "clearFields" },
+                updateUserStoryProperties);
+            var updateUserStoryRequired = updateUserStory.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "userStoryId", "version" }, updateUserStoryRequired);
 
             var updateIssue = Assert.Single(tools, tool => tool.Name == "update_issue");
             var updateProperties = updateIssue.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
