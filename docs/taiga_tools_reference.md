@@ -237,3 +237,17 @@ Cleanup compatibility: production C# types now live in `TaigaMCP.Api`,
 `TaigaMCP.Tools`, and other folder namespaces. The unused aggregate facade is
 removed; internal consumers use domain APIs. MCP signatures, defaults, JSON
 property names and response omission are unchanged at this stage.
+
+## Input validation and configuration
+
+Positive internal IDs and pages >= 1 are required. Slugs and supplied subjects
+must be nonblank. Update versions must be >= 0; an update needs a real change
+or nonblank comment. Empty description/tag arrays remain valid. These are
+intentional validation changes: invalid calls now fail before contacting Taiga.
+`update_issue.subject` remains required but nullable; pass null for other edits.
+Cancellation is injected by MCP and is not a tool argument.
+
+Credentials must be nonblank. `TAIGA__BASEURL` accepts an absolute HTTP/HTTPS URL
+without credentials/query/fragment and normalizes a trailing slash.
+`TAIGA__METADATATTLSECONDS` is positive, defaults to 300, and controls metadata
+refresh. See [development](development.md) for lifetimes and future contracts.

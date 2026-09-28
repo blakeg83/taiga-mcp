@@ -8,6 +8,57 @@ namespace TaigaMCP.Tests;
 public sealed class McpIntegrationTests
 {
     [Fact]
+    public async Task ProductionServer_AllToolsAndNullEmptyArguments_KeepContracts()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var assembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [assembly], CreateEnvironment(taiga), Path.GetDirectoryName(assembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+        async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
+            => await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        foreach (var tool in tools)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(tool.Description));
+            foreach (var property in tool.JsonSchema.GetProperty("properties").EnumerateObject())
+                Assert.False(string.IsNullOrWhiteSpace(property.Value.GetProperty("description").GetString()));
+        }
+        foreach (var member in new string?[] { null, "" })
+        {
+            Assert.False((await Call("list_projects", new() { ["member"] = member })).IsError == true);
+            Assert.DoesNotContain("member=", taiga.Requests.Last().PathAndQuery);
+        }
+        Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
+        foreach (var name in new[] { "list_issues", "list_user_stories", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
+            Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
+        var detail = await Call("get_issue", new() { ["issueId"] = 42 });
+        Assert.False(detail.IsError == true);
+        Assert.False(JsonSerializer.Deserialize<JsonElement>(GetText(detail)).GetProperty("issue").TryGetProperty("assigned_to", out _));
+        Assert.False((await Call("create_issue", new() { ["projectId"] = 123, ["subject"] = "Created" })).IsError == true);
+        var createBody = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Single(r => r.Method == "POST" && r.PathAndQuery == "/api/v1/issues").Body);
+        Assert.False(createBody.TryGetProperty("description", out _));
+
+        Assert.False((await Call("update_issue", new()
+        {
+            ["issueId"] = 42, ["subject"] = null, ["version"] = 0, ["description"] = "", ["tags"] = Array.Empty<string>()
+        })).IsError == true);
+        var body = JsonSerializer.Deserialize<JsonElement>(taiga.Requests.Single(r => r.Method == "PATCH").Body);
+        Assert.False(body.TryGetProperty("subject", out _));
+        Assert.Equal("", body.GetProperty("description").GetString());
+        Assert.Equal(0, body.GetProperty("tags").GetArrayLength());
+        Assert.Equal(0, body.GetProperty("version").GetInt32());
+
+        var count = taiga.Requests.Count;
+        var invalid = await Call("update_issue", new() { ["issueId"] = 42, ["subject"] = null, ["version"] = 1 });
+        Assert.True(invalid.IsError);
+        Assert.Contains("requires a change", GetText(invalid));
+        Assert.True((await Call("list_issues", new() { ["projectId"] = 0 })).IsError);
+        Assert.True((await Call("resolve_project", new() { ["slug"] = " " })).IsError);
+        Assert.Equal(count, taiga.Requests.Count);
+    }
+    [Fact]
     public async Task ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure()
     {
         await using var taiga = FakeTaigaHttpServer.Start();

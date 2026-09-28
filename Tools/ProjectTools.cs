@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using TaigaMCP.Api;
 using ModelContextProtocol.Server;
 
@@ -14,14 +15,16 @@ public sealed class ProjectTools
     }
 
     [McpServerTool(Name = "list_projects")]
-    public async Task<string> ListProjects(string? member = "6", int page = 1, CancellationToken cancellationToken = default)
+    [Description("List one page of projects; member is an optional member ID filter (currently defaults to 6). Returns an array without pagination metadata.")]
+    public async Task<string> ListProjects([Description("Member ID filter; null or empty means no filter.")] string? member = "6", [Description("Page number, starting at 1; requests one page only.")] int page = 1, CancellationToken cancellationToken = default)
     => await ToolErrors.RunAsync(async () => {
         var projects = await _projects.ListProjectsAsync(member, page, cancellationToken);
         return ToolResponseJson.Serialize(projects);
     });
 
     [McpServerTool(Name = "resolve_project")]
-    public async Task<string> ResolveProject(string slug, CancellationToken cancellationToken = default)
+    [Description("Resolve an exact project slug to its internal project ID.")]
+    public async Task<string> ResolveProject([Description("Nonblank exact project slug.")] string slug, CancellationToken cancellationToken = default)
     => await ToolErrors.RunAsync(async () => {
         return ToolResponseJson.Serialize(new { project = await _projects.ResolveProjectIdAsync(slug, cancellationToken) });
     });

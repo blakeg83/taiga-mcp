@@ -165,3 +165,17 @@ You now have:
 - Integrated Codex CLI for natural language interaction
 - Troubleshooting steps for TOML parse errors, startup timeouts, and stdout logging
 
+
+### Validated configuration and updates
+
+`TAIGA__USERNAME` and `TAIGA__PASSWORD` must be nonblank. Optional
+`TAIGA__BASEURL` is an absolute HTTP/HTTPS API URL without embedded credentials,
+query, or fragment. Optional `TAIGA__METADATATTLSECONDS` is a positive integer
+(default 300). Startup rejects invalid configuration.
+
+Use positive internal project/entity IDs and pages >= 1. For an update of only
+description/tags, pass `subject: null` and the current `version`; use
+`description: ""` or `tags: []` to empty those fields. Null optional values leave
+fields unchanged. Empty updates and negative versions are rejected before HTTP.
+A write error saying it may already have applied requires reading the entity
+before deciding whether to retry. See [development conventions](development.md).

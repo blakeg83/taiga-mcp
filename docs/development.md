@@ -123,3 +123,36 @@ when no later traffic triggers expiry cleanup.
 immutable old snapshots, coalescing, kind/project isolation, loader and waiter
 cancellation, failure recovery and capacity eviction. Existing fake-HTTP issue
 read/write and production MCP tests passed.
+
+## Configuration and tool validation
+
+Set `TAIGA__USERNAME`, `TAIGA__PASSWORD`, optionally `TAIGA__BASEURL` and
+`TAIGA__METADATATTLSECONDS` (positive integer; default 300). Credentials must be
+nonblank. Base URL must be absolute HTTP/HTTPS with no embedded credentials,
+query or fragment; a trailing slash is normalized. Self-hosted HTTP is supported.
+Host defaults bind double-underscore environment keys to the Taiga section;
+command-line configuration overrides environment values. The extra `TAIGA_`
+provider was redundant for these documented keys and is removed.
+
+IDs must be positive, pages start at one, slugs/subjects must be nonblank, update
+versions are nonnegative. An update must contain a change or nonblank comment.
+Optional null values leave defaults/fields unchanged; empty descriptions and
+empty tag arrays are valid explicit values. These validation errors now arrive
+as safe MCP errors before HTTP requests. `subject` remains a required nullable
+update parameter for schema compatibility; pass null when changing other fields.
+
+## Future feature conventions (not implemented by cleanup)
+
+Request one page per call; build allowlisted, encoded queries. Unknown pagination
+headers remain unknown, never fabricated zero/false. Current list results remain
+arrays. Future page envelopes must preserve explicit null metadata. Updates use
+caller-supplied versions without retry; planned clearFields uses presence-aware
+payloads and is separate from nullable omission. No new page envelopes, clearing
+parameters or tools are introduced here. See the reconciled batch contracts.
+
+Step 6 follows `59ca19f`. `dotnet test -c Debug --filter FullyQualifiedName~ConfigurationTests`
+passed 12 checks before removing redundant wiring, proving the same documented
+binding/CLI precedence with and without it. Full `dotnet test -c Debug` passed
+65 tests afterwards: 14 invalid-input/no-HTTP cases plus configuration and real
+MCP calls of all 11 production tools, descriptions/schema, explicit null, omitted
+create fields, empty string/array, version zero, validation errors and null output.

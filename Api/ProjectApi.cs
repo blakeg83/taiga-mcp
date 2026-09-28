@@ -15,6 +15,7 @@ public sealed class ProjectApi
 
     public async Task<IReadOnlyList<ProjectDto>> ListProjectsAsync(string? member, int page, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(page, nameof(page));
         var url = string.IsNullOrEmpty(member)
             ? $"projects?page={page}"
             : $"projects?member={Uri.EscapeDataString(member)}&page={page}";
@@ -40,6 +41,7 @@ public sealed class ProjectApi
 
     public async Task<int> ResolveProjectIdAsync(string slug, CancellationToken cancellationToken = default)
     {
+        InputValidation.Required(slug, nameof(slug));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"resolver?project={Uri.EscapeDataString(slug)}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         return doc.RootElement.GetProperty("project").GetInt32();

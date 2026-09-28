@@ -15,6 +15,8 @@ public sealed class UserStoryApi
 
     public async Task<IReadOnlyList<UserStoryDto>> ListUserStoriesAsync(int projectId, int page = 1, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
         using var stReq = new HttpRequestMessage(HttpMethod.Get, $"userstory-statuses?project={projectId}");
         using var stDoc = await _transport.ReadAsync(stReq, cancellationToken);
         var excludeIds = new List<int>();

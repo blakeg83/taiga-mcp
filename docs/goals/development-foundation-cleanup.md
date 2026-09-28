@@ -95,13 +95,13 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 
 ## Step 6: establish configuration and tool-boundary conventions
 
-- [ ] Validate nonblank credentials, an absolute HTTP/HTTPS API base URL without embedded credentials/query/fragment, and the cache TTL at startup. Preserve self-hosted HTTP support and normalize the trailing slash.
-- [ ] Test configuration binding using the documented `TAIGA__...` keys. Remove redundant configuration-provider wiring only after proving these keys and existing precedence still work.
-- [ ] Add meaningful tool and parameter descriptions using APIs supported by the pinned SDK. Explain IDs versus refs, version requirements, pagination, filters, and omission semantics accurately.
-- [ ] Reject nonpositive project/entity IDs, pages below one, blank required subjects/slugs, and negative update versions before sending HTTP. Preserve valid empty optional values and reject updates containing neither a real change nor a nonblank comment.
-- [ ] Document shared future-feature rules: one page per call, allowlisted encoded query parameters, unknown pagination metadata remains unknown, caller-supplied versions, and explicit field-clearing semantics. Reconcile existing batch contracts; do not implement those future features here.
-- [ ] Add parameterized validation tests asserting no HTTP calls for invalid input, plus real MCP invocation tests for omitted/default/null/empty values and safe error presentation. Ensure all existing tools remain discoverable and cancellation is absent from input schemas.
-- [ ] Update tool reference, quickstart, developer guide, and evidence; commit as `Standardize configuration and tool contracts`.
+- [x] Validate nonblank credentials, an absolute HTTP/HTTPS API base URL without embedded credentials/query/fragment, and the cache TTL at startup. Preserve self-hosted HTTP support and normalize the trailing slash.
+- [x] Test configuration binding using the documented `TAIGA__...` keys. Remove redundant configuration-provider wiring only after proving these keys and existing precedence still work.
+- [x] Add meaningful tool and parameter descriptions using APIs supported by the pinned SDK. Explain IDs versus refs, version requirements, pagination, filters, and omission semantics accurately.
+- [x] Reject nonpositive project/entity IDs, pages below one, blank required subjects/slugs, and negative update versions before sending HTTP. Preserve valid empty optional values and reject updates containing neither a real change nor a nonblank comment.
+- [x] Document shared future-feature rules: one page per call, allowlisted encoded query parameters, unknown pagination metadata remains unknown, caller-supplied versions, and explicit field-clearing semantics. Reconcile existing batch contracts; do not implement those future features here.
+- [x] Add parameterized validation tests asserting no HTTP calls for invalid input, plus real MCP invocation tests for omitted/default/null/empty values and safe error presentation. Ensure all existing tools remain discoverable and cancellation is absent from input schemas.
+- [x] Update tool reference, quickstart, developer guide, and evidence; commit as `Standardize configuration and tool contracts`.
 
 ## Step 7: remove account-specific defaults and label-dependent filters
 
@@ -147,7 +147,7 @@ If blocked, keep unfinished boxes unchecked and report the precise dependency or
 | 3. Transport | Complete | Previous ffeba6b. Shared transport/disposal, cancellation and safe errors; 28 Debug tests passed including actual MCP safe errors/schema and write uncertainty. Details in developer guide. | Centralize Taiga HTTP handling and cancellation |
 | 4. Authentication | Complete | Previous e2f9cc5. Gated coherent token state, bounded replay and per-operation factory clients. 33 Debug tests passed, including barrier-driven races and PATCH replay/ambiguity. | Coordinate authentication and HTTP client lifetimes |
 | 5. Cache | Complete | Previous 9a2b80c. Immutable per-key coalesced snapshots, configurable TTL/clock and bounded idle eviction. 38 Debug tests passed with deterministic expiry/cancellation/recovery/isolation. | Add concurrent expiring metadata caching |
-| 6. Contracts/configuration | Not started | Pending | Pending |
+| 6. Contracts/configuration | Complete | Previous 59ca19f. Validated binding/URL/TTL, documented SDK descriptions and no-HTTP input validation. 12 focused configuration tests and 65 full Debug tests passed; all tools invoked through MCP. | Standardize configuration and tool contracts |
 | 7. Defaults/filters | Not started | Pending | Pending |
 | 8. Guardrails/final verification | Not started | Pending | Pending |
 

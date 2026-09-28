@@ -17,8 +17,10 @@ public static class ServiceCollectionExtensions
         services
             .AddOptions<TaigaOptions>()
             .Bind(config.GetSection("Taiga"))
-            .Validate(o => !string.IsNullOrEmpty(o.Username) && !string.IsNullOrEmpty(o.Password),
+            .Validate(o => !string.IsNullOrWhiteSpace(o.Username) && !string.IsNullOrWhiteSpace(o.Password),
                 "Taiga credentials are required")
+            .Validate(o => TaigaOptions.IsValidBaseUrl(o.BaseUrl), "Taiga base URL must be absolute HTTP/HTTPS without credentials, query or fragment")
+            .PostConfigure(o => { if (TaigaOptions.IsValidBaseUrl(o.BaseUrl)) o.BaseUrl = o.BaseUrl.TrimEnd('/') + "/"; })
             .Validate(o => o.MetadataTtlSeconds > 0, "Taiga metadata TTL must be positive")
             .ValidateOnStart();
 

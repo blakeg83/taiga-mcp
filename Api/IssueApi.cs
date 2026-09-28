@@ -67,6 +67,8 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueDto>> ListIssuesAsync(int projectId, int page, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
         var statuses = await _cache.GetStatusesAsync(projectId, cancellationToken);
         var severities = await _cache.GetSeveritiesAsync(projectId, cancellationToken);
         var types = await _cache.GetTypesAsync(projectId, cancellationToken);
@@ -101,6 +103,7 @@ public sealed class IssueApi
 
     public async Task<IssueDto> GetIssueAsync(int issueId, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(issueId, nameof(issueId));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"issues/{issueId}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var el = doc.RootElement;
@@ -114,6 +117,7 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueCommentDto>> GetIssueCommentsAsync(int issueId, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(issueId, nameof(issueId));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"history/issue/{issueId}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var items = new List<IssueCommentDto>(32);
@@ -149,6 +153,7 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueStatusDto>> ListIssueStatusesAsync(int projectId, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"issue-statuses?project={projectId}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var items = new List<IssueStatusDto>(32);
@@ -168,6 +173,7 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueSeverityDto>> ListIssueSeveritiesAsync(int projectId, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"severities?project={projectId}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var items = new List<IssueSeverityDto>(32);
@@ -187,6 +193,7 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssueTypeDto>> ListIssueTypesAsync(int projectId, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"issue-types?project={projectId}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var items = new List<IssueTypeDto>(32);
@@ -206,6 +213,7 @@ public sealed class IssueApi
 
     public async Task<IReadOnlyList<IssuePriorityDto>> ListIssuePrioritiesAsync(int projectId, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"priorities?project={projectId}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         var items = new List<IssuePriorityDto>(32);
@@ -228,6 +236,9 @@ public sealed class IssueApi
         int? status, int? type, int? priority, int? severity,
         int? assigned_to, string[]? tags, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Required(subject, nameof(subject));
+        InputValidation.OptionalIds((status, nameof(status)), (type, nameof(type)), (priority, nameof(priority)), (severity, nameof(severity)), (assigned_to, nameof(assigned_to)));
         var payload = new IssueCreateDto
         {
             Project = projectId,
@@ -279,6 +290,13 @@ public sealed class IssueApi
         string[]? tags = null,
         string? comment = null, CancellationToken cancellationToken = default)
     {
+        InputValidation.Positive(issueId, nameof(issueId));
+        InputValidation.OptionalIds((status, nameof(status)), (type, nameof(type)), (priority, nameof(priority)), (severity, nameof(severity)), (assigned_to, nameof(assigned_to)));
+        if (version < 0) throw new ArgumentException("version must be nonnegative.");
+        if (subject is not null) InputValidation.Required(subject, nameof(subject));
+        if (subject is null && description is null && status is null && type is null && priority is null &&
+            severity is null && assigned_to is null && tags is null && string.IsNullOrWhiteSpace(comment))
+            throw new ArgumentException("An update requires a change or a nonblank comment.");
         var payload = new IssueUpdateDto
         {
             Subject = subject,
