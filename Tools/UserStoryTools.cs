@@ -14,6 +14,17 @@ public sealed class UserStoryTools
         _userStories = userStories;
     }
 
+    [McpServerTool(Name = "get_user_story")]
+    [Description("Retrieve one user story by its positive internal ID, not the displayed #ref. Returns the authoritative version, description, assignment, status, tags, sprint, and available epic/source relationship metadata; comments and tasks are not loaded.")]
+    public async Task<string> GetUserStory(
+        [Description("Positive internal user story ID, not the displayed #ref.")] int userStoryId,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _userStories.GetUserStoryAsync(userStoryId, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
     [McpServerTool(Name = "list_user_stories")]
     [Description("List one page of project user stories. By default only stories with open, non-archived statuses are returned; explicit statusIds take precedence over includeClosed and includeArchived. Set backlogOnly=true for stories with no milestone, or milestoneId for one sprint; those two selectors cannot be combined. Returns an array unless includePageInfo=true.")]
     public async Task<string> ListUserStories(

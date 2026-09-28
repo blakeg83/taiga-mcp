@@ -33,6 +33,7 @@ public sealed class McpIntegrationTests
         Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
         foreach (var name in new[] { "list_issues", "list_user_stories", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
+        Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
         var detail = await Call("get_issue", new() { ["issueId"] = 42 });
         Assert.False(detail.IsError == true);
         Assert.False(JsonSerializer.Deserialize<JsonElement>(GetText(detail)).GetProperty("issue").TryGetProperty("assigned_to", out _));
@@ -119,6 +120,7 @@ public sealed class McpIntegrationTests
             {
                 "create_issue",
                 "get_issue",
+                "get_user_story",
                 "list_issue_priorities",
                 "list_issue_severities",
                 "list_issue_statuses",
@@ -169,6 +171,13 @@ public sealed class McpIntegrationTests
             var storyRequired = listUserStories.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, storyRequired);
+
+            var getUserStory = Assert.Single(tools, tool => tool.Name == "get_user_story");
+            var getUserStoryProperties = getUserStory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "userStoryId" }, getUserStoryProperties);
+            var getUserStoryRequired = getUserStory.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "userStoryId" }, getUserStoryRequired);
 
             var updateIssue = Assert.Single(tools, tool => tool.Name == "update_issue");
             var updateProperties = updateIssue.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -237,6 +246,18 @@ public sealed class McpIntegrationTests
             Assert.Equal(
                 "/api/v1/userstories?project=123&page=2&status=2%2C3&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 storyRequest.PathAndQuery);
+
+            var storyDetail = await client.CallToolAsync(
+                "get_user_story",
+                new Dictionary<string, object?> { ["userStoryId"] = 90 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(storyDetail.IsError == true);
+            var detail = JsonSerializer.Deserialize<JsonElement>(GetText(storyDetail));
+            Assert.Equal(90, detail.GetProperty("id").GetInt32());
+            Assert.Equal(4, detail.GetProperty("version").GetInt32());
+            Assert.Equal("**Ready**", detail.GetProperty("description").GetString());
+            var storyDetailRequest = Assert.Single(taiga.Requests, request => request.PathAndQuery == "/api/v1/userstories/90");
+            Assert.Equal("Bearer integration-token", storyDetailRequest.Authorization);
 
             var legacy = await client.CallToolAsync("list_projects", new Dictionary<string, object?> { ["member"] = "6" }, cancellationToken: protocolDeadline.Token);
             Assert.False(legacy.IsError == true);

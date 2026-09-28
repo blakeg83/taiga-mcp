@@ -57,6 +57,12 @@ Illustrative MCP arguments (IDs are placeholders):
 {"userStoryId":102}
 ```
 
+Caller workflow: list stories for a placeholder project such as `12345`, take
+the returned internal `id` (for example `102`, not displayed `#ref`), call
+`get_user_story(userStoryId=102)`, and pass its returned `version` (for example
+`4`) to the planned `update_user_story` command. The update command is outside
+this goal and is not yet exposed.
+
 Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga-doc/blob/main/api/user-stories/endpoints.adoc). Before implementing, record a pinned upstream revision or deployed-version evidence; a floating main branch is not a deployment guarantee.
 
 ## Files and integration points
@@ -90,12 +96,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose the detail tool
 
-- [ ] Add the get_user_story MCP method and descriptions distinguishing internal ID from displayed #ref.
-- [ ] Return a JSON detail object and keep list_user_stories behavior unchanged.
-- [ ] Document a list -> detail -> update example using placeholders rather than production IDs.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose get_user_story MCP interface`.
+- [x] Add the `get_user_story` MCP method and descriptions distinguishing internal ID from displayed `#ref`.
+- [x] Return a JSON detail object and keep `list_user_stories` behavior unchanged.
+- [x] Document a list -> detail -> update example using placeholders rather than production IDs.
+- [x] Validate this step: 6 MCP integration tests passed, covering `tools/list`, required schema binding, actual `tools/call`, exact detail URI, and returned version.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose get_user_story MCP interface`.
 
 ## Step 4: Verify story detail behavior
 
@@ -129,8 +135,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug --no-build` passed on 2026-09-28: 112 tests, 0 warnings/errors. Pinned `taiga-doc` revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` documents `GET /api/v1/userstories/{userStoryId}`; pinned backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the detail serializer's tags, epics, and origin fields. | Specify get_user_story contracts / 70ece54 |
-| 2 | Complete | `UserStoryDetailTests` cover exact detail routing, authentication, status-extra-info and project lookup labels, Markdown/Unicode, nulls, empty tags, raw relationships, malformed identity/version, and pre-HTTP ID validation. Focused Debug tests: 120 passed. Debug build: 0 warnings/errors. | Implement get_user_story API behavior / pending |
-| 3 | Not started | — | Expose get_user_story MCP interface / pending |
+| 2 | Complete | `UserStoryDetailTests` cover exact detail routing, authentication, status-extra-info and project lookup labels, Markdown/Unicode, nulls, empty tags, raw relationships, malformed identity/version, and pre-HTTP ID validation. Focused Debug tests: 120 passed. Debug build: 0 warnings/errors. | Implement get_user_story API behavior / ce991dd |
+| 3 | Complete | 6 MCP integration tests passed. They discover 12 tools, verify `get_user_story` requires only `userStoryId`, call it through STDIO, assert exact `/api/v1/userstories/90` routing, bearer auth, JSON detail, and version 4; list behavior remains covered. | Expose get_user_story MCP interface / pending |
 | 4 | Not started | — | Verify get_user_story workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
