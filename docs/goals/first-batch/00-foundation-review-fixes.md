@@ -1,6 +1,6 @@
 # Goal 00 follow-up: fix foundation review findings
 
-Status: in progress; Step 1 is complete and Step 2 remains.
+Status: complete.
 
 ## Objective and scope
 
@@ -14,7 +14,7 @@ Keep the installed MCP SDK and production tool behavior unchanged. Do not introd
 
 - **P2: STDOUT cleanliness is not asserted.** `McpIntegrationTests` successfully calls the server and parses the returned content, but the installed SDK catches malformed JSON lines and continues. A temporary copy with `Console.WriteLine("REVIEW: non-JSON stdout contamination")` before host creation still passed the integration test. See the pinned SDK's [StreamClientSessionTransport.ProcessMessageAsync](https://github.com/modelcontextprotocol/csharp-sdk/blob/15f8e89ac3aedb2bb4fa9232f6093f092b2ce956/src/ModelContextProtocol.Core/Client/StreamClientSessionTransport.cs#L155-L179). Successful invocation therefore does not prove clean STDOUT.
 - **P3: the issue JSON example misstates null behavior.** `docs/taiga_tools_reference.md` includes `assigned_to: null`, while `IssueTools` serializes with `JsonIgnoreCondition.WhenWritingNull`. An unassigned issue omits this property. Preserve that behavior and correct the example.
-- Review validation: all 8 tests passed with `dotnet test -c Release`. Debug validation with `UseAppHost=false` was blocked by running server processes locking `bin/Debug/net8.0/TaigaMCP.dll`.
+- Review-time validation: all 8 original foundation tests passed with `dotnet test -c Release`. At that time, Debug validation with `UseAppHost=false` was blocked by running server processes locking `bin/Debug/net8.0/TaigaMCP.dll`; the corrected validation below records the later root run separately.
 
 ## Step 1: enforce clean production STDOUT
 
@@ -29,28 +29,28 @@ Keep the installed MCP SDK and production tool behavior unchanged. Do not introd
 
 ## Step 2: correct null-response documentation and finalize
 
-- [ ] Remove `assigned_to: null` from the unassigned-issue example in `docs/taiga_tools_reference.md`; explain that null-valued response properties are omitted under the current tool serializers.
-- [ ] Clearly distinguish current response omission from the planned page envelope's explicit-null metadata and from request-side clearing semantics. Do not change serializer settings to fit the example.
-- [ ] Check the other representative examples against the existing DTOs and tool serializers, correcting any related null-shape inconsistencies.
-- [ ] Verify a representative unassigned issue through the real `IssueTools` serialization path with fake HTTP, asserting that `assigned_to` is absent; a direct DTO null assertion alone is insufficient. Keep this coverage focused on the public compatibility contract.
-- [ ] Run root restore, Debug build, and tests. If default Debug outputs are locked, record that failure and use a unique temporary output directory, as documented in the foundation reference. Do not stop running MCP servers without user authorization, and do not claim `UseAppHost=false` alone resolves a DLL lock.
-- [ ] Record commands, outcomes, limitations, and the first step's commit hash here; update goal 00's evidence to link this follow-up and distinguish original checks from corrected verification.
-- [ ] Review the diff for generated files, temporary mutations, and secrets; commit as: `Correct nullable issue response contracts`.
+- [x] Remove `assigned_to: null` from the unassigned-issue example in `docs/taiga_tools_reference.md`; explain that null-valued response properties are omitted under the current tool serializers.
+- [x] Clearly distinguish current response omission from the planned page envelope's explicit-null metadata and from request-side clearing semantics. Do not change serializer settings to fit the example.
+- [x] Check the other representative examples against the existing DTOs and tool serializers, correcting any related null-shape inconsistencies.
+- [x] Verify a representative unassigned issue through the real `IssueTools` serialization path with fake HTTP, asserting that `assigned_to` is absent; a direct DTO null assertion alone is insufficient. Keep this coverage focused on the public compatibility contract.
+- [x] Run root restore, Debug build, and tests. If default Debug outputs are locked, record that failure and use a unique temporary output directory, as documented in the foundation reference. Do not stop running MCP servers without user authorization, and do not claim `UseAppHost=false` alone resolves a DLL lock.
+- [x] Record commands, outcomes, limitations, and the first step's commit hash here; update goal 00's evidence to link this follow-up and distinguish original checks from corrected verification.
+- [x] Review the diff for generated files, temporary mutations, and secrets; commit as: `Correct nullable issue response contracts`.
 
 ## Definition of done
 
-- [ ] The production integration test detects non-protocol STDOUT; the negative end-to-end experiment proves the previously passing mutation now fails.
-- [ ] Existing discovery, invocation, binding, HTTP-contract, and error tests still pass.
-- [ ] Documentation matches emitted nullable issue fields without changing production behavior.
-- [ ] Root validation and any output-lock workaround are accurately recorded.
-- [ ] Both steps are committed with evidence, and no temporary production mutation is included.
+- [x] The production integration test detects non-protocol STDOUT; the negative end-to-end experiment proves the previously passing mutation now fails.
+- [x] Existing discovery, invocation, binding, HTTP-contract, and error tests still pass.
+- [x] Documentation matches emitted nullable issue fields without changing production behavior.
+- [x] Root validation and any output-lock workaround are accurately recorded.
+- [x] Both steps are committed with evidence, and no temporary production mutation is included.
 
 ## Execution record
 
 | Step | Status | Validation and documentation evidence | Commit |
 | --- | --- | --- | --- |
-| 1 | Complete | `StrictMcpProcess` tees raw child STDOUT into the SDK only after validating JSON-RPC 2.0 lines; 5 focused integration tests passed, including clean production discovery/read/failure/bearer coverage, three validator negatives, and temporary-copy contamination failure. `contracts.md`, the tool reference, and goal 00 evidence now describe the strict check. | Assert clean MCP protocol output |
-| 2 | Not started | Pending | Pending |
+| 1 | Complete | `StrictMcpProcess` tees raw child STDOUT into the SDK only after validating JSON-RPC 2.0 lines; 5 focused integration tests passed, including clean production discovery/read/failure/bearer coverage, three validator negatives, and temporary-copy contamination failure. `contracts.md`, the tool reference, and goal 00 evidence now describe the strict check. | `003fe00` — Assert clean MCP protocol output |
+| 2 | Complete | Removed the impossible current `assigned_to: null` issue example, documented serializer omission versus planned explicit-null metadata and `clearFields`, checked representative shapes, and added a real `IssueTools.GetIssue` compatibility test. Root `dotnet restore`, `dotnet build -c Debug`, and `dotnet test` passed; the build had 0 warnings and the suite passed 13 tests. No production source, generated output, credential, or live payload was added. | Correct nullable issue response contracts |
 
 Step 1 validation command:
 
@@ -60,4 +60,24 @@ dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Release -p:OutputPath=
 
 Result: 5 passed in approximately 5 seconds. The contaminated temporary copy emitted the expected `REVIEW: non-JSON stdout contamination` line; the strict validator raised `InvalidDataException`, and the bounded MCP initialization failed within the five-second deadline. Temporary files were removed and no production source was mutated.
 
-Final handoff: report both findings addressed, commit hashes, clean/contaminated protocol results, null-serialization verification, root validation results, and any remaining limitations.
+Step 2 validation commands:
+
+```text
+dotnet restore
+dotnet build -c Debug
+dotnet test
+```
+
+Result: restore passed; the Debug build passed with 0 warnings; and the
+solution test run passed all 13 tests in approximately 5 seconds. The added
+`IssueTools_GetIssue_OmitsNullAssignedToFromPublicJson` test exercised the
+public tool serializer with fake HTTP and confirmed that `assigned_to` is
+absent when Taiga returns null. The current run did not require the temporary
+output fallback; earlier foundation lock evidence remains documented as
+historical, and no running MCP process was stopped.
+
+Final handoff: both findings are addressed. The first commit is `003fe00`
+(`Assert clean MCP protocol output`); the second commit is this document's
+`Correct nullable issue response contracts` commit. Clean and contaminated
+protocol results, null-serialization verification, root validation results,
+and the historical output-lock limitation are recorded above.

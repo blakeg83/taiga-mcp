@@ -68,7 +68,6 @@ Issue list/detail results:
   "severity":"Normal",
   "type":"Bug",
   "priority":"Normal",
-  "assigned_to":null,
   "modified":"2026-09-28T12:00:00Z",
   "version":3
 }]
@@ -106,6 +105,12 @@ User-story and metadata results:
   the array default; this is planned until the relevant goal implements it.
 - Issue and story labels are derived from project metadata calls. The current
   DTOs preserve labels for compatibility and do not expose all source IDs.
+- The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
+  null-valued response properties such as an unassigned issue's `assigned_to`
+  are omitted from current tool JSON. This response omission is distinct from
+  the planned page envelope, whose missing pagination values are explicit JSON
+  `null`, and from planned request-side `clearFields`, which will deliberately
+  encode JSON null to clear a nullable field.
 - Nullable create/update fields are serialized with `WhenWritingNull`, so an
   omitted or null update value is currently indistinguishable from “leave it
   unchanged.” Explicit clearing is a planned contract change owned by the
@@ -199,9 +204,9 @@ A separate test-only stream server probes argument binding for explicit
 `false`, an empty array, an explicit null, and a missing required integer; the
 probe type is compiled only in the test project.
 
-Final validation on 2026-09-28 used the repository root and an explicit
-temporary output directory because two pre-existing `TaigaMCP.exe` processes
-held the default apphost file:
+The original foundation validation on 2026-09-28 used the repository root and
+an explicit temporary output directory because pre-existing `TaigaMCP.exe`
+processes held the default apphost file:
 
 ```text
 dotnet restore
@@ -210,8 +215,24 @@ dotnet test TaigaMCP.sln -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation-fina
 ```
 
 Restore passed; the alternate-output solution build passed with 0 warnings and
-the solution test run passed all 8 tests. The default `dotnet build -c Debug`
-and `dotnet test` commands were also run and stopped before compilation/test
-execution when MSBuild could not replace the locked default apphost. No server
-process was stopped, and no generated `bin/`, `obj/`, `.vs/`, credential, or
-live Taiga payload was added to the commit.
+the solution test run passed all 8 tests. The default commands were also run
+and stopped before compilation/test execution when MSBuild could not replace
+the locked default apphost. No server process was stopped, and no generated
+`bin/`, `obj/`, `.vs/`, credential, or live Taiga payload was added to the
+foundation commits.
+
+The corrected review validation reran the root commands after the output lock
+was no longer present:
+
+```text
+dotnet restore
+dotnet build -c Debug
+dotnet test
+```
+
+All three commands passed; the Debug build had 0 warnings and the solution
+test run passed all 13 tests. The focused strict STDIO run also passed its 5
+integration tests, including the expected failure of the contaminated
+temporary-copy experiment. The nullable issue contract was verified through
+the real `IssueTools.GetIssue` path, with `assigned_to` absent from the public
+JSON when the upstream value is null.

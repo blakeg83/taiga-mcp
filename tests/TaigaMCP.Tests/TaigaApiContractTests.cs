@@ -108,6 +108,34 @@ public sealed class TaigaApiContractTests
         Assert.Equal("demo%20project", resolverRequest.Uri.Query.Split("project=", StringSplitOptions.None).Last());
     }
 
+    [Fact]
+    public async Task IssueTools_GetIssue_OmitsNullAssignedToFromPublicJson()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/issues/42",
+                """
+                {"id":42,"ref":7,"project":123,"subject":"Unassigned","status":1,"severity":2,"type":3,"priority":4,"assigned_to":null,"version":3}
+                """)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-statuses", """[{"id":1,"name":"Open"}]""")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/severities", """[{"id":2,"name":"Normal"}]""")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issue-types", """[{"id":3,"name":"Bug"}]""")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/priorities", """[{"id":4,"name":"Normal"}]""")
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/history/issue/42", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        var api = new IssueApi(http, auth, new IssueMetadataCache(http, auth));
+        var tools = new IssueTools(api);
+
+        var result = await tools.GetIssue(42);
+
+        using var document = JsonDocument.Parse(result);
+        var issue = document.RootElement.GetProperty("issue");
+        Assert.False(issue.TryGetProperty("assigned_to", out _));
+        Assert.Equal("Unassigned", issue.GetProperty("subject").GetString());
+        Assert.Equal(3, issue.GetProperty("version").GetInt32());
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest, "{\"version\":[\"Invalid version\"]}", "400")]
     [InlineData(HttpStatusCode.Conflict, "{\"detail\":\"Version conflict\"}", "409")]
