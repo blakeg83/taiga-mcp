@@ -1,6 +1,6 @@
 # Goal 10: update_task
 
-Status: in progress.
+Status: complete.
 
 ## Objective
 
@@ -66,31 +66,31 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify progress and failure paths
 
-- [ ] Invoke assignment, status change, unassignment, block, unblock, and comment-only calls through MCP against fake state.
-- [ ] Assert exact PATCH bodies and unchanged parent/sprint fields.
-- [ ] Test server version rejection, successful server acceptance, invalid input, 403/404, and ambiguous transport failure with no retries.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify update_task workflow`.
+- [x] Invoke assignment, status change, unassignment, block, unblock, and comment-only calls through MCP against fake state.
+- [x] Assert exact PATCH bodies and unchanged parent/sprint fields.
+- [x] Test server version rejection, successful server acceptance, invalid input, 403/404, and ambiguous transport failure with no retries.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify update_task workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Task state/assignment edits send only selected changes.
-- [ ] isBlocked=false reaches the API; omission leaves blocking untouched.
-- [ ] Unassignment and empty collections/text preserve intentional clearing semantics.
-- [ ] The server result/version is returned without automatic parent changes or write retries.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Task state/assignment edits send only selected changes.
+- [x] isBlocked=false reaches the API; omission leaves blocking untouched.
+- [x] Unassignment and empty collections/text preserve intentional clearing semantics.
+- [x] The server result/version is returned without automatic parent changes or write retries.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can manage daily task progress through narrow, reliable MCP updates.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can manage daily task progress through narrow, reliable MCP updates.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
@@ -98,8 +98,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline restore passed; baseline test run passed 214 tests. The concurrent baseline build hit a SourceLink output lock, so a serial baseline build rerun passed. Contract payload tests passed. Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked on 2026-09-28; task model fields, versioned update path, and detail serializer support the scoped PATCH. No deployed-version claim; no live Taiga writes. Goal/reference docs updated with omitted-vs-explicit semantics and planned examples. | Specify update_task contracts / a2e0b72 |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~TaskUpdateTests`: 19 passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. Task PATCH tests cover omitted/set/clear assignment, empty description/tags, `is_blocked=false`, empty `blocked_note`, comment-only updates, invalid inputs, safe 400/409 errors, malformed success, and no retry. Domain API maps the authoritative task detail; no parent/sprint mutation is sent. | Implement update_task API behavior / 4dec867 |
-| 3 | Complete | The real STDIO integration test passed: `tools/list` exposes `update_task` with required `taskId`/`version` and all optional fields, and `tools/call` bound explicit `false`, empty arrays/strings, and explicit null omission. The fake server observed an exact PATCH body and returned valid JSON text. README, quickstart, reference, and inventory now describe the public tool. | Expose update_task MCP interface / pending |
-| 4 | Not started | — | Verify update_task workflow / pending |
+| 3 | Complete | The real STDIO integration test passed: `tools/list` exposes `update_task` with required `taskId`/`version` and all optional fields, and `tools/call` bound explicit `false`, empty arrays/strings, and explicit null omission. The fake server observed an exact PATCH body and returned valid JSON text. README, quickstart, reference, and inventory now describe the public tool. | Expose update_task MCP interface / c4e9674 |
+| 4 | Complete | `dotnet restore`: passed. `dotnet build -c Debug --no-restore`: passed with 0 warnings/errors. `dotnet test -c Debug --no-build --no-restore`: 237 passed. Release build/test also passed with 0 warnings/errors and 237 tests. Focused MCP workflow and domain update suites passed (1 and 22 tests). Fake HTTP only; no live Taiga writes. | Verify update_task workflow / final handoff |
 
 ### Step 1 decisions and planned examples
 

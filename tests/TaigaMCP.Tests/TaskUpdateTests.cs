@@ -182,6 +182,8 @@ public sealed class TaskUpdateTests
     [Theory]
     [InlineData(HttpStatusCode.BadRequest, "{\"version\":[\"invalid synthetic-token\"]}", "400", "version")]
     [InlineData(HttpStatusCode.Conflict, "{\"detail\":\"Version conflict synthetic-token\"}", "409", "version")]
+    [InlineData(HttpStatusCode.Forbidden, "{\"detail\":\"permission synthetic-token\"}", "403", "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "{\"detail\":\"missing synthetic-token\"}", "404", "resource not found")]
     public async Task UpdateTaskAsync_PropagatesSafeHttpStatusWithoutRetry(
         HttpStatusCode statusCode,
         string errorBody,
@@ -216,6 +218,27 @@ public sealed class TaskUpdateTests
                 NewApi(handler, auth).UpdateTaskAsync(203, version: 2, status: 11));
 
             Assert.Contains("may already have applied", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateTaskAsync_TransportFailureAttemptsOneWrite()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Patch,
+                "/api/v1/tasks/203",
+                new HttpRequestException("secret synthetic-token"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).UpdateTaskAsync(203, version: 2, status: 11));
+
+            Assert.Contains("transport failure", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.DoesNotContain("synthetic-token", exception.Message);
             Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
         }
     }

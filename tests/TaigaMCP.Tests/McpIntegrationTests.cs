@@ -733,6 +733,186 @@ public sealed class McpIntegrationTests
     }
 
     [Fact]
+    public async Task ProductionServer_UpdateTask_CoversProgressAssignmentBlockingCommentsAndFailures()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using (var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token))
+        {
+            async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
+                => await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
+
+            var initial = await Call("get_task", new() { ["taskId"] = 203 });
+            Assert.False(initial.IsError == true);
+            Assert.Equal(2, JsonSerializer.Deserialize<JsonElement>(GetText(initial)).GetProperty("version").GetInt32());
+
+            var status = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 2,
+                ["status"] = 11
+            });
+            Assert.False(status.IsError == true, GetText(status));
+            Assert.Equal(3, JsonSerializer.Deserialize<JsonElement>(GetText(status)).GetProperty("version").GetInt32());
+            AssertTaskPatch(taiga, ["status", "version"]);
+
+            var assigned = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 3,
+                ["assigned_to"] = 42
+            });
+            Assert.False(assigned.IsError == true, GetText(assigned));
+            Assert.Equal(4, JsonSerializer.Deserialize<JsonElement>(GetText(assigned)).GetProperty("version").GetInt32());
+            AssertTaskPatch(taiga, ["assigned_to", "version"]);
+
+            var unassigned = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 4,
+                ["clearFields"] = new[] { "assigned_to" }
+            });
+            Assert.False(unassigned.IsError == true, GetText(unassigned));
+            var unassignedJson = JsonSerializer.Deserialize<JsonElement>(GetText(unassigned));
+            Assert.Equal(5, unassignedJson.GetProperty("version").GetInt32());
+            Assert.False(unassignedJson.TryGetProperty("assigned_to", out _));
+            using (var unassignedBody = GetLastTaskPatchDocument(taiga))
+            {
+                AssertPatchProperties(unassignedBody.RootElement, "assigned_to", "version");
+                Assert.Equal(JsonValueKind.Null, unassignedBody.RootElement.GetProperty("assigned_to").ValueKind);
+            }
+
+            var blocked = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 5,
+                ["isBlocked"] = true,
+                ["blockedNote"] = "Waiting for the dependency."
+            });
+            Assert.False(blocked.IsError == true, GetText(blocked));
+            Assert.True(JsonSerializer.Deserialize<JsonElement>(GetText(blocked)).GetProperty("is_blocked").GetBoolean());
+            AssertTaskPatch(taiga, ["blocked_note", "is_blocked", "version"]);
+
+            var unblockedWithoutNote = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 6,
+                ["isBlocked"] = false
+            });
+            Assert.False(unblockedWithoutNote.IsError == true, GetText(unblockedWithoutNote));
+            var retainedNote = JsonSerializer.Deserialize<JsonElement>(GetText(unblockedWithoutNote));
+            Assert.False(retainedNote.GetProperty("is_blocked").GetBoolean());
+            Assert.Equal("Waiting for the dependency.", retainedNote.GetProperty("blocked_note").GetString());
+            AssertTaskPatch(taiga, ["is_blocked", "version"]);
+
+            var unblocked = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 7,
+                ["isBlocked"] = false,
+                ["blockedNote"] = string.Empty
+            });
+            Assert.False(unblocked.IsError == true, GetText(unblocked));
+            var clearedBlock = JsonSerializer.Deserialize<JsonElement>(GetText(unblocked));
+            Assert.False(clearedBlock.GetProperty("is_blocked").GetBoolean());
+            Assert.Equal(string.Empty, clearedBlock.GetProperty("blocked_note").GetString());
+            AssertTaskPatch(taiga, ["blocked_note", "is_blocked", "version"]);
+
+            var comment = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 8,
+                ["comment"] = "Dependency resolved."
+            });
+            Assert.False(comment.IsError == true, GetText(comment));
+            Assert.Equal(9, JsonSerializer.Deserialize<JsonElement>(GetText(comment)).GetProperty("version").GetInt32());
+            AssertTaskPatch(taiga, ["comment", "version"]);
+
+            var emptyValues = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 9,
+                ["description"] = string.Empty,
+                ["tags"] = Array.Empty<string>()
+            });
+            Assert.False(emptyValues.IsError == true, GetText(emptyValues));
+            var emptyJson = JsonSerializer.Deserialize<JsonElement>(GetText(emptyValues));
+            Assert.Equal(10, emptyJson.GetProperty("version").GetInt32());
+            Assert.Equal(string.Empty, emptyJson.GetProperty("description").GetString());
+            Assert.Empty(emptyJson.GetProperty("tags").EnumerateArray());
+            AssertTaskPatch(taiga, ["description", "tags", "version"]);
+
+            var readBack = await Call("get_task", new() { ["taskId"] = 203 });
+            Assert.False(readBack.IsError == true, GetText(readBack));
+            var readBackJson = JsonSerializer.Deserialize<JsonElement>(GetText(readBack));
+            Assert.Equal(10, readBackJson.GetProperty("version").GetInt32());
+            Assert.Equal(102, readBackJson.GetProperty("user_story").GetInt32());
+            Assert.Equal(55, readBackJson.GetProperty("milestone").GetInt32());
+            Assert.False(readBackJson.TryGetProperty("assigned_to", out _));
+
+            var patchCount = taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203");
+            var missingVersion = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["status"] = 11
+            });
+            Assert.True(missingVersion.IsError);
+            Assert.Equal(patchCount, taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203"));
+
+            var invalidClear = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 10,
+                ["clearFields"] = new[] { "blocked_note" }
+            });
+            Assert.True(invalidClear.IsError);
+            Assert.Contains("unsupported field", GetText(invalidClear));
+            Assert.Equal(patchCount, taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203"));
+
+            var stale = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 9,
+                ["status"] = 11
+            });
+            Assert.True(stale.IsError);
+            Assert.Contains("409", GetText(stale));
+            Assert.Contains("conflict", GetText(stale), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(patchCount + 1, taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203"));
+
+            taiga.TaskUpdateStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbidden = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 10,
+                ["status"] = 11
+            });
+            Assert.True(forbidden.IsError);
+            Assert.Contains("403", GetText(forbidden));
+            Assert.Contains("permission denied", GetText(forbidden), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic task update secret", GetText(forbidden));
+
+            taiga.TaskUpdateStatusCode = System.Net.HttpStatusCode.NotFound;
+            var missingTask = await Call("update_task", new()
+            {
+                ["taskId"] = 203,
+                ["version"] = 10,
+                ["status"] = 11
+            });
+            Assert.True(missingTask.IsError);
+            Assert.Contains("404", GetText(missingTask));
+            Assert.Contains("resource not found", GetText(missingTask), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic task update secret", GetText(missingTask));
+        }
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
+    [Fact]
     public async Task ProductionServer_RejectsStartupStdoutContaminationInTemporaryCopy()
     {
         await using var taiga = FakeTaigaHttpServer.Start();
@@ -812,4 +992,13 @@ public sealed class McpIntegrationTests
 
     private static RecordedTaigaRequest GetLastStoryPatch(FakeTaigaHttpServer taiga)
         => taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/userstories/102");
+
+    private static void AssertTaskPatch(FakeTaigaHttpServer taiga, string[] expectedNames)
+    {
+        using var body = GetLastTaskPatchDocument(taiga);
+        AssertPatchProperties(body.RootElement, expectedNames);
+    }
+
+    private static JsonDocument GetLastTaskPatchDocument(FakeTaigaHttpServer taiga)
+        => JsonDocument.Parse(taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203").Body);
 }
