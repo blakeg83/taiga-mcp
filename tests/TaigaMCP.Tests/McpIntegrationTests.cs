@@ -34,6 +34,20 @@ public sealed class McpIntegrationTests
         foreach (var name in new[] { "list_issues", "list_user_stories", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_user_story", new() { ["userStoryId"] = 90 })).IsError == true);
+        var createdStory = await Call("create_user_story", new()
+        {
+            ["projectId"] = 123,
+            ["subject"] = "Created story"
+        });
+        Assert.False(createdStory.IsError == true);
+        var createdStoryJson = JsonSerializer.Deserialize<JsonElement>(GetText(createdStory));
+        Assert.Equal(102, createdStoryJson.GetProperty("id").GetInt32());
+        var createdStoryRequest = Assert.Single(taiga.Requests, request =>
+            request.Method == "POST" && request.PathAndQuery == "/api/v1/userstories");
+        var createdStoryBody = JsonSerializer.Deserialize<JsonElement>(createdStoryRequest.Body);
+        Assert.Equal(new[] { "project", "subject" }, createdStoryBody.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(123, createdStoryBody.GetProperty("project").GetInt32());
+        Assert.Equal("Created story", createdStoryBody.GetProperty("subject").GetString());
         var detail = await Call("get_issue", new() { ["issueId"] = 42 });
         Assert.False(detail.IsError == true);
         Assert.False(JsonSerializer.Deserialize<JsonElement>(GetText(detail)).GetProperty("issue").TryGetProperty("assigned_to", out _));
@@ -119,6 +133,7 @@ public sealed class McpIntegrationTests
             var expectedNames = new[]
             {
                 "create_issue",
+                "create_user_story",
                 "get_issue",
                 "get_user_story",
                 "list_issue_priorities",
@@ -178,6 +193,15 @@ public sealed class McpIntegrationTests
             var getUserStoryRequired = getUserStory.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "userStoryId" }, getUserStoryRequired);
+
+            var createUserStory = Assert.Single(tools, tool => tool.Name == "create_user_story");
+            var createUserStoryProperties = createUserStory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "projectId", "subject", "description", "status", "assigned_to", "tags", "milestoneId" },
+                createUserStoryProperties);
+            var createUserStoryRequired = createUserStory.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId", "subject" }, createUserStoryRequired);
 
             var updateIssue = Assert.Single(tools, tool => tool.Name == "update_issue");
             var updateProperties = updateIssue.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();

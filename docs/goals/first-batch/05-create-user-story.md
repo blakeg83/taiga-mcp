@@ -57,12 +57,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose the creation tool
 
-- [ ] Register the create_user_story MCP method in the existing tool class with required projectId/subject only.
-- [ ] Document descriptions as the place for acceptance criteria in this batch.
-- [ ] Add minimal-backlog and assigned-sprint examples, marking milestone/status IDs as project-specific.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_user_story MCP interface`.
+- [x] Register the create_user_story MCP method in the existing tool class with required projectId/subject only.
+- [x] Document descriptions as the place for acceptance criteria in this batch.
+- [x] Add minimal-backlog and assigned-sprint examples, marking milestone/status IDs as project-specific.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record for results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose create_user_story MCP interface`.
 
 ## Step 4: Verify creation and readback
 
@@ -97,8 +97,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (124 passed) passed on 2026-09-28. Added passing minimal/populated JSON fixtures and inventory contract scope. Pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` checked 2026-09-28: `UserStoryValidator` accepts optional `tags` with an empty-list default; `UserStoryViewSet` maps creation through `userstories` and enforces project membership for status/milestone values. Request decisions: `project` and nonblank `subject` are required; null optionals are omitted; empty description/tags remain explicit; status/assignee/milestone IDs are positive locally and membership remains server validation; no create retry. README/reference/quickstart remain current until the MCP method is exposed. | Specify create_user_story contracts / fc75821 |
-| 2 | Complete | Added `UserStoryCreateDto` and authenticated `POST userstories` with explicit wire mapping, null omission, positive ID/subject validation, detail/status mapping, and ambiguous-write warnings. `dotnet test ... --filter FullyQualifiedName~UserStoryCreateTests` passed (11 tests); `dotnet build -c Debug --no-restore` passed with 0 warnings/errors on 2026-09-28. Public MCP documentation remains unchanged until Step 3 exposes the tool. | Implement create_user_story API behavior / pending |
-| 3 | Not started | — | Expose create_user_story MCP interface / pending |
+| 2 | Complete | Added `UserStoryCreateDto` and authenticated `POST userstories` with explicit wire mapping, null omission, positive ID/subject validation, detail/status mapping, and ambiguous-write warnings. `dotnet test ... --filter FullyQualifiedName~UserStoryCreateTests` passed (11 tests); `dotnet build -c Debug --no-restore` passed with 0 warnings/errors on 2026-09-28. Public MCP documentation remains unchanged until Step 3 exposes the tool. | Implement create_user_story API behavior / aeb0d7a |
+| 3 | Complete | Added the `create_user_story` MCP method with required `projectId`/`subject`, optional `description`, `status`, `assigned_to`, `tags`, and `milestoneId`, plus descriptions for acceptance criteria and project-specific IDs. Updated README, quickstart, implemented reference, and inventory. Production STDIO `tools/list` and `tools/call` test passed on 2026-09-28, including minimal optional omission, JSON response parsing, and schema required/optional checks. | Expose create_user_story MCP interface / pending |
 | 4 | Not started | — | Verify create_user_story workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

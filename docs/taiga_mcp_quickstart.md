@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, updating issues, and listing projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, updating issues and user stories, and listing projects.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 12 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 13 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -81,6 +81,25 @@ npx @modelcontextprotocol/inspector dotnet run --project ./TaigaMCP.csproj
 - Env: TAIGA__BASEURL, TAIGA__USERNAME, TAIGA__PASSWORD
 
 Click **Connect** → call tools interactively.
+
+### Create a user story
+
+Use the required arguments for a minimal backlog story:
+
+```json
+{"projectId":123,"subject":"Allow saved searches"}
+```
+
+Put acceptance criteria in `description`. To place the story in a sprint and
+assign it, provide project-specific internal IDs:
+
+```json
+{"projectId":123,"subject":"Allow saved searches","description":"Acceptance: saved searches can be reopened.","status":7,"assigned_to":42,"tags":["search","saved"],"milestoneId":55}
+```
+
+Taiga applies project defaults for omitted optional fields. The returned JSON
+contains the server-created story detail, including its `id`, `ref`, and
+`version`. Status, assignee, and milestone membership are validated by Taiga.
 
 ### CLI Mode
 ```bash
