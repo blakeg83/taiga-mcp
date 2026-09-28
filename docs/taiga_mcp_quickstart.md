@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, updating issues and user stories, and listing projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; and listing projects.
 
 ---
 

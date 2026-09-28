@@ -135,16 +135,35 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.OK,
-                "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}");
+                "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created backlog story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/userstories/103")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                {"id":103,"ref":19,"project":123,"subject":"Assigned sprint story","description":"  Acceptance: the story can be reopened.  ","status":2,"status_extra_info":{"name":"In Progress"},"assigned_to":42,"tags":[["search","#336699"],["saved",null]],"milestone":55,"version":5}
+                """);
             return;
         }
 
         if (request.HttpMethod == HttpMethod.Post.Method && path == "/api/v1/userstories")
         {
+            var populated = body.Contains("\"milestone\":55", StringComparison.Ordinal);
+            var createdStory = populated
+                ? """
+                  {"id":103,"ref":19,"project":123,"subject":"Assigned sprint story","description":"  Acceptance: the story can be reopened.  ","status":2,"status_extra_info":{"name":"In Progress"},"assigned_to":42,"tags":[["search","#336699"],["saved",null]],"milestone":55,"version":5}
+                  """
+                : """
+                  {"id":102,"ref":18,"project":123,"subject":"Created backlog story","description":"Acceptance: the story can be reopened.","status":1,"status_extra_info":{"name":"Ready"},"assigned_to":null,"tags":[],"milestone":null,"version":4}
+                  """;
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.Created,
-                "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}");
+                createdStory);
             return;
         }
 

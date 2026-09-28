@@ -1,6 +1,6 @@
 # Goal 05: create_user_story
 
-Status: planned.
+Status: complete.
 
 ## Objective
 
