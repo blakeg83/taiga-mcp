@@ -49,12 +49,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement TaskApi and DI
 
-- [ ] Add TaskApi accepting TaigaTransport; register the concrete domain API in Hosting/ServiceCollectionExtensions.cs and pass CancellationToken through every call.
-- [ ] Reuse query/page helpers with positive-ID/page validation, authenticated requests, success checks, and response disposal.
-- [ ] Map parent and sprint IDs without treating null as zero; do not fetch every parent story for listing.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_tasks API behavior`.
+- [x] Add TaskApi accepting TaigaTransport; register the concrete domain API in Hosting/ServiceCollectionExtensions.cs and pass CancellationToken through every call.
+- [x] Reuse query/page helpers with positive-ID/page validation, authenticated requests, success checks, and response disposal.
+- [x] Map parent and sprint IDs without treating null as zero; do not fetch every parent story for listing.
+- [x] Validate this step: focused TaskListTests and isolated Debug test run passed (176 tests, zero failures).
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement list_tasks API behavior`.
 
 ## Step 3: Expose task listing
 
@@ -98,7 +98,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` reviewed 2026-09-28; pinned [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60) and [TaskListSerializer fields](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57) recorded. DTO and standalone/story-linked/closed/unavailable-label fixtures added. Baseline root build/test initially exposed a pre-existing missing `System.Text.Json` using; isolated build passed after the narrow test-harness fix. | Specify list_tasks contracts / pending |
-| 2 | Not started | — | Implement list_tasks API behavior / pending |
+| 2 | Complete | `TaskApi` and `TaskListQueryBuilder` request `GET tasks` with `project`, `page`, `status`, `status__is_closed`, `user_story`, `milestone`, `assigned_to`, `tags`, and `q` only as applicable; values are encoded and one page is requested. Null parent/sprint/assignee values remain null, inline `status_extra_info.name` supplies labels, and no parent/status lookup is made. Positive input validation, HTTP/safe transport errors, malformed-list rejection, response disposal, and pagination header parsing reuse the foundation contracts. Focused isolated-output test run: 176 passed. | Implement list_tasks API behavior / pending |
 | 3 | Not started | — | Expose list_tasks MCP interface / pending |
 | 4 | Not started | — | Verify list_tasks workflow / pending |
 

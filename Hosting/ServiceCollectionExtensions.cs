@@ -39,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IssueMetadataCache>();
         services.AddSingleton<IssueApi>();
         services.AddSingleton<UserStoryApi>();
+        services.AddSingleton<TaskApi>();
         services
             .AddMcpServer()
             .WithStdioServerTransport()
