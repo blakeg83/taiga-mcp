@@ -138,7 +138,7 @@ public sealed class EpicCreateTests
     public async Task CreateEpicAsync_ReportsAmbiguousTransportFailureWithoutRetry()
     {
         var handler = new FakeHttpMessageHandler()
-            .AddExceptionRoute(HttpMethod.Post, "/api/v1/epics", new HttpRequestException("secret connection details"));
+            .AddExceptionRoute(HttpMethod.Post, "/api/v1/epics", new IOException("synthetic timeout details"));
         var (http, auth) = TaigaTestClient.Create(handler);
         using (http)
         {
@@ -146,7 +146,7 @@ public sealed class EpicCreateTests
                 NewApi(handler, auth).CreateEpicAsync(123, "Saved search experience"));
 
             Assert.Contains("may already have applied", exception.Message);
-            Assert.DoesNotContain("secret connection details", exception.Message);
+            Assert.DoesNotContain("synthetic timeout details", exception.Message);
             Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/epics"));
         }
     }

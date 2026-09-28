@@ -1,6 +1,6 @@
 # Goal 13: create_epic
 
-Status: in progress on `codex/create-epic`.
+Status: complete on `codex/create-epic`.
 
 ## Objective
 
@@ -66,38 +66,38 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify epic creation and readback
 
-- [ ] Create through MCP against fake HTTP and read returned epicId with get_epic.
-- [ ] Assert omitted defaults stay omitted; confirm provided description, color, tags, and assignment reach Taiga.
-- [ ] Cover disabled epics, invalid status/color responses, permissions, malformed success response, and ambiguous timeout without replay.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_epic workflow`.
+- [x] Create through MCP against fake HTTP and read returned epicId with get_epic.
+- [x] Assert omitted defaults stay omitted; confirm provided description, color, tags, and assignment reach Taiga.
+- [x] Cover disabled epics, invalid status/color responses, permissions, malformed success response, and ambiguous timeout without replay.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify create_epic workflow`.
 
 ## Acceptance scenarios
 
-- [ ] Minimal creation uses server defaults and returns generated identity/version.
-- [ ] Populated creation maps optional fields correctly.
-- [ ] No stories or project settings are modified as a side effect by the client.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] Minimal creation uses server defaults and returns generated identity/version.
+- [x] Populated creation maps optional fields correctly.
+- [x] No stories or project settings are modified as a side effect by the client.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Users can create an epic through MCP and use its returned ID for grouping work.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Users can create an epic through MCP and use its returned ID for grouping work.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, Debug build, and 261 tests passed. Pinned taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e` and taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` checked on 2026-09-28; fixture tests verify minimal omission and populated wire keys. Color format is delegated to Taiga because the model accepts a string up to 32 characters. Linking stories and requirement flags remain planned. | Specify create_epic contracts / b86376e |
-| 2 | Complete | `EpicCreateTests` cover minimal/default omission, populated serialization and mapping, explicit empty values, invalid inputs before HTTP, safe 400/403 failures, ambiguous transport failure without retry, and malformed success response. `dotnet test` focused create suite and Debug build passed. | Implement create_epic API behavior / pending |
-| 3 | Complete | MCP integration verifies `tools/list` exposes `create_epic` with required `projectId`/`subject` and optional fields, plus minimal and populated `tools/call` requests and returned identity/version. README, quickstart, reference, and inventory now describe the implemented scope and planned separate linking. | Expose create_epic MCP interface / pending |
-| 4 | Not started | — | Verify create_epic workflow / pending |
+| 2 | Complete | `EpicCreateTests` cover minimal/default omission, populated serialization and mapping, explicit empty values, invalid inputs before HTTP, safe 400/403 failures, ambiguous transport failure without retry, and malformed success response. `dotnet test` focused create suite and Debug build passed. | Implement create_epic API behavior / cd8ff9a |
+| 3 | Complete | MCP integration verifies `tools/list` exposes `create_epic` with required `projectId`/`subject` and optional fields, plus minimal and populated `tools/call` requests and returned identity/version. README, quickstart, reference, and inventory now describe the implemented scope and planned separate linking. | Expose create_epic MCP interface / 4ad326c |
+| 4 | Complete | Focused Step 4 tests passed (12), including MCP create/readback, omitted/populated requests, no story/project side effects, disabled/invalid status/color validation, permission denial, malformed success, and no replay after ambiguous transport failure. Root restore passed; Debug and Release builds completed with 0 warnings/errors; Debug and Release test runs each passed 275 tests. | Verify create_epic workflow |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.

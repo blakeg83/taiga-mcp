@@ -102,7 +102,7 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             using var doc = JsonDocument.Parse(bytes.AsMemory(0, count));
             if (doc.RootElement.ValueKind == JsonValueKind.Object)
             {
-                string[] fields = ["version", "subject", "project", "status", "type", "priority", "severity", "assigned_to", "tags", "description", "milestone", "comment"];
+                string[] fields = ["version", "subject", "project", "status", "type", "priority", "severity", "assigned_to", "tags", "description", "milestone", "comment", "color"];
                 foreach (var field in fields)
                     if (doc.RootElement.TryGetProperty(field, out _)) details.Add($"{field}: rejected");
                 if (doc.RootElement.TryGetProperty("detail", out var detail) &&

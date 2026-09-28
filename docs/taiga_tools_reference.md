@@ -202,6 +202,12 @@ The result is the authoritative created epic detail, including its internal
 later `link_user_story_to_epic` call when that separate tool is implemented.
 This command creates only the epic and does not alter stories or project
 settings. Taiga validates project membership, status, assignee, and color.
+Invalid positive-ID/subject inputs fail before HTTP. HTTP validation and
+permission failures preserve only safe status/category and allowlisted field
+names such as `status`, `project`, and `color`; upstream text is not echoed.
+The client does not retry an ambiguous POST or a malformed success response,
+and reports that the write may already have applied so callers can read the
+entity before retrying.
 
 ### `create_task` contract
 

@@ -47,6 +47,13 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicCreateStatusCode { get; set; } = HttpStatusCode.Created;
 
+    public string EpicCreateResponseBody { get; set; } =
+        """
+        {"id":301,"ref":12,"project":123,"subject":"Integration epic","description":"Group saved-search delivery work.","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"color":"#336699","tags":[["search","#336699"]],"modified_date":"2026-09-28T12:03:00Z","version":4}
+        """;
+
+    public string EpicCreateErrorBody { get; set; } = "{\"detail\":\"synthetic epic create secret\"}";
+
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
     public static FakeTaigaHttpServer Start()
@@ -191,16 +198,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         {
             if (EpicCreateStatusCode != HttpStatusCode.Created)
             {
-                await RespondAsync(context.Response, EpicCreateStatusCode, "{\"detail\":\"synthetic epic create secret\"}");
+                await RespondAsync(context.Response, EpicCreateStatusCode, EpicCreateErrorBody);
                 return;
             }
 
-            await RespondAsync(
-                context.Response,
-                HttpStatusCode.Created,
-                """
-                {"id":301,"ref":12,"project":123,"subject":"Integration epic","description":"Group saved-search delivery work.","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"color":"#336699","tags":[["search","#336699"]],"modified_date":"2026-09-28T12:03:00Z","version":4}
-                """);
+            await RespondAsync(context.Response, HttpStatusCode.Created, EpicCreateResponseBody);
             return;
         }
 
