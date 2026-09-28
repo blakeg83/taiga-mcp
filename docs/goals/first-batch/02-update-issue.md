@@ -57,13 +57,20 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement versioned partial updates
 
-- [ ] Replace null-omitting DTO construction for PATCH with a presence-aware payload while keeping create serialization unchanged.
-- [ ] Include assigned_to:null only when explicitly cleared; preserve description="", tags=[], and exact caller version.
-- [ ] Preserve HTTP status and safe field errors, call success validation consistently, and do not retry rejected or ambiguous writes.
-- [ ] Map returned data using the existing issue mapper and preserve IDs added by goal 01.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement update_issue API behavior`.
+- [x] Replace null-omitting DTO construction for PATCH with a presence-aware payload while keeping create serialization unchanged.
+- [x] Include assigned_to:null only when explicitly cleared; preserve description="", tags=[], and exact caller version.
+- [x] Preserve HTTP status and safe field errors, call success validation consistently, and do not retry rejected or ambiguous writes.
+- [x] Map returned data using the existing issue mapper and preserve IDs added by goal 01.
+- [x] Validate this step: focused update/API/validation tests passed (13 tests) and Debug build passed with 0 warnings/errors.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement update_issue API behavior`.
+
+### Step 2 implementation record
+
+- `IssueUpdateDto.ToPatchPayload` builds a dictionary from selected non-null values, always includes the caller's `version`, and adds `assigned_to:null` only for the validated explicit clear. `IssueCreateDto` and its serializer are unchanged.
+- `clearFields` currently accepts only the exact `assigned_to` name. Unsupported names and set/clear conflicts throw `ArgumentException` before an HTTP request. An explicit clear counts as a real update, while an otherwise empty update still requires a nonblank comment.
+- Existing `TaigaTransport` response checks and safe HTTP error propagation remain in use. No rejected or ambiguous PATCH is retried; response enrichment continues to report that a write may already have applied when mapping/metadata fails.
+- `tests/TaigaMCP.Tests/IssueUpdateTests.cs` verifies omitted assignment, integer assignment, JSON-null clearing, exact version forwarding, clear-only updates, and pre-HTTP clear-field validation.
 
 ## Step 3: Expose compatible tool arguments
 
@@ -108,7 +115,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline restore/build/test passed: 90 tests, 0 failures; contract/source record above | Specify update_issue contracts / pending |
-| 2 | Not started | — | Implement update_issue API behavior / pending |
+| 2 | Complete | Focused update/API/validation tests: 13 passed; Debug build: 0 warnings/errors | Implement update_issue API behavior / pending |
 | 3 | Not started | — | Expose update_issue MCP interface / pending |
 | 4 | Not started | — | Verify update_issue workflow / pending |
 

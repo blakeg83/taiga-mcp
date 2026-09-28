@@ -108,7 +108,8 @@ public sealed class IssueTools
             severity,
             assigned_to,
             tags,
-            comment, cancellationToken);
+            comment,
+            cancellationToken: cancellationToken);
         return ToolResponseJson.Serialize(issue);
     });
 

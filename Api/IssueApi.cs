@@ -384,14 +384,17 @@ public sealed class IssueApi
         int? severity = null,
         int? assigned_to = null,
         string[]? tags = null,
-        string? comment = null, CancellationToken cancellationToken = default)
+        string? comment = null,
+        string[]? clearFields = null,
+        CancellationToken cancellationToken = default)
     {
         InputValidation.Positive(issueId, nameof(issueId));
         InputValidation.OptionalIds((status, nameof(status)), (type, nameof(type)), (priority, nameof(priority)), (severity, nameof(severity)), (assigned_to, nameof(assigned_to)));
         if (version < 0) throw new ArgumentException("version must be nonnegative.");
         if (subject is not null) InputValidation.Required(subject, nameof(subject));
+        var clearAssignedTo = ValidateClearFields(clearFields, assigned_to);
         if (subject is null && description is null && status is null && type is null && priority is null &&
-            severity is null && assigned_to is null && tags is null && string.IsNullOrWhiteSpace(comment))
+            severity is null && assigned_to is null && tags is null && !clearAssignedTo && string.IsNullOrWhiteSpace(comment))
             throw new ArgumentException("An update requires a change or a nonblank comment.");
         var payload = new IssueUpdateDto
         {
@@ -407,12 +410,7 @@ public sealed class IssueApi
             Comment = comment
         };
 
-        var json = JsonSerializer.Serialize(
-            payload,
-            new JsonSerializerOptions
-            {
-                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-            });
+        var json = JsonSerializer.Serialize(payload.ToPatchPayload(clearAssignedTo));
 
         using var req = new HttpRequestMessage(HttpMethod.Patch, $"issues/{issueId}")
         {
@@ -441,6 +439,25 @@ public sealed class IssueApi
         {
             throw new TaigaRequestException("Taiga write may already have applied; response enrichment failed. Read the entity before retrying.");
         }
+    }
+
+    private static bool ValidateClearFields(string[]? clearFields, int? assignedTo)
+    {
+        if (clearFields is null) return false;
+
+        bool clearAssignedTo = false;
+        foreach (var field in clearFields)
+        {
+            if (!string.Equals(field, "assigned_to", StringComparison.Ordinal))
+                throw new ArgumentException($"clearFields contains unsupported field '{field}'.");
+
+            clearAssignedTo = true;
+        }
+
+        if (clearAssignedTo && assignedTo.HasValue)
+            throw new ArgumentException("assigned_to cannot be set and cleared in the same update.");
+
+        return clearAssignedTo;
     }
 
 }
