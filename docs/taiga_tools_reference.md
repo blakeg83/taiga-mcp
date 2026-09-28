@@ -55,6 +55,24 @@ Use the returned internal `id` with the `get_epic` command. Later story-linking
 commands will also take this internal epic ID; the displayed `ref` is for
 human-facing project context only.
 
+The `create_epic` contract is specified for goal 13 but remains planned until
+that goal's implementation and MCP verification are complete. Its signature is
+`create_epic(projectId, subject, description?, status?, assigned_to?, color?,
+tags?)`. The request maps to `POST /api/v1/epics` with `project`, `subject`,
+`description`, `status`, `assigned_to`, `color`, and `tags`; omitted optional
+values stay omitted so Taiga can apply project defaults. The response will use
+the existing epic detail mapping and expose the server's authoritative `id`,
+`ref`, and nonnegative `version`. This call creates one epic only; linking
+stories and setting requirement flags remain separate planned operations.
+
+The contract was checked on 2026-09-28 against pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`: the epic validator accepts the
+model's writable fields and the model supplies a generated default color when
+one is omitted. The model stores color as a string with a 32-character limit,
+so this client does not impose a narrower color format; Taiga remains the
+authority for color validation. The endpoint is documented at the pinned
+taiga-doc revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9`.
+
 ### `get_epic` contract
 
 The signature is `get_epic(epicId)`. It performs one authenticated `GET

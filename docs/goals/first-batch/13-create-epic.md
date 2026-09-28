@@ -1,6 +1,6 @@
 # Goal 13: create_epic
 
-Status: planned.
+Status: in progress on `codex/create-epic`.
 
 ## Objective
 
@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Specify epic creation defaults
 
-- [ ] Add minimal and populated payload fixtures and verify optional color/status can be omitted for server defaults.
-- [ ] Validate required project/subject and supplied IDs; verify accepted color formats before imposing local validation.
-- [ ] Document that linking stories is a separate operation and this call creates only one epic.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify create_epic contracts`.
+- [x] Add minimal and populated payload fixtures and verify optional color/status can be omitted for server defaults.
+- [x] Validate required project/subject and supplied IDs; verify accepted color formats before imposing local validation.
+- [x] Document that linking stories is a separate operation and this call creates only one epic.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify create_epic contracts`.
 
 ## Step 2: Implement epic POST
 
@@ -95,7 +95,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify create_epic contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, Debug build, and 261 tests passed. Pinned taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e` and taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` checked on 2026-09-28; fixture tests verify minimal omission and populated wire keys. Color format is delegated to Taiga because the model accepts a string up to 32 characters. Linking stories and requirement flags remain planned. | Specify create_epic contracts / pending |
 | 2 | Not started | — | Implement create_epic API behavior / pending |
 | 3 | Not started | — | Expose create_epic MCP interface / pending |
 | 4 | Not started | — | Verify create_epic workflow / pending |
