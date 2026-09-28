@@ -64,6 +64,18 @@ the issue update method intentionally retains the existing `assigned_to`
 spelling for compatibility. The MCP SDK schema and runtime binding are
 verified by the integration tests added by this foundation goal.
 
+### Planned `get_task` contract (goal 08)
+
+The planned signature is `get_task(taskId)`, where `taskId` is the positive
+internal task ID rather than the displayed `#ref`. It will request exactly
+`GET /api/v1/tasks/{taskId}` and return one detail object rather than a page
+envelope. The required identity/version fields are `id`, `ref`, `project`, and
+`version`; optional fields include `subject`, Markdown `description`,
+`status_id`/`status`, `assigned_to`, `user_story`, `milestone`, `tags`,
+`modified`, `due_date`, `due_date_reason`, `due_date_status`, `is_blocked`,
+and `blocked_note`. Unknown upstream fields are ignored. Comments,
+attachments, and parent-detail requests are outside this command.
+
 ## Representative sanitized JSON
 
 Project and lookup results:
@@ -184,6 +196,10 @@ An update returns the server's authoritative detail, for example:
   from inline `status_extra_info.name`; an unavailable label leaves the
   numeric `status_id` intact. Standalone tasks preserve null parent/sprint
   values, and listing makes no parent or detail requests.
+- `get_task` remains planned until goal 08 is complete. Its contract fixtures
+  cover standalone and story-linked tasks, null assignment/sprint values,
+  Markdown descriptions, colored tags, optional due-date/blocking fields,
+  required identity/version failures, and additive unknown fields.
 - `get_user_story` requests exactly `userstories/{userStoryId}`. It uses the
   returned `status_extra_info.name` when present and otherwise performs one
   project-scoped `userstory-statuses?project=...` lookup; if no usable project
@@ -249,6 +265,7 @@ The following sources were checked on 2026-09-28:
 - Task listing was checked against the same pinned backend revision in the
   [TaskViewSet filters](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py#L36-L60)
   and [TaskListSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L22-L57).
+- Task detail was checked on 2026-09-28 against the pinned [task GET route](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/tasks/endpoints.adoc#L191-L199), [detail command](https://raw.githubusercontent.com/taigaio/taiga-doc/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/generated/tasks-get-cmd.adoc), and backend [TaskSerializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/serializers.py#L59-L73). The backend's task serializer supplies description and the shared task serializer supplies parent/sprint IDs, tags, version, blocking, and due-date fields. This is pinned source evidence, not a deployed-version claim.
 - The story detail route and serializer fields were checked against pinned
   `taiga-doc` revision
   [`7455fd37cb164bbf80198c1517fd0ef414e2a7b9`](https://github.com/taigaio/taiga-doc/blob/7455fd37cb164bbf80198c1517fd0ef414e2a7b9/api/user-stories/endpoints.adoc)

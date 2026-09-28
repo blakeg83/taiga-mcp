@@ -1,6 +1,6 @@
 # Goal 08: get_task
 
-Status: planned.
+Status: in progress.
 
 ## Objective
 
@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Define task detail fixtures
 
-- [ ] Add standalone and story-linked fixtures including null assignment/sprint and Markdown descriptions.
-- [ ] Define detail-only fields separately from optional list fields and preserve tags/colors.
-- [ ] Specify required identity/version failures and additive tolerance for unfamiliar server fields.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify get_task contracts`.
+- [x] Add standalone and story-linked fixtures including null assignment/sprint and Markdown descriptions.
+- [x] Define detail-only fields separately from optional list fields and preserve tags/colors.
+- [x] Specify required identity/version failures and additive tolerance for unfamiliar server fields.
+- [x] Validate this step: baseline restore/build/test passed; fixture JSON was reviewed for the planned cases without adding a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify get_task contracts`.
 
 ## Step 2: Implement task detail retrieval
 
@@ -96,7 +96,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify get_task contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore` (0 warnings/errors), and `dotnet test -c Debug --no-build --no-restore` (181 passed) passed before changes. Added standalone/story-linked fixture contracts, required identity/version malformed cases, and unknown-field tolerance. Verified 2026-09-28 against taiga-doc `7455fd37cb164bbf80198c1517fd0ef414e2a7b9` and taiga-back `4d11baef9027f5598f6341d6eb4261de2840688e`; no live Taiga calls. | Specify get_task contracts / pending |
 | 2 | Not started | — | Implement get_task API behavior / pending |
 | 3 | Not started | — | Expose get_task MCP interface / pending |
 | 4 | Not started | — | Verify get_task workflow / pending |
