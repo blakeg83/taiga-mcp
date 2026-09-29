@@ -1,6 +1,6 @@
 # Goal 02: list_project_members
 
-Status: in progress; Step 3 complete; final workflow verification remains.
+Status: complete; all four ordered steps and the documented acceptance scenarios are verified.
 
 ## Objective
 
@@ -97,31 +97,39 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify member-driven assignment
 
-- [ ] Read a synthetic member, then use its user_id in an existing assignment; assert the membership ID is never sent as the assignee.
-- [ ] Test absent user_id, inactive user, duplicate display names, localized names, empty/later pages, and missing headers.
-- [ ] Cover invalid inputs before HTTP, permission denial, malformed required IDs, cancellation, and omission of admin email/invitation text.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_project_members workflows`.
+- [x] Read a synthetic member, then use its user_id in an existing assignment; assert the membership ID is never sent as the assignee.
+- [x] Test absent user_id, inactive user, duplicate display names, localized names, empty/later pages, and missing headers.
+- [x] Cover invalid inputs before HTTP, permission denial, malformed required IDs, cancellation, and omission of admin email/invitation text.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_project_members workflows`.
+
+### Step 4 execution record
+
+- Previous checkpoint: `6992dad` (`Expose list_project_members MCP tool`).
+- Workflow evidence: the real STDIO integration call read membership `membership_id=501` with `user_id=42`, passed `42` to `create_user_story(assigned_to=42)`, and asserted the outgoing request contained `assigned_to:42` rather than `assigned_to:501`. No membership detail or user-profile request was made beyond the one membership page.
+- Edge/error evidence: focused ProjectMemberTests now pass 8 tests covering active/inactive/pending rows, duplicate display names, localized names, null role, absent `user_id`, empty later pages, missing headers, pagination, invalid IDs before HTTP, malformed required IDs, cancellation before HTTP, sanitized permission errors, and omission of email/user-email/invitation fields. The real MCP integration also verifies safe public permission errors and invalid `projectId` handling. Existing authentication/transport tests cover the shared one-401 replay rule, request disposal, cancellation, null omission, and safe errors; the membership read adds no write or version retry behavior.
+- Final validation: `dotnet restore` passed; `dotnet build -c Debug` passed with 0 warnings and 0 errors; the first full `dotnet test -c Debug` attempt had one transient cleanup `UnauthorizedAccessException` in the pre-existing temporary-copy contamination test after 350 passing tests, and the immediate retry passed all 351 tests; `dotnet build -c Release --no-restore` passed with 0 warnings and 0 errors; `dotnet test -c Release --no-build --no-restore` passed all 351 tests; `git diff --check` passed. The validated assemblies were `bin/Debug/net8.0/TaigaMCP.dll` and `bin/Release/net8.0/TaigaMCP.dll`; no generated output was staged.
+- Documentation reconciliation: the public reference, README, quickstart, command inventory, development guide, second-batch index, and this goal now name only the delivered `list_project_members` scope. The endpoint/source evidence remains pinned to `taiga-back` revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no live deployment version or live Taiga data was used.
 
 ## Acceptance scenarios
 
-- [ ] Membership and user IDs have distinct unambiguous JSON names.
-- [ ] Pending/inactive records cannot silently masquerade as active assignees.
-- [ ] Pagination represents the requested membership stream and makes no per-member detail requests.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] Membership and user IDs have distinct unambiguous JSON names.
+- [x] Pending/inactive records cannot silently masquerade as active assignees.
+- [x] Pagination represents the requested membership stream and makes no per-member detail requests.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can select project user IDs for assignment while understanding pending/inactive membership records.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can select project user IDs for assignment while understanding pending/inactive membership records.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -130,11 +138,12 @@ pinned source only; no live deployment version was inspected or claimed.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Pinned serializer/API evidence recorded; mixed membership fixture and contract test added; `dotnet test -c Debug` baseline passed 343 tests before changes. | Specify list_project_members contracts / pending |
-| 2 | Complete | `ProjectApi`/`ProjectMemberDto` implemented; focused ProjectMemberTests passed 6 tests with request, mapping, pagination, validation, malformed-data, and safe-error coverage. Public tool remains planned pending Step 3. | Implement list_project_members API behavior / pending |
-| 3 | Complete | Public tool exposed; real STDIO tools/list and tools/call integration passed with schema/default/error/allowlist checks; full Debug test suite passed 349 tests; public docs and 25-tool counts reconciled. | Expose list_project_members MCP tool / pending |
-| 4 | Not started | — | Verify list_project_members workflows / pending |
+| 1 | Complete | Pinned serializer/API evidence recorded; mixed membership fixture and contract test added; `dotnet test -c Debug` baseline passed 343 tests before changes. | Specify list_project_members contracts / `fa4c786` |
+| 2 | Complete | `ProjectApi`/`ProjectMemberDto` implemented; focused ProjectMemberTests passed 6 tests with request, mapping, pagination, validation, malformed-data, and safe-error coverage. Public tool remained planned pending Step 3. | Implement list_project_members API behavior / `1c55973` |
+| 3 | Complete | Public tool exposed; real STDIO tools/list and tools/call integration passed with schema/default/error/allowlist checks; full Debug test suite passed 349 tests; public docs and 25-tool counts reconciled. | Expose list_project_members MCP tool / `6992dad` |
+| 4 | Complete | Member-driven assignment, edge/error flows, complete Debug/Release validation, and diff hygiene passed; see the Step 4 execution record above. | Verify list_project_members workflows / pending (this checkpoint) |
 
-Record baseline failures, evidence-backed contract changes, previous step hashes,
-exact commands/results, and remaining blockers as work proceeds. Leave unverified
-boxes unchecked; a checkpoint commit is not a completed step.
+All required steps are complete. The only observed validation retry was the
+transient pre-existing test cleanup failure recorded above; the immediate Debug
+retry passed. No blockers remain, and the final checkpoint commit hash is reported
+in the handoff rather than embedded by rewriting this commit.

@@ -55,6 +55,19 @@ internal static class ProjectMemberFixtures
             "is_owner": false,
             "email": "private-localized@example.test",
             "user_email": "private-localized-user@example.test"
+          },
+          {
+            "id": 505,
+            "user": 45,
+            "project": 123,
+            "role": 9,
+            "is_admin": false,
+            "role_name": "Developer",
+            "full_name": "Active User",
+            "is_user_active": true,
+            "is_owner": false,
+            "email": "private-duplicate@example.test",
+            "user_email": "private-duplicate-user@example.test"
           }
         ]
         """;

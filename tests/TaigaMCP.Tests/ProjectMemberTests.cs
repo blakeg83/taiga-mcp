@@ -14,13 +14,14 @@ public sealed class ProjectMemberTests
         using var document = JsonDocument.Parse(ProjectMemberFixtures.MixedPage);
         var members = document.RootElement.EnumerateArray().ToArray();
 
-        Assert.Equal(4, members.Length);
+        Assert.Equal(5, members.Length);
         Assert.Equal(42, members[0].GetProperty("user").GetInt32());
         Assert.True(members[0].GetProperty("is_user_active").GetBoolean());
         Assert.Equal(JsonValueKind.Null, members[1].GetProperty("role").ValueKind);
         Assert.False(members[1].GetProperty("is_user_active").GetBoolean());
         Assert.Equal(JsonValueKind.Null, members[2].GetProperty("user").ValueKind);
         Assert.Equal(JsonValueKind.Null, members[3].GetProperty("role").ValueKind);
+        Assert.Equal("Active User", members[4].GetProperty("full_name").GetString());
 
         foreach (var member in members)
         {
@@ -55,7 +56,7 @@ public sealed class ProjectMemberTests
             Assert.Equal(8, page.Total);
             Assert.Equal(3, page.NextPage);
             Assert.True(page.HasMore);
-            Assert.Equal(4, page.Items.Count);
+            Assert.Equal(5, page.Items.Count);
             Assert.Equal(501, page.Items[0].MembershipId);
             Assert.Equal(123, page.Items[0].Project);
             Assert.Equal(42, page.Items[0].UserId);
@@ -70,6 +71,10 @@ public sealed class ProjectMemberTests
             Assert.Null(page.Items[2].UserId);
             Assert.Equal(8, page.Items[2].RoleId);
             Assert.Null(page.Items[2].FullName);
+            Assert.Equal("Localized 名称", page.Items[3].FullName);
+            Assert.Equal("Active User", page.Items[4].FullName);
+            Assert.Equal(42, page.Items[0].UserId);
+            Assert.Equal(45, page.Items[4].UserId);
 
             var request = Assert.Single(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/memberships"));
             Assert.Equal("?project=123&page=2", request.Uri.Query);
@@ -137,6 +142,44 @@ public sealed class ProjectMemberTests
             Assert.Contains("403", exception.Message);
             Assert.Contains("permission denied", exception.Message);
             Assert.DoesNotContain("membership secret", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListProjectMembersPage_PreservesEmptyLaterPageAndUnknownHeaders()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/memberships", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new ProjectApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var page = await api.ListProjectMembersPageAsync(123, page: 4);
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+            Assert.Equal("?project=123&page=4", Assert.Single(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/memberships")).Uri.Query);
+        }
+    }
+
+    [Fact]
+    public async Task ListProjectMembersAsync_PropagatesCancellationBeforeHttp()
+    {
+        var handler = new FakeHttpMessageHandler().AddJsonRoute(HttpMethod.Get, "/api/v1/memberships", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+            var api = new ProjectApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => api.ListProjectMembersAsync(123, cancellationToken: cancellation.Token));
+
+            Assert.Empty(handler.Requests);
         }
     }
 }

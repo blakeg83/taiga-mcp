@@ -797,12 +797,44 @@ public sealed class McpIntegrationTests
                 request.Method == "GET" && request.PathAndQuery == "/api/v1/memberships?project=123&page=1");
             Assert.Equal("Bearer integration-token", memberRequest.Authorization);
 
+            var memberUserId = members[0].GetProperty("user_id").GetInt32();
+            var membershipId = members[0].GetProperty("membership_id").GetInt32();
+            var assignedFromMember = await client.CallToolAsync(
+                "create_user_story",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = "Member-driven assignment",
+                    ["assigned_to"] = memberUserId
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(assignedFromMember.IsError == true, GetText(assignedFromMember));
+            var assignedRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "POST" && request.PathAndQuery == "/api/v1/userstories" &&
+                request.Body.Contains("Member-driven assignment", StringComparison.Ordinal));
+            using (var assignedBody = JsonDocument.Parse(assignedRequest.Body))
+            {
+                Assert.Equal(memberUserId, assignedBody.RootElement.GetProperty("assigned_to").GetInt32());
+                Assert.NotEqual(membershipId, assignedBody.RootElement.GetProperty("assigned_to").GetInt32());
+            }
+
             var invalidMember = await client.CallToolAsync(
                 "list_project_members",
                 new Dictionary<string, object?> { ["projectId"] = 0 },
                 cancellationToken: protocolDeadline.Token);
             Assert.True(invalidMember.IsError == true);
             Assert.Contains("projectId", GetText(invalidMember));
+
+            taiga.MembershipStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenMembers = await client.CallToolAsync(
+                "list_project_members",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenMembers.IsError == true);
+            Assert.Contains("403", GetText(forbiddenMembers));
+            Assert.Contains("permission denied", GetText(forbiddenMembers), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic membership secret", GetText(forbiddenMembers));
+            taiga.MembershipStatusCode = System.Net.HttpStatusCode.OK;
 
             var issuePage = await client.CallToolAsync(
                 "list_issues",
