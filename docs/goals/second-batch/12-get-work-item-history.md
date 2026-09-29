@@ -69,12 +69,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose audit history
 
-- [ ] Add get_work_item_history with explicit one-page and upstream-count semantics; distinguish it from comment-only listing.
-- [ ] Document resolve_work_item -> detail -> update -> history using the returned internal ID and a separate example for reading a later history page.
-- [ ] Add MCP schema/call coverage, safe error behavior, and update the completed batch's expected tool count to 35 only when all 12 actually ship.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose get_work_item_history MCP tool`.
+- [x] Add get_work_item_history with explicit one-page and upstream-count semantics; distinguish it from comment-only listing.
+- [x] Document resolve_work_item -> detail -> update -> history using the returned internal ID and a separate example for reading a later history page.
+- [x] Add MCP schema/call coverage, safe error behavior, and update the completed batch's expected tool count to 35 now that all 12 actually ship.
+- [x] Validate this step: real MCP tools/list and tools/call checks passed, including required/default/null arguments, the unfiltered page request, and safe invalid-ID errors.
+- [x] Update documentation during this step: published the callable signature, response/default/error examples, 35-tool counts, inventory delivery, and a quickstart workflow.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose get_work_item_history MCP tool`.
 
 ## Step 4: Verify audit trails and complete the batch
 
@@ -131,8 +131,8 @@ mixed/deleted, hidden, and unknown nested changes.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 511 passed. Pinned history serializer/viewset/choice sources rechecked; synthetic full-history fixture added with field, comment, mixed/deleted, hidden, and unknown nested changes. | Specify get_work_item_history contracts / `47726eb` |
-| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~WorkItemHistoryTests`: 11 passed. Debug compilation passed with zero warnings. API request is `GET history/{route}/{id}?page=N`; response mapping clones structured JSON and redacts deleted comment content. | Implement get_work_item_history API behavior / pending |
-| 3 | Not started | — | Expose get_work_item_history MCP tool / pending |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~WorkItemHistoryTests`: 11 passed. Debug compilation passed with zero warnings. API request is `GET history/{route}/{id}?page=N`; response mapping clones structured JSON and redacts deleted comment content. | Implement get_work_item_history API behavior / `9909a5f` |
+| 3 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~McpIntegrationTests`: 12 passed. Real STDIO discovery/calls verify the 35-name set, schema (`kind,id,page` with `kind,id` required), unfiltered page request, and safe invalid-ID result. Reference, README, quickstart, inventory, development, and batch status were reconciled. | Expose get_work_item_history MCP tool / pending |
 | 4 | Not started | — | Verify get_work_item_history workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

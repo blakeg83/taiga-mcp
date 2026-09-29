@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 34 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 35 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -412,6 +412,26 @@ Call `add_work_item_comment` with the current item version, then call
 `list_work_item_comments` to read the resulting visible conversation. This
 read does not edit, delete, restore, or fetch comment revisions.
 
+### Read work-item history
+
+Use `get_work_item_history` when you need field changes as well as visible
+comments. It uses the same internal ID and four-kind set, but requests the full
+history stream without `type=comment`:
+
+```json
+{"kind":"task","id":203,"page":1}
+```
+
+The page preserves numeric event `type`, actor/time data, structured
+`diff`/`values_diff`, and available edit/delete metadata. Hidden entries are
+omitted. Deleted comment bodies are suppressed and reported with
+`comment_deleted=true`; comment-labelled or matching text is also removed from
+structured changes. Use a later page explicitly when `next_page` is present:
+
+```text
+Call the tool get_work_item_history with kind="task", id=203, and page=2
+```
+
 ### CLI Mode
 ```bash
 npx @modelcontextprotocol/inspector --cli ./bin/Release/net8.0/linux-x64/publish/TaigaMCP \
@@ -460,6 +480,7 @@ Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11
 Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."
 Call the tool list_work_item_comments with kind="task", id=203, and page=1
+Call the tool get_work_item_history with kind="task", id=203, and page=1
 Call the tool get_user_story with userStoryId=102
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345

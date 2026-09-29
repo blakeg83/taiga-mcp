@@ -355,6 +355,21 @@ public sealed class McpIntegrationTests
                 $"/api/v1/history/{route}/{id}?type=comment&page=1",
                 taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith($"/api/v1/history/{route}/{id}", StringComparison.Ordinal)).PathAndQuery);
             Assert.DoesNotContain(taiga.Requests, request => request.PathAndQuery.Contains("comment_versions", StringComparison.Ordinal));
+
+            var history = await Call("get_work_item_history", new()
+            {
+                ["kind"] = kind,
+                ["id"] = id
+            });
+            Assert.False(history.IsError == true, GetText(history));
+            var historyEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(history));
+            var historyItem = Assert.Single(
+                historyEnvelope.GetProperty("items").EnumerateArray(),
+                item => item.GetProperty("comment").GetString() == "**Progress**\n@alice — revisión ✓");
+            Assert.Equal(1, historyItem.GetProperty("type").GetInt32());
+            Assert.Equal(
+                $"/api/v1/history/{route}/{id}?page=1",
+                taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith($"/api/v1/history/{route}/{id}", StringComparison.Ordinal)).PathAndQuery);
         }
 
         var count = taiga.Requests.Count;
@@ -793,6 +808,7 @@ public sealed class McpIntegrationTests
                 "get_issue",
                 "get_task",
                 "get_user_story",
+                "get_work_item_history",
                 "link_user_story_to_epic",
                 "list_epic_statuses",
                 "list_epic_user_stories",
@@ -1177,6 +1193,15 @@ public sealed class McpIntegrationTests
             Assert.Contains("opaque", listWorkItemComments.Description, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("next_page", listWorkItemComments.Description, StringComparison.Ordinal);
 
+            var getWorkItemHistory = Assert.Single(tools, tool => tool.Name == "get_work_item_history");
+            var historyProperties = getWorkItemHistory.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "kind", "id", "page" }, historyProperties);
+            var historyRequired = getWorkItemHistory.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "kind", "id" }, historyRequired);
+            Assert.Contains("diff", getWorkItemHistory.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("comment_deleted", getWorkItemHistory.Description, StringComparison.Ordinal);
+
             var resolveWorkItem = Assert.Single(tools, tool => tool.Name == "resolve_work_item");
             var resolveProperties = resolveWorkItem.JsonSchema.GetProperty("properties").EnumerateObject().ToArray();
             Assert.Equal(new[] { "projectId", "kind", "ref" }, resolveProperties.Select(property => property.Name));
@@ -1315,6 +1340,32 @@ public sealed class McpIntegrationTests
             Assert.True(invalidCommentId.IsError == true);
             Assert.Contains("id", GetText(invalidCommentId), StringComparison.OrdinalIgnoreCase);
             Assert.Equal(commentRequestsAfterSuccess, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)));
+
+            var history = await client.CallToolAsync(
+                "get_work_item_history",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = "issue",
+                    ["id"] = 42
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(history.IsError == true, GetText(history));
+            var historyEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(history));
+            Assert.Equal(1, historyEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(JsonValueKind.Array, historyEnvelope.GetProperty("items").ValueKind);
+            Assert.Equal(
+                "/api/v1/history/issue/42?page=1",
+                taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)).PathAndQuery);
+            var historyRequestsAfterSuccess = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal));
+            var invalidHistoryId = await client.CallToolAsync(
+                "get_work_item_history",
+                new Dictionary<string, object?> { ["kind"] = "issue", ["id"] = 0 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(invalidHistoryId.IsError == true);
+            Assert.Contains("id", GetText(invalidHistoryId), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(historyRequestsAfterSuccess, taiga.Requests.Count(request =>
                 request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)));
 
             var result = await client.CallToolAsync(
