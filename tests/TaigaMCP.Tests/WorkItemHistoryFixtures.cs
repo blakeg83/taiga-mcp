@@ -38,6 +38,18 @@ internal static class WorkItemHistoryFixtures
             "comment":"The original actor is no longer available.",
             "created_at":"2026-09-28T12:06:00Z",
             "user":{"pk":null,"name":null,"username":null,"is_active":false}
+          },
+          {
+            "id":"inactive-actor",
+            "comment":"Inactive authors remain identifiable.",
+            "created_at":"2026-09-28T12:06:30Z",
+            "user":{"pk":9,"name":"Inactive User","username":"inactive","is_active":false}
+          },
+          {
+            "id":"surrounding-whitespace",
+            "comment":"  Keep surrounding whitespace  ",
+            "created_at":"2026-09-28T12:07:00Z",
+            "user":{"pk":42,"name":"Example User","username":"example","is_active":true}
           }
         ]
         """;

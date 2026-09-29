@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using TaigaMCP.Api;
 using TaigaMCP.Models;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -34,7 +35,7 @@ public sealed class WorkItemCommentReadTests
             Assert.Null(page.Total);
             Assert.Null(page.NextPage);
             Assert.Null(page.HasMore);
-            Assert.Equal(2, page.Items.Count);
+            Assert.Equal(4, page.Items.Count);
 
             var edited = page.Items[0];
             Assert.Equal("550e8400-e29b-41d4-a716-446655440000", edited.Id);
@@ -52,6 +53,15 @@ public sealed class WorkItemCommentReadTests
             Assert.Null(missingActor.User.Name);
             Assert.Null(missingActor.User.Username);
             Assert.False(missingActor.User.IsActive);
+
+            var inactiveActor = page.Items[2];
+            Assert.Equal(9, inactiveActor.User!.Id);
+            Assert.Equal("Inactive User", inactiveActor.User.Name);
+            Assert.False(inactiveActor.User.IsActive);
+
+            var whitespace = page.Items[3];
+            Assert.Equal("  Keep surrounding whitespace  ", whitespace.Comment);
+            Assert.DoesNotContain("private rendered form", ToolResponseJson.Serialize(page.Items));
 
             var request = Assert.Single(handler.Requests, item => item.Method == HttpMethod.Get);
             Assert.Equal("?type=comment&page=1", request.Uri.Query);
@@ -254,6 +264,27 @@ public sealed class WorkItemCommentReadTests
             Assert.Contains("403", exception.Message);
             Assert.Contains("permission denied", exception.Message);
             Assert.DoesNotContain("history secret", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListWorkItemCommentsPage_PropagatesNotFoundSafely()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/history/issue/42",
+                "{\"detail\":\"private history\"}",
+                HttpStatusCode.NotFound);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListWorkItemCommentsPageAsync(WorkItemKind.issue, 42));
+
+            Assert.Contains("404", exception.Message);
+            Assert.Contains("resource not found", exception.Message);
+            Assert.DoesNotContain("private history", exception.Message);
         }
     }
 

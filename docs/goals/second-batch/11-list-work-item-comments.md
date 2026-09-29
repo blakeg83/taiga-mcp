@@ -78,33 +78,33 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify conversations across all kinds
 
-- [ ] Invoke the tool through MCP for all four kinds; submit a comment with the existing tool and read it back from a stateful fake.
-- [ ] Test hidden/deleted/blank filtering, retained whitespace/Markdown/Unicode, edited date, inactive/missing actor, and string entry IDs.
-- [ ] Cover empty filtered pages with next_page, last-page evidence, unknown/malformed pagination, 403/404, invalid kind, and cancellation.
-- [ ] Assert no write, history revision fetch, full-page scan, or hidden/deleted body leakage occurs.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_work_item_comments workflows`.
+- [x] Invoke the tool through MCP for all four kinds; submit a comment with the existing tool and read it back from a stateful fake.
+- [x] Test hidden/deleted/blank filtering, retained whitespace/Markdown/Unicode, edited date, inactive/missing actor, and string entry IDs.
+- [x] Cover empty filtered pages with next_page, last-page evidence, unknown/malformed pagination, 403/404, invalid kind, and cancellation.
+- [x] Assert no write, history revision fetch, full-page scan, or hidden/deleted body leakage occurs.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_work_item_comments workflows`.
 
 ## Acceptance scenarios
 
-- [ ] All four kinds have paged visible-comment reads with correct routes.
-- [ ] Opaque comment/history IDs and author/date context are preserved.
-- [ ] Hidden/deleted/blank comments are omitted without corrupting pagination claims.
-- [ ] Existing get_issue and comment-submission contracts are unchanged.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] All four kinds have paged visible-comment reads with correct routes.
+- [x] Opaque comment/history IDs and author/date context are preserved.
+- [x] Hidden/deleted/blank comments are omitted without corrupting pagination claims.
+- [x] Existing get_issue and comment-submission contracts are unchanged.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can read the current visible conversation on any supported work-item kind before acting.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can read the current visible conversation on any supported work-item kind before acting.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -169,12 +169,32 @@ missing-required and explicit-null argument failures, and an invalid-ID safe
 error without an HTTP request. The existing get-issue comment path remains
 covered by the full suite.
 
+Step 4 verification: the stateful `FakeTaigaHttpServer` records successful
+comment-only PATCHes and serves the resulting history for all four route kinds.
+The real MCP workflow submits and reads back Markdown/Unicode comments with
+opaque IDs and safe actor identity. Focused/API fixtures cover hidden, deleted,
+blank, whitespace-preserving, edited, inactive, missing-actor, UUID-like, and
+filtered-empty pages; they also cover header/body pagination fallback,
+last-page `next=null`, malformed/conflicting metadata, 403/404, invalid input,
+pre-cancellation, response ownership, and no revision/full-page follow-up.
+The existing `get_issue` path and comment-submission tests remain unchanged.
+
+Final validation commands and results (2026-09-29): `dotnet restore` passed;
+`dotnet build -c Debug` passed with 0 warnings/errors and output under
+`bin/Debug/net8.0`; `dotnet test -c Debug` passed 509/509; `dotnet build -c
+Release --no-restore` passed with 0 warnings/errors and output under
+`bin/Release/net8.0`; `dotnet test -c Release --no-build --no-restore` passed
+509/509; and `git diff --check` passed. One earlier Debug run exposed the
+stateful fake's history-key mismatch and was corrected before the final pass;
+no production behavior was weakened. Generated outputs remain ignored and no
+credentials or live Taiga data were used.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / pending |
-| 2 | Complete | Focused `WorkItemCommentReadTests`: 17 passed; Debug build passed; DI/API/transport behavior recorded above. | Implement list_work_item_comments API behavior / pending |
-| 3 | Complete | Real STDIO `tools/list`/`tools/call` integration passed; public docs and counts updated; API commits `349e3b6`, `20c08d3` precede this checkpoint. | Expose list_work_item_comments MCP tool / pending |
-| 4 | Not started | — | Verify list_work_item_comments workflows / pending |
+| 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / `349e3b6` |
+| 2 | Complete | Focused `WorkItemCommentReadTests`: 17 passed at checkpoint; Debug build passed; DI/API/transport behavior recorded above. | Implement list_work_item_comments API behavior / `20c08d3` |
+| 3 | Complete | Real STDIO `tools/list`/`tools/call` integration passed; public docs and counts updated. | Expose list_work_item_comments MCP tool / `1e6d271` |
+| 4 | Complete | Stateful four-kind MCP read-back plus final 509-test Debug/Release validation and `git diff --check` passed. | Verify list_work_item_comments workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified

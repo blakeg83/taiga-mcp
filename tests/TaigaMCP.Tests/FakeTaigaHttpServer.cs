@@ -21,6 +21,9 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     private readonly object _storyLock = new();
     private readonly object _taskLock = new();
     private readonly object _epicStoryLinkLock = new();
+    private readonly object _historyLock = new();
+    private readonly Dictionary<string, List<JsonObject>> _commentHistory = new(StringComparer.OrdinalIgnoreCase);
+    private int _historyEntryNumber;
     private string _userStory102 = "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created backlog story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}";
     private string _task203 = "{\"id\":203,\"ref\":17,\"project\":123,\"subject\":\"Integration task\",\"description\":\"**Acceptance:** preserve Markdown and Unicode — ✓\",\"status\":11,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"user_story\":102,\"milestone\":55,\"tags\":[[\"search\",\"#336699\"]],\"modified_date\":\"2026-09-28T12:00:00Z\",\"version\":2,\"is_blocked\":false,\"blocked_note\":\"\",\"is_closed\":false}";
     private bool _epicStoryLinkExists;
@@ -149,6 +152,9 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             body));
 
         var path = request.Url?.AbsolutePath ?? string.Empty;
+        if (request.HttpMethod == HttpMethod.Get.Method && await TryHandleCommentHistoryAsync(context, path))
+            return;
+
         if (request.HttpMethod == HttpMethod.Post.Method && path.EndsWith("/auth", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(context.Response, HttpStatusCode.OK, "{\"auth_token\":\"integration-token\",\"refresh\":\"integration-refresh\"}");
@@ -610,6 +616,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 }
             }
 
+            if (responseStatus == HttpStatusCode.OK)
+                RecordComment(path, patch);
             await RespondAsync(context.Response, responseStatus, responseBody);
             return;
         }
@@ -668,6 +676,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 }
             }
 
+            if (responseStatus == HttpStatusCode.OK)
+                RecordComment(path, patch);
             await RespondAsync(context.Response, responseStatus, responseBody);
             return;
         }
@@ -676,6 +686,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         {
             var patch = JsonNode.Parse(body)?.AsObject();
             var version = patch?["version"]?.GetValue<int>() ?? -1;
+            RecordComment(path, patch);
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.OK,
@@ -691,6 +702,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 return;
             }
 
+            RecordComment(path, JsonNode.Parse(body)?.AsObject());
             await RespondAsync(context.Response, HttpStatusCode.OK, EpicUpdateResponseBody);
             return;
         }
@@ -715,6 +727,95 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         }
 
         await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"not found\"}");
+    }
+
+    private async Task<bool> TryHandleCommentHistoryAsync(HttpListenerContext context, string path)
+    {
+        var historyPath = path switch
+        {
+            "/api/v1/history/issue/42" => "/api/v1/history/issue/42",
+            "/api/v1/history/userstory/102" => "/api/v1/history/userstory/102",
+            "/api/v1/history/task/203" => "/api/v1/history/task/203",
+            "/api/v1/history/epic/301" => "/api/v1/history/epic/301",
+            _ => null
+        };
+        if (historyPath is null)
+            return false;
+
+        JsonArray entries;
+        lock (_historyLock)
+        {
+            entries = new JsonArray();
+            if (_commentHistory.TryGetValue(historyPath, out var history))
+            {
+                foreach (var entry in history)
+                    entries.Add(entry.DeepClone());
+            }
+        }
+
+        await RespondAsync(
+            context.Response,
+            HttpStatusCode.OK,
+            entries.ToJsonString(),
+            new Dictionary<string, string>
+            {
+                ["x-paginated"] = "false",
+                ["x-pagination-count"] = entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["x-pagination-current"] = "1"
+            });
+        return true;
+    }
+
+    private void RecordComment(string path, JsonObject? patch)
+    {
+        string? comment;
+        try
+        {
+            comment = patch?["comment"]?.GetValue<string>();
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(comment))
+            return;
+
+        var historyPath = path switch
+        {
+            "/api/v1/issues/42" => path.Replace("/issues/", "/history/issue/", StringComparison.Ordinal),
+            "/api/v1/userstories/102" => "/api/v1/history/userstory/102",
+            "/api/v1/tasks/203" => "/api/v1/history/task/203",
+            "/api/v1/epics/301" => "/api/v1/history/epic/301",
+            _ => null
+        };
+        if (historyPath is null)
+            return;
+
+        var entry = new JsonObject
+        {
+            ["id"] = $"integration-comment-{Interlocked.Increment(ref _historyEntryNumber)}",
+            ["comment"] = comment,
+            ["created_at"] = "2026-09-29T12:00:00Z",
+            ["user"] = new JsonObject
+            {
+                ["pk"] = 42,
+                ["name"] = "Integration User",
+                ["username"] = "integration-user",
+                ["is_active"] = true
+            }
+        };
+
+        lock (_historyLock)
+        {
+            if (!_commentHistory.TryGetValue(historyPath, out var history))
+            {
+                history = [];
+                _commentHistory.Add(historyPath, history);
+            }
+
+            history.Insert(0, entry);
+        }
     }
 
     private static async Task RespondAsync(

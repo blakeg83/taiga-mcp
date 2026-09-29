@@ -327,6 +327,36 @@ public sealed class McpIntegrationTests
             Assert.Equal(version, commentBody.RootElement.GetProperty("version").GetInt32());
         }
 
+        foreach (var (kind, id, route) in new[]
+        {
+            ("issue", 42, "issue"),
+            ("user_story", 102, "userstory"),
+            ("task", 203, "task"),
+            ("epic", 301, "epic")
+        })
+        {
+            var comments = await Call("list_work_item_comments", new()
+            {
+                ["kind"] = kind,
+                ["id"] = id
+            });
+            Assert.False(comments.IsError == true, GetText(comments));
+            var envelope = JsonSerializer.Deserialize<JsonElement>(GetText(comments));
+            var items = envelope.GetProperty("items").EnumerateArray().ToArray();
+            var matching = items
+                .Where(item => item.GetProperty("comment").GetString() == "**Progress**\n@alice — revisión ✓")
+                .ToArray();
+            Assert.True(matching.Length == 1, $"{kind} history did not contain the submitted comment: {GetText(comments)}");
+            var submitted = matching[0];
+            Assert.StartsWith("integration-comment-", submitted.GetProperty("id").GetString(), StringComparison.Ordinal);
+            Assert.Equal("2026-09-29T12:00:00Z", submitted.GetProperty("created_at").GetString());
+            Assert.Equal(42, submitted.GetProperty("user").GetProperty("id").GetInt32());
+            Assert.Equal(
+                $"/api/v1/history/{route}/{id}?type=comment&page=1",
+                taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith($"/api/v1/history/{route}/{id}", StringComparison.Ordinal)).PathAndQuery);
+            Assert.DoesNotContain(taiga.Requests, request => request.PathAndQuery.Contains("comment_versions", StringComparison.Ordinal));
+        }
+
         var count = taiga.Requests.Count;
         var invalidKind = await Call("add_work_item_comment", new()
         {
@@ -1271,7 +1301,8 @@ public sealed class McpIntegrationTests
             var commentEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(comments));
             Assert.Equal(1, commentEnvelope.GetProperty("page").GetInt32());
             Assert.Equal(JsonValueKind.Array, commentEnvelope.GetProperty("items").ValueKind);
-            Assert.Equal(JsonValueKind.Null, commentEnvelope.GetProperty("total").ValueKind);
+            Assert.Equal(0, commentEnvelope.GetProperty("total").GetInt32());
+            Assert.False(commentEnvelope.GetProperty("has_more").GetBoolean());
             Assert.Equal(
                 "/api/v1/history/issue/42?type=comment&page=1",
                 taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)).PathAndQuery);
