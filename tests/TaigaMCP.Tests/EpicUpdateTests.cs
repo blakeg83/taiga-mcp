@@ -217,6 +217,23 @@ public sealed class EpicUpdateApiTests
     }
 
     [Fact]
+    public async Task UpdateEpicAsync_ReportsMalformedMappedSuccessAsPotentiallyApplied()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Patch, "/api/v1/epics/301", "{\"version\":5}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).UpdateEpicAsync(301, 4, status: 7));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Get);
+        }
+    }
+
+    [Fact]
     public async Task UpdateEpicAsync_ReportsAmbiguousTransportFailureWithoutRetry()
     {
         var handler = new FakeHttpMessageHandler()

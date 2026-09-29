@@ -640,6 +640,12 @@ public sealed class McpIntegrationTests
         var updateEpic = Assert.Single(tools, tool => tool.Name == "update_epic");
         Assert.Equal(new[] { "epicId", "version" }, updateEpic.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
 
+        var memberPage = await Call("list_project_members", new() { ["projectId"] = 123 });
+        Assert.False(memberPage.IsError == true, GetText(memberPage));
+        var memberEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(memberPage));
+        var memberUserId = memberEnvelope.GetProperty("items")[0].GetProperty("user_id").GetInt32();
+        Assert.Equal(42, memberUserId);
+
         var commentOnly = await Call("update_epic", new()
         {
             ["epicId"] = 301,
@@ -653,6 +659,41 @@ public sealed class McpIntegrationTests
         var commentBody = JsonSerializer.Deserialize<JsonElement>(GetLastEpicPatch(taiga).Body);
         AssertPatchProperties(commentBody, "comment", "version");
         Assert.Equal("Delivery complete.", commentBody.GetProperty("comment").GetString());
+
+        var assigned = await Call("update_epic", new()
+        {
+            ["epicId"] = 301,
+            ["version"] = 4,
+            ["subject"] = "Assigned integration epic",
+            ["description"] = "Updated content",
+            ["assigned_to"] = memberUserId,
+            ["tags"] = new[] { "search", "delivery" }
+        });
+        Assert.False(assigned.IsError == true, GetText(assigned));
+        var assignedJson = JsonSerializer.Deserialize<JsonElement>(GetText(assigned));
+        Assert.Equal("Updated integration epic", assignedJson.GetProperty("subject").GetString());
+        Assert.Equal(memberUserId, assignedJson.GetProperty("assigned_to").GetInt32());
+        var assignedBody = JsonSerializer.Deserialize<JsonElement>(GetLastEpicPatch(taiga).Body);
+        AssertPatchProperties(assignedBody, "assigned_to", "description", "subject", "tags", "version");
+        Assert.Equal(memberUserId, assignedBody.GetProperty("assigned_to").GetInt32());
+        Assert.Equal("Assigned integration epic", assignedBody.GetProperty("subject").GetString());
+
+        taiga.EpicUpdateResponseBody =
+            """
+            {"id":301,"ref":12,"project":123,"subject":"Assigned integration epic","description":"Updated content","status":7,"status_extra_info":{"name":"Ready"},"color":"#336699","tags":[["search","delivery"]],"version":6}
+            """;
+        var unassigned = await Call("update_epic", new()
+        {
+            ["epicId"] = 301,
+            ["version"] = 5,
+            ["clearFields"] = new[] { "assigned_to" }
+        });
+        Assert.False(unassigned.IsError == true, GetText(unassigned));
+        var unassignedJson = JsonSerializer.Deserialize<JsonElement>(GetText(unassigned));
+        Assert.False(unassignedJson.TryGetProperty("assigned_to", out _));
+        var unassignedBody = JsonSerializer.Deserialize<JsonElement>(GetLastEpicPatch(taiga).Body);
+        AssertPatchProperties(unassignedBody, "assigned_to", "version");
+        Assert.Equal(JsonValueKind.Null, unassignedBody.GetProperty("assigned_to").ValueKind);
 
         var explicitNulls = await Call("update_epic", new()
         {

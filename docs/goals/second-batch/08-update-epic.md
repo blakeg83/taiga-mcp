@@ -113,7 +113,7 @@ deployment version was read or claimed.
 | 1 | Complete | Starting commit `4b4d896`; baseline `dotnet test -c Debug`: 422 passed. Focused contract fixtures cover status-only, explicit assignee clearing, empty description/tags, color, and comment-only payloads. The pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the epic writable fields and OCC version requirement; no source deviation was found. | Specify update_epic contracts / `1d9ee50` |
 | 2 | Complete | Previous step `1d9ee50`. `UpdateEpicAsync` sends only selected fields plus the exact caller version, supports explicit assignee clearing, maps the authoritative PATCH response, preserves safe 400/409/403/404 errors, and never performs a read/retry after an ambiguous write. Focused `FullyQualifiedName~EpicUpdate` tests: 26 passed; `dotnet build -c Debug --no-restore`: 0 warnings/errors. | Implement update_epic API behavior / `e7ea1d6` |
 | 3 | Complete | Previous step `e7ea1d6`. The `update_epic` tool is discoverable with required `epicId`/`version`, no public cancellation argument, and descriptions for every optional field. Real MCP integration covered omitted optionals with comment-only editing, explicit null optionals, empty tags, missing required version, authoritative detail response, safe 403 error handling, and preserved existing create/comment flows. The updated reference, README, quickstart, inventory, batch index, and development count document 31 tools and the delivered scope. | Expose update_epic MCP tool / `edad560` |
-| 4 | Complete | Previous step `edad560`. Focused epic workflow tests: 28 passed, including status discovery plus close/reopen with returned versions, explicit clearing/omission, comment-only edits, empty fields, malformed success, safe HTTP statuses, stale-version acceptance, cancellation, and ambiguous write handling. Full required validation passed: `dotnet restore`; `dotnet build -c Debug` (0 warnings/errors); `dotnet test -c Debug` (451 passed); `dotnet build -c Release --no-restore` (0 warnings/errors); `dotnet test -c Release --no-build --no-restore` (451 passed); `git diff --check` clean apart from the expected CRLF conversion warning. Outputs were the standard `bin/Debug/net8.0` and `bin/Release/net8.0` directories; no generated files were staged. | Verify update_epic workflows / pending |
+| 4 | Complete | Previous step `edad560`. Focused epic workflow tests: 29 passed, including status discovery plus close/reopen with returned versions, successful subject/assignment/unassignment, explicit clearing/omission, comment-only edits, empty fields, malformed transport and mapped success, safe HTTP statuses, stale-version acceptance, cancellation, and ambiguous write handling. Full required validation passed: `dotnet restore`; `dotnet build -c Debug` (0 warnings/errors); `dotnet test -c Debug` (452 passed); `dotnet build -c Release --no-restore` (0 warnings/errors); `dotnet test -c Release --no-build --no-restore` (452 passed); `git diff --check` clean apart from the expected CRLF conversion warning. Outputs were the standard `bin/Debug/net8.0` and `bin/Release/net8.0` directories; no generated files were staged. | Verify update_epic workflows / `bf3f98d` + follow-up |
 
 ### Step 1 contract decisions
 
@@ -133,6 +133,15 @@ defines `subject`, `description`, `status`, `assigned_to`, `color`, and tags,
 while `OCCResourceMixin` requires a nonnegative caller version and returns the
 authoritative incremented version. `epics_order`, requirement flags, blocking,
 dates, custom fields, and relationships remain out of scope.
+
+### Follow-up review hardening
+
+The completion review found no production defect. Additional coverage now
+exercises member-driven `user_id` assignment, successful subject/content edits,
+explicit assignee clearing with omitted returned `assigned_to`, and a valid JSON
+response that fails detail mapping after PATCH. The quickstart, reference,
+inventory, and development guide now consistently describe assignment through
+`list_project_members` and the delivered 31-tool state.
 
 ### Step 2 implementation evidence
 

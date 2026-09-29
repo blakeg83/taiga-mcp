@@ -552,6 +552,10 @@ clearing it in the same call is rejected. A nonblank subject is required when
 provided, and an update must contain a real change or a nonblank comment.
 Status IDs are project- and epic-specific; use `list_epic_statuses` to discover
 them and select a closed status to close or an open status to reopen an epic.
+For assignment, use `list_project_members` and pass an active member's
+`user_id` as `assigned_to`; `membership_id` identifies the membership record
+and is not an assignee ID. Use the new returned `version` with
+`clearFields=["assigned_to"]` to unassign.
 
 The result is the authoritative `EpicDetailDto`, including the server's
 returned version. The client does not refresh versions, retry ambiguous writes,

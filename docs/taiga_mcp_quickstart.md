@@ -327,6 +327,17 @@ version. A comment-only update is valid when the comment is nonblank. The
 client does not refresh a version or retry an ambiguous write; read the epic
 again before retrying after an uncertain transport or response failure.
 
+For assignment, call `list_project_members` first and use an active member's
+`user_id` as `assigned_to`; `membership_id` identifies the membership record
+and is not an assignee ID. To unassign later, fetch the new epic `version` and
+send `clearFields=["assigned_to"]`:
+
+```json
+{"projectId":123,"page":1}
+{"epicId":301,"version":4,"assigned_to":42}
+{"epicId":301,"version":5,"clearFields":["assigned_to"]}
+```
+
 ### Update a user story
 
 Read the story first and pass its returned `version` to the update. Omitted
