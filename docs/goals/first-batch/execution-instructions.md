@@ -1,6 +1,6 @@
 # Instructions for coding agents executing this batch
 
-These instructions apply to every goal in this directory. Read the repository's [AGENTS.md](../../../AGENTS.md) first. The current request that produced these files was planning only; the checklists describe later implementation work.
+Historical instructions for the completed first batch. The original numbered goal files are no longer in this checkout; see the [completion summary](README.md). For new assignments, use the [second-batch execution instructions](../second-batch/execution-instructions.md), current [AGENTS.md](../../../AGENTS.md), and the assigned goal. The text below retains the original ordered commit/documentation cycle.
 
 ## Before starting a goal
 
@@ -39,6 +39,6 @@ Run dotnet restore, dotnet build -c Debug, and dotnet test from the repository r
 
 Test actual serialized requests, pagination, error paths, and MCP discovery/invocation. Reflection alone cannot prove that optional/default/null arguments bind correctly. Use the SDK APIs available in the installed package or an automated STDIO client against fake HTTP; do not assume APIs from a newer MCP package.
 
-Live smoke testing is optional and requires a user-designated test project. Do not create or alter production tickets for validation. Report mocked checks and live checks distinctly.
+Current repository policy requires fake HTTP and synthetic credentials for tests. Never modify live Taiga data for validation. Do not interpret historical plans as permission for live writes.
 
 Final handoff: identify delivered tools, completed steps and commit hashes, validation results, documented compatibility changes, remaining limitations, and the definition-of-done result. Never claim completion solely because code compiles.

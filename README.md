@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, create/read/update user stories, read/list/update tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 24 tools identify the current account, list projects, resolve project IDs, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -87,8 +87,8 @@ with cancellation, safe errors and explicit disposal. Auth token state and the
 expiring metadata cache are singleton services; named HTTP clients are obtained
 per operation. STDIO carries MCP messages only; logging goes to stderr.
 
-See the [developer guide](docs/development.md) and the completed
-[foundation cleanup goal](docs/goals/development-foundation-cleanup.md).
+See the [developer guide](docs/development.md) for current architecture and the
+historical foundation cleanup record, and the [completed first batch](docs/goals/first-batch/README.md) for delivered scope.
 
 Windows PowerShell:
 
@@ -110,7 +110,8 @@ build/tests; do not stop that server. See the developer guide for the exact comm
 
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
-- [First-batch agent goals](docs/goals/first-batch/README.md): detailed plans for 15 frequently used functions, with step checklists, definitions of done, documentation updates, and a commit after each step. The `list_issues` expansion and `list_tasks` are delivered subsets; the remaining entries are plans.
+- [Completed first batch](docs/goals/first-batch/README.md): delivered scope for all 15 selected functions, with links to current source and tests.
+- [Second-batch agent goals](docs/goals/second-batch/README.md): plans for 12 discovery, epic management, and conversation/history functions. Each has ordered checklists, validation, a definition of done, and documentation/commit requirements after every step. These next-batch functions are not implemented yet.
 
 ## Debug Logging
 - Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.

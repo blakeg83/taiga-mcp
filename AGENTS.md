@@ -43,10 +43,10 @@ Integration tests load the newly built assembly from the test output directory.
 - Four-space C#, UTF-8, final newline, file-scoped `TaigaMCP.<Folder>` namespaces. Follow `.editorconfig`; avoid unrelated formatting churn.
 - PascalCase types/methods, camelCase locals/parameters, `_camelCase` fields. DTO properties use explicit snake_case JSON attributes and init accessors.
 - Add tools to `Tools/`, inject a concrete API, and pass injected CancellationToken through every async layer. Never expose it as a user argument.
-- Preserve existing names/parameter names/response shapes. Tool responses omit null properties. Upstream request serialization is separate; null means omission, empty strings/arrays remain explicit.
+- Preserve existing names/parameter names/response shapes. Tool DTOs omit null properties; page envelopes preserve explicit null pagination metadata. Upstream request serialization is separate: ordinary null means omission, supported clearFields emits explicit null, and empty strings/arrays remain explicit.
 - Validate positive IDs/pages, nonblank required text and nonnegative versions before HTTP. Updates require a real change or nonblank comment.
 - Only a received 401 permits one authentication replay. Never retry ambiguous writes or automatically refresh entity versions.
-- New list features request one page; use allowlisted encoded queries and preserve unknown page metadata. Explicit clearing/page envelopes remain planned; see batch contracts.
+- New list features request one page; use allowlisted encoded queries and preserve unknown page metadata. Explicit clearing and page envelopes are implemented for the documented first-batch tools; preserve their supported fields and defaults. Read the assigned batch contracts before adding new behavior.
 
 ## Security and configuration
 

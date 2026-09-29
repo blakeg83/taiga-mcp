@@ -1,12 +1,12 @@
 # Shared contracts for the first batch
 
-These are proposed implementation decisions for this batch, not descriptions of current behavior. Goal 00 verifies that the installed MCP SDK can represent them; evidence-driven adjustments must update this file and affected goals before dependent work.
+The first batch is complete within its selected scope. These retained design contracts explain the implemented conventions, but the [current tool reference](../../taiga_tools_reference.md) and source take precedence over earlier design intent. For new work, use the [second-batch contracts](../second-batch/contracts.md); do not treat the absent original goal files as pending assignments.
 
 ## Compatibility and layering
 
 - Preserve the post-cleanup MCP baseline: all names/response shapes, member=null project default, flag-based story filtering and open-only issue filtering. The cleanup intentionally changed the old member=6 and label-based defaults; later goals preserve this corrected baseline unless an additive opt-in is specified below.
-- Existing list tools return arrays by default. Add includePageInfo=false; when true, return the page envelope below. New list tools always return the envelope.
-- Existing issue response status/type/priority/severity properties are labels. Keep them and add status_id/type_id/priority_id/severity_id, rather than changing their types. Story status labels likewise remain compatible.
+- Issue/story lists retain arrays by default and offer includePageInfo=false; when true, they return the page envelope below. Task/epic lists always return the envelope. Existing project/issue-metadata list shapes remain unchanged.
+- Issue response status/type/priority/severity properties remain labels, with numeric status_id/type_id/priority_id/severity_id alongside them. Story status labels likewise remain compatible.
 - New resource DTOs use explicit JSON property names: id, ref, project, subject, status_id, status, assigned_to, and modified. Detail DTOs include description and version. Nullable fields remain nullable; never manufacture ID/version zero from absent required data.
 - Reuse concrete domain APIs directly in tools. The unused aggregate facade was removed by the development cleanup; do not recreate it.
 - Use TaigaTransport for HTTP JSON reads, with caller-owned requests/documents and transport-owned responses. Pass CancellationToken end to end; AuthClient handles authentication. New TaskApi/EpicApi registrations belong in Hosting/ServiceCollectionExtensions.cs; assembly tool discovery is already configured.
@@ -31,7 +31,7 @@ These are proposed implementation decisions for this batch, not descriptions of 
 - Public update parameters are optional typed fields plus clearFields: string[]. Omission/null of a normal nullable argument means leave unchanged. Explicit clearFields is the way to request a JSON null. This preserves existing update_issue behavior.
 - clearFields accepts only the fields listed in the goal. Reject unsupported clear names and a field that is both set and cleared. Internally serialize a presence-aware object/dictionary so explicit JSON null survives.
 - Description is cleared with description=""; tags are cleared with tags=[]. False and zero must not be dropped just because they are default-valued. Required references/statuses cannot be cleared.
-- Status inputs are internal IDs. The server enforces membership/project permissions; retain its useful validation details.
+- Status inputs are internal IDs. The server enforces membership/project permissions; retain safe status/category and allowlisted rejected field names, never raw validation messages or bodies.
 - Dates, custom attributes, multiple assignees, arbitrary external references, and project moves are deferred unless explicitly included in a goal.
 - Return the server's authoritative result and version, not a fabricated merged object. A successful write followed by a failed read/mapping must be reported as potentially applied, not safe to retry.
 
@@ -40,7 +40,7 @@ These are proposed implementation decisions for this batch, not descriptions of 
 - Check HTTP success on every request. Preserve status and safe validation details without exposing tokens, credentials, or unbounded response dumps.
 - Distinguish invalid input, authentication/permission denial, missing resource, server validation/version rejection, throttling, and transport failure. Integrate with the MCP package's actual error response mechanism.
 - Taiga version rejection is not guaranteed to be HTTP 409. Inspect field errors as well; tests should include a version-related 400 and a 409 response. Some server versions can accept stale versions when modified fields do not overlap.
-- Do not retry creates, updates, links, or comments automatically after an ambiguous transport failure; this can duplicate work.
+- Do not retry creates, updates, links, or comments automatically after an ambiguous transport failure; this can duplicate work. The existing bounded authentication replay after a received 401 is retained.
 - Comments are submitted by PATCHing the resource with version and comment. Do not POST a new history entry or invent its ID from the updated resource response.
 - The dedicated comment command returns kind, id, returned version, and comment_submitted=true only after a successful update. That flag means submission succeeded, not that a history-entry identifier was obtained.
 

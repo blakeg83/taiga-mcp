@@ -1,53 +1,58 @@
-# First implementation batch: agent goal documents
+# Completed first implementation batch
 
-Status: feature goals 01-15 remain planned. Goal 00, its review fixes and the development foundation cleanup are complete; their test/transport/auth/cache infrastructure is available.
+Status: all 15 selected functions are implemented within their defined scope.
+Reconciled against the current checkout on 2026-09-28.
 
-## Selected batch
+The batch expanded three existing tools and added twelve, bringing the server
+from 11 to 23 public tools. This records delivered functionality; it does not
+assert that every broader entry in the [command inventory](../../taiga_command_inventory.md)
+is complete.
 
-The 15 functions below prioritize the daily cycle of finding work, reading its current version, creating tickets, updating progress, grouping stories under epics, and leaving comments. This ranking is a product judgment based on typical workflows and repository gaps; no usage telemetry was available. Existing project lookup, issue creation, issue detail, and issue metadata tools remain useful prerequisites.
+## Delivered functions
 
-| Order | Goal | Reason for inclusion | Prerequisites |
-| --- | --- | --- | --- |
-| 00 | [Shared foundation](00-foundation.md) | Consistent tests, contracts, and MCP verification | None |
-| 01 | [list_issues](01-list-issues.md) | Daily triage and finding completed issues | 00 |
-| 02 | [update_issue](02-update-issue.md) | Assignment, status, classification, and clearing values | 00, 01 |
-| 03 | [list_user_stories](03-list-user-stories.md) | Find backlog and sprint work without hidden closed stories | 00, 01 |
-| 04 | [get_user_story](04-get-user-story.md) | Read full context and version before editing | 03 |
-| 05 | [create_user_story](05-create-user-story.md) | Capture planned delivery work | 04 |
-| 06 | [update_user_story](06-update-user-story.md) | Maintain story progress and ownership | 02, 04, 05 |
-| 07 | [list_tasks](07-list-tasks.md) | Find implementation work and establish TaskApi | 00, 03 |
-| 08 | [get_task](08-get-task.md) | Read task context and version before editing | 07 |
-| 09 | [create_task](09-create-task.md) | Break stories into actionable work | 04, 08 |
-| 10 | [update_task](10-update-task.md) | Move tasks through delivery | 02, 08, 09 |
-| 11 | [list_epics](11-list-epics.md) | Find large work groups and establish EpicApi | 00, 03 |
-| 12 | [get_epic](12-get-epic.md) | Read epic context and identity | 11 |
-| 13 | [create_epic](13-create-epic.md) | Capture larger initiatives | 12 |
-| 14 | [link_user_story_to_epic](14-link-user-story-to-epic.md) | Group existing delivery tickets without duplication | 04, 12, 13 |
-| 15 | [add_work_item_comment](15-add-work-item-comment.md) | Record decisions and progress across all four kinds | 02, 06, 10, 12 |
+| Original goal | Function | Delivered behavior | Source | Test coverage source |
+| --- | --- | --- | --- | --- |
+| 01 | `list_issues` | Filters, closed-work selection, classification IDs, optional page envelope | [IssueTools](../../../Tools/IssueTools.cs) | [IssueListTests](../../../tests/TaigaMCP.Tests/IssueListTests.cs) |
+| 02 | `update_issue` | Versioned edits, optional subject, explicit unassignment | [IssueTools](../../../Tools/IssueTools.cs) | [IssueUpdateTests](../../../tests/TaigaMCP.Tests/IssueUpdateTests.cs) |
+| 03 | `list_user_stories` | Backlog/sprint and status filters, optional page envelope | [UserStoryTools](../../../Tools/UserStoryTools.cs) | [UserStoryListTests](../../../tests/TaigaMCP.Tests/UserStoryListTests.cs) |
+| 04 | `get_user_story` | Core detail and authoritative version | [UserStoryTools](../../../Tools/UserStoryTools.cs) | [UserStoryDetailTests](../../../tests/TaigaMCP.Tests/UserStoryDetailTests.cs) |
+| 05 | `create_user_story` | Backlog/sprint creation with assignment and tags | [UserStoryTools](../../../Tools/UserStoryTools.cs) | [UserStoryCreateTests](../../../tests/TaigaMCP.Tests/UserStoryCreateTests.cs) |
+| 06 | `update_user_story` | Content, status, primary assignment, sprint placement/clearing, comments | [UserStoryTools](../../../Tools/UserStoryTools.cs) | [UserStoryUpdateTests](../../../tests/TaigaMCP.Tests/UserStoryUpdateTests.cs) |
+| 07 | `list_tasks` | Project/story/sprint filters and page envelope | [TaskTools](../../../Tools/TaskTools.cs) | [TaskListTests](../../../tests/TaigaMCP.Tests/TaskListTests.cs) |
+| 08 | `get_task` | Core detail, parent/sprint, blocking/due-date information, version | [TaskTools](../../../Tools/TaskTools.cs) | [TaskDetailTests](../../../tests/TaigaMCP.Tests/TaskDetailTests.cs) |
+| 09 | `create_task` | Standalone or story-linked creation with sprint inheritance | [TaskTools](../../../Tools/TaskTools.cs) | [TaskCreateTests](../../../tests/TaigaMCP.Tests/TaskCreateTests.cs) |
+| 10 | `update_task` | Content, status, assignment, tags, blocking, comments | [TaskTools](../../../Tools/TaskTools.cs) | [TaskUpdateTests](../../../tests/TaigaMCP.Tests/TaskUpdateTests.cs) |
+| 11 | `list_epics` | Project/status/assignee/tag/text filters and page envelope | [EpicTools](../../../Tools/EpicTools.cs) | [EpicListTests](../../../tests/TaigaMCP.Tests/EpicListTests.cs) |
+| 12 | `get_epic` | Core detail, version, available server summaries | [EpicTools](../../../Tools/EpicTools.cs) | [EpicDetailTests](../../../tests/TaigaMCP.Tests/EpicDetailTests.cs) |
+| 13 | `create_epic` | One epic with optional status, assignee, color, tags | [EpicTools](../../../Tools/EpicTools.cs) | [EpicCreateTests](../../../tests/TaigaMCP.Tests/EpicCreateTests.cs) |
+| 14 | `link_user_story_to_epic` | Existing-story linking with repeat-call behavior | [EpicTools](../../../Tools/EpicTools.cs) | [EpicStoryLinkTests](../../../tests/TaigaMCP.Tests/EpicStoryLinkTests.cs) |
+| 15 | `add_work_item_comment` | Versioned comment submission to all four kinds | [WorkItemCommentTools](../../../Tools/WorkItemCommentTools.cs) | [WorkItemCommentTests](../../../tests/TaigaMCP.Tests/WorkItemCommentTests.cs) |
 
-## How to use these documents
+## Infrastructure and verification records
 
-Foundation review follow-up: [Goal 00 review fixes](00-foundation-review-fixes.md) addresses PR #31's protocol-output verification and nullable-response documentation findings. It is complete and retained by the [development cleanup](../development-foundation-cleanup.md). Use the final infrastructure described in [development](../../development.md).
+The foundation and cleanup established transport ownership, gated authentication,
+safe errors, cancellation, metadata caching, fake HTTP tests, and real MCP
+protocol sessions. The [development guide](../../development.md) retains the
+historical cleanup record. [McpIntegrationTests](../../../tests/TaigaMCP.Tests/McpIntegrationTests.cs)
+and the function-specific tests above describe the current checks.
 
-Assign one goal document to a coding agent, along with access to this repository. Tell it to read [the execution instructions](execution-instructions.md), [the shared contracts](contracts.md), and the linked prerequisites before editing. Implement in the order above by default. Documents are task specifications, not instructions to start separate chats or delegate automatically.
+The original numbered goal/checklist files and cleanup goal files are no longer
+present in this checkout. This summary links to existing evidence rather than
+recreating completion checklists or claiming historical commit hashes.
+Use Git history to inspect the original plans and implementation commits.
+No fresh build, test result, or live deployment verification is claimed by this
+documentation-only reconciliation.
 
-Each function has its own objective, bounded scope, target interface, four implementation steps, acceptance scenarios, and definition of done. All completion boxes deliberately start unchecked. The foundation is a prerequisite goal, not a sixteenth public function.
+## Remaining scope and next work
 
-Suggested assignment:
+The [tool reference](../../taiga_tools_reference.md) is authoritative for callable
+signatures. The retained [first-batch contracts](contracts.md) and
+[execution instructions](execution-instructions.md) explain historical design
+intent; current source/reference and the active goal take precedence where
+implementation decisions changed.
 
-> Execute docs/goals/first-batch/NN-function.md. Follow its linked execution instructions and contracts. Complete and validate one step at a time, update documentation during each step, and commit after each step. Preserve unrelated work and report completion evidence against the definition of done.
-
-## Batch boundary
-
-Keep the batch focused. Defer deletes, bulk operations, epic editing, attachments, custom fields, workflow administration, reference resolution, new metadata lookup tools, estimates, multiple story assignees, and general cross-project moves. Existing IDs can be supplied by users or read from Taiga. Do not claim these 15 goals complete the entire [command inventory](../../taiga_command_inventory.md).
-
-Some inventory entries describe broader eventual behavior. Completing these goals delivers only the fields and behaviors named in each goal. Update inventory notes to state any remaining scope; do not mark a broad entry fully implemented when only this batch's subset exists.
-
-## Batch completion checklist
-
-- [ ] Foundation and all 15 function definitions of done are satisfied.
-- [ ] Existing 11 MCP tools remain callable with their established names and compatible inputs/outputs.
-- [ ] New tools are discoverable through MCP and examples match emitted schemas.
-- [ ] A fake-HTTP workflow covers epic creation, story creation/linking, task creation/update, issue update, and comments.
-- [ ] Root solution build and tests pass; documentation examples and links are checked.
-- [ ] Every completed step has a commit and evidence; unfinished inventory scope remains explicit.
+Proceed to the [second-batch plans](../second-batch/README.md) for the next 12
+functions: identity/member/status/sprint lookup, reference resolution, epic
+editing and relationship reads/removal, and shared comments/history reads.
+Attachments, estimates, bulk operations, and workflow administration remain
+outside both selected batches.

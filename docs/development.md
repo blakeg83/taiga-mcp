@@ -1,5 +1,33 @@
 # Development guide
 
+## Current state (2026-09-28)
+
+All 15 selected first-batch functions are implemented within their documented
+scope. The server exposes 23 tools; see the [tool reference](taiga_tools_reference.md)
+for exact contracts and the [completed-batch summary](goals/first-batch/README.md)
+for source/test pointers. The [second batch](goals/second-batch/README.md) contains
+12 implementation plans, not additional callable tools.
+
+Tools inject concrete domain APIs and use ToolResponseJson/ToolErrors.
+TaigaTransport owns responses and obtains a factory client per operation;
+callers own requests and returned documents. AuthClient is gated singleton
+token state, and issue metadata uses immutable TTL-controlled snapshots.
+Cancellation flows through every asynchronous layer. No aggregate API facade
+is present. A received 401 permits one authentication replay; ambiguous writes
+and entity version conflicts are not automatically retried.
+
+Issue/story lists preserve legacy arrays and offer opt-in page envelopes;
+task/epic lists always use envelopes. Page metadata preserves unknown nulls,
+while resource DTOs omit null properties. Versioned updates support explicit
+assignee clearing; story updates can also clear the milestone. See current
+reference contracts before extending these features.
+
+The sections below retain the historical foundation cleanup record. Their
+11-tool counts, test totals, future-tense descriptions, and step-specific
+limitations describe that earlier work, not the current release. This
+documentation reconciliation checked source, schemas described in the reference,
+and links; it did not rerun application tests or validate a live deployment.
+
 ## Verified cleanup baseline (2026-09-28)
 
 Baseline: `f760583` on `goal-00`, clean working tree. Implementation branch:

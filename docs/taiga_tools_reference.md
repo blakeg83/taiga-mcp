@@ -3,8 +3,8 @@
 This document describes the behavior that is implemented in the current
 repository. It is deliberately separate from the larger command inventory:
 the inventory contains proposed future coverage, while this page records what
-clients can call today and the compatibility constraints that the first batch
-will verify.
+clients can call today and the compatibility constraints future batches must
+preserve.
 
 ## Implemented versus planned
 
@@ -22,11 +22,12 @@ The current server exposes 24 tools:
   `link_user_story_to_epic`.
 - 1 shared work-item tool: `add_work_item_comment`.
 
-The first-batch documents describe 15 additional or expanded functions. The
-`list_issues`, `list_user_stories`, the core `get_user_story` detail read, and
-`link_user_story_to_epic` are delivered; the remaining goal documents describe
-planned work until their individual checklists are complete. Other
-cross-resource commands remain planned.
+All 15 selected first-batch functions are implemented within their defined
+scope: three existing tools were expanded and twelve were added, bringing the
+first-batch total to 23. Goal 01 of the [second batch](goals/second-batch/README.md)
+adds `get_current_user` as the first delivered second-batch tool; 11 batch
+functions remain planned. The broader inventory still includes deferred fields
+and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -201,7 +202,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `list_epics` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with epic items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, color?, tags?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_epic` | `epicId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, color?, tags?, modified?, is_closed?, is_blocked?, blocked_note?, client_requirement?, team_requirement?, user_stories_counts?, version }`. `epicId` is the internal ID, not displayed `#ref`; related stories and computed progress are not loaded. |
-| `create_epic` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `color`, and `tags` optional and default null | One server-created epic detail with authoritative `id`, `ref`, and `version`. Omitted optional fields use project defaults; `description=""` and `tags=[]` are explicit values. Story linking, requirement flags, bulk creation, and custom fields remain planned. |
+| `create_epic` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `color`, and `tags` optional and default null | One server-created epic detail with authoritative `id`, `ref`, and `version`. Omitted optional fields use project defaults; `description=""` and `tags=[]` are explicit values. Use the separate `link_user_story_to_epic` tool for existing stories. Requirement flags, bulk creation, and custom fields remain planned. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 | `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
