@@ -562,11 +562,10 @@ An update returns the server's authoritative detail, for example:
   verify propagation of each status; they do not claim that every stale
   version is rejected, because Taiga can accept non-overlapping stale edits.
 - Issue history filtering currently omits hidden entries, entries without a
-  string comment, and empty comments. The domain APIs now support the planned
-  comment-only PATCH behavior for `issue`, `user_story`, `task`, and `epic`:
-  only `comment` and the supplied `version` are written, and the returned
-  resource version is parsed without fetching history. The shared MCP wrapper
-  and its receipt remain in the next implementation step.
+  string comment, and empty comments. The domain APIs and shared MCP wrapper
+  now support comment-only PATCH behavior for `issue`, `user_story`, `task`,
+  and `epic`: only `comment` and the supplied `version` are written, and the
+  returned resource version is parsed without fetching history.
 - Authentication is performed against `/auth`, cached in memory per process,
   and attached as `Authorization: Bearer <token>` to Taiga requests. Tests use
   synthetic credentials and a fake `/auth` response; no live credentials are
