@@ -1,6 +1,7 @@
 # Goal 09: list_epic_user_stories
 
-Status: planned; not implemented by this document.
+Status: implementation in progress; the relationship contract is specified and
+the public tool remains planned until Step 3.
 
 ## Objective
 
@@ -47,12 +48,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify relationship listing
 
-- [ ] Verify the nested serializer returns epic/user_story/order, with lookup by story ID and no independent public relationship ID.
-- [ ] Keep the existing link receipt's created flag out of the new list DTO; listing must not imply creation.
-- [ ] Add empty/single/multiple/cross-project relationship fixtures and page metadata; define epic identity consistency checks.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_epic_user_stories contracts`.
+- [x] Verify the nested serializer returns epic/user_story/order, with lookup by story ID and no independent public relationship ID.
+- [x] Keep the existing link receipt's created flag out of the new list DTO; listing must not imply creation.
+- [x] Add empty/single/multiple/cross-project relationship fixtures and page metadata; define epic identity consistency checks.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_epic_user_stories contracts`.
 
 ## Step 2: Implement one-page relationship reads
 
@@ -102,12 +103,19 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `1da9990` (`origin/master`). Source evidence is pinned
+taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no live
+deployment version was inspected or claimed. The pinned relationship serializer
+defines `epic` from `epic_id`, `user_story` from `user_story_id`, and `order`;
+the nested viewset uses `user_story` as its lookup field. This confirms that the
+new list DTO must not expose the existing link receipt's `created` flag or a
+relationship ID. No source-shape deviation was found. The current reference's
+older link-source citation describes the same fields, but this goal uses the
+batch's current pinned revision.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_epic_user_stories contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore` passed; 452 existing tests passed. Added source-backed empty, single, multiple, zero/large-order, cross-project-identity, and pagination fixtures plus the creation-free DTO contract. | Specify list_epic_user_stories contracts / pending |
 | 2 | Not started | — | Implement list_epic_user_stories API behavior / pending |
 | 3 | Not started | — | Expose list_epic_user_stories MCP tool / pending |
 | 4 | Not started | — | Verify list_epic_user_stories workflows / pending |
