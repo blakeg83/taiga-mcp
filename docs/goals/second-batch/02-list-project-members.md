@@ -1,6 +1,6 @@
 # Goal 02: list_project_members
 
-Status: planned; not implemented by this document.
+Status: in progress; Step 1 complete; the public tool is not exposed yet.
 
 ## Objective
 
@@ -47,12 +47,21 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify membership identity and pagination
 
-- [ ] Inspect the pinned ordinary/admin membership serializers; map id to membership_id and user to user_id explicitly.
-- [ ] Add fixtures for active/inactive users, missing user for an invitation, null role, and admin-only extra email fields.
-- [ ] Define no local name filter or automatic all-page read; preserve source page counts even when records are not assignable.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_project_members contracts`.
+- [x] Inspect the pinned ordinary/admin membership serializers; map id to membership_id and user to user_id explicitly.
+- [x] Add fixtures for active/inactive users, missing user for an invitation, null role, and admin-only extra email fields.
+- [x] Define no local name filter or automatic all-page read; preserve source page counts even when records are not assignable.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_project_members contracts`.
+
+### Step 1 execution record
+
+- Starting commit: `b69243b7f87980f0d3a180b908bb70a95ceb6550` (`doc cleanup`); branch: `codex/list-project-members`.
+- Source evidence: pinned `taiga-back` revision `4d11baef9027f5598f6341d6eb4261de2840688e`. `MembershipViewSet` selects the ordinary serializer for normal project-member reads and the admin serializer for project-admin list reads. `MembershipSerializer` maps `id`, `user_id`, `project_id`, `role_id`, `is_admin`, `role_name`, `full_name`, `is_user_active`, and `is_owner`; `MembershipAdminSerializer` adds `email` and `user_email`. These fields were verified in [the pinned API source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/api.py#L886-L914) and [serializers](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/serializers.py#L148-L223). This is source evidence, not a deployed-version claim.
+- Contract decisions: the public DTO will expose `membership_id` and `user_id` separately, use `project` for the project ID, and expose only the allowlisted role/name/activity/admin/owner fields. Missing `user_id` records remain in `items` and are not assignable; inactive users remain visible with `is_user_active=false`. Null optional role/name/activity/admin/owner values are omitted by the normal tool serializer. The request has only `projectId` and `page`; it sends one encoded page request, performs no name filter or per-member user lookup, and preserves header-derived `total`, `next_page`, and `has_more` values even when a page contains pending records.
+- Fixtures: `ProjectMemberFixtures.MixedPage` covers active and inactive users, a pending record with no user, a null role, a localized name, and admin-only email/invitation fields. Email, user-email, and invitation text are deliberately not part of the planned public DTO.
+- Baseline validation: `dotnet test -c Debug` passed on 2026-09-28 with 343 tests passing and 0 failures before feature changes. The new fixture contract test is included in this checkpoint; implementation-focused checks remain for Steps 2–4.
+- Planned MCP example: `{"projectId":123,"page":1}` returns a page envelope whose assignable records use `user_id` as the later `assigned_to` value; `membership_id` is never sent as an assignee.
 
 ## Step 2: Implement project member retrieval
 
@@ -102,12 +111,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `b69243b7f87980f0d3a180b908bb70a95ceb6550`. Source/deployment evidence:
+pinned source only; no live deployment version was inspected or claimed.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_project_members contracts / pending |
+| 1 | Complete | Pinned serializer/API evidence recorded; mixed membership fixture and contract test added; `dotnet test -c Debug` baseline passed 343 tests before changes. | Specify list_project_members contracts / pending |
 | 2 | Not started | — | Implement list_project_members API behavior / pending |
 | 3 | Not started | — | Expose list_project_members MCP tool / pending |
 | 4 | Not started | — | Verify list_project_members workflows / pending |
