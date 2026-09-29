@@ -528,8 +528,11 @@ An update returns the server's authoritative detail, for example:
   verify propagation of each status; they do not claim that every stale
   version is rejected, because Taiga can accept non-overlapping stale edits.
 - Issue history filtering currently omits hidden entries, entries without a
-  string comment, and empty comments. The dedicated comment command described
-  in the plans is not implemented.
+  string comment, and empty comments. The dedicated `add_work_item_comment`
+  command is being implemented in the current feature branch. Its closed kind
+  vocabulary is `issue`, `user_story`, `task`, or `epic`; the confirmed receipt
+  will contain the returned version and `comment_submitted=true`, without
+  inventing a history-entry ID.
 - Authentication is performed against `/auth`, cached in memory per process,
   and attached as `Authorization: Bearer <token>` to Taiga requests. Tests use
   synthetic credentials and a fake `/auth` response; no live credentials are

@@ -121,7 +121,7 @@ These are proposed common commands across the four resource kinds. Fields that a
 | `set_work_item_due_date` | New | `kind, id, version, date or null, reason?`; set or clear due-date fields for kinds that support them. |
 | `update_work_item_tags` | New; composite | `kind, id, version, add?, remove?`; read current tags and patch the merged set, retaining tag colors and unrelated tags. |
 | `list_work_item_comments` | New | `kind, id, page?`; return visible comments from history with history-entry IDs, authors, timestamps, and edit information. Issue comments are currently bundled into `get_issue`. |
-| `add_work_item_comment` | New | `kind, id, version, text`; submit a comment through the item's update API, preserving supported Markdown and mentions. Issue comments currently use `update_issue`. |
+| `add_work_item_comment` | New — contract specified, implementation in progress | `kind, id, version, text`; submit a comment through the item's update API, preserving supported Markdown and mentions. The closed kind set is `issue`, `user_story`, `task`, or `epic`; the receipt returns the authoritative version and `comment_submitted=true`, not a fabricated history-entry ID. |
 | `edit_work_item_comment` | New | `kind, id, historyEntryId, text`; edit the comment through the history API using its permissions and revision behavior. |
 | `delete_work_item_comment` | New | `kind, id, historyEntryId`; hide/delete a comment through Taiga's history action. |
 | `restore_work_item_comment` | New | `kind, id, historyEntryId`; restore a deleted comment through the undelete action when permitted. |
