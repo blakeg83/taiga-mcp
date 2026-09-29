@@ -3,11 +3,11 @@
 Status: in progress. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
 (`list_user_story_statuses`), 05 (`list_task_statuses`), 06 (`list_epic_statuses`),
-07 (`list_sprints`), 08 (`update_epic`), 09 (`list_epic_user_stories`), and 10
-(`unlink_user_story_from_epic`) are delivered; the remaining 2 functions below
-are planned and are not callable until their goals ship.
-Prepared 2026-09-29 against the current 33-tool repository baseline after goal
-10.
+07 (`list_sprints`), 08 (`update_epic`), 09 (`list_epic_user_stories`), 10
+(`unlink_user_story_from_epic`), and 11 (`list_work_item_comments`) are
+delivered; goal 12 remains planned and is not callable until its goal ships.
+Prepared 2026-09-29 against the current 34-tool repository baseline after goal
+11.
 
 ## Objective
 
@@ -58,8 +58,9 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 33 tools; completing the remaining 2 yields
-35 tools unless separately authorized changes alter that count. No separate foundation
+New functions build on the existing 33 tools; goal 11 brings the current count
+to 34, and completing goal 12 is expected to yield 35 tools unless separately
+authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
 The new list functions use page envelopes. Reference lookup returns an identity

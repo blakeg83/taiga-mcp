@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 33 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 34 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -390,6 +390,28 @@ history-entry ID or perform a separate history read. A version conflict,
 permission error, missing item, malformed success response, or ambiguous
 transport failure is surfaced as an error and is not automatically retried.
 
+### Read work-item comments
+
+Use the internal work-item ID and a `kind` of `issue`, `user_story`, `task`, or
+`epic` to read one visible comment page. History-entry IDs are opaque strings;
+they are not the numeric work-item ID or displayed `#ref`:
+
+```json
+{"kind":"task","id":203,"page":1}
+```
+
+The result is a page envelope. Hidden, deleted, blank, and whitespace-only
+comments are omitted, but `total`, `next_page`, and `has_more` describe the
+upstream history page, so `items` can be empty while another page exists:
+
+```json
+{"items":[{"id":"history-entry","comment":"Reproduced locally","created_at":"2026-09-28T12:01:00Z","user":{"id":42,"name":"Example User","username":"example","is_active":true}}],"page":1,"total":3,"next_page":2,"has_more":true}
+```
+
+Call `add_work_item_comment` with the current item version, then call
+`list_work_item_comments` to read the resulting visible conversation. This
+read does not edit, delete, restore, or fetch comment revisions.
+
 ### CLI Mode
 ```bash
 npx @modelcontextprotocol/inspector --cli ./bin/Release/net8.0/linux-x64/publish/TaigaMCP \
@@ -437,6 +459,7 @@ Call the tool update_epic with epicId=301, version=4, status=8, and comment="Del
 Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11
 Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."
+Call the tool list_work_item_comments with kind="task", id=203, and page=1
 Call the tool get_user_story with userStoryId=102
 Call the tool get_issue with issueId=67890
 Call the tool list_issue_statuses with projectId=12345

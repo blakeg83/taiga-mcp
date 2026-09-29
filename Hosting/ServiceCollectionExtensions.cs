@@ -44,6 +44,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<EpicApi>();
         services.AddSingleton<SprintApi>();
         services.AddSingleton<WorkItemResolverApi>();
+        services.AddSingleton<WorkItemHistoryApi>();
         services
             .AddMcpServer()
             .WithStdioServerTransport()

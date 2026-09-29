@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 33 tools identify the current account, list projects, project members, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/update/link/list/unlink epic relationships, and add comments to all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 34 tools identify the current account, list projects, project members, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/update/link/list/unlink epic relationships, and submit or read visible comments on all four work-item kinds via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -14,6 +14,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `create_issue(projectId, subject, …)`: Create a new issue.
 - `update_issue(issueId, version, subject?, ..., clearFields?)`: Partially update an issue via PATCH; `subject` is optional, and `clearFields=["assigned_to"]` explicitly unassigns while omitted/null `assigned_to` leaves it unchanged.
 - `add_work_item_comment(kind, id, version, text)`: Submit a Markdown/mention-preserving comment to an `issue`, `user_story`, `task`, or `epic` using the supplied version. Returns the server's resulting version and `comment_submitted=true`.
+- `list_work_item_comments(kind, id, page?)`: Read one page of visible nonblank comments from a work-item history stream. Returns opaque history-entry IDs, raw Markdown/text, timestamps, safe actor identity, edit dates, and upstream pagination metadata; hidden/deleted comments are omitted without filling from later pages.
 - `list_issue_statuses(projectId)`: List available issue statuses for a project.
 - `list_issue_severities(projectId)`: List available issue severities for a project.
 - `list_issue_types(projectId)`: List available issue types for a project.
@@ -120,7 +121,7 @@ build/tests; do not stop that server. See the developer guide for the exact comm
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
 - [Completed first batch](docs/goals/first-batch/README.md): delivered scope for all 15 selected functions, with links to current source and tests.
-- [Second-batch agent goals](docs/goals/second-batch/README.md): plans for 12 discovery, epic management, and conversation/history functions. Each has ordered checklists, validation, a definition of done, and documentation/commit requirements after every step. These next-batch functions are not implemented yet.
+- [Second-batch agent goals](docs/goals/second-batch/README.md): ordered checklists and evidence for discovery, epic management, and conversation/history functions. Goal 11's comment listing is implemented; goal 12 and later functions remain planned.
 
 ## Debug Logging
 - Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.
