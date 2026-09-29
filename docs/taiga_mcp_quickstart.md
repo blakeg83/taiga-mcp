@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; creating, reading, and listing tasks; and listing and reading epics and projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; creating, reading, and listing tasks; and creating, listing, and reading epics and projects.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 20 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 21 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -138,6 +138,27 @@ The detail result preserves the server's description, status, assignment,
 color, tags, version, and optional summary fields such as
 `user_stories_counts`. It does not enumerate related stories or calculate
 progress. Use the returned internal epic ID for later story-linking commands.
+
+### Create an epic
+
+Create one epic with Taiga's project defaults, then use its returned internal
+ID for reads or a later story link:
+
+```json
+{"projectId":123,"subject":"Saved search experience"}
+```
+
+Optional values are project-specific status and assignee IDs. Color is passed
+to Taiga for validation, while an omitted color lets Taiga generate its
+default:
+
+```json
+{"projectId":123,"subject":"Saved search experience","description":"Group saved-search delivery work.","status":7,"assigned_to":42,"color":"#336699","tags":["search","saved"]}
+```
+
+This creates only the epic. It does not create or link stories or change
+project settings; use a separate `link_user_story_to_epic` call when that
+planned tool becomes available.
 
 ### Update a user story
 

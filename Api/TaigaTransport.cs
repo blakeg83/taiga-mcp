@@ -63,6 +63,11 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                     StringComparer.OrdinalIgnoreCase);
             return new TaigaReadResult(document, headers, requestUri);
         }
+        catch (OperationCanceledException exception) when (IsHttpTimeout(exception, cancellationToken))
+        {
+            throw new TaigaRequestException(
+                "Taiga request timed out; the write may already have applied. Read the entity before retrying.");
+        }
         catch (OperationCanceledException) when (write && applied)
         {
             throw new OperationCanceledException("Taiga write may already have applied; response reading was cancelled. Read the entity before retrying.", cancellationToken);
@@ -83,6 +88,11 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
         }
     }
 
+    private static bool IsHttpTimeout(OperationCanceledException exception, CancellationToken cancellationToken)
+        => !cancellationToken.IsCancellationRequested &&
+           exception is TaskCanceledException &&
+           exception.InnerException is TimeoutException;
+
     internal static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode) return;
@@ -102,7 +112,7 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             using var doc = JsonDocument.Parse(bytes.AsMemory(0, count));
             if (doc.RootElement.ValueKind == JsonValueKind.Object)
             {
-                string[] fields = ["version", "subject", "project", "status", "type", "priority", "severity", "assigned_to", "tags", "description", "milestone", "comment"];
+                string[] fields = ["version", "subject", "project", "status", "type", "priority", "severity", "assigned_to", "tags", "description", "milestone", "comment", "color"];
                 foreach (var field in fields)
                     if (doc.RootElement.TryGetProperty(field, out _)) details.Add($"{field}: rejected");
                 if (doc.RootElement.TryGetProperty("detail", out var detail) &&
