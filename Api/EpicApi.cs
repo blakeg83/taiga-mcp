@@ -8,10 +8,17 @@ namespace TaigaMCP.Api;
 public sealed class EpicApi
 {
     private readonly TaigaTransport _transport;
+    private readonly UserStoryApi _userStories;
 
     public EpicApi(TaigaTransport transport)
+        : this(transport, new UserStoryApi(transport))
+    {
+    }
+
+    public EpicApi(TaigaTransport transport, UserStoryApi userStories)
     {
         _transport = transport;
+        _userStories = userStories;
     }
 
     public async Task<EpicDetailDto> GetEpicAsync(
@@ -77,6 +84,94 @@ public sealed class EpicApi
             throw new TaigaRequestException(
                 "Taiga write may already have applied; response mapping failed. Read the epic before retrying.");
         }
+    }
+
+    public async Task<EpicUserStoryLinkDto> LinkUserStoryToEpicAsync(
+        int epicId,
+        int userStoryId,
+        long? order = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(epicId, nameof(epicId));
+        InputValidation.Positive(userStoryId, nameof(userStoryId));
+
+        var existing = await TryGetUserStoryLinkAsync(epicId, userStoryId, cancellationToken);
+        if (existing is not null)
+            return existing with { Created = false };
+
+        // A nested 404 can mean an inaccessible parent rather than a missing link.
+        // Confirm both resources before creating the relationship.
+        await GetEpicAsync(epicId, cancellationToken);
+        await _userStories.GetUserStoryAsync(userStoryId, cancellationToken);
+
+        var payload = new Dictionary<string, object>
+        {
+            ["epic"] = epicId,
+            ["user_story"] = userStoryId
+        };
+        if (order.HasValue)
+            payload["order"] = order.Value;
+
+        var json = JsonSerializer.Serialize(payload);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"epics/{epicId}/related_userstories")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+
+        try
+        {
+            using var document = await _transport.ReadAsync(request, cancellationToken);
+            return MapUserStoryLink(document.RootElement, created: true);
+        }
+        catch (TaigaRequestException exception) when (exception.IsDuplicateRelationship)
+        {
+            var concurrent = await TryGetUserStoryLinkAsync(epicId, userStoryId, cancellationToken);
+            if (concurrent is not null)
+                return concurrent with { Created = false };
+
+            throw;
+        }
+    }
+
+    private async Task<EpicUserStoryLinkDto?> TryGetUserStoryLinkAsync(
+        int epicId,
+        int userStoryId,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"epics/{epicId}/related_userstories/{userStoryId}");
+        try
+        {
+            using var document = await _transport.ReadAsync(request, cancellationToken);
+            return MapUserStoryLink(document.RootElement, created: false);
+        }
+        catch (TaigaRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    private static EpicUserStoryLinkDto MapUserStoryLink(JsonElement link, bool created)
+    {
+        if (link.ValueKind != JsonValueKind.Object ||
+            !link.TryGetProperty("epic", out var epic) ||
+            !epic.TryGetInt32(out var epicId) || epicId <= 0 ||
+            !link.TryGetProperty("user_story", out var userStory) ||
+            !userStory.TryGetInt32(out var userStoryId) || userStoryId <= 0 ||
+            !link.TryGetProperty("order", out var order) ||
+            !order.TryGetInt64(out var relationshipOrder))
+            throw new TaigaRequestException("Taiga returned invalid epic/user story relationship data.");
+
+        return new EpicUserStoryLinkDto
+        {
+            EpicId = epicId,
+            UserStoryId = userStoryId,
+            Order = relationshipOrder,
+            Created = created
+        };
     }
 
     public async Task<IReadOnlyList<EpicDto>> ListEpicsAsync(

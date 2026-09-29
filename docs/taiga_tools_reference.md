@@ -89,7 +89,8 @@ concurrent uniqueness validation is followed by the same relationship read and
 is reported as `created=false` only when that read confirms the link; unrelated
 validation, permission, missing-resource, and transport failures propagate.
 Cross-project linking is left to Taiga's permission and validation rules.
-This contract is planned until goal 14's implementation checklist is complete.
+The domain implementation now follows this wire behavior; MCP exposure and
+caller-facing examples are completed in the later goal steps.
 
 ### `get_epic` contract
 

@@ -48,13 +48,13 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 2: Implement linking and repeat-call behavior
 
-- [ ] Validate positive IDs and verify epic/story access using existing domain readers as needed to disambiguate a missing link.
-- [ ] Return an existing relationship unchanged; otherwise POST the relationship once with optional order.
-- [ ] Handle a recognized concurrent duplicate by reading the relationship and returning created=false only if that read confirms it; propagate unrelated errors.
-- [ ] Let Taiga determine cross-project eligibility; never patch the story's project or remove other epic links.
-- [ ] Validate this step: run domain request/response tests for this behavior and Debug build.
-- [ ] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement link_user_story_to_epic API behavior`.
+- [x] Validate positive IDs and verify epic/story access using existing domain readers as needed to disambiguate a missing link.
+- [x] Return an existing relationship unchanged; otherwise POST the relationship once with optional order.
+- [x] Handle a recognized concurrent duplicate by reading the relationship and returning created=false only if that read confirms it; propagate unrelated errors.
+- [x] Let Taiga determine cross-project eligibility; never patch the story's project or remove other epic links.
+- [x] Validate this step: run domain request/response tests for this behavior and Debug build.
+- [x] Update documentation now: document implemented wire behavior, validation/errors, and any deviations. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Implement link_user_story_to_epic API behavior`.
 
 ## Step 3: Expose relationship creation
 
@@ -98,7 +98,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned taiga-back `c8264ac6775103cbcc2a3a145978f2b475e9ff05` checked 2026-09-28; nested lookup/payload/order semantics recorded; success, unique-duplicate, missing-link, and permission fixtures parse; baseline restore/build passed and baseline tests had 276 passes plus the pre-existing temporary-copy cleanup failure. | Specify link_user_story_to_epic contracts / current step commit |
-| 2 | Not started | — | Implement link_user_story_to_epic API behavior / pending |
+| 2 | Complete | `EpicStoryLinkApiTests`: 8 passing checks for initial POST, optional order omission, repeat-call order preservation, confirmed uniqueness race, unrelated 400 propagation, inaccessible epic, and pre-HTTP ID validation; Debug build passed with 0 warnings/errors. Previous Step 1 commit: `6d3f2d3`. | Implement link_user_story_to_epic API behavior / current step commit |
 | 3 | Not started | — | Expose link_user_story_to_epic MCP interface / pending |
 | 4 | Not started | — | Verify link_user_story_to_epic workflow / pending |
 
