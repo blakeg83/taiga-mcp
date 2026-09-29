@@ -1,7 +1,7 @@
 # Goal 10: unlink_user_story_from_epic
 
-Status: planned; Step 1 contract specification is complete; implementation and
-public exposure remain planned until later checkpoints.
+Status: planned; Steps 1–2 are complete; public exposure and final verification
+remain planned until later checkpoints.
 
 ## Objective
 
@@ -59,13 +59,13 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Add no-content transport and unlink API
 
-- [ ] Add a narrowly named TaigaTransport no-content send method using operation-scoped factory clients, AuthClient, safe status checks, and response disposal.
-- [ ] Handle expected empty success without JSON parsing; keep existing ReadAsync behavior strict for JSON endpoints. Reuse shared send/error rules without weakening status validation.
-- [ ] Extend EpicApi to validate IDs and issue DELETE only to the nested path; return a removal receipt after confirmed success.
-- [ ] Preserve existing one-replay-only behavior for a received 401; ambiguous deletion/response failures remain potentially applied and are not replayed.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement unlink_user_story_from_epic API behavior`.
+- [x] Add a narrowly named TaigaTransport no-content send method using operation-scoped factory clients, AuthClient, safe status checks, and response disposal.
+- [x] Handle expected empty success without JSON parsing; keep existing ReadAsync behavior strict for JSON endpoints. Reuse shared send/error rules without weakening status validation.
+- [x] Extend EpicApi to validate IDs and issue DELETE only to the nested path; return a removal receipt after confirmed success.
+- [x] Preserve existing one-replay-only behavior for a received 401; ambiguous deletion/response failures remain potentially applied and are not replayed.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement unlink_user_story_from_epic API behavior`.
 
 ## Step 3: Expose relationship removal
 
@@ -130,10 +130,28 @@ Step 1 contract decisions and source evidence:
   unexpected successful body, and the planned cancellation/transport-failure
   cases without introducing future-behavior stubs.
 
+Step 2 implementation and validation:
+
+- `TaigaTransport.SendNoContentAsync` obtains and disposes one named factory
+  client per operation, delegates authentication/status/error handling to the
+  existing path, accepts only HTTP 204, and never parses the response body.
+  Existing JSON reads remain unchanged and strict.
+- `EpicApi.UnlinkUserStoryFromEpicAsync` validates both positive IDs, sends
+  exactly `DELETE epics/{epicId}/related_userstories/{userStoryId}`, and returns
+  the receipt only after the transport confirms 204. It performs no relationship
+  lookup, parent/story read, PATCH, or retry after an ambiguous failure.
+- Focused validation:
+  `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore
+  --filter "FullyQualifiedName~TransportTests|FullyQualifiedName~EpicStoryUnlink"`
+  passed 36 tests with 0 failures, 0 skipped, and no warnings. Coverage includes
+  204 body non-parsing/disposal, 403/404 safe errors, unexpected success status,
+  one 401 replay, cancellation, transport failure, ID validation, and exact
+  nested request ownership. The Debug build completed as part of that command.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline: 471 focused tests passed. Pinned source revision and nested DELETE/204 semantics recorded above; fixture-only tests pass. | Specify unlink_user_story_from_epic contracts / pending |
-| 2 | Not started | — | Implement unlink_user_story_from_epic API behavior / pending |
+| 1 | Complete | Baseline: 471 focused tests passed. Pinned source revision and nested DELETE/204 semantics recorded above; fixture-only tests pass. | Specify unlink_user_story_from_epic contracts / `27f1657` |
+| 2 | Complete | Focused transport/API tests: 36 passed; no warnings. 204 no-content ownership, status/error handling, cancellation, one-401 replay, exact DELETE path, receipt, and ambiguous-failure behavior recorded above. | Implement unlink_user_story_from_epic API behavior / pending |
 | 3 | Not started | — | Expose unlink_user_story_from_epic MCP tool / pending |
 | 4 | Not started | — | Verify unlink_user_story_from_epic workflows / pending |
 

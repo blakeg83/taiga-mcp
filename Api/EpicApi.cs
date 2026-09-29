@@ -227,6 +227,27 @@ public sealed class EpicApi
         }
     }
 
+    public async Task<EpicUserStoryUnlinkDto> UnlinkUserStoryFromEpicAsync(
+        int epicId,
+        int userStoryId,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(epicId, nameof(epicId));
+        InputValidation.Positive(userStoryId, nameof(userStoryId));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"epics/{epicId}/related_userstories/{userStoryId}");
+        await _transport.SendNoContentAsync(request, cancellationToken);
+
+        return new EpicUserStoryUnlinkDto
+        {
+            EpicId = epicId,
+            UserStoryId = userStoryId,
+            Removed = true
+        };
+    }
+
     private async Task<EpicUserStoryLinkDto?> TryGetUserStoryLinkAsync(
         int epicId,
         int userStoryId,
