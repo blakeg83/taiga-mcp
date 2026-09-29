@@ -98,6 +98,99 @@ public sealed class WorkItemHistoryTests
     }
 
     [Fact]
+    public async Task ListWorkItemHistoryPage_PreservesContinuationForAnEmptyVisiblePage()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/history/epic/301",
+                "[{\"id\":\"hidden\",\"type\":1,\"is_hidden\":true,\"created_at\":\"2026-09-28T12:00:00Z\"}]",
+                headers: new Dictionary<string, string>
+                {
+                    ["x-pagination-count"] = "4",
+                    ["x-pagination-next"] = "https://fake.taiga.test/api/v1/history/epic/301?page=2",
+                    ["x-paginated"] = "true"
+                });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListWorkItemHistoryPageAsync(WorkItemKind.epic, 301);
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Total);
+            Assert.Equal(2, page.NextPage);
+            Assert.True(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListWorkItemHistoryPage_RedactsEscapedDeletedTextAndOmitsUnsafeChanges()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/history/issue/42",
+                """
+                [
+                  {
+                    "id":"escaped-deleted",
+                    "type":1,
+                    "comment":"deleted\nsecret ✓",
+                    "delete_comment_date":"2026-09-28T12:00:00Z",
+                    "diff":{"safe":["before","deleted\\nsecret ✓"],"nullable":null},
+                    "values_diff":{"nested":{"payload":"deleted\\nsecret ✓","kept":true}},
+                    "created_at":"2026-09-28T12:00:00Z"
+                  },
+                  {
+                    "id":"unsafe-deleted",
+                    "type":1,
+                    "comment":"deleted",
+                    "delete_comment_date":"2026-09-28T12:01:00Z",
+                    "diff":"deleted",
+                    "created_at":"2026-09-28T12:01:00Z"
+                  }
+                ]
+                """);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListWorkItemHistoryPageAsync(WorkItemKind.issue, 42);
+
+            var escaped = Assert.Single(page.Items);
+            Assert.Equal("escaped-deleted", escaped.Id);
+            Assert.True(escaped.CommentDeleted);
+            var safeChanges = escaped.Diff!.Value.GetProperty("safe");
+            Assert.Single(safeChanges.EnumerateArray());
+            Assert.Equal("before", safeChanges[0].GetString());
+            Assert.Equal(JsonValueKind.Null, escaped.Diff.Value.GetProperty("nullable").ValueKind);
+            var nestedChanges = escaped.ValuesDiff!.Value.GetProperty("nested");
+            Assert.True(nestedChanges.GetProperty("kept").GetBoolean());
+            Assert.False(nestedChanges.TryGetProperty("payload", out _));
+        }
+    }
+
+    [Fact]
+    public async Task ListWorkItemHistoryPage_PropagatesPermissionFailureSafely()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/history/task/203",
+                "{\"detail\":\"history secret\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListWorkItemHistoryPageAsync(WorkItemKind.task, 203));
+
+            Assert.Contains("403", exception.Message);
+            Assert.Contains("permission denied", exception.Message);
+            Assert.DoesNotContain("history secret", exception.Message);
+        }
+    }
+
+    [Fact]
     public async Task ListWorkItemHistoryPage_RejectsMalformedRequiredData()
     {
         var handler = new FakeHttpMessageHandler()

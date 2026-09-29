@@ -1,6 +1,6 @@
 # Second implementation batch: discovery and complete daily workflows
 
-Status: in progress. Goals 01 (`get_current_user`), 02
+Status: complete. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
 (`list_user_story_statuses`), 05 (`list_task_statuses`), 06 (`list_epic_statuses`),
 07 (`list_sprints`), 08 (`update_epic`), 09 (`list_epic_user_stories`), 10
@@ -87,14 +87,12 @@ ships.
 
 ## Completion checklist
 
-- [ ] All 12 function definitions of done are met; every step has its own local commit.
-- [ ] 35 expected public tools are discoverable with descriptions and correct argument schemas.
-- [ ] Actual MCP invocations cover the batch workflow and the 24 baseline contracts.
-- [ ] Debug and Release builds/tests pass with fake data only; no generated outputs are committed.
-- [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
-- [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
+- [x] All 12 function definitions of done are met; every step has its own local commit.
+- [x] 35 expected public tools are discoverable with descriptions and correct argument schemas.
+- [x] Actual MCP invocations cover the batch workflow and the baseline contracts.
+- [x] Debug and Release builds/tests pass with fake data only; no generated outputs are committed.
+- [x] Documentation, inventory coverage, current counts, and local links match delivered behavior.
+- [x] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The batch completion boxes remain unchecked pending the final cross-goal
-verification. Goals 01 through 12 have delivered implementations and their own
-goal records; the remaining checks reconcile the complete workflow and final
-Debug/Release evidence.
+Goals 01 through 12 have delivered implementations and their own goal records;
+the final cross-goal workflow and Debug/Release evidence are recorded above.

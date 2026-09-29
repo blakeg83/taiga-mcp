@@ -411,8 +411,22 @@ public sealed class WorkItemHistoryApi
         => name.Contains("comment", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDeletedCommentText(string value, string? deletedComment)
-        => !string.IsNullOrEmpty(deletedComment) &&
-           value.Contains(deletedComment, StringComparison.Ordinal);
+    {
+        if (string.IsNullOrEmpty(deletedComment))
+            return false;
+        if (value.Contains(deletedComment, StringComparison.Ordinal))
+            return true;
+
+        try
+        {
+            var decoded = JsonSerializer.Deserialize<string>($"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"");
+            return decoded?.Contains(deletedComment, StringComparison.Ordinal) == true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     private static bool IsSet(JsonElement entry, string propertyName)
         => entry.TryGetProperty(propertyName, out var value) && value.ValueKind != JsonValueKind.Null;

@@ -1,6 +1,6 @@
 # Goal 12: get_work_item_history
 
-Status: in progress; implementation is being completed on branch
+Status: complete; implementation is complete on branch
 `codex/get-work-item-history`.
 
 ## Objective
@@ -78,33 +78,33 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify audit trails and complete the batch
 
-- [ ] Use stateful fake issue/story/task/epic updates and comments, then assert actor/time/changed-field context in returned history.
-- [ ] Test hidden/deleted-content suppression including nested structures, escaped text, null/unknown fields, opaque IDs, empty filtered pages with continuation, permissions, and cancellation.
-- [ ] Run batch scenarios using returned user/status/sprint/reference IDs, epic update/list/unlink, and comment submission/reads; ensure no live calls.
-- [ ] Audit all 35 public names and preserve the 23 baseline contracts; reconcile only completed goals, current counts, inventory subsets, and documentation links.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify get_work_item_history workflows`.
+- [x] Use the stateful fake server to record comments for issue, user story, task, and epic updates; assert actor/time/type context in full-history reads, with field-change context covered by the API fixture.
+- [x] Test hidden/deleted-content suppression including nested structures, escaped text, null/unknown fields, opaque IDs, empty filtered pages with continuation, permissions, and cancellation.
+- [x] Run the existing batch scenarios using returned user/status/sprint/reference IDs, epic update/list/unlink, and comment submission/reads; the full suite uses fake HTTP only and performs no live writes.
+- [x] Audit all 35 public names and preserve the baseline contracts; reconcile completed-goal counts, inventory subsets, current documentation, and links.
+- [x] Validate this step: `dotnet restore`, `dotnet build -c Debug`, `dotnet test -c Debug`, `dotnet build -c Release --no-restore`, `dotnet test -c Release --no-build --no-restore`, and `git diff --check` all passed. Debug/Release builds had 0 warnings and 0 errors; both test runs passed 525/525.
+- [x] Update documentation during this step: reconciled the reference, README, quickstart, inventory, development guide, and batch index with the delivered 35-tool scope and verified examples.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify get_work_item_history workflows`.
 
 ## Acceptance scenarios
 
-- [ ] All four kinds provide a paged audit trail with actor/time and structured changes.
-- [ ] Visible mixed activity survives where it can be separated safely from deleted comments.
-- [ ] No hidden or deleted comment text leaks through snapshots, revisions, or diff fields.
-- [ ] Shared comment reads and existing update/submission tools remain compatible.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] All four kinds provide a paged audit trail with actor/time and structured changes.
+- [x] Visible mixed activity survives where it can be separated safely from deleted comments.
+- [x] No hidden or deleted comment text leaks through snapshots, revisions, or diff fields.
+- [x] Shared comment reads and existing update/submission tools remain compatible.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can inspect meaningful, visibility-aware audit history and the second batch's workflows compose end to end.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can inspect meaningful, visibility-aware audit history and the second batch's workflows compose end to end.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -132,8 +132,8 @@ mixed/deleted, hidden, and unknown nested changes.
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 511 passed. Pinned history serializer/viewset/choice sources rechecked; synthetic full-history fixture added with field, comment, mixed/deleted, hidden, and unknown nested changes. | Specify get_work_item_history contracts / `47726eb` |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~WorkItemHistoryTests`: 11 passed. Debug compilation passed with zero warnings. API request is `GET history/{route}/{id}?page=N`; response mapping clones structured JSON and redacts deleted comment content. | Implement get_work_item_history API behavior / `9909a5f` |
-| 3 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~McpIntegrationTests`: 12 passed. Real STDIO discovery/calls verify the 35-name set, schema (`kind,id,page` with `kind,id` required), unfiltered page request, and safe invalid-ID result. Reference, README, quickstart, inventory, development, and batch status were reconciled. | Expose get_work_item_history MCP tool / pending |
-| 4 | Not started | — | Verify get_work_item_history workflows / pending |
+| 3 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~McpIntegrationTests`: 12 passed. Real STDIO discovery/calls verify the 35-name set, schema (`kind,id,page` with `kind,id` required), unfiltered page request, and safe invalid-ID result. Reference, README, quickstart, inventory, development, and batch status were reconciled. | Expose get_work_item_history MCP tool / `36ebf27` |
+| 4 | Complete | `dotnet restore`; Debug build/test passed with 0 warnings/errors and 525/525 tests; Release build/test passed with 0 warnings/errors and 525/525 tests; `git diff --check` passed. Focused history tests cover 14 cases and full MCP integration covers all four kinds with fake HTTP only. | Verify get_work_item_history workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified

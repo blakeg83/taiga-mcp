@@ -1085,10 +1085,10 @@ temporary output directory without stopping that process:
 dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation\ -p:UseAppHost=false
 ```
 
-The MCP integration fixture launches the built application with
+At the earlier 33-tool foundation baseline, the MCP integration fixture launched the built application with
 `StdioClientTransport`, points its configured base URL at a local fake HTTP
 listener, and uses `McpClientFactory.CreateAsync` with the installed
-`0.3.0-preview.4` SDK. It verifies the complete 33-name `tools/list` result,
+`0.3.0-preview.4` SDK and verified the then-current 33-name `tools/list` result,
 the required/optional schema entries, a real `list_projects` `tools/call`, and
 that a fake HTTP 500 is returned as a tool result with `IsError=true`. The
 fixture also tees the child process's raw STDOUT before the SDK sees it and
