@@ -1,6 +1,6 @@
 # Goal 08: update_epic
 
-Status: in progress; Step 1 completed.
+Status: in progress; Steps 1–2 completed.
 
 ## Objective
 
@@ -51,19 +51,19 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 - [x] Compare existing issue/story/task update payload construction and reuse its omission/clearing conventions.
 - [x] Add fixtures for status-only edits, unassignment, empty description/tags, color changes, and comment-only calls.
-- [ ] Require positive IDs, nonnegative version, a real change/nonblank comment, nonblank supplied subject, and no set/clear collision; let Taiga validate color formats.
+- [x] Require positive IDs, nonnegative version, a real change/nonblank comment, nonblank supplied subject, and no set/clear collision; let Taiga validate color formats.
 - [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
 - [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
 - [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify update_epic contracts`.
 
 ## Step 2: Implement versioned epic PATCH
 
-- [ ] Construct a minimal presence-aware payload with exact supplied version and assigned_to:null only when explicitly cleared.
-- [ ] Reuse MapEpicDetail; report post-write parse/mapping failure as potentially applied and preserve bounded safe version/status errors.
-- [ ] Do not refresh entity versions or touch project settings, linked stories, or relationship order; retain only existing received-401 auth replay.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement update_epic API behavior`.
+- [x] Construct a minimal presence-aware payload with exact supplied version and assigned_to:null only when explicitly cleared.
+- [x] Reuse MapEpicDetail; report post-write parse/mapping failure as potentially applied and preserve bounded safe version/status errors.
+- [x] Do not refresh entity versions or touch project settings, linked stories, or relationship order; retain only existing received-401 auth replay.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement update_epic API behavior`.
 
 ## Step 3: Expose epic editing
 
@@ -110,7 +110,7 @@ deployment version from upstream source alone.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Starting commit `4b4d896`; baseline `dotnet test -c Debug`: 422 passed. Focused contract fixtures cover status-only, explicit assignee clearing, empty description/tags, color, and comment-only payloads. The pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the epic writable fields and OCC version requirement; no source deviation was found. | Specify update_epic contracts / pending |
-| 2 | Not started | — | Implement update_epic API behavior / pending |
+| 2 | Complete | Previous step `1d9ee50`. `UpdateEpicAsync` sends only selected fields plus the exact caller version, supports explicit assignee clearing, maps the authoritative PATCH response, preserves safe 400/409/403/404 errors, and never performs a read/retry after an ambiguous write. Focused `FullyQualifiedName~EpicUpdate` tests: 26 passed; `dotnet build -c Debug --no-restore`: 0 warnings/errors. | Implement update_epic API behavior / pending |
 | 3 | Not started | — | Expose update_epic MCP tool / pending |
 | 4 | Not started | — | Verify update_epic workflows / pending |
 
@@ -132,6 +132,21 @@ defines `subject`, `description`, `status`, `assigned_to`, `color`, and tags,
 while `OCCResourceMixin` requires a nonnegative caller version and returns the
 authoritative incremented version. `epics_order`, requirement flags, blocking,
 dates, custom fields, and relationships remain out of scope.
+
+### Step 2 implementation evidence
+
+`EpicApi.UpdateEpicAsync` now issues one `PATCH epics/{epicId}` with a minimal
+presence-aware JSON body. It validates positive IDs, nonnegative versions,
+nonblank supplied subjects, positive optional IDs, supported clear names, and
+set/clear collisions before HTTP. Empty descriptions and tag arrays are valid
+explicit values; blank comments do not satisfy a comment-only update. The
+returned document is mapped through the existing `MapEpicDetail`, so the
+server's identity and version are authoritative. Transport/status failures
+remain bounded safe `TaigaRequestException` values; successful-response mapping
+failures explicitly warn that the write may already have applied. No automatic
+version refresh, read-modify-write, relationship change, or project mutation is
+performed. The public MCP tool and public documentation remain planned until
+Step 3.
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
