@@ -1,6 +1,7 @@
 # Goal 10: unlink_user_story_from_epic
 
-Status: planned; not implemented by this document.
+Status: planned; Step 1 contract specification is complete; implementation and
+public exposure remain planned until later checkpoints.
 
 ## Objective
 
@@ -49,12 +50,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify DELETE success and ownership
 
-- [ ] Verify nested deletion semantics and expected 204 status from the pinned viewset/base CRUD path before coding.
-- [ ] Add fixtures for 204 empty content, 403/404, 401 then 204, unexpected responses, cancellation, and transport failure.
-- [ ] Define no version parameter for this relationship operation; do not infer an absent/access-denied parent from a 404.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify unlink_user_story_from_epic contracts`.
+- [x] Verify nested deletion semantics and expected 204 status from the pinned viewset/base CRUD path before coding.
+- [x] Add fixtures for 204 empty content, 403/404, 401 then 204, unexpected responses, cancellation, and transport failure.
+- [x] Define no version parameter for this relationship operation; do not infer an absent/access-denied parent from a 404.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify unlink_user_story_from_epic contracts`.
 
 ## Step 2: Add no-content transport and unlink API
 
@@ -107,12 +108,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `c51bfd1adda74b52a44dd42135a25c4800f255fc` on
+`codex/unlink-user-story-from-epic`. Baseline focused validation:
+`dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug` passed with
+471 tests, 0 failures, 0 skipped. Source/deployment evidence: the pinned
+Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was checked
+read-only; this is not a live deployment claim.
+
+Step 1 contract decisions and source evidence:
+
+- `EpicRelatedUserStoryViewSet` declares `lookup_field = "user_story"` and is
+  nested under the epic, so the operation is `DELETE
+  epics/{epicId}/related_userstories/{userStoryId}`.
+- The viewset inherits `ModelCrudViewSet`; its pinned destroy mixin resolves the
+  nested object, checks permissions, deletes only that relationship, and returns
+  `response.NoContent()` (HTTP 204 with no JSON body).
+- Missing or inaccessible relationships remain server errors (404/403); a 404
+  is not interpreted as an already-successful unlink. The operation has no
+  version argument and performs no parent/story preflight lookup.
+- Step 1 fixtures cover empty 204 success, safe 403/404/401 detail objects, an
+  unexpected successful body, and the planned cancellation/transport-failure
+  cases without introducing future-behavior stubs.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify unlink_user_story_from_epic contracts / pending |
+| 1 | Complete | Baseline: 471 focused tests passed. Pinned source revision and nested DELETE/204 semantics recorded above; fixture-only tests pass. | Specify unlink_user_story_from_epic contracts / pending |
 | 2 | Not started | — | Implement unlink_user_story_from_epic API behavior / pending |
 | 3 | Not started | — | Expose unlink_user_story_from_epic MCP tool / pending |
 | 4 | Not started | — | Verify unlink_user_story_from_epic workflows / pending |
