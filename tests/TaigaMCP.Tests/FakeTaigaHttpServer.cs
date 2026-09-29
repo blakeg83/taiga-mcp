@@ -147,6 +147,29 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/by_ref", StringComparison.OrdinalIgnoreCase))
+        {
+            if (request.Url?.Query.Contains("project=999", StringComparison.Ordinal) == true)
+            {
+                await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"synthetic missing reference\"}");
+                return;
+            }
+
+            var responseBody = path switch
+            {
+                "/api/v1/issues/by_ref" => "{\"id\":42,\"ref\":42,\"project\":123,\"subject\":\"Resolved issue\",\"version\":1}",
+                "/api/v1/userstories/by_ref" => "{\"id\":102,\"ref\":42,\"project\":123,\"subject\":\"Resolved story\",\"version\":4}",
+                "/api/v1/tasks/by_ref" => "{\"id\":203,\"ref\":42,\"project\":123,\"subject\":\"Resolved task\",\"version\":2}",
+                "/api/v1/epics/by_ref" => "{\"id\":301,\"ref\":42,\"project\":123,\"subject\":\"Resolved epic\",\"version\":4}",
+                _ => null
+            };
+            await RespondAsync(
+                context.Response,
+                responseBody is null ? HttpStatusCode.NotFound : HttpStatusCode.OK,
+                responseBody ?? "{\"detail\":\"not found\"}");
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/projects", StringComparison.OrdinalIgnoreCase))
         {
             if (ProjectsStatusCode != HttpStatusCode.OK)

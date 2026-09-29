@@ -596,6 +596,7 @@ public sealed class McpIntegrationTests
                 "list_tasks",
                 "list_user_stories",
                 "resolve_project",
+                "resolve_work_item",
                 "update_issue",
                 "update_task",
                 "update_user_story"
@@ -774,6 +775,87 @@ public sealed class McpIntegrationTests
             var commentRequired = addWorkItemComment.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "kind", "id", "version", "text" }, commentRequired);
+
+            var resolveWorkItem = Assert.Single(tools, tool => tool.Name == "resolve_work_item");
+            var resolveProperties = resolveWorkItem.JsonSchema.GetProperty("properties").EnumerateObject().ToArray();
+            Assert.Equal(new[] { "projectId", "kind", "ref" }, resolveProperties.Select(property => property.Name));
+            Assert.Equal(
+                new[] { "issue", "user_story", "task", "epic" },
+                resolveProperties.Single(property => property.Name == "kind").Value.GetProperty("enum")
+                    .EnumerateArray().Select(value => value.GetString()));
+            var resolveRequired = resolveWorkItem.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId", "kind", "ref" }, resolveRequired);
+            Assert.DoesNotContain("cancellationToken", resolveProperties.Select(property => property.Name));
+
+            var expectedResolvedIds = new Dictionary<string, int>
+            {
+                ["issue"] = 42,
+                ["user_story"] = 102,
+                ["task"] = 203,
+                ["epic"] = 301
+            };
+            var expectedRoutes = new Dictionary<string, string>
+            {
+                ["issue"] = "issues",
+                ["user_story"] = "userstories",
+                ["task"] = "tasks",
+                ["epic"] = "epics"
+            };
+            foreach (var expected in expectedResolvedIds)
+            {
+                var resolved = await client.CallToolAsync(
+                    "resolve_work_item",
+                    new Dictionary<string, object?>
+                    {
+                        ["projectId"] = 123,
+                        ["kind"] = expected.Key,
+                        ["ref"] = 42
+                    },
+                    cancellationToken: protocolDeadline.Token);
+                Assert.False(resolved.IsError == true, GetText(resolved));
+                var resolvedJson = JsonSerializer.Deserialize<JsonElement>(GetText(resolved));
+                Assert.Equal(expected.Key, resolvedJson.GetProperty("kind").GetString());
+                Assert.Equal(expected.Value, resolvedJson.GetProperty("id").GetInt32());
+                Assert.Equal(42, resolvedJson.GetProperty("ref").GetInt32());
+                Assert.Equal(123, resolvedJson.GetProperty("project").GetInt32());
+                Assert.Contains(
+                    taiga.Requests,
+                    request => request.Method == "GET" &&
+                               request.PathAndQuery == $"/api/v1/{expectedRoutes[expected.Key]}/by_ref?project=123&ref=42");
+            }
+
+            async Task<string> CallResolverBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "resolve_work_item",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
+            var resolverRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.Contains("/by_ref?", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallResolverBoundaryAsync(new Dictionary<string, object?>
+            {
+                ["projectId"] = 123,
+                ["kind"] = "task"
+            }));
+            Assert.Equal("error_result", await CallResolverBoundaryAsync(new Dictionary<string, object?>
+            {
+                ["projectId"] = 123,
+                ["kind"] = "task",
+                ["ref"] = null
+            }));
+            Assert.Equal(resolverRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.Contains("/by_ref?", StringComparison.Ordinal)));
 
             var result = await client.CallToolAsync(
                 "list_projects",
@@ -1053,7 +1135,7 @@ public sealed class McpIntegrationTests
             Assert.Equal(55, task.GetProperty("milestone").GetInt32());
             Assert.True(taskEnvelope.GetProperty("total").GetInt32() == 1);
             var taskRequest = Assert.Single(taiga.Requests, request =>
-                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/tasks", StringComparison.Ordinal));
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/tasks?project=", StringComparison.Ordinal));
             Assert.Equal(
                 "/api/v1/tasks?project=123&page=2&status=11&user_story=102&milestone=55&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 taskRequest.PathAndQuery);
@@ -1418,6 +1500,96 @@ public sealed class McpIntegrationTests
             Assert.Contains("404", GetText(missingTask));
             Assert.Contains("resource not found", GetText(missingTask), StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("synthetic task update secret", GetText(missingTask));
+        }
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
+    [Fact]
+    public async Task ProductionServer_ResolvesTaskThenReadsAndUpdatesItsInternalId()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using (var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token))
+        {
+            async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
+                => await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
+
+            var resolved = await Call("resolve_work_item", new()
+            {
+                ["projectId"] = 123,
+                ["kind"] = "task",
+                ["ref"] = 42
+            });
+            Assert.False(resolved.IsError == true, GetText(resolved));
+            var resolvedJson = JsonSerializer.Deserialize<JsonElement>(GetText(resolved));
+            Assert.Equal("task", resolvedJson.GetProperty("kind").GetString());
+            Assert.Equal(203, resolvedJson.GetProperty("id").GetInt32());
+            Assert.Equal(42, resolvedJson.GetProperty("ref").GetInt32());
+
+            var detail = await Call("get_task", new()
+            {
+                ["taskId"] = resolvedJson.GetProperty("id").GetInt32()
+            });
+            Assert.False(detail.IsError == true, GetText(detail));
+            var detailJson = JsonSerializer.Deserialize<JsonElement>(GetText(detail));
+            var version = detailJson.GetProperty("version").GetInt32();
+            Assert.Equal(2, version);
+
+            var update = await Call("update_task", new()
+            {
+                ["taskId"] = resolvedJson.GetProperty("id").GetInt32(),
+                ["version"] = version,
+                ["status"] = 11
+            });
+            Assert.False(update.IsError == true, GetText(update));
+            Assert.Equal(3, JsonSerializer.Deserialize<JsonElement>(GetText(update)).GetProperty("version").GetInt32());
+
+            using var patch = JsonDocument.Parse(
+                taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203").Body);
+            Assert.Equal(2, patch.RootElement.GetProperty("version").GetInt32());
+
+            var byRefRequestsBeforeFailures = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.Contains("/by_ref?", StringComparison.Ordinal));
+            var missing = await Call("resolve_work_item", new()
+            {
+                ["projectId"] = 999,
+                ["kind"] = "task",
+                ["ref"] = 42
+            });
+            Assert.True(missing.IsError);
+            Assert.Contains("404", GetText(missing));
+            Assert.Contains("resource not found", GetText(missing), StringComparison.OrdinalIgnoreCase);
+
+            var invalidProject = await Call("resolve_work_item", new()
+            {
+                ["projectId"] = 0,
+                ["kind"] = "task",
+                ["ref"] = 42
+            });
+            Assert.True(invalidProject.IsError);
+            var invalidKind = await Call("resolve_work_item", new()
+            {
+                ["projectId"] = 123,
+                ["kind"] = "wrong_kind",
+                ["ref"] = 42
+            });
+            Assert.True(invalidKind.IsError);
+            var invalidRef = await Call("resolve_work_item", new()
+            {
+                ["projectId"] = 123,
+                ["kind"] = "task",
+                ["ref"] = 0
+            });
+            Assert.True(invalidRef.IsError);
+            Assert.Equal(
+                byRefRequestsBeforeFailures + 1,
+                taiga.Requests.Count(request =>
+                    request.Method == "GET" && request.PathAndQuery.Contains("/by_ref?", StringComparison.Ordinal)));
         }
 
         await process.DisposeAsync();
