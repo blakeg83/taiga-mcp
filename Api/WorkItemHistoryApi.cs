@@ -147,11 +147,22 @@ public sealed class WorkItemHistoryApi
         bool? headerValue,
         BodyPageInfo bodyInfo)
         => MergeValue(
-            HasHeader(headers, "x-pagination-next") || HasHeader(headers, "x-paginated"),
+            HasMeaningfulHasMoreHeader(headers),
             headerValue,
             bodyInfo.HasNext,
             bodyInfo.NextIsValid,
             bodyInfo.HasMore);
+
+    private static bool HasMeaningfulHasMoreHeader(IReadOnlyDictionary<string, string[]> headers)
+    {
+        if (HasHeader(headers, "x-pagination-next"))
+            return true;
+
+        if (!headers.TryGetValue("x-paginated", out var values) || values.FirstOrDefault() is not { } value)
+            return false;
+
+        return bool.TryParse(value, out var paginated) && !paginated;
+    }
 
     private static T? MergeValue<T>(
         bool headerPresent,

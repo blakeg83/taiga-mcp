@@ -69,10 +69,12 @@ invented ID.
 
 Pagination metadata describes the upstream selected history page before local
 visibility filtering. Therefore an empty `items` array can still have a
-`next_page`. The client uses Taiga pagination headers and a verified
-`{count,next,results}` body fallback when headers are absent; malformed or
-conflicting metadata remains `null`. It never fetches later pages to fill a
-filtered result.
+`next_page`. The pinned Taiga backend returns an array body and pagination
+headers. The client also accepts the exact `{count,next,results}` body shape
+specified by the shared batch contract as a defensive compatibility path when
+matching headers are absent; this fallback is not claimed as pinned-backend
+behavior. Malformed or conflicting metadata remains `null`. It never fetches
+later pages to fill a filtered result.
 
 For example:
 
@@ -91,9 +93,10 @@ The tool performs no writes, history revision reads, or hidden-content access.
 This contract was checked on 2026-09-29 against pinned taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`: the [history viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/api.py)
 maps the four route kinds, applies `type=comment`, orders newest first, and
-uses paginated `results`; the [history serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/serializers.py)
-supplies the actor and edit/deletion fields. This is pinned source evidence,
-not a deployed-version claim.
+uses an array body with pagination headers from the [pagination mixin](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/base/api/pagination.py); the [history serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/serializers.py)
+supplies the actor and edit/deletion fields. The compatible object-body fallback
+above is a client contract, not a claim about this pinned source or a live
+deployment.
 
 The `list_epics` and `get_epic` contracts are source-verified and their
 domain APIs/MCP wrappers are implemented. `list_epics` has the signature

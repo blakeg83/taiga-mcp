@@ -134,6 +134,46 @@ public sealed class WorkItemCommentReadTests
     }
 
     [Fact]
+    public async Task ListWorkItemCommentsPage_UsesBodyLastPageEvidenceWhenPaginatedHeaderHasNoNext()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/history/task/203",
+                "{\"count\":1,\"next\":null,\"results\":[]}",
+                headers: new Dictionary<string, string> { ["x-paginated"] = "true" });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListWorkItemCommentsPageAsync(WorkItemKind.task, 203);
+
+            Assert.Equal(1, page.Total);
+            Assert.Null(page.NextPage);
+            Assert.False(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListWorkItemCommentsPage_UsesBodyContinuationWhenPaginatedHeaderHasNoNext()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/history/task/203",
+                "{\"count\":3,\"next\":\"https://fake.taiga.test/api/v1/history/task/203?type=comment&page=2\",\"results\":[]}",
+                headers: new Dictionary<string, string> { ["x-paginated"] = "true" });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListWorkItemCommentsPageAsync(WorkItemKind.task, 203);
+
+            Assert.Equal(3, page.Total);
+            Assert.Equal(2, page.NextPage);
+            Assert.True(page.HasMore);
+        }
+    }
+
+    [Fact]
     public async Task ListWorkItemCommentsPage_UsesNullNextAsLastPageEvidence()
     {
         var handler = new FakeHttpMessageHandler()

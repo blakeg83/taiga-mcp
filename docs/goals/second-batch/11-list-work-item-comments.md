@@ -116,10 +116,12 @@ Step 1 contract decisions: history reads use `history/{kind-route}/{id}` with
 `type=comment` and an explicit `page` query. The enum value `user_story` maps to
 the upstream route token `userstory`; the other route tokens are `issue`,
 `task`, and `epic`. The pinned `HistoryViewSet` excludes empty comments for this
-filter, orders newest first, and returns a paginated `results` body whenever a
-page is requested. Response headers remain authoritative when present; a
-verified body `{count,next,results}` shape is the fallback when headers are
-absent. Unknown or conflicting metadata remains null. Local filtering removes
+filter, orders newest first, and returns an array body with pagination headers
+when a page is requested. The client also has a narrowly validated
+`{count,next,results}` compatibility fallback from the shared batch contract;
+that object-body form is not claimed as pinned-backend behavior. Response
+headers remain authoritative when meaningful; unknown or conflicting metadata
+remains null. Local filtering removes
 hidden entries, blank/whitespace comments, and comments with either deletion
 marker; envelope metadata still describes the upstream page, so visible `items`
 may be empty while `next_page` remains set. Returned text is the raw comment;
@@ -135,10 +137,12 @@ UUID-like entry cases. No public behavior is exposed in this checkpoint.
 
 Step 2 implementation decisions: `WorkItemHistoryApi` owns the shared comment
 read and exposes an internal page result for tools. It accepts Taiga's array
-response and the pinned paginated `{count,next,results}` body. Header metadata
-is used when it is the only source; a body field is used only when the matching
-header is absent, and malformed or conflicting metadata remains null. A valid
-body `next: null` is explicit last-page evidence (`has_more=false`). Comment
+response with pinned pagination headers and the exact compatible
+`{count,next,results}` body fallback. Header metadata is used when it is the
+only source; a body field is used when the matching header is absent or only
+`x-paginated: true` is present without a next URL, and malformed or conflicting
+metadata remains null. A valid body `next: null` is explicit last-page evidence
+(`has_more=false`). Comment
 mapping filters hidden entries, whitespace-only/non-string comments, and either
 deletion marker before validating visible entry identity/timestamp. It preserves
 raw comment text and only maps safe user `pk`, `name`, `username`, and
@@ -174,27 +178,29 @@ comment-only PATCHes and serves the resulting history for all four route kinds.
 The real MCP workflow submits and reads back Markdown/Unicode comments with
 opaque IDs and safe actor identity. Focused/API fixtures cover hidden, deleted,
 blank, whitespace-preserving, edited, inactive, missing-actor, UUID-like, and
-filtered-empty pages; they also cover header/body pagination fallback,
+filtered-empty pages; they also cover array/header pagination and the narrow
+compatible header/body fallback,
 last-page `next=null`, malformed/conflicting metadata, 403/404, invalid input,
 pre-cancellation, response ownership, and no revision/full-page follow-up.
 The existing `get_issue` path and comment-submission tests remain unchanged.
 
 Final validation commands and results (2026-09-29): `dotnet restore` passed;
 `dotnet build -c Debug` passed with 0 warnings/errors and output under
-`bin/Debug/net8.0`; `dotnet test -c Debug` passed 509/509; `dotnet build -c
+`bin/Debug/net8.0`; `dotnet test -c Debug` passed 511/511; `dotnet build -c
 Release --no-restore` passed with 0 warnings/errors and output under
 `bin/Release/net8.0`; `dotnet test -c Release --no-build --no-restore` passed
-509/509; and `git diff --check` passed. One earlier Debug run exposed the
-stateful fake's history-key mismatch and was corrected before the final pass;
-no production behavior was weakened. Generated outputs remain ignored and no
-credentials or live Taiga data were used.
+511/511; and `git diff --check` passed. Review follow-up validation added
+mixed `x-paginated: true` plus body-continuation/final-page cases; all focused
+and full suites passed. The pinned backend evidence was corrected to distinguish
+its array-plus-header response from the optional compatible object-body fallback.
+Generated outputs remain ignored and no credentials or live Taiga data were used.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / `349e3b6` |
 | 2 | Complete | Focused `WorkItemCommentReadTests`: 17 passed at checkpoint; Debug build passed; DI/API/transport behavior recorded above. | Implement list_work_item_comments API behavior / `20c08d3` |
 | 3 | Complete | Real STDIO `tools/list`/`tools/call` integration passed; public docs and counts updated. | Expose list_work_item_comments MCP tool / `1e6d271` |
-| 4 | Complete | Stateful four-kind MCP read-back plus final 509-test Debug/Release validation and `git diff --check` passed. | Verify list_work_item_comments workflows / `f152f44` |
+| 4 | Complete | Stateful four-kind MCP read-back plus final 511-test Debug/Release validation, review fixes, and `git diff --check` passed. | Verify list_work_item_comments workflows / `f152f44` + review fix pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
