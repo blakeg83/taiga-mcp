@@ -1,10 +1,10 @@
 # Second implementation batch: discovery and complete daily workflows
 
 Status: in progress. Goals 01 (`get_current_user`), 02
-(`list_project_members`), 03 (`resolve_work_item`), and 04
-(`list_user_story_statuses`) are delivered; the remaining 8 functions below
+(`list_project_members`), 03 (`resolve_work_item`), 04
+(`list_user_story_statuses`), and 05 (`list_task_statuses`) are delivered; the remaining 7 functions below
 are planned and are not callable until their goals ship. Prepared 2026-09-29
-against the current 27-tool repository baseline after goal 04.
+against the current 28-tool repository baseline after goal 05.
 
 ## Objective
 
@@ -55,7 +55,7 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 27 tools; completing the remaining 8 yields
+New functions build on the existing 28 tools; completing the remaining 7 yields
 35 tools unless separately authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
@@ -91,7 +91,7 @@ ships.
 - [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 8 goals are intentionally unchecked.
-Goals 01 through 04 are delivered and have their own four-step evidence
+The completion boxes for the remaining 7 goals are intentionally unchecked.
+Goals 01 through 05 are delivered and have their own four-step evidence
 records; the remaining goal entries are still planning documents and do not
 claim implementation or new application test results.

@@ -193,6 +193,42 @@ public sealed class TaskApi
             new TaskListOptions { Page = page },
             cancellationToken)).Items;
 
+    public async Task<IReadOnlyList<TaskStatusDto>> ListTaskStatusesAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+        => (await ListTaskStatusesPageAsync(projectId, page, cancellationToken)).Items;
+
+    internal async Task<TaskStatusListPage> ListTaskStatusesPageAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"task-statuses?project={projectId}&page={page}");
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid task status list data.");
+
+        var items = new List<TaskStatusDto>(32);
+        foreach (var status in document.RootElement.EnumerateArray())
+        {
+            var mapped = MapTaskStatus(status);
+            if (mapped.Project.HasValue && mapped.Project.Value != projectId)
+                throw new TaigaRequestException("Taiga returned task status data for a different project.");
+
+            items.Add(mapped);
+        }
+
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new TaskStatusListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);
+    }
+
     internal async Task<TaskListPage> ListTasksPageAsync(
         int projectId,
         TaskListOptions options,
@@ -252,6 +288,84 @@ public sealed class TaskApi
             throw new ArgumentException("assigned_to cannot be set and cleared in the same update.");
 
         return clearAssignedTo;
+    }
+
+    private static TaskStatusDto MapTaskStatus(JsonElement status)
+    {
+        if (status.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid task status data.");
+
+        return new TaskStatusDto
+        {
+            Id = ReadTaskStatusRequiredPositiveInt(status, "id"),
+            Project = ReadTaskStatusOptionalPositiveInt(status, "project"),
+            Name = ReadTaskStatusOptionalString(status, "name"),
+            Slug = ReadTaskStatusOptionalString(status, "slug"),
+            Order = ReadTaskStatusOptionalInt(status, "order"),
+            Color = ReadTaskStatusOptionalString(status, "color"),
+            IsClosed = ReadTaskStatusOptionalBoolean(status, "is_closed")
+        };
+    }
+
+    private static int ReadTaskStatusRequiredPositiveInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid task status {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadTaskStatusOptionalPositiveInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid task status {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadTaskStatusOptionalInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+            throw new TaigaRequestException($"Taiga returned invalid task status {propertyName} data.");
+
+        return number;
+    }
+
+    private static string? ReadTaskStatusOptionalString(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.String)
+            throw new TaigaRequestException($"Taiga returned invalid task status {propertyName} data.");
+
+        return value.GetString();
+    }
+
+    private static bool? ReadTaskStatusOptionalBoolean(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            throw new TaigaRequestException($"Taiga returned invalid task status {propertyName} data.");
+
+        return value.GetBoolean();
     }
 
     private static TaskDto MapTask(JsonElement task)

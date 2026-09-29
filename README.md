@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 27 tools identify the current account, list projects and project members, resolve project and work-item references, discover story workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 28 tools identify the current account, list projects and project members, resolve project and work-item references, discover story and task workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -25,6 +25,7 @@ wire filters and envelope fields, including the current-user identity contract.
 
 - `list_user_stories(projectId, page, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?)`: List one page of backlog or sprint stories with explicit status/assignment/text filters; the default is an array and `includePageInfo` opts into pagination metadata.
 - `list_user_story_statuses(projectId, page)`: List one page of every selectable story workflow status, including closed and archived choices, with project/resource-specific IDs and available order, color, and WIP metadata. Use a returned `id` with `create_user_story` or `update_user_story`.
+- `list_task_statuses(projectId, page)`: List one page of every selectable task workflow status, including open and closed choices, with project/resource-specific IDs and available name, slug, order, color, and closure metadata. Use a returned `id` with `create_task` or `update_task`; task statuses do not include story-only archive or WIP fields.
 - `list_tasks(projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of standalone or story-linked tasks. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
 - `list_epics(projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of project epics with verified status, assignee, tag, and text filters. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
 - `get_epic(epicId)`: Retrieve one epic by its positive internal ID, including authoritative identity/version, Markdown description, status, assignment, color, tags, and available server summaries. It does not fetch related stories or compute progress.
