@@ -416,13 +416,14 @@ public sealed class McpIntegrationTests
         var before = await Call("get_user_story", new() { ["userStoryId"] = 102 });
         Assert.False(before.IsError == true);
         var beforeJson = JsonSerializer.Deserialize<JsonElement>(GetText(before));
-        Assert.Equal(4, beforeJson.GetProperty("version").GetInt32());
+        var fetchedStoryVersion = beforeJson.GetProperty("version").GetInt32();
+        Assert.Equal(4, fetchedStoryVersion);
         Assert.False(beforeJson.TryGetProperty("milestone", out _));
 
         var placedInSprint = await Call("update_user_story", new()
         {
             ["userStoryId"] = 102,
-            ["version"] = 4,
+            ["version"] = fetchedStoryVersion,
             ["milestoneId"] = milestoneId
         });
         Assert.False(placedInSprint.IsError == true);
@@ -431,6 +432,7 @@ public sealed class McpIntegrationTests
         Assert.Equal(55, placedJson.GetProperty("milestone").GetInt32());
         var placedBody = JsonSerializer.Deserialize<JsonElement>(GetLastStoryPatch(taiga).Body);
         AssertPatchProperties(placedBody, "milestone", "version");
+        Assert.Equal(fetchedStoryVersion, placedBody.GetProperty("version").GetInt32());
         Assert.Equal(milestoneId, placedBody.GetProperty("milestone").GetInt32());
 
         var changedFields = await Call("update_user_story", new()

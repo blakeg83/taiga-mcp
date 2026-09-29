@@ -120,6 +120,21 @@ public sealed class SprintListTests
         }
     }
 
+    [Theory]
+    [InlineData("{\"project\":12,\"name\":\"Sprint\",\"slug\":\"sprint\",\"estimated_start\":\"2026-09-01\",\"estimated_finish\":\"2026-09-14\",\"closed\":false}", "id")]
+    [InlineData("{\"id\":0,\"project\":12,\"name\":\"Sprint\",\"slug\":\"sprint\",\"estimated_start\":\"2026-09-01\",\"estimated_finish\":\"2026-09-14\",\"closed\":false}", "id")]
+    [InlineData("{\"id\":301,\"project\":\"12\",\"name\":\"Sprint\",\"slug\":\"sprint\",\"estimated_start\":\"2026-09-01\",\"estimated_finish\":\"2026-09-14\",\"closed\":false}", "project")]
+    public async Task ListSprintsPage_RejectsMalformedIdentity(string sprintJson, string propertyName)
+    {
+        var handler = SprintRoutes($"[{sprintJson}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() => NewApi(handler, auth).ListSprintsPageAsync(12));
+            Assert.Contains(propertyName, error.Message);
+        }
+    }
+
     [Fact]
     public async Task ListSprintsPage_RejectsMalformedListResponse()
     {
