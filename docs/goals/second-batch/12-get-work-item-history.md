@@ -50,22 +50,22 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify audit mapping and visibility
 
-- [ ] Reuse goal 11 routes/pagination/actor handling and verify diff/values_diff/type shapes against the pinned history model/serializer.
-- [ ] Add fixtures for pure changes, comment-only events, mixed changes/comments, deleted comments with retained field changes, hidden events, and unknown change fields.
-- [ ] Define bounded output fields: do not return snapshot, raw values, comment_html, or comment_versions. Suppress deleted comment text in every returned structure as required by contracts.md.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify get_work_item_history contracts`.
+- [x] Reuse goal 11 routes/pagination/actor handling and verify diff/values_diff/type shapes against the pinned history model/serializer.
+- [x] Add fixtures for pure changes, comment-only events, mixed changes/comments, deleted comments with retained field changes, hidden events, and unknown change fields.
+- [x] Define bounded output fields: do not return snapshot, raw values, comment_html, or comment_versions. Suppress deleted comment text in every returned structure as required by contracts.md.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify get_work_item_history contracts`.
 
 ## Step 2: Implement history-page mapping
 
-- [ ] Add a full-history API method sharing the existing page reader but omitting the comment-only query filter.
-- [ ] Map core entry/actor fields and clone retained JSON changes before disposing documents; retain source ordering and type values.
-- [ ] Omit hidden entries; remove deleted comment content from comment/diff/values_diff while retaining separable non-comment changes and deletion metadata.
-- [ ] If an unknown structure prevents safe separation of deleted text, omit that entry and document/test the behavior; do not serialize raw responses wholesale.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement get_work_item_history API behavior`.
+- [x] Add a full-history API method sharing the existing page reader but omitting the comment-only query filter.
+- [x] Map core entry/actor fields and clone retained JSON changes before disposing documents; retain source ordering and type values.
+- [x] Omit hidden entries; remove deleted comment content from comment/diff/values_diff while retaining separable non-comment changes and deletion metadata.
+- [x] If an unknown structure prevents safe separation of deleted text, omit that entry and document/test the behavior; do not serialize raw responses wholesale.
+- [x] Validate this step: focused `WorkItemHistoryTests` passed 11/11; Debug build passed with zero warnings; cancellation and ownership are covered.
+- [x] Update documentation during this step: the API sends `history/{route}/{id}?page=N`, supports array and verified body-page responses, and redacts deleted comment fields/text. The public function remains planned until exposed.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement get_work_item_history API behavior`.
 
 ## Step 3: Expose audit history
 
@@ -130,8 +130,8 @@ mixed/deleted, hidden, and unknown nested changes.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet test -c Debug`: 511 passed. Pinned history serializer/viewset/choice sources rechecked; synthetic full-history fixture added with field, comment, mixed/deleted, hidden, and unknown nested changes. | Specify get_work_item_history contracts / pending |
-| 2 | Not started | — | Implement get_work_item_history API behavior / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug`: 511 passed. Pinned history serializer/viewset/choice sources rechecked; synthetic full-history fixture added with field, comment, mixed/deleted, hidden, and unknown nested changes. | Specify get_work_item_history contracts / `47726eb` |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~WorkItemHistoryTests`: 11 passed. Debug compilation passed with zero warnings. API request is `GET history/{route}/{id}?page=N`; response mapping clones structured JSON and redacts deleted comment content. | Implement get_work_item_history API behavior / pending |
 | 3 | Not started | — | Expose get_work_item_history MCP tool / pending |
 | 4 | Not started | — | Verify get_work_item_history workflows / pending |
 
