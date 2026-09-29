@@ -1,6 +1,6 @@
 # Goal 07: list_sprints
 
-Status: planned; not implemented by this document.
+Status: in progress on `codex/list-sprints`.
 
 ## Objective
 
@@ -49,12 +49,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify milestone filters and dates
 
-- [ ] Verify the milestone viewset's closed filter and default ordering; do not call the filter is_closed or use work-item status IDs.
-- [ ] Add fixtures for open/closed sprints, ISO date strings, null optional fields, and extra nested stories/point summaries.
-- [ ] Define omission versus explicit false for nullable closed and separate pagination count from project-wide open/closed summary headers.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_sprints contracts`.
+- [x] Verify the milestone viewset's closed filter and default ordering; do not call the filter is_closed or use work-item status IDs.
+- [x] Add fixtures for open/closed sprints, ISO date strings, null optional fields, and extra nested stories/point summaries.
+- [x] Define omission versus explicit false for nullable closed and separate pagination count from project-wide open/closed summary headers.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_sprints contracts`.
 
 ## Step 2: Implement lightweight sprint retrieval
 
@@ -104,12 +104,33 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `882e1ec7136c3e24a920dd288b7ed41917953f6a`. Source evidence is
+pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`; official
+REST documentation was checked on 2026-09-29. This is source evidence only and
+does not claim a live deployment version.
+
+Step 1 contract decisions:
+
+- The request is `GET milestones?project={projectId}&page={page}`, with
+  `closed=true` or `closed=false` appended only when the nullable argument is
+  explicitly supplied. Project and page are positively validated and all fixed
+  query values are URI-encoded.
+- The pinned milestone viewset accepts `project`, `project__slug`, and `closed`,
+  orders by descending `estimated_start`, and adds
+  `Taiga-Info-Total-Opened-Milestones` / `Taiga-Info-Total-Closed-Milestones`.
+  Those summary headers are deliberately not page totals; pagination metadata
+  comes only from the standard pagination headers.
+- The lightweight DTO maps only `id`, `project`, `name`, `slug`,
+  `estimated_start`, `estimated_finish`, and `closed`. Required identity/name/
+  slug/date/closed values are validated; dates remain date-only ISO strings with
+  no timezone conversion. Nested `user_stories`, `total_points`, and
+  `closed_points`, plus nullable upstream extras such as `owner`, are ignored.
+- Fixtures cover open/closed rows, ISO date strings, nullable ignored extras, and
+  nested story/point data. No live Taiga data is used.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_sprints contracts / pending |
+| 1 | Complete | Source review and fixtures recorded above. Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore`: passed, 408 tests. | Specify list_sprints contracts / pending |
 | 2 | Not started | — | Implement list_sprints API behavior / pending |
 | 3 | Not started | — | Expose list_sprints MCP tool / pending |
 | 4 | Not started | — | Verify list_sprints workflows / pending |
