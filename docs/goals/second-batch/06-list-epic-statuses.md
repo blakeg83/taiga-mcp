@@ -1,6 +1,6 @@
 # Goal 06: list_epic_statuses
 
-Status: planned; not implemented by this document.
+Status: in progress; contract checkpoint complete, implementation in progress.
 
 ## Objective
 
@@ -47,12 +47,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify epic workflow lookup
 
-- [ ] Verify the epic serializer and project filtering; omit unsupported archival/WIP fields.
-- [ ] Add fixtures for custom open/closed names and missing optional color/order fields where supported.
-- [ ] Define validation/mapping behavior consistently with the other new status readers.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_epic_statuses contracts`.
+- [x] Verify the epic serializer and project filtering; omit unsupported archival/WIP fields.
+- [x] Add fixtures for custom open/closed names and missing optional color/order fields where supported.
+- [x] Define validation/mapping behavior consistently with the other new status readers.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_epic_statuses contracts`.
 
 ## Step 2: Implement epic status reads
 
@@ -102,12 +102,14 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `25432f4` (`Merge pull request #49 from blakeg83/codex/list-task-statuses`).
+Source/deployment evidence: verified against pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`; this is source evidence, not a live
+deployment claim.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_epic_statuses contracts / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug`: 399 passed. Added contract fixtures/tests for localized open/closed names, zero order, missing order/color, and null omission. Verified `EpicStatusSerializer` fields and project filter against pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no deviation. | Specify list_epic_statuses contracts / pending |
 | 2 | Not started | — | Implement list_epic_statuses API behavior / pending |
 | 3 | Not started | — | Expose list_epic_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_epic_statuses workflows / pending |
