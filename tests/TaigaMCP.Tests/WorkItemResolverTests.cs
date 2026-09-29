@@ -132,17 +132,29 @@ public sealed class WorkItemResolverContractTests
     }
 
     [Theory]
-    [InlineData(0, 12, 42)]
-    [InlineData(12, 0, 42)]
-    [InlineData(12, 99, 42)]
-    public async Task ResolveAsync_RejectsInvalidRequestBeforeHttp(int projectId, int reference, int kindValue)
+    [InlineData(0, 12)]
+    [InlineData(12, 0)]
+    public async Task ResolveAsync_RejectsInvalidIdsBeforeHttp(int projectId, int reference)
     {
         var handler = new FakeHttpMessageHandler();
         var (http, auth) = TaigaTestClient.Create(handler);
         using (http)
         {
-            var kind = (WorkItemKind)kindValue;
-            await Assert.ThrowsAsync<ArgumentException>(() => CreateApi(handler, auth).ResolveAsync(projectId, kind, reference));
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                CreateApi(handler, auth).ResolveAsync(projectId, WorkItemKind.task, reference));
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_RejectsUndefinedKindBeforeHttp()
+    {
+        var handler = new FakeHttpMessageHandler();
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                CreateApi(handler, auth).ResolveAsync(12, (WorkItemKind)99, 42));
             Assert.Empty(handler.Requests);
         }
     }

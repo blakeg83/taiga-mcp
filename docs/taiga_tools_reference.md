@@ -235,8 +235,9 @@ identity receipt, for example:
 ```
 
 The returned `id` is the value to pass to `get_task` (or the matching existing
-`get_*` tool), and the returned `version` should be used for a later versioned
-edit. The resolver does not fetch full details, scan lists, search other
+`get_*` tool). Use the version from that subsequent detail response for a later
+versioned edit; the resolver's optional version is informational and must not
+replace the detail read. The resolver does not fetch full details, scan lists, search other
 projects, infer the kind, parse slugs/URLs, or modify Taiga. The response's
 positive `id`, `ref`, and `project` are required; a ref/project mismatch is a
 safe lookup error rather than a fallback. Missing optional `subject` or

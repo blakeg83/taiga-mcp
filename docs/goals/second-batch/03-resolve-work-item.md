@@ -174,7 +174,7 @@ stdout-contamination test while deleting a locked
 | 1 | Complete | Contract tests passed; the full baseline retained the temporary-copy cleanup lock failure described above. | Specify resolve_work_item contracts / `a1283a5` |
 | 2 | Complete | Focused resolver contract/API suite: 26 passed; Debug compilation passed; `git diff --check` passed. | Implement resolve_work_item API behavior / `c60f8a9` |
 | 3 | Complete | Real stdio discovery/schema and four actual MCP calls passed in the integration fixture; docs/inventory updated. | Expose resolve_work_item MCP tool / `847f970` |
-| 4 | Complete | Restore, Debug/Release builds and tests, focused 29-test resolver suite, resolve→get→update flow, and `git diff --check` all passed. | Verify resolve_work_item workflows / pending |
+| 4 | Complete | Restore, Debug/Release builds and tests, focused 29-test resolver suite, resolve→get→update flow, and `git diff --check` all passed. | Verify resolve_work_item workflows / `fb3ab61` |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
