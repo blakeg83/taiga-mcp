@@ -59,6 +59,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicDetailStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicStoryListStatusCode { get; set; } = HttpStatusCode.OK;
+
     public HttpStatusCode EpicCreateStatusCode { get; set; } = HttpStatusCode.Created;
 
     public HttpStatusCode EpicUpdateStatusCode { get; set; } = HttpStatusCode.OK;
@@ -340,6 +342,35 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             }
 
             await RespondAsync(context.Response, HttpStatusCode.Created, EpicCreateResponseBody);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/epics/301/related_userstories")
+        {
+            if (EpicStoryListStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicStoryListStatusCode, "{\"detail\":\"synthetic relationship list secret\"}");
+                return;
+            }
+
+            bool exists;
+            long order;
+            lock (_epicStoryLinkLock)
+            {
+                exists = _epicStoryLinkExists;
+                order = _epicStoryLinkOrder;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                exists ? $"[{{\"epic\":301,\"user_story\":102,\"order\":{order}}}]" : "[]",
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "false",
+                    ["x-pagination-count"] = exists ? "1" : "0",
+                    ["x-pagination-current"] = "1"
+                });
             return;
         }
 

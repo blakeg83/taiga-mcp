@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; discovering sprints and story/task/epic workflow statuses; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; discovering sprints and story/task/epic workflow statuses; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, linking, and inspecting epic relationships; and discovering project members before assignment.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 31 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 32 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -243,6 +243,22 @@ in the link call. The workflow is:
 The link operation does not move or update the story. Cross-project links are
 left to Taiga's permissions and validation.
 
+### Inspect stories linked to an epic
+
+After linking or when auditing an existing epic, list one relationship page and
+use a returned `user_story_id` with `get_user_story` when full story details are
+needed:
+
+```json
+{"epicId":301,"page":1}
+{"items":[{"epic_id":301,"user_story_id":102,"order":9001}],"page":1,"total":1,"next_page":null,"has_more":false}
+{"userStoryId":102}
+```
+
+The list is a lightweight relationship index. It does not return full story
+objects, creation state, calculated epic progress, or project data for each
+story; Taiga decides whether accessible cross-project links are valid.
+
 ### Discover sprints before scheduling work
 
 Taiga calls sprints **milestones**. List a page, then use a returned `id` as
@@ -414,6 +430,7 @@ Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClose
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
 Call the tool get_epic with epicId=301
+Call the tool list_epic_user_stories with epicId=301 and page=1
 Call the tool update_epic with epicId=301, version=4, status=8, and comment="Delivery complete."
 Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11
