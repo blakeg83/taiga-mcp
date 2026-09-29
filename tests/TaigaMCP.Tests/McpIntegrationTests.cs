@@ -683,6 +683,22 @@ public sealed class McpIntegrationTests
                 }
             }
 
+            async Task<string> CallStoryStatusBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_user_story_statuses",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
             var issueProperties = listIssues.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1150,6 +1166,26 @@ public sealed class McpIntegrationTests
             Assert.Equal(
                 "/api/v1/userstories?project=123&page=2&status=2%2C3&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 storyRequest.PathAndQuery);
+
+            var omittedStoryStatusPage = await client.CallToolAsync(
+                "list_user_story_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(omittedStoryStatusPage.IsError == true, GetText(omittedStoryStatusPage));
+            var omittedStoryStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(omittedStoryStatusPage));
+            Assert.Equal(1, omittedStoryStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(3, omittedStoryStatusEnvelope.GetProperty("items").GetArrayLength());
+            var omittedStoryStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/userstory-statuses?project=123&page=1", omittedStoryStatusRequest.PathAndQuery);
+
+            var statusRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallStoryStatusBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallStoryStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            Assert.Equal("error_result", await CallStoryStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = null }));
+            Assert.Equal(statusRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal)));
 
             var storyStatusPage = await client.CallToolAsync(
                 "list_user_story_statuses",
