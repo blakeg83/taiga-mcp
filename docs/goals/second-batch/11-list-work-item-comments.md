@@ -59,13 +59,13 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement shared history read infrastructure
 
-- [ ] Add WorkItemHistoryApi using a closed kind-route map, positive ID/page validation, TaigaTransport, and end-to-end cancellation.
-- [ ] Request type=comment and page explicitly; map only visible nonblank comments with neither deletion marker set.
-- [ ] Reuse TaigaPagination for headers; handle only verified body pagination forms with isolated tests, and never auto-fetch later pages to fill a filtered page.
-- [ ] Map actor pk to user.id when present, preserve missing/deleted actor information without inventing IDs, and register the API in DI.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_work_item_comments API behavior`.
+- [x] Add WorkItemHistoryApi using a closed kind-route map, positive ID/page validation, TaigaTransport, and end-to-end cancellation.
+- [x] Request type=comment and page explicitly; map only visible nonblank comments with neither deletion marker set.
+- [x] Reuse TaigaPagination for headers; handle only verified body pagination forms with isolated tests, and never auto-fetch later pages to fill a filtered page.
+- [x] Map actor pk to user.id when present, preserve missing/deleted actor information without inventing IDs, and register the API in DI.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_work_item_comments API behavior`.
 
 ## Step 3: Expose comment reading
 
@@ -133,10 +133,30 @@ fixture JSON is synthetic and does not contact Taiga; it covers visible,
 whitespace, hidden, deleted, edited, missing-actor, Unicode/Markdown, and
 UUID-like entry cases. No public behavior is exposed in this checkpoint.
 
+Step 2 implementation decisions: `WorkItemHistoryApi` owns the shared comment
+read and exposes an internal page result for tools. It accepts Taiga's array
+response and the pinned paginated `{count,next,results}` body. Header metadata
+is used when it is the only source; a body field is used only when the matching
+header is absent, and malformed or conflicting metadata remains null. A valid
+body `next: null` is explicit last-page evidence (`has_more=false`). Comment
+mapping filters hidden entries, whitespace-only/non-string comments, and either
+deletion marker before validating visible entry identity/timestamp. It preserves
+raw comment text and only maps safe user `pk`, `name`, `username`, and
+`is_active` fields; HTML, revisions, diffs, snapshots, and values are excluded.
+No later page is fetched to fill a filtered page. `TaigaPagination` gained only
+the shared safe next-page parser needed by this fallback.
+
+Step 2 validation: focused `WorkItemCommentReadTests` passed 17/17, including
+all four route tokens, exact query serialization, filtering, UUID-like IDs,
+actor mapping, empty filtered pages with continuation, body/header pagination,
+malformed/conflicting metadata, safe 403 handling, pre-cancellation, and
+response disposal. A Debug build passed as part of that run. No source
+deviations from the pinned history contract were found.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / pending |
-| 2 | Not started | — | Implement list_work_item_comments API behavior / pending |
+| 2 | Complete | Focused `WorkItemCommentReadTests`: 17 passed; Debug build passed; DI/API/transport behavior recorded above. | Implement list_work_item_comments API behavior / pending |
 | 3 | Not started | — | Expose list_work_item_comments MCP tool / pending |
 | 4 | Not started | — | Verify list_work_item_comments workflows / pending |
 

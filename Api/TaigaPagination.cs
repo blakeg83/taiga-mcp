@@ -59,13 +59,24 @@ internal static class TaigaPagination
             : null;
     }
 
-    private static int? ParseNextPage(string value, Uri requestUri)
+    internal static bool TryParseNextPage(string value, Uri requestUri, out int? page)
     {
         value = value.Trim();
-        if (value.Length == 0 || value.StartsWith('#')) return null;
+        if (value.Length == 0 || value.StartsWith('#'))
+        {
+            page = null;
+            return false;
+        }
         if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var directPage))
-            return directPage > 0 ? directPage : null;
-        if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var candidate)) return null;
+        {
+            page = directPage > 0 ? directPage : null;
+            return page.HasValue;
+        }
+        if (!Uri.TryCreate(value, UriKind.RelativeOrAbsolute, out var candidate))
+        {
+            page = null;
+            return false;
+        }
 
         Uri resolved;
         if (candidate.IsAbsoluteUri)
@@ -73,7 +84,10 @@ internal static class TaigaPagination
             if (!string.Equals(candidate.Scheme, requestUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(candidate.Authority, requestUri.Authority, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(candidate.AbsolutePath, requestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
-                return null;
+            {
+                page = null;
+                return false;
+            }
             resolved = candidate;
         }
         else
@@ -84,7 +98,10 @@ internal static class TaigaPagination
         if (!string.Equals(resolved.Scheme, requestUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(resolved.Authority, requestUri.Authority, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(resolved.AbsolutePath, requestUri.AbsolutePath, StringComparison.OrdinalIgnoreCase))
-            return null;
+        {
+            page = null;
+            return false;
+        }
 
         foreach (var part in resolved.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -93,11 +110,20 @@ internal static class TaigaPagination
                 pieces.Length != 2)
                 continue;
             var pageValue = Uri.UnescapeDataString(pieces[1]);
-            return int.TryParse(pageValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var page) && page > 0
-                ? page
-                : null;
+            if (int.TryParse(pageValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedPage) && parsedPage > 0)
+            {
+                page = parsedPage;
+                return true;
+            }
+
+            page = null;
+            return false;
         }
 
-        return null;
+        page = null;
+        return false;
     }
+
+    private static int? ParseNextPage(string value, Uri requestUri)
+        => TryParseNextPage(value, requestUri, out var page) ? page : null;
 }
