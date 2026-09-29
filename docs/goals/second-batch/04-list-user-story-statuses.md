@@ -1,6 +1,6 @@
 # Goal 04: list_user_story_statuses
 
-Status: planned; not implemented by this document.
+Status: in progress; the public tool remains planned until Step 3.
 
 ## Objective
 
@@ -47,12 +47,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify status metadata
 
-- [ ] Verify the pinned story status serializer and project filter; include closed/archived choices with no automatic exclusions.
-- [ ] Add localized/custom-name fixtures and independent closed/archive flags, null WIP, and zero order/WIP values.
-- [ ] Define a page-envelope public contract despite older issue metadata tools returning arrays; preserve those old shapes.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_user_story_statuses contracts`.
+- [x] Verify the pinned story status serializer and project filter; include closed/archived choices with no automatic exclusions.
+- [x] Add localized/custom-name fixtures and independent closed/archive flags, null WIP, and zero order/WIP values.
+- [x] Define a page-envelope public contract despite older issue metadata tools returning arrays; preserve those old shapes.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_user_story_statuses contracts`.
 
 ## Step 2: Implement project status reads
 
@@ -102,12 +102,36 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `abefa995f7a05bb918d741f0a222c20592d53077` (`master`). Source
+evidence is pinned taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`;
+no live deployment or Taiga data was queried. The verified serializer exposes
+`id`, `name`, `slug`, `order`, `is_closed`, `is_archived`, `color`, `wip_limit`,
+and `project`; the project viewset allowlists `project` and applies project-view
+permissions. The implementation therefore preserves localized/custom names,
+independent boolean flags, zero `order`/`wip_limit`, nullable optional metadata,
+and server order without name-based filtering.
+
+The public contract is a page envelope:
+
+```json
+{
+  "items":[{"id":10,"project":123,"name":"Terminado","slug":"terminado","order":0,"color":"#cc0000","is_closed":true,"is_archived":false,"wip_limit":0}],
+  "page":1,
+  "total":null,
+  "next_page":null,
+  "has_more":null
+}
+```
+
+The endpoint sends exactly one request per call to
+`userstory-statuses?project={projectId}&page={page}`. It includes all returned
+statuses, including closed and archived choices. Null DTO properties are omitted
+by the public serializer; page metadata remains explicit JSON null when unknown.
+The legacy issue-status array and story-list behavior remain unchanged.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_user_story_statuses contracts / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed (381 tests, 0 warnings/errors). Added `UserStoryStatusDto` contract fixtures/tests for localized names, independent flags, null color/WIP, and zero order/WIP. Verified pinned source revision and project filter above. | Specify list_user_story_statuses contracts / pending |
 | 2 | Not started | — | Implement list_user_story_statuses API behavior / pending |
 | 3 | Not started | — | Expose list_user_story_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_user_story_statuses workflows / pending |
