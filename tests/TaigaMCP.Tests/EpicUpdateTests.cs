@@ -106,6 +106,7 @@ public sealed class EpicUpdateApiTests
     [Theory]
     [InlineData(HttpStatusCode.BadRequest, "{\"version\":[\"invalid synthetic-token\"]}", "400", "version")]
     [InlineData(HttpStatusCode.Conflict, "{\"detail\":\"Version conflict synthetic-token\"}", "409", "version")]
+    [InlineData(HttpStatusCode.BadRequest, "{\"status\":[\"wrong project synthetic-token\"]}", "400", "status")]
     [InlineData(HttpStatusCode.Forbidden, "{\"detail\":\"permission synthetic-token\"}", "403", "permission denied")]
     [InlineData(HttpStatusCode.NotFound, "{\"detail\":\"missing synthetic-token\"}", "404", "resource not found")]
     public async Task UpdateEpicAsync_PropagatesSafeHttpStatusWithoutRetry(
@@ -146,6 +147,56 @@ public sealed class EpicUpdateApiTests
             Assert.Equal(5, epic.Version);
             Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
             Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Get);
+        }
+    }
+
+    [Fact]
+    public async Task UpdateEpicAsync_ClosesAndReopensUsingDiscoveredStatusesAndReturnedVersions()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epic-statuses", EpicStatusFixtures.LocalizedProjectStatuses)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/301", EpicDetailFixtures.Rich)
+            .AddRoute(
+                HttpMethod.Patch,
+                "/api/v1/epics/301",
+                request =>
+                {
+                    using var body = JsonDocument.Parse(request.Body);
+                    var status = body.RootElement.GetProperty("status").GetInt32();
+                    var response = status == 31
+                        ? EpicUpdateFixtures.ClosedEpicResponse
+                        : EpicUpdateFixtures.ReopenedEpicResponse;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(response, System.Text.Encoding.UTF8, "application/json")
+                    };
+                });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = NewApi(handler, auth);
+            var statuses = await api.ListEpicStatusesAsync(123);
+            var closedStatus = Assert.Single(statuses, status => status.IsClosed == true);
+            var openStatus = Assert.Single(statuses, status => status.IsClosed == false);
+            var current = await api.GetEpicAsync(301);
+
+            var closed = await api.UpdateEpicAsync(301, current.Version, status: closedStatus.Id);
+            var reopened = await api.UpdateEpicAsync(301, closed.Version, status: openStatus.Id);
+
+            Assert.True(closed.IsClosed);
+            Assert.Equal(5, closed.Version);
+            Assert.False(reopened.IsClosed);
+            Assert.Equal(6, reopened.Version);
+
+            var patches = handler.Requests.Where(request => request.Method == HttpMethod.Patch).ToArray();
+            Assert.Equal(2, patches.Length);
+            using var closeBody = JsonDocument.Parse(patches[0].Body);
+            using var reopenBody = JsonDocument.Parse(patches[1].Body);
+            Assert.Equal(4, closeBody.RootElement.GetProperty("version").GetInt32());
+            Assert.Equal(31, closeBody.RootElement.GetProperty("status").GetInt32());
+            Assert.Equal(5, reopenBody.RootElement.GetProperty("version").GetInt32());
+            Assert.Equal(30, reopenBody.RootElement.GetProperty("status").GetInt32());
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath.Contains("related_userstories", StringComparison.Ordinal));
         }
     }
 
@@ -250,5 +301,13 @@ internal static class EpicUpdateFixtures
 
     public const string AcceptedStaleVersionResponse = """
         {"id":301,"ref":12,"project":123,"subject":"Server epic","status":7,"status_extra_info":{"name":"Ready"},"version":5}
+        """;
+
+    public const string ClosedEpicResponse = """
+        {"id":301,"ref":12,"project":123,"subject":"Server epic","status":31,"status_extra_info":{"name":"Terminé"},"is_closed":true,"version":5}
+        """;
+
+    public const string ReopenedEpicResponse = """
+        {"id":301,"ref":12,"project":123,"subject":"Server epic","status":30,"status_extra_info":{"name":"En revisión"},"is_closed":false,"version":6}
         """;
 }

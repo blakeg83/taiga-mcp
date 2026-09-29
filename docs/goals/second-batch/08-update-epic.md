@@ -1,6 +1,6 @@
 # Goal 08: update_epic
 
-Status: in progress; Steps 1–3 completed.
+Status: complete; all four steps completed.
 
 ## Objective
 
@@ -76,43 +76,44 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify close/reopen and edits
 
-- [ ] Fetch a version and status IDs through existing/new readers; close and reopen a fake epic using its returned versions.
-- [ ] Test omission versus clear, comment-only update, empty tags/description, unknown clear names, status validation, and wrong-project IDs rejected by Taiga.
-- [ ] Cover 400 version rejection, 409, accepted nonoverlapping stale edits, 403/404, cancellation, and ambiguous transport failure with no automatic edit retry.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify update_epic workflows`.
+- [x] Fetch a version and status IDs through existing/new readers; close and reopen a fake epic using its returned versions.
+- [x] Test omission versus clear, comment-only update, empty tags/description, unknown clear names, status validation, and wrong-project IDs rejected by Taiga.
+- [x] Cover 400 version rejection, 409, accepted nonoverlapping stale edits, 403/404, cancellation, and ambiguous transport failure with no automatic edit retry.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify update_epic workflows`.
 
 ## Acceptance scenarios
 
-- [ ] An epic can be edited, assigned/unassigned, and transitioned using discovered status IDs.
-- [ ] Only selected properties and the exact supplied version are sent.
-- [ ] Returned identity/version reflect the server, and linked stories remain untouched.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] An epic can be edited, assigned/unassigned, and transitioned using discovered status IDs.
+- [x] Only selected properties and the exact supplied version are sent.
+- [x] Returned identity/version reflect the server, and linked stories remain untouched.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can maintain and close/reopen epics through the same reliable versioned workflow as stories and tasks.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can maintain and close/reopen epics through the same reliable versioned workflow as stories and tasks.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `4b4d896`. Source evidence is the pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`, checked 2026-09-29; no live
+deployment version was read or claimed.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Starting commit `4b4d896`; baseline `dotnet test -c Debug`: 422 passed. Focused contract fixtures cover status-only, explicit assignee clearing, empty description/tags, color, and comment-only payloads. The pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the epic writable fields and OCC version requirement; no source deviation was found. | Specify update_epic contracts / pending |
-| 2 | Complete | Previous step `1d9ee50`. `UpdateEpicAsync` sends only selected fields plus the exact caller version, supports explicit assignee clearing, maps the authoritative PATCH response, preserves safe 400/409/403/404 errors, and never performs a read/retry after an ambiguous write. Focused `FullyQualifiedName~EpicUpdate` tests: 26 passed; `dotnet build -c Debug --no-restore`: 0 warnings/errors. | Implement update_epic API behavior / pending |
-| 3 | Complete | Previous step `e7ea1d6`. The `update_epic` tool is discoverable with required `epicId`/`version`, no public cancellation argument, and descriptions for every optional field. Real MCP integration covered omitted optionals with comment-only editing, explicit null optionals, empty tags, missing required version, authoritative detail response, safe 403 error handling, and preserved existing create/comment flows. The updated reference, README, quickstart, inventory, batch index, and development count document 31 tools and the delivered scope. | Expose update_epic MCP tool / pending |
-| 4 | Not started | — | Verify update_epic workflows / pending |
+| 1 | Complete | Starting commit `4b4d896`; baseline `dotnet test -c Debug`: 422 passed. Focused contract fixtures cover status-only, explicit assignee clearing, empty description/tags, color, and comment-only payloads. The pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the epic writable fields and OCC version requirement; no source deviation was found. | Specify update_epic contracts / `1d9ee50` |
+| 2 | Complete | Previous step `1d9ee50`. `UpdateEpicAsync` sends only selected fields plus the exact caller version, supports explicit assignee clearing, maps the authoritative PATCH response, preserves safe 400/409/403/404 errors, and never performs a read/retry after an ambiguous write. Focused `FullyQualifiedName~EpicUpdate` tests: 26 passed; `dotnet build -c Debug --no-restore`: 0 warnings/errors. | Implement update_epic API behavior / `e7ea1d6` |
+| 3 | Complete | Previous step `e7ea1d6`. The `update_epic` tool is discoverable with required `epicId`/`version`, no public cancellation argument, and descriptions for every optional field. Real MCP integration covered omitted optionals with comment-only editing, explicit null optionals, empty tags, missing required version, authoritative detail response, safe 403 error handling, and preserved existing create/comment flows. The updated reference, README, quickstart, inventory, batch index, and development count document 31 tools and the delivered scope. | Expose update_epic MCP tool / `edad560` |
+| 4 | Complete | Previous step `edad560`. Focused epic workflow tests: 28 passed, including status discovery plus close/reopen with returned versions, explicit clearing/omission, comment-only edits, empty fields, malformed success, safe HTTP statuses, stale-version acceptance, cancellation, and ambiguous write handling. Full required validation passed: `dotnet restore`; `dotnet build -c Debug` (0 warnings/errors); `dotnet test -c Debug` (451 passed); `dotnet build -c Release --no-restore` (0 warnings/errors); `dotnet test -c Release --no-build --no-restore` (451 passed); `git diff --check` clean apart from the expected CRLF conversion warning. Outputs were the standard `bin/Debug/net8.0` and `bin/Release/net8.0` directories; no generated files were staged. | Verify update_epic workflows / pending |
 
 ### Step 1 contract decisions
 
