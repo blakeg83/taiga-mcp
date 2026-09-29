@@ -3,9 +3,10 @@
 Status: in progress. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
 (`list_user_story_statuses`), 05 (`list_task_statuses`), 06 (`list_epic_statuses`),
-and 07 (`list_sprints`) are delivered; the remaining 5 functions below are
-planned and are not callable until their goals ship. Prepared 2026-09-29 against
-the current 30-tool repository baseline after goal 07.
+07 (`list_sprints`), and 08 (`update_epic`) are delivered; the remaining 4
+functions below are planned and are not callable until their goals ship.
+Prepared 2026-09-29 against the current 31-tool repository baseline after goal
+08.
 
 ## Objective
 
@@ -22,7 +23,7 @@ The [first batch](../first-batch/README.md) is complete within its selected scop
 | 03 | [resolve_work_item](03-resolve-work-item.md) | Translate a human-facing project #ref into the correct internal issue, story, task, or epic ID. | None; reuse implemented baseline |
 | 04 | [list_user_story_statuses](04-list-user-story-statuses.md) | Expose the project's complete selectable story workflow options, including closed/archived columns. | None; reuse implemented baseline |
 | 05 | [list_task_statuses](05-list-task-statuses.md) | Let agents discover task workflow IDs before changing task progress. | 04 |
-| 06 | [list_epic_statuses](06-list-epic-statuses.md) | Provide valid epic workflow IDs for creation and the planned epic update command. | 04 |
+| 06 | [list_epic_statuses](06-list-epic-statuses.md) | Provide valid epic workflow IDs for creation and the epic update command. | 04 |
 | 07 | [list_sprints](07-list-sprints.md) | Let agents find existing sprints and use their IDs to schedule stories or standalone tasks. | None; reuse implemented baseline |
 | 08 | [update_epic](08-update-epic.md) | Complete routine epic management: edit content, change ownership, update appearance/tags, and close or reopen through a chosen status. | 02, 06 |
 | 09 | [list_epic_user_stories](09-list-epic-user-stories.md) | Expose the existing stories linked to an epic so agents can inspect or correct its membership. | None; reuse implemented baseline |
@@ -56,7 +57,7 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 30 tools; completing the remaining 5 yields
+New functions build on the existing 31 tools; completing the remaining 4 yields
 35 tools unless separately authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
@@ -92,7 +93,7 @@ ships.
 - [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 5 goals are intentionally unchecked.
-Goals 01 through 06 are delivered and have their own four-step evidence
+The completion boxes for the remaining 4 goals are intentionally unchecked.
+Goals 01 through 08 are delivered and have their own four-step evidence
 records; the remaining goal entries are still planning documents and do not
 claim implementation or new application test results.

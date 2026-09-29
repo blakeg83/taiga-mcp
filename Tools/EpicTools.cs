@@ -50,6 +50,37 @@ public sealed class EpicTools
         return ToolResponseJson.Serialize(epic);
     });
 
+    [McpServerTool(Name = "update_epic")]
+    [Description("Update one epic using the caller-supplied version. Omitted nullable fields stay unchanged; empty description or tags are explicit clears, and clearFields=[\"assigned_to\"] explicitly unassigns. Status IDs are epic-specific and can close or reopen the epic. Requires a change or nonblank comment and does not automatically retry version conflicts. Linked stories, epic order, requirement flags, blocking, dates, custom fields, and project moves are not included.")]
+    public async Task<string> UpdateEpic(
+        [Description("Positive internal epic ID, not the displayed #ref.")] int epicId,
+        [Description("Required current epic version, zero or greater; forwarded unchanged to Taiga.")] int version,
+        [Description("Optional nonblank subject; omission or null leaves it unchanged.")] string? subject = null,
+        [Description("Description; null leaves it unchanged, while an empty string clears it.")] string? description = null,
+        [Description("Optional positive internal epic status ID; null leaves it unchanged. Use list_epic_statuses for project-specific choices.")] int? status = null,
+        [Description("Optional positive internal assignee user ID; null leaves it unchanged, while clearFields can unassign.")] int? assigned_to = null,
+        [Description("Optional epic color string; null leaves it unchanged. Taiga validates the accepted format.")] string? color = null,
+        [Description("Tags; null leaves them unchanged, while an empty array clears them.")] string[]? tags = null,
+        [Description("Optional comment; a comment-only update requires nonblank text.")] string? comment = null,
+        [Description("Optional fields to clear explicitly; only assigned_to is accepted, using this exact wire name.")] string[]? clearFields = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var epic = await _epics.UpdateEpicAsync(
+            epicId,
+            version,
+            subject,
+            description,
+            status,
+            assigned_to,
+            color,
+            tags,
+            comment,
+            clearFields,
+            cancellationToken);
+        return ToolResponseJson.Serialize(epic);
+    });
+
     [McpServerTool(Name = "link_user_story_to_epic")]
     [Description("Associate an existing user story with an epic. Both IDs are positive internal IDs, not displayed refs. If the relationship already exists, returns its current server order with created=false and ignores a new order request; otherwise confirms both resources are accessible and creates the relationship. Cross-project eligibility is decided by Taiga; this does not move, update, or duplicate the story.")]
     public async Task<string> LinkUserStoryToEpic(

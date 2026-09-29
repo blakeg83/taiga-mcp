@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 30 tools:
+The current server exposes 31 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -19,16 +19,16 @@ The current server exposes 30 tools:
 - 5 user-story tools: `list_user_stories`, `list_user_story_statuses`,
   `get_user_story`, `create_user_story`, and `update_user_story`.
 - 5 task tools: `list_tasks`, `list_task_statuses`, `get_task`, `create_task`, and `update_task`.
-- 5 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`, and
-  `link_user_story_to_epic`.
+- 6 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
+  `update_epic`, and `link_user_story_to_epic`.
 - 2 shared work-item tools: `add_work_item_comment` and `resolve_work_item`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
-first-batch total to 23. Goals 01 through 06 of the [second batch](goals/second-batch/README.md)
+first-batch total to 23. Goals 01 through 07 of the [second batch](goals/second-batch/README.md)
 add `get_current_user`, `list_project_members`, `resolve_work_item`,
 `list_user_story_statuses`, `list_task_statuses`, `list_epic_statuses`, and
-`list_sprints`; 5 batch functions remain planned. The broader
+`list_sprints`; goal 08 adds `update_epic`; 4 batch functions remain planned. The broader
 inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
@@ -334,6 +334,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_epics` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with epic items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, color?, tags?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_epic` | `epicId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, color?, tags?, modified?, is_closed?, is_blocked?, blocked_note?, client_requirement?, team_requirement?, user_stories_counts?, version }`. `epicId` is the internal ID, not displayed `#ref`; related stories and computed progress are not loaded. |
 | `create_epic` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `color`, and `tags` optional and default null | One server-created epic detail with authoritative `id`, `ref`, and `version`. Omitted optional fields use project defaults; `description=""` and `tags=[]` are explicit values. Use the separate `link_user_story_to_epic` tool for existing stories. Requirement flags, bulk creation, and custom fields remain planned. |
+| `update_epic` | `epicId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `color`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One authoritative epic detail after a versioned PATCH. Omitted fields stay unchanged; empty description/tags are explicit clears, and `clearFields=["assigned_to"]` emits JSON null. Use `list_epic_statuses` for project-specific status IDs; ordering, requirement flags, blocking, dates, custom fields, project moves, and linked-story changes remain planned. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 | `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
@@ -399,8 +400,8 @@ not a deployed version claim.
 The signature is `list_epic_statuses(projectId, page=1)`. It validates positive
 IDs, sends one request per call as
 `GET epic-statuses?project={projectId}&page={page}`, and returns a standard page
-envelope. Use a returned status `id` with `create_epic` or the planned
-`update_epic`; IDs are project- and resource-specific. Request a later page when
+envelope. Use a returned status `id` with `create_epic` or `update_epic`; IDs
+are project- and resource-specific. Request a later page when
 `next_page` is a number. The result includes open and closed choices without
 filtering by status name and preserves supplied false, zero, null, localized or
 custom names, colors, and order values. Unknown pagination headers remain
@@ -531,6 +532,46 @@ names such as `status`, `project`, and `color`; upstream text is not echoed.
 The client does not retry an ambiguous POST or a malformed success response,
 and reports that the write may already have applied so callers can read the
 entity before retrying.
+
+### `update_epic` contract
+
+The signature is `update_epic(epicId, version, subject?, description?, status?,
+assigned_to?, color?, tags?, comment?, clearFields?)`. Read the epic first and
+pass its current nonnegative `version`. The update sends one authenticated
+`PATCH /api/v1/epics/{epicId}` with only the supplied fields and the exact
+caller version:
+
+```json
+{"epicId":301,"version":4,"status":8,"clearFields":["assigned_to"],"comment":"Delivery complete."}
+```
+
+Omitted or null optional values remain unchanged. An empty description or tag
+array is explicit. `clearFields` accepts only the exact wire name
+`assigned_to`, which emits `"assigned_to":null`; setting `assigned_to` and
+clearing it in the same call is rejected. A nonblank subject is required when
+provided, and an update must contain a real change or a nonblank comment.
+Status IDs are project- and epic-specific; use `list_epic_statuses` to discover
+them and select a closed status to close or an open status to reopen an epic.
+For assignment, use `list_project_members` and pass an active member's
+`user_id` as `assigned_to`; `membership_id` identifies the membership record
+and is not an assignee ID. Use the new returned `version` with
+`clearFields=["assigned_to"]` to unassign.
+
+The result is the authoritative `EpicDetailDto`, including the server's
+returned version. The client does not refresh versions, retry ambiguous writes,
+change project settings, reorder epics, or modify linked stories. HTTP errors
+retain only safe status/category and allowlisted rejected-field or version
+details. Malformed successful responses and ambiguous transport failures report
+that the write may already have applied; read the epic before retrying. Color
+format validation remains Taiga-owned.
+
+This contract was checked on 2026-09-29 against pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`: the [epic serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py),
+[epic validator](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/validators.py),
+[epic model](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/models.py),
+and [OCC mixin](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/occ/mixins.py)
+confirm the writable fields and version behavior. This is pinned source
+evidence, not a deployed-version claim.
 
 ### `create_task` contract
 
