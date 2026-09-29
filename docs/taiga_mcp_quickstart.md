@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 30 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 31 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -309,6 +309,24 @@ Epic status IDs are not interchangeable with story or task status IDs. The
 reader includes closed choices and does not expose story-only archive or WIP
 fields. If `next_page` is present, call the same tool with that page number.
 
+### Update an epic
+
+Read an epic first, discover its project-specific statuses, and pass the
+returned `version` and a selected status ID to `update_epic`. Omitted fields
+stay unchanged; empty description or tags are explicit clears, and
+`clearFields=["assigned_to"]` unassigns the primary assignee:
+
+```json
+{"epicId":301}
+{"projectId":123,"page":1}
+{"epicId":301,"version":4,"status":8,"clearFields":["assigned_to"],"comment":"Delivery complete."}
+```
+
+The result is the server's authoritative epic detail, including its new
+version. A comment-only update is valid when the comment is nonblank. The
+client does not refresh a version or retry an ambiguous write; read the epic
+again before retrying after an uncertain transport or response failure.
+
 ### Update a user story
 
 Read the story first and pass its returned `version` to the update. Omitted
@@ -385,6 +403,7 @@ Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClose
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
 Call the tool get_epic with epicId=301
+Call the tool update_epic with epicId=301, version=4, status=8, and comment="Delivery complete."
 Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11
 Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."

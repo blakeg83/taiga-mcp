@@ -61,12 +61,21 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicCreateStatusCode { get; set; } = HttpStatusCode.Created;
 
+    public HttpStatusCode EpicUpdateStatusCode { get; set; } = HttpStatusCode.OK;
+
     public string EpicCreateResponseBody { get; set; } =
         """
         {"id":301,"ref":12,"project":123,"subject":"Integration epic","description":"Group saved-search delivery work.","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"color":"#336699","tags":[["search","#336699"]],"modified_date":"2026-09-28T12:03:00Z","version":4}
         """;
 
     public string EpicCreateErrorBody { get; set; } = "{\"detail\":\"synthetic epic create secret\"}";
+
+    public string EpicUpdateResponseBody { get; set; } =
+        """
+        {"id":301,"ref":12,"project":123,"subject":"Updated integration epic","description":"Updated description","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"color":"#336699","tags":[["search","#336699"]],"modified_date":"2026-09-29T12:30:00Z","version":5}
+        """;
+
+    public string EpicUpdateErrorBody { get; set; } = "{\"detail\":\"synthetic epic update secret\"}";
 
     public IReadOnlyList<RecordedTaigaRequest> Requests => _requests.ToArray();
 
@@ -617,9 +626,13 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         if (request.HttpMethod == HttpMethod.Patch.Method && path == "/api/v1/epics/301")
         {
-            var patch = JsonNode.Parse(body)?.AsObject();
-            var version = patch?["version"]?.GetValue<int>() ?? -1;
-            await RespondAsync(context.Response, HttpStatusCode.OK, $"{{\"version\":{version + 1}}}");
+            if (EpicUpdateStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicUpdateStatusCode, EpicUpdateErrorBody);
+                return;
+            }
+
+            await RespondAsync(context.Response, HttpStatusCode.OK, EpicUpdateResponseBody);
             return;
         }
 

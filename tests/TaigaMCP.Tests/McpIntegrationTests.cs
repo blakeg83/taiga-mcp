@@ -624,6 +624,72 @@ public sealed class McpIntegrationTests
         await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Null(process.ValidationFailure);
     }
+
+    [Fact]
+    public async Task ProductionServer_UpdateEpic_BindsOptionalArgumentsAndReportsSafeFailures()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+        async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
+            => await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        var updateEpic = Assert.Single(tools, tool => tool.Name == "update_epic");
+        Assert.Equal(new[] { "epicId", "version" }, updateEpic.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+
+        var commentOnly = await Call("update_epic", new()
+        {
+            ["epicId"] = 301,
+            ["version"] = 4,
+            ["comment"] = "Delivery complete."
+        });
+        Assert.False(commentOnly.IsError == true, GetText(commentOnly));
+        var commentJson = JsonSerializer.Deserialize<JsonElement>(GetText(commentOnly));
+        Assert.Equal(301, commentJson.GetProperty("id").GetInt32());
+        Assert.Equal(5, commentJson.GetProperty("version").GetInt32());
+        var commentBody = JsonSerializer.Deserialize<JsonElement>(GetLastEpicPatch(taiga).Body);
+        AssertPatchProperties(commentBody, "comment", "version");
+        Assert.Equal("Delivery complete.", commentBody.GetProperty("comment").GetString());
+
+        var explicitNulls = await Call("update_epic", new()
+        {
+            ["epicId"] = 301,
+            ["version"] = 4,
+            ["status"] = 7,
+            ["description"] = null,
+            ["assigned_to"] = null,
+            ["color"] = null,
+            ["tags"] = Array.Empty<string>(),
+            ["comment"] = null,
+            ["clearFields"] = null
+        });
+        Assert.False(explicitNulls.IsError == true, GetText(explicitNulls));
+        var explicitNullBody = JsonSerializer.Deserialize<JsonElement>(GetLastEpicPatch(taiga).Body);
+        AssertPatchProperties(explicitNullBody, "status", "tags", "version");
+        Assert.Equal(7, explicitNullBody.GetProperty("status").GetInt32());
+        Assert.Empty(explicitNullBody.GetProperty("tags").EnumerateArray());
+        Assert.False(explicitNullBody.TryGetProperty("assigned_to", out _));
+
+        var patchCount = taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/epics/301");
+        var missingVersion = await Call("update_epic", new() { ["epicId"] = 301, ["status"] = 7 });
+        Assert.True(missingVersion.IsError);
+        Assert.Equal(patchCount, taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/epics/301"));
+
+        taiga.EpicUpdateStatusCode = HttpStatusCode.Forbidden;
+        var forbidden = await Call("update_epic", new() { ["epicId"] = 301, ["version"] = 4, ["status"] = 7 });
+        Assert.True(forbidden.IsError);
+        Assert.Contains("403", GetText(forbidden));
+        Assert.Contains("permission denied", GetText(forbidden), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("synthetic epic update secret", GetText(forbidden));
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
     [Fact]
     public async Task ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure()
     {
@@ -673,6 +739,7 @@ public sealed class McpIntegrationTests
                 "list_user_story_statuses",
                 "resolve_project",
                 "resolve_work_item",
+                "update_epic",
                 "update_issue",
                 "update_task",
                 "update_user_story"
@@ -919,6 +986,15 @@ public sealed class McpIntegrationTests
             var getEpicRequired = getEpic.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "epicId" }, getEpicRequired);
+
+            var updateEpic = Assert.Single(tools, tool => tool.Name == "update_epic");
+            var updateEpicProperties = updateEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(
+                new[] { "epicId", "version", "subject", "description", "status", "assigned_to", "color", "tags", "comment", "clearFields" },
+                updateEpicProperties);
+            var updateEpicRequired = updateEpic.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "epicId", "version" }, updateEpicRequired);
 
             var linkUserStoryToEpic = Assert.Single(tools, tool => tool.Name == "link_user_story_to_epic");
             var linkProperties = linkUserStoryToEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -2081,6 +2157,9 @@ public sealed class McpIntegrationTests
 
     private static RecordedTaigaRequest GetLastStoryPatch(FakeTaigaHttpServer taiga)
         => taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/userstories/102");
+
+    private static RecordedTaigaRequest GetLastEpicPatch(FakeTaigaHttpServer taiga)
+        => taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/epics/301");
 
     private static void AssertTaskPatch(FakeTaigaHttpServer taiga, string[] expectedNames)
     {
