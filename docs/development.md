@@ -3,10 +3,11 @@
 ## Current state (2026-09-28)
 
 All 15 selected first-batch functions are implemented within their documented
-scope. The server exposes 23 tools; see the [tool reference](taiga_tools_reference.md)
+scope. The server exposes 25 tools; see the [tool reference](taiga_tools_reference.md)
 for exact contracts and the [completed-batch summary](goals/first-batch/README.md)
-for source/test pointers. The [second batch](goals/second-batch/README.md) contains
-12 implementation plans, not additional callable tools.
+for source/test pointers. The [second batch](goals/second-batch/README.md) has
+delivered `get_current_user` and `list_project_members`; its remaining 10 goals
+are implementation plans.
 
 Tools inject concrete domain APIs and use ToolResponseJson/ToolErrors.
 TaigaTransport owns responses and obtains a factory client per operation;

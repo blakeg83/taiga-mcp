@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using Xunit;
@@ -590,6 +591,7 @@ public sealed class McpIntegrationTests
                 "list_issue_statuses",
                 "list_issue_types",
                 "list_issues",
+                "list_project_members",
                 "list_projects",
                 "list_tasks",
                 "list_user_stories",
@@ -610,6 +612,29 @@ public sealed class McpIntegrationTests
                 ? required.EnumerateArray().Select(value => value.GetString()).ToArray()
                 : [];
             Assert.DoesNotContain("member", listProjectsRequired);
+
+            var listProjectMembers = Assert.Single(tools, tool => tool.Name == "list_project_members");
+            var memberProperties = listProjectMembers.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "projectId", "page" }, memberProperties);
+            var memberRequired = listProjectMembers.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, memberRequired);
+
+            async Task<string> CallMemberBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_project_members",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
 
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
@@ -763,6 +788,88 @@ public sealed class McpIntegrationTests
             Assert.Equal("Bearer integration-token", projectRequest.Authorization);
             Assert.DoesNotContain("member=", projectRequest.PathAndQuery);
             Assert.Contains("page=1", projectRequest.PathAndQuery);
+
+            var memberRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/memberships", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallMemberBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallMemberBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            Assert.Equal("error_result", await CallMemberBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = null }));
+            Assert.Equal(memberRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/memberships", StringComparison.Ordinal)));
+
+            var memberPage = await client.CallToolAsync(
+                "list_project_members",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(memberPage.IsError == true, GetText(memberPage));
+            var memberEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(memberPage));
+            Assert.Equal(JsonValueKind.Object, memberEnvelope.ValueKind);
+            Assert.Equal(1, memberEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(3, memberEnvelope.GetProperty("total").GetInt32());
+            Assert.Equal(2, memberEnvelope.GetProperty("next_page").GetInt32());
+            Assert.True(memberEnvelope.GetProperty("has_more").GetBoolean());
+            var members = memberEnvelope.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(3, members.Length);
+            Assert.Equal(501, members[0].GetProperty("membership_id").GetInt32());
+            Assert.Equal(42, members[0].GetProperty("user_id").GetInt32());
+            Assert.False(members[0].TryGetProperty("email", out _));
+            Assert.False(members[0].TryGetProperty("user_email", out _));
+            Assert.Equal(43, members[1].GetProperty("user_id").GetInt32());
+            Assert.False(members[1].GetProperty("is_user_active").GetBoolean());
+            Assert.False(members[2].TryGetProperty("user_id", out _));
+            Assert.Equal(8, members[2].GetProperty("role_id").GetInt32());
+            var memberRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "GET" && request.PathAndQuery == "/api/v1/memberships?project=123&page=1");
+            Assert.Equal("Bearer integration-token", memberRequest.Authorization);
+
+            var explicitMemberPage = await client.CallToolAsync(
+                "list_project_members",
+                new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = 4 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(explicitMemberPage.IsError == true, GetText(explicitMemberPage));
+            var explicitMemberEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(explicitMemberPage));
+            Assert.Equal(4, explicitMemberEnvelope.GetProperty("page").GetInt32());
+            Assert.Single(taiga.Requests, request =>
+                request.Method == "GET" && request.PathAndQuery == "/api/v1/memberships?project=123&page=4");
+
+            var memberUserId = members[0].GetProperty("user_id").GetInt32();
+            var membershipId = members[0].GetProperty("membership_id").GetInt32();
+            var assignedFromMember = await client.CallToolAsync(
+                "create_user_story",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["subject"] = "Member-driven assignment",
+                    ["assigned_to"] = memberUserId
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(assignedFromMember.IsError == true, GetText(assignedFromMember));
+            var assignedRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "POST" && request.PathAndQuery == "/api/v1/userstories" &&
+                request.Body.Contains("Member-driven assignment", StringComparison.Ordinal));
+            using (var assignedBody = JsonDocument.Parse(assignedRequest.Body))
+            {
+                Assert.Equal(memberUserId, assignedBody.RootElement.GetProperty("assigned_to").GetInt32());
+                Assert.NotEqual(membershipId, assignedBody.RootElement.GetProperty("assigned_to").GetInt32());
+            }
+
+            var invalidMember = await client.CallToolAsync(
+                "list_project_members",
+                new Dictionary<string, object?> { ["projectId"] = 0 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(invalidMember.IsError == true);
+            Assert.Contains("projectId", GetText(invalidMember));
+
+            taiga.MembershipStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenMembers = await client.CallToolAsync(
+                "list_project_members",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenMembers.IsError == true);
+            Assert.Contains("403", GetText(forbiddenMembers));
+            Assert.Contains("permission denied", GetText(forbiddenMembers), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic membership secret", GetText(forbiddenMembers));
+            taiga.MembershipStatusCode = System.Net.HttpStatusCode.OK;
 
             var issuePage = await client.CallToolAsync(
                 "list_issues",
