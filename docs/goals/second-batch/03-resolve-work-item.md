@@ -1,6 +1,6 @@
 # Goal 03: resolve_work_item
 
-Status: planned; not implemented by this document.
+Status: Step 1 complete; callable tool remains planned until Step 3.
 
 ## Objective
 
@@ -33,6 +33,26 @@ Illustrative MCP arguments (synthetic IDs):
 }
 ```
 
+## Step 1 contract evidence
+
+The pinned source revision is `4d11baef9027f5598f6341d6eb4261de2840688e`,
+reviewed 2026-09-29. `ByRefMixin.by_ref` requires a numeric `ref` query value
+and either `project` or `project__slug`, then delegates to the resource's
+permission-aware retrieve action. The four supported resource routes are
+`issues`, `userstories`, `tasks`, and `epics`; all four viewsets include the
+mixin. This implementation selects only the numeric `project` form and does
+not parse slugs, URLs, or a leading `#`.
+
+The contract layer now closes `WorkItemKind` to the four enum values and maps
+those values to the four routes. A response must be an object with positive
+`id`, `ref`, and `project`; its `ref` and `project` must equal the requested
+values. `subject` and nonnegative `version` are optional and are preserved only
+when present with the expected type. A displayed ref is kept separate from the
+returned internal ID; for example, synthetic task ref `42` resolves to ID
+`405`. The four source-shaped fixtures and project/ref mismatch cases are
+covered without making an HTTP request. The response kind is supplied by the
+closed request kind because Taiga's by-ref payload has no kind discriminator.
+
 ## Files and integration points
 
 - `Api/WorkItemResolverApi.cs`
@@ -50,12 +70,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify four-kind lookup
 
-- [ ] Verify ByRefMixin and each resource's route; reuse WorkItemKind with a closed mapping.
-- [ ] Validate positive project/ref and defined kind; specify numeric ref only, with no leading # in the public argument.
-- [ ] Add four response fixtures and cases for mismatched project/ref; do not treat a supplied ref as an internal ID.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify resolve_work_item contracts`.
+- [x] Verify ByRefMixin and each resource's route; reuse WorkItemKind with a closed mapping.
+- [x] Validate positive project/ref and defined kind; specify numeric ref only, with no leading # in the public argument.
+- [x] Add four response fixtures and cases for mismatched project/ref; do not treat a supplied ref as an internal ID.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify resolve_work_item contracts`.
 
 ## Step 2: Implement reference resolution
 
@@ -105,12 +125,17 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `f26b534` (`master`, 2026-09-29). Source/deployment evidence:
+pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e`; this is
+source evidence only and not a live deployment claim. The initial root
+`dotnet test -c Debug --no-restore` run built successfully and reported 350
+passed plus one pre-existing/environmental failure in the temporary-copy
+stdout-contamination test while deleting a locked
+`Microsoft.Extensions.Configuration.Abstractions.dll`.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify resolve_work_item contracts / pending |
+| 1 | Complete | Contract tests passed; the full baseline retained the temporary-copy cleanup lock failure described above. | Specify resolve_work_item contracts / pending |
 | 2 | Not started | — | Implement resolve_work_item API behavior / pending |
 | 3 | Not started | — | Expose resolve_work_item MCP tool / pending |
 | 4 | Not started | — | Verify resolve_work_item workflows / pending |
