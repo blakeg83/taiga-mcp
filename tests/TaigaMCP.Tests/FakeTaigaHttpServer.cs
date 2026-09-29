@@ -795,6 +795,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         var entry = new JsonObject
         {
             ["id"] = $"integration-comment-{Interlocked.Increment(ref _historyEntryNumber)}",
+            ["type"] = 1,
             ["comment"] = comment,
             ["created_at"] = "2026-09-29T12:00:00Z",
             ["user"] = new JsonObject

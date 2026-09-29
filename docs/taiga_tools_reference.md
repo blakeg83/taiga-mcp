@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 34 tools:
+The current server exposes 35 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,8 +22,8 @@ The current server exposes 34 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 3 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
-  and `resolve_work_item`.
+- 4 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+  `get_work_item_history`, and `resolve_work_item`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -32,7 +32,7 @@ add `get_current_user`, `list_project_members`, `resolve_work_item`,
 `list_user_story_statuses`, `list_task_statuses`, `list_epic_statuses`, and
 `list_sprints`; goal 08 adds `update_epic`; goal 09 adds
 `list_epic_user_stories`, and `unlink_user_story_from_epic`; goal 11 adds
-`list_work_item_comments`, and goal 12 remains planned. The broader
+`list_work_item_comments`, and goal 12 adds `get_work_item_history`. The broader
 inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
@@ -96,7 +96,49 @@ maps the four route kinds, applies `type=comment`, orders newest first, and
 uses an array body with pagination headers from the [pagination mixin](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/base/api/pagination.py); the [history serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/serializers.py)
 supplies the actor and edit/deletion fields. The compatible object-body fallback
 above is a client contract, not a claim about this pinned source or a live
-deployment.
+  deployment.
+
+### `get_work_item_history` contract
+
+The signature is `get_work_item_history(kind, id, page=1)`. It reads exactly
+one page from `GET /api/v1/history/{kind-route}/{id}?page={page}`. The public
+`kind` values are `issue`, `user_story`, `task`, and `epic`; `user_story` maps
+to Taiga's `userstory` route. `id` is the positive internal work-item ID and
+`page` is positive and defaults to 1. The result uses the standard page
+envelope, whose metadata describes the upstream history page before local
+visibility filtering.
+
+Each visible item contains the opaque string history-entry `id`, numeric
+upstream `type`, `created_at`, optional safe `user`, structured `diff` and
+`values_diff`, optional comment/edit/delete metadata, and optional
+`is_snapshot`. Unknown non-comment fields in the structured changes remain
+structured JSON. Null-valued DTO fields are omitted. For example:
+
+```json
+{"items":[{"id":"history-entry","type":1,"created_at":"2026-09-28T12:01:00Z","user":{"id":42,"name":"Example User","username":"example","is_active":true},"diff":{"status":[1,2]},"values_diff":{"status":["Ready","Done"]}}],"page":1,"total":4,"next_page":2,"has_more":true}
+```
+
+Entries marked `is_hidden` are omitted. When either deletion marker is present,
+the comment body is suppressed, `comment_deleted=true` is returned, safe delete
+actor/date metadata is retained, and comment-labelled or matching deleted text
+is removed from `diff` and `values_diff`. Unknown nested carriers and unverified
+text shapes are dropped; an unstructured deleted root that cannot be separated
+safely causes the entry to be omitted. `snapshot`, raw `values`, `comment_html`,
+and `comment_versions` are never returned. The command does not fetch later
+pages, restore historical objects, read comment revisions, or write data.
+
+The pinned backend returns an array body with pagination headers. The client
+also accepts the shared `{count,next,results}` body shape when matching headers
+are absent; malformed or conflicting pagination metadata remains `null`.
+Invalid kind/ID/page, malformed required history identity/type/timestamp,
+permission failures, and transport failures become safe MCP errors.
+
+This contract was checked on 2026-09-29 against pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`: the [history viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/api.py)
+supports all four routes and applies newest-first ordering without a type
+filter; the [history serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/serializers.py)
+supplies the structured changes, actor, comment, edit/delete, hidden, and
+snapshot fields. This is pinned source evidence, not a deployed-version claim.
 
 The `list_epics` and `get_epic` contracts are source-verified and their
 domain APIs/MCP wrappers are implemented. `list_epics` has the signature
@@ -1044,10 +1086,10 @@ temporary output directory without stopping that process:
 dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation\ -p:UseAppHost=false
 ```
 
-The MCP integration fixture launches the built application with
+At the earlier 33-tool foundation baseline, the MCP integration fixture launched the built application with
 `StdioClientTransport`, points its configured base URL at a local fake HTTP
 listener, and uses `McpClientFactory.CreateAsync` with the installed
-`0.3.0-preview.4` SDK. It verifies the complete 33-name `tools/list` result,
+`0.3.0-preview.4` SDK and verified the then-current 33-name `tools/list` result,
 the required/optional schema entries, a real `list_projects` `tools/call`, and
 that a fake HTTP 500 is returned as a tool result with `IsError=true`. The
 fixture also tees the child process's raw STDOUT before the SDK sees it and

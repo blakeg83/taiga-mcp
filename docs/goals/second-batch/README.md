@@ -1,13 +1,12 @@
 # Second implementation batch: discovery and complete daily workflows
 
-Status: in progress. Goals 01 (`get_current_user`), 02
+Status: complete. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
 (`list_user_story_statuses`), 05 (`list_task_statuses`), 06 (`list_epic_statuses`),
 07 (`list_sprints`), 08 (`update_epic`), 09 (`list_epic_user_stories`), 10
-(`unlink_user_story_from_epic`), and 11 (`list_work_item_comments`) are
-delivered; goal 12 remains planned and is not callable until its goal ships.
-Prepared 2026-09-29 against the current 34-tool repository baseline after goal
-11.
+(`unlink_user_story_from_epic`), 11 (`list_work_item_comments`), and 12
+(`get_work_item_history`) are delivered. Prepared 2026-09-29 against the
+current 35-tool repository baseline after goal 12.
 
 ## Objective
 
@@ -58,8 +57,8 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 33 tools; goal 11 brings the current count
-to 34, and completing goal 12 is expected to yield 35 tools unless separately
+New functions build on the existing 33 tools; goal 11 brought the count to 34
+and goal 12 brings the current count to 35 unless separately
 authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
@@ -88,14 +87,12 @@ ships.
 
 ## Completion checklist
 
-- [ ] All 12 function definitions of done are met; every step has its own local commit.
-- [ ] 35 expected public tools are discoverable with descriptions and correct argument schemas.
-- [ ] Actual MCP invocations cover the batch workflow and the 24 baseline contracts.
-- [ ] Debug and Release builds/tests pass with fake data only; no generated outputs are committed.
-- [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
-- [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
+- [x] All 12 function definitions of done are met; every step has its own local commit.
+- [x] 35 expected public tools are discoverable with descriptions and correct argument schemas.
+- [x] Actual MCP invocations cover the batch workflow and the baseline contracts.
+- [x] Debug and Release builds/tests pass with fake data only; no generated outputs are committed.
+- [x] Documentation, inventory coverage, current counts, and local links match delivered behavior.
+- [x] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 2 goals are intentionally unchecked.
-Goals 01 through 10 are delivered and have their own four-step evidence
-records; goals 11 through 12 remain planning documents and do not claim
-implementation or new application test results.
+Goals 01 through 12 have delivered implementations and their own goal records;
+the final cross-goal workflow and Debug/Release evidence are recorded above.

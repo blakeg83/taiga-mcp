@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
@@ -20,6 +22,13 @@ public sealed class WorkItemHistoryApi
         int page = 1,
         CancellationToken cancellationToken = default)
         => (await ListWorkItemCommentsPageAsync(kind, id, page, cancellationToken)).Items;
+
+    public async Task<IReadOnlyList<WorkItemHistoryEntryDto>> ListWorkItemHistoryAsync(
+        WorkItemKind kind,
+        int id,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+        => (await ListWorkItemHistoryPageAsync(kind, id, page, cancellationToken)).Items;
 
     internal async Task<WorkItemCommentListPage> ListWorkItemCommentsPageAsync(
         WorkItemKind kind,
@@ -47,28 +56,38 @@ public sealed class WorkItemHistoryApi
             parsed.HasMore);
     }
 
+    internal async Task<WorkItemHistoryListPage> ListWorkItemHistoryPageAsync(
+        WorkItemKind kind,
+        int id,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(id, nameof(id));
+        InputValidation.Positive(page, nameof(page));
+        var route = WorkItemHistoryContract.GetRoute(kind);
+
+        var query = string.Create(
+            CultureInfo.InvariantCulture,
+            $"history/{route}/{id}?page={page}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, query);
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+
+        var parsed = ParseHistoryResponse(document.RootElement, response.Headers, response.RequestUri);
+        return new WorkItemHistoryListPage(
+            parsed.Items,
+            page,
+            parsed.Total,
+            parsed.NextPage,
+            parsed.HasMore);
+    }
+
     private static ParsedCommentResponse ParseResponse(
         JsonElement root,
         IReadOnlyDictionary<string, string[]> headers,
         Uri requestUri)
     {
-        JsonElement entries;
-        BodyPageInfo bodyInfo = default;
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            entries = root;
-        }
-        else if (root.ValueKind == JsonValueKind.Object &&
-                 root.TryGetProperty("results", out var results) &&
-                 results.ValueKind == JsonValueKind.Array)
-        {
-            entries = results;
-            bodyInfo = ParseBodyPageInfo(root, requestUri);
-        }
-        else
-        {
-            throw new TaigaRequestException("Taiga returned invalid work-item comment history data.");
-        }
+        var entries = ReadEntries(root, requestUri, out var bodyInfo, "comment");
 
         var items = new List<WorkItemCommentEntryDto>(entries.GetArrayLength());
         foreach (var entry in entries.EnumerateArray())
@@ -84,6 +103,49 @@ public sealed class WorkItemHistoryApi
             MergeTotal(headers, headerInfo.Total, bodyInfo),
             MergeNextPage(headers, headerInfo.NextPage, bodyInfo),
             MergeHasMore(headers, headerInfo.HasMore, bodyInfo));
+    }
+
+    private static ParsedHistoryResponse ParseHistoryResponse(
+        JsonElement root,
+        IReadOnlyDictionary<string, string[]> headers,
+        Uri requestUri)
+    {
+        var entries = ReadEntries(root, requestUri, out var bodyInfo, "history");
+        var items = new List<WorkItemHistoryEntryDto>(entries.GetArrayLength());
+        foreach (var entry in entries.EnumerateArray())
+        {
+            var historyEntry = MapVisibleHistoryEntry(entry);
+            if (historyEntry is not null)
+                items.Add(historyEntry);
+        }
+
+        var headerInfo = TaigaPagination.Parse(headers, requestUri);
+        return new ParsedHistoryResponse(
+            items,
+            MergeTotal(headers, headerInfo.Total, bodyInfo),
+            MergeNextPage(headers, headerInfo.NextPage, bodyInfo),
+            MergeHasMore(headers, headerInfo.HasMore, bodyInfo));
+    }
+
+    private static JsonElement ReadEntries(
+        JsonElement root,
+        Uri requestUri,
+        out BodyPageInfo bodyInfo,
+        string dataKind)
+    {
+        bodyInfo = default;
+        if (root.ValueKind == JsonValueKind.Array)
+            return root;
+
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("results", out var results) &&
+            results.ValueKind == JsonValueKind.Array)
+        {
+            bodyInfo = ParseBodyPageInfo(root, requestUri);
+            return results;
+        }
+
+        throw new TaigaRequestException($"Taiga returned invalid work-item {dataKind} history data.");
     }
 
     private static BodyPageInfo ParseBodyPageInfo(JsonElement root, Uri requestUri)
@@ -214,6 +276,223 @@ public sealed class WorkItemHistoryApi
         };
     }
 
+    private static WorkItemHistoryEntryDto? MapVisibleHistoryEntry(JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid work-item history entry data.");
+
+        if (entry.TryGetProperty("is_hidden", out var hidden) &&
+            (hidden.ValueKind == JsonValueKind.True ||
+             hidden.ValueKind != JsonValueKind.False))
+            return null;
+
+        var id = ReadRequiredNonblankString(entry, "id", "work-item history");
+        var type = ReadRequiredInt(entry, "type", "work-item history");
+        var createdAt = ReadRequiredNonblankString(entry, "created_at", "work-item history");
+        var deleted = IsSet(entry, "delete_comment_date") || IsSet(entry, "delete_comment_user");
+        var comment = ReadOptionalString(entry, "comment");
+        JsonElement? diff = ReadOptionalJson(entry, "diff");
+        JsonElement? valuesDiff = ReadOptionalJson(entry, "values_diff");
+        if (deleted)
+        {
+            if (!TryRedactDeletedChange(diff, comment, out diff) ||
+                !TryRedactDeletedChange(valuesDiff, comment, out valuesDiff))
+                return null;
+            comment = null;
+        }
+
+        return new WorkItemHistoryEntryDto
+        {
+            Id = id,
+            Type = type,
+            CreatedAt = createdAt,
+            User = MapUser(entry),
+            Diff = diff,
+            ValuesDiff = valuesDiff,
+            Comment = comment,
+            EditCommentDate = ReadOptionalString(entry, "edit_comment_date"),
+            DeleteCommentDate = ReadOptionalString(entry, "delete_comment_date"),
+            DeleteCommentUser = MapDeleteCommentUser(entry),
+            CommentDeleted = deleted ? true : null,
+            IsSnapshot = ReadOptionalBoolean(entry, "is_snapshot")
+        };
+    }
+
+    private static bool TryRedactDeletedChange(
+        JsonElement? value,
+        string? deletedComment,
+        out JsonElement? redacted)
+    {
+        redacted = null;
+        if (!value.HasValue || value.Value.ValueKind == JsonValueKind.Null)
+            return true;
+        if (value.Value.ValueKind is not JsonValueKind.Object and not JsonValueKind.Array)
+            return false;
+
+        var node = JsonNode.Parse(value.Value.GetRawText());
+        if (node is null)
+            return false;
+
+        if (!TryRedactDeletedNode(node, deletedComment, allowStrings: false, out var safeNode) || safeNode is null)
+            return true;
+
+        using var document = JsonDocument.Parse(safeNode.ToJsonString());
+        redacted = document.RootElement.Clone();
+        return true;
+    }
+
+    private static bool TryRedactDeletedNode(
+        JsonNode node,
+        string? deletedComment,
+        bool allowStrings,
+        out JsonNode? redacted)
+    {
+        if (node is JsonObject obj)
+        {
+            foreach (var property in obj.ToList())
+            {
+                if (IsCommentField(property.Key))
+                {
+                    obj.Remove(property.Key);
+                    continue;
+                }
+
+                if (property.Value is null)
+                    continue;
+                if (property.Value is JsonObject)
+                {
+                    obj.Remove(property.Key);
+                    continue;
+                }
+
+                if (!TryRedactDeletedNode(
+                        property.Value,
+                        deletedComment,
+                        IsSafeTextChangeField(property.Key),
+                        out var safeValue))
+                {
+                    redacted = null;
+                    return false;
+                }
+
+                if (safeValue is null)
+                    obj.Remove(property.Key);
+                else if (!ReferenceEquals(safeValue, property.Value))
+                    obj[property.Key] = safeValue;
+            }
+
+            redacted = obj.Count == 0 ? null : obj;
+            return true;
+        }
+
+        if (node is JsonArray array)
+        {
+            for (var index = array.Count - 1; index >= 0; index--)
+            {
+                var child = array[index];
+                if (child is null)
+                    continue;
+                if (child is JsonObject or JsonArray)
+                {
+                    array.RemoveAt(index);
+                    continue;
+                }
+
+                if (!TryRedactDeletedNode(child, deletedComment, allowStrings, out var safeChild))
+                {
+                    redacted = null;
+                    return false;
+                }
+
+                if (safeChild is null)
+                    array.RemoveAt(index);
+                else if (!ReferenceEquals(safeChild, child))
+                    array[index] = safeChild;
+            }
+
+            redacted = array.Count == 0 ? null : array;
+            return true;
+        }
+
+        if (node is JsonValue value && value.TryGetValue<string>(out var text))
+        {
+            redacted = !allowStrings || IsDeletedCommentText(text, deletedComment)
+                ? null
+                : node;
+            return true;
+        }
+
+        redacted = node;
+        return true;
+    }
+
+    private static bool IsCommentField(string name)
+        => name.Contains("comment", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSafeTextChangeField(string name)
+        => name.Equals("status", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("severity", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("priority", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("type", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("assigned_to", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("owner", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("assigned_users", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("milestone", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("user_story", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("epic", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("tags", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsDeletedCommentText(string value, string? deletedComment)
+    {
+        if (string.IsNullOrEmpty(deletedComment))
+            return false;
+        if (value.Contains(deletedComment, StringComparison.Ordinal))
+            return true;
+
+        try
+        {
+            var decoded = JsonSerializer.Deserialize<string>($"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"");
+            if (decoded?.Contains(deletedComment, StringComparison.Ordinal) == true)
+                return true;
+        }
+        catch (JsonException)
+        {
+        }
+
+        var normalizedValue = NormalizeVisibleText(value);
+        var normalizedComment = NormalizeVisibleText(deletedComment);
+        return normalizedComment.Length > 0 &&
+               normalizedValue.Contains(normalizedComment, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeVisibleText(string value)
+    {
+        var decoded = WebUtility.HtmlDecode(value);
+        var builder = new System.Text.StringBuilder(decoded.Length);
+        var inTag = false;
+        foreach (var character in decoded)
+        {
+            if (character == '<')
+            {
+                inTag = true;
+                continue;
+            }
+
+            if (character == '>')
+            {
+                inTag = false;
+                continue;
+            }
+
+            if (!inTag)
+                builder.Append(character);
+        }
+
+        return string.Join(
+            ' ',
+            builder.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    }
+
     private static bool IsSet(JsonElement entry, string propertyName)
         => entry.TryGetProperty(propertyName, out var value) && value.ValueKind != JsonValueKind.Null;
 
@@ -241,19 +520,71 @@ public sealed class WorkItemHistoryApi
         };
     }
 
-    private static string ReadRequiredNonblankString(JsonElement element, string propertyName)
+    private static WorkItemCommentUserDto? MapDeleteCommentUser(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("delete_comment_user", out var user) ||
+            user.ValueKind != JsonValueKind.Object)
+            return null;
+
+        return MapUserObject(user);
+    }
+
+    private static WorkItemCommentUserDto? MapUserObject(JsonElement user)
+    {
+        int? id = null;
+        if (user.TryGetProperty("pk", out var pk) &&
+            pk.ValueKind == JsonValueKind.Number &&
+            pk.TryGetInt32(out var parsedId) &&
+            parsedId > 0)
+            id = parsedId;
+
+        return new WorkItemCommentUserDto
+        {
+            Id = id,
+            Name = ReadOptionalString(user, "name"),
+            Username = ReadOptionalString(user, "username"),
+            IsActive = ReadOptionalBoolean(user, "is_active")
+        };
+    }
+
+    private static string ReadRequiredNonblankString(
+        JsonElement element,
+        string propertyName,
+        string dataKind = "work-item comment")
     {
         if (!element.TryGetProperty(propertyName, out var value) ||
             value.ValueKind != JsonValueKind.String ||
             string.IsNullOrWhiteSpace(value.GetString()))
-            throw new TaigaRequestException($"Taiga returned invalid work-item comment {propertyName} data.");
+            throw new TaigaRequestException($"Taiga returned invalid {dataKind} {propertyName} data.");
 
         return value.GetString()!;
+    }
+
+    private static int ReadRequiredInt(JsonElement element, string propertyName, string dataKind)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var result))
+            throw new TaigaRequestException($"Taiga returned invalid {dataKind} {propertyName} data.");
+
+        return result;
     }
 
     private static string? ReadOptionalString(JsonElement element, string propertyName)
         => element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
+            : null;
+
+    private static bool? ReadOptionalBoolean(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) &&
+           value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
+
+    private static JsonElement? ReadOptionalJson(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var value) &&
+           value.ValueKind != JsonValueKind.Null
+            ? value.Clone()
             : null;
 
     private static bool HasHeader(IReadOnlyDictionary<string, string[]> headers, string name)
@@ -275,6 +606,12 @@ public sealed class WorkItemHistoryApi
         int? Total,
         int? NextPage,
         bool? HasMore);
+
+    private readonly record struct ParsedHistoryResponse(
+        IReadOnlyList<WorkItemHistoryEntryDto> Items,
+        int? Total,
+        int? NextPage,
+        bool? HasMore);
 }
 
 internal static class WorkItemHistoryContract
@@ -292,6 +629,13 @@ internal static class WorkItemHistoryContract
 
 internal sealed record WorkItemCommentListPage(
     IReadOnlyList<WorkItemCommentEntryDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
+
+internal sealed record WorkItemHistoryListPage(
+    IReadOnlyList<WorkItemHistoryEntryDto> Items,
     int Page,
     int? Total,
     int? NextPage,
