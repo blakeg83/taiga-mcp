@@ -286,6 +286,25 @@ public sealed class EpicStoryListApiTests
     }
 
     [Fact]
+    public async Task ListEpicUserStoriesAsync_ReportsTransportFailureWithoutSecretDetails()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                new IOException("synthetic relationship transport secret"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListEpicUserStoriesPageAsync(301));
+
+            Assert.Contains("transport failure", exception.Message);
+            Assert.DoesNotContain("synthetic relationship transport secret", exception.Message);
+        }
+    }
+
+    [Fact]
     public async Task ListEpicUserStoriesAsync_PropagatesPreCancellationWithoutHttp()
     {
         var handler = new FakeHttpMessageHandler()

@@ -1,7 +1,7 @@
 # Goal 09: list_epic_user_stories
 
-Status: implementation in progress; the relationship contract is specified and
-the public tool remains planned until Step 3.
+Status: complete; `list_epic_user_stories` is implemented and documented within
+the one-page relationship-index scope below.
 
 ## Objective
 
@@ -75,31 +75,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify group inspection
 
-- [ ] Link existing stories in a stateful fake, list the relationship page, and fetch one returned story ID with get_user_story.
-- [ ] Test zero/multiple links, later pages, large/zero order values, malformed IDs, mismatched epic, permissions, and cancellation.
-- [ ] Assert the list makes no writes or per-item detail requests and missing pagination is not reported as a complete epic backlog.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_epic_user_stories workflows`.
+- [x] Link existing stories in a stateful fake, list the relationship page, and fetch one returned story ID with get_user_story.
+- [x] Test zero/multiple links, later pages, large/zero order values, malformed IDs, mismatched epic, permissions, and cancellation.
+- [x] Assert the list makes no writes or per-item detail requests and missing pagination is not reported as a complete epic backlog.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_epic_user_stories workflows`.
 
 ## Acceptance scenarios
 
-- [ ] Agents can obtain linked story IDs/order without creating or modifying relationships.
-- [ ] Cross-project membership is represented without a fabricated same-project constraint.
-- [ ] The page result does not claim full story details, creation state, or calculated epic progress.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] Agents can obtain linked story IDs/order without creating or modifying relationships.
+- [x] Cross-project membership is represented without a fabricated same-project constraint.
+- [x] The page result does not claim full story details, creation state, or calculated epic progress.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] An agent can enumerate an epic's linked story identities page by page and inspect selected stories.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] An agent can enumerate an epic's linked story identities page by page and inspect selected stories.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -113,14 +113,15 @@ relationship ID. No source-shape deviation was found. The current reference's
 older link-source citation describes the same fields, but this goal uses the
 batch's current pinned revision.
 
-Previous completed step commits: Step 1 `2ce7366`; Step 2 `9012e7c`.
+Previous completed step commits: Step 1 `2ce7366`; Step 2 `9012e7c`; Step 3
+`70d44d5`.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore` passed; 452 existing tests passed. Added source-backed empty, single, multiple, zero/large-order, cross-project-identity, and pagination fixtures plus the creation-free DTO contract. | Specify list_epic_user_stories contracts / `2ce7366` |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~EpicStoryList` passed 17 focused tests; a serial Debug build passed with 0 warnings/errors. API tests cover exact `?page=2`, empty/unknown metadata, scalar ownership, long/zero order, cross-project IDs without detail reads, malformed/mismatched responses, 403 sanitization, invalid inputs, and pre-cancellation. | Implement list_epic_user_stories API behavior / `9012e7c` |
-| 3 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused relationship tests passed 18; real `ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure` passed. Discovery verified the 32-tool set and `{ epicId, page }` schema; invocation verified default `?page=1`, page metadata, no `created`, no list-time story detail request, selected `get_user_story`, missing/null argument errors, and sanitized 403. | Expose list_epic_user_stories MCP tool / pending |
-| 4 | Not started | — | Verify list_epic_user_stories workflows / pending |
+| 3 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused relationship tests passed 18; real `ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure` passed. Discovery verified the 32-tool set and `{ epicId, page }` schema; invocation verified default `?page=1`, page metadata, no `created`, no list-time story detail request, selected `get_user_story`, missing/null argument errors, and sanitized 403. | Expose list_epic_user_stories MCP tool / `70d44d5` |
+| 4 | Complete | Stateful fake MCP flow linked story 102, listed it, and fetched the returned ID; focused relationship tests passed 19. Required final checks all passed: `dotnet restore` (up to date); `dotnet build -c Debug` (0 warnings/errors, `bin/Debug/net8.0`); `dotnet test -c Debug` (471 passed); `dotnet build -c Release --no-restore` (0 warnings/errors, `bin/Release/net8.0`); `dotnet test -c Release --no-build --no-restore` (471 passed); `git diff --check` passed. No generated outputs, credentials, or unrelated changes were present. | Verify list_epic_user_stories workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
