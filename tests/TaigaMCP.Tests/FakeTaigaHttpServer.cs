@@ -53,6 +53,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicListStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicStatusStatusCode { get; set; } = HttpStatusCode.OK;
+
     public HttpStatusCode EpicDetailStatusCode { get; set; } = HttpStatusCode.OK;
 
     public HttpStatusCode EpicCreateStatusCode { get; set; } = HttpStatusCode.Created;
@@ -221,6 +223,27 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 context.Response,
                 HttpStatusCode.OK,
                 "[{\"id\":11,\"project\":123,\"name\":\"Ready\",\"slug\":\"ready\",\"order\":0,\"color\":\"#00aa00\",\"is_closed\":false},{\"id\":12,\"project\":123,\"name\":\"Terminé\",\"slug\":\"termine\",\"order\":1,\"color\":null,\"is_closed\":true},{\"id\":13,\"project\":123,\"name\":\"Guardado\",\"slug\":\"guardado\",\"order\":2,\"color\":null,\"is_closed\":false}]");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/epic-statuses")
+        {
+            if (EpicStatusStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicStatusStatusCode, "{\"detail\":\"synthetic epic status secret\"}");
+                return;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "[{\"id\":7,\"project\":123,\"name\":\"Ready\",\"slug\":\"ready\",\"order\":0,\"color\":\"#336699\",\"is_closed\":false},{\"id\":8,\"project\":123,\"name\":\"Terminé\",\"slug\":\"termine\",\"order\":1,\"color\":\"#cc0000\",\"is_closed\":true},{\"id\":9,\"project\":123,\"name\":\"Guardado\",\"slug\":\"guardado\",\"order\":2,\"color\":null,\"is_closed\":false}]",
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "3",
+                    ["x-pagination-next"] = "/api/v1/epic-statuses?project=123&page=3"
+                });
             return;
         }
 

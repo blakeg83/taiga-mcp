@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 28 tools identify the current account, list projects and project members, resolve project and work-item references, discover story and task workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 29 tools identify the current account, list projects and project members, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -28,6 +28,7 @@ wire filters and envelope fields, including the current-user identity contract.
 - `list_task_statuses(projectId, page)`: List one page of every selectable task workflow status, including open and closed choices, with project/resource-specific IDs and available name, slug, order, color, and closure metadata. Use a returned `id` with `create_task` or `update_task`; task statuses do not include story-only archive or WIP fields.
 - `list_tasks(projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of standalone or story-linked tasks. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
 - `list_epics(projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of project epics with verified status, assignee, tag, and text filters. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
+- `list_epic_statuses(projectId, page)`: List one page of every selectable epic workflow status, including open and closed choices, with project/resource-specific IDs and available name, slug, order, color, and closure metadata. Use a returned `id` with `create_epic` or the planned `update_epic`; epic statuses do not expose story-only archive or WIP fields.
 - `get_epic(epicId)`: Retrieve one epic by its positive internal ID, including authoritative identity/version, Markdown description, status, assignment, color, tags, and available server summaries. It does not fetch related stories or compute progress.
 - `create_epic(projectId, subject, description?, status?, assigned_to?, color?, tags?)`: Create one epic and return its authoritative detail. Omitted optional fields use Taiga project defaults; story linking and requirement flags remain separate operations.
 - `link_user_story_to_epic(epicId, userStoryId, order?)`: Associate an existing story with an epic. Repeated calls return the existing server order with `created=false` and do not change it; Taiga decides whether accessible cross-project links are permitted.
