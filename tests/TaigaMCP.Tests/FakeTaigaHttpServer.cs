@@ -40,6 +40,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode MembershipStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode SprintStatusCode { get; set; } = HttpStatusCode.OK;
+
     public HttpStatusCode CurrentUserStatusCode { get; set; } = HttpStatusCode.OK;
 
     public string CurrentUserResponseBody { get; set; } =
@@ -213,6 +215,31 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                     ["x-paginated"] = "true",
                     ["x-pagination-count"] = "3",
                     ["x-pagination-next"] = "/api/v1/memberships?project=123&page=2"
+                });
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/milestones")
+        {
+            if (SprintStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, SprintStatusCode, "{\"detail\":\"synthetic sprint secret\"}");
+                return;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                [{"id":55,"project":123,"name":"Sprint 2026-09","slug":"sprint-2026-09","estimated_start":"2026-09-01","estimated_finish":"2026-09-14","closed":false,"owner":null,"user_stories":[{"id":901,"subject":"Nested story must be ignored"}],"total_points":12.0,"closed_points":null}]
+                """,
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "2",
+                    ["x-pagination-next"] = "/api/v1/milestones?project=123&page=2",
+                    ["Taiga-Info-Total-Opened-Milestones"] = "1",
+                    ["Taiga-Info-Total-Closed-Milestones"] = "1"
                 });
             return;
         }

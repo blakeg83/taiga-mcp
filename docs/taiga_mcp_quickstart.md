@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; discovering story and task workflow statuses; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; discovering sprints and story/task/epic workflow statuses; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 29 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 30 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -243,6 +243,25 @@ in the link call. The workflow is:
 The link operation does not move or update the story. Cross-project links are
 left to Taiga's permissions and validation.
 
+### Discover sprints before scheduling work
+
+Taiga calls sprints **milestones**. List a page, then use a returned `id` as
+`milestoneId` when creating a story or standalone task. Omit `closed` (or pass
+`null`) to include both open and closed sprints; pass `false` or `true` to select
+one state:
+
+```json
+{"projectId":123,"page":1}
+{"items":[{"id":55,"project":123,"name":"Sprint 2026-09","slug":"sprint-2026-09","estimated_start":"2026-09-01","estimated_finish":"2026-09-14","closed":false}],"page":1,"total":null,"next_page":null,"has_more":null}
+{"projectId":123,"page":1,"closed":false}
+{"projectId":123,"subject":"Prepare release notes","milestoneId":55}
+```
+
+The result keeps ISO date-only values and does not expand user stories or point
+summaries. If `next_page` is present, request that page explicitly. The separate
+Taiga summary counts for all open/closed milestones are not substituted for the
+page envelope's `total`.
+
 ### Discover story workflow statuses
 
 Before creating or transitioning a story, call `list_user_story_statuses` with
@@ -353,6 +372,7 @@ Look for `taiga` in the MCP servers list.
 List projects I belong to
 Call the tool list_projects with member=6 and page=1
 Call the tool list_project_members with projectId=12345 and page=1
+Call the tool list_sprints with projectId=12345 and closed=false
 Call the tool resolve_work_item with projectId=12345, kind="task", and ref=42
 Call the tool list_issues with projectId=12345 and page=1
 Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true

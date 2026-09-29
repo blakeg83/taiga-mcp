@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 29 tools identify the current account, list projects and project members, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 30 tools identify the current account, list projects, project members, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -8,6 +8,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `resolve_work_item(projectId, kind, ref)`: Resolve a numeric project-local `ref` for a known `issue`, `user_story`, `task`, or `epic` to its internal ID plus available subject/version. Use that ID with the matching `get_*` tool before editing; the ref is not the internal ID.
 - `get_current_user()`: Identify the authenticated account and return its positive numeric ID plus available identity fields. Private profile fields are omitted.
 - `list_project_members(projectId, page)`: List one page of project membership records. Use `user_id` from an active member as an assignee ID; `membership_id` identifies the membership record, and pending/inactive records remain visible without exposing email or invitation text.
+- `list_sprints(projectId, page, closed?)`: List one page of Taiga milestones with date-only start/finish values and closure state. Omit or pass `null` for all sprints, `false` for open only, or `true` for closed only; use a returned `id` as `milestoneId` when scheduling a story or standalone task.
 - `list_issues(projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?)`: Triage one page of issues with allowlisted filters. It returns the legacy array by default and an opt-in pagination envelope with `includePageInfo=true`.
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.

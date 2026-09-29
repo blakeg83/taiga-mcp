@@ -8,9 +8,10 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 29 tools:
+The current server exposes 30 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
+- 1 sprint tool: `list_sprints`.
 - 1 identity tool: `get_current_user`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
@@ -26,8 +27,8 @@ All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
 first-batch total to 23. Goals 01 through 06 of the [second batch](goals/second-batch/README.md)
 add `get_current_user`, `list_project_members`, `resolve_work_item`,
-`list_user_story_statuses`, `list_task_statuses`, and `list_epic_statuses`; 6 batch functions remain
-planned. The broader
+`list_user_story_statuses`, `list_task_statuses`, `list_epic_statuses`, and
+`list_sprints`; 5 batch functions remain planned. The broader
 inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
@@ -214,6 +215,52 @@ not a public argument. At the installed MCP boundary, omitting `projectId`,
 sending `projectId:null`, or sending `page:null` produces an `IsError=true`
 tool result before HTTP; an explicit `page=4` is accepted and requests page 4.
 
+### `list_sprints` contract
+
+The signature is `list_sprints(projectId, page=1, closed=null)`. Taiga calls
+sprints **milestones**. The tool sends exactly one authenticated page request:
+
+```text
+GET /api/v1/milestones?project={projectId}&page={page}
+GET /api/v1/milestones?project={projectId}&page={page}&closed=false
+GET /api/v1/milestones?project={projectId}&page={page}&closed=true
+```
+
+The first form is used when `closed` is omitted or explicitly null; false selects
+open milestones and true selects closed milestones. The result is always the
+standard page envelope. Only the lightweight fields below are returned; dates
+remain ISO date-only strings and are not converted to timestamps:
+
+```json
+{
+  "items":[
+    {"id":55,"project":123,"name":"Sprint 2026-09","slug":"sprint-2026-09","estimated_start":"2026-09-01","estimated_finish":"2026-09-14","closed":false}
+  ],
+  "page":1,
+  "total":null,
+  "next_page":null,
+  "has_more":null
+}
+```
+
+Use each returned `id` as `milestoneId` with `create_user_story`,
+`update_user_story`, or standalone `create_task`. Nested `user_stories`, point
+aggregates, statistics, date filters, and sprint creation/editing are not
+included. Taiga's project-wide open/closed summary headers are not used as the
+page `total`; unknown standard pagination headers remain explicit `null`.
+Positive `projectId`/`page`, malformed identity/date data, 401/403 responses,
+invalid JSON, cancellation, and other transport failures produce safe errors.
+The injected `cancellationToken` is not a public argument.
+
+This contract was checked on 2026-09-29 against pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`: the [milestone viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/milestones/api.py)
+allows `project` and `closed`, orders by descending estimated start, and emits
+separate open/closed summary headers; the [milestone serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/milestones/serializers.py)
+also supplies nested stories and point aggregates that are deliberately ignored.
+The [official REST documentation](https://docs.taiga.io/api.html) confirms the
+milestone route and `closed=true|false` filter. This is pinned source evidence,
+not a deployed-version claim.
+
 ### `resolve_work_item` contract
 
 The signature is `resolve_work_item(projectId, kind, ref)`. It sends exactly one
@@ -266,6 +313,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `resolve_work_item` | `projectId`, `kind`, and `ref` required; `kind` is one of `issue`, `user_story`, `task`, or `epic` | `{ kind, id, ref, project, subject?, version? }`; identity is checked against the requested project/ref. |
 | `get_current_user` | No arguments | One identity object with required positive `id` and optional `username`, `full_name`, and `is_active`. |
 | `list_project_members` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; member items expose `membership_id`, `project`, optional `user_id`, `role_id`, `role_name`, `full_name`, `is_user_active`, `is_admin`, and `is_owner`. |
+| `list_sprints` | `projectId` integer, required; `page` integer, default `1`; `closed` boolean?, default `null` | `{ items, page, total, next_page, has_more }`; sprint items expose `{ id, project, name, slug, estimated_start, estimated_finish, closed }`. Omitted/null `closed` sends no filter; false selects open milestones and true selects closed milestones. Use `id` as `milestoneId`; nested stories, point aggregates, statistics, and date filters are not included. |
 | `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
