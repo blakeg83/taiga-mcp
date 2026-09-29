@@ -74,7 +74,7 @@ so this client does not impose a narrower color format; Taiga remains the
 authority for color validation. The endpoint is documented at the pinned
 taiga-doc revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9`.
 
-The planned `link_user_story_to_epic` contract was source-verified on
+The `link_user_story_to_epic` contract was source-verified on
 2026-09-28 against taiga-back revision
 `c8264ac6775103cbcc2a3a145978f2b475e9ff05` ([nested API viewset](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/api.py#L185-L232), [relationship serializer](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/serializers.py#L68-L71), and [relationship model](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/models.py#L96-L107)). The nested route is
 `/api/v1/epics/{epicId}/related_userstories/{userStoryId}`: the story ID is
@@ -245,8 +245,8 @@ Provide optional project-specific values when needed:
 ```
 
 The result is the authoritative created epic detail, including its internal
-`id`, display `ref`, and `version`. Use that internal ID with `get_epic` or a
-later `link_user_story_to_epic` call when that separate tool is implemented.
+`id`, display `ref`, and `version`. Use that internal ID with `get_epic` or the
+separate `link_user_story_to_epic` tool.
 This command creates only the epic and does not alter stories or project
 settings. Taiga validates project membership, status, assignee, and color.
 Invalid positive-ID/subject inputs fail before HTTP. HTTP validation and

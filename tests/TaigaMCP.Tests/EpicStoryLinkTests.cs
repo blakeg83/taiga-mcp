@@ -203,6 +203,78 @@ public sealed class EpicStoryLinkApiTests
     }
 
     [Fact]
+    public async Task LinkUserStoryToEpicAsync_AllowsTaigaToDecideCrossProjectEligibility()
+    {
+        var handler = MissingLinkThenResourceRoutes(
+            "{\"id\":102,\"ref\":18,\"project\":999,\"status\":7,\"status_extra_info\":{\"name\":\"Ready\"},\"version\":4}")
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/epics/301/related_userstories",
+                EpicStoryLinkFixtures.Success,
+                HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var link = await NewApi(handler, auth).LinkUserStoryToEpicAsync(301, 102);
+
+            Assert.True(link.Created);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post &&
+                request.Uri.AbsolutePath.EndsWith("/related_userstories", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task LinkUserStoryToEpicAsync_DoesNotPostWhenNested404BelongsToMissingStory()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories/102",
+                EpicStoryLinkFixtures.MissingLink,
+                HttpStatusCode.NotFound)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/301", EpicDetailFixtures.Rich)
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                "{\"detail\":\"missing story\"}",
+                HttpStatusCode.NotFound);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).LinkUserStoryToEpicAsync(301, 102));
+
+            Assert.Contains("404", exception.Message);
+            Assert.Contains("resource not found", exception.Message);
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post &&
+                request.Uri.AbsolutePath.EndsWith("/related_userstories", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public async Task LinkUserStoryToEpicAsync_DoesNotRetryAmbiguousPostTransportFailure()
+    {
+        var handler = MissingLinkThenResourceRoutes()
+            .AddExceptionRoute(
+                HttpMethod.Post,
+                "/api/v1/epics/301/related_userstories",
+                new IOException("secret transport details"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).LinkUserStoryToEpicAsync(301, 102));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.DoesNotContain("secret transport details", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post &&
+                request.Uri.AbsolutePath.EndsWith("/related_userstories", StringComparison.Ordinal));
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Get &&
+                request.Uri.AbsolutePath.EndsWith("related_userstories/102", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
     public async Task LinkUserStoryToEpicAsync_DoesNotPostWhenNested404BelongsToInaccessibleEpic()
     {
         var handler = new FakeHttpMessageHandler()
@@ -246,7 +318,7 @@ public sealed class EpicStoryLinkApiTests
         }
     }
 
-    private static FakeHttpMessageHandler MissingLinkThenResourceRoutes()
+    private static FakeHttpMessageHandler MissingLinkThenResourceRoutes(string? storyJson = null)
         => new FakeHttpMessageHandler()
             .AddJsonRoute(
                 HttpMethod.Get,
@@ -257,7 +329,7 @@ public sealed class EpicStoryLinkApiTests
             .AddJsonRoute(
                 HttpMethod.Get,
                 "/api/v1/userstories/102",
-                "{\"id\":102,\"ref\":18,\"project\":123,\"status\":7,\"status_extra_info\":{\"name\":\"Ready\"},\"version\":4}");
+                storyJson ?? "{\"id\":102,\"ref\":18,\"project\":123,\"status\":7,\"status_extra_info\":{\"name\":\"Ready\"},\"version\":4}");
 
     private static HttpResponseMessage Response(HttpStatusCode statusCode, string body)
         => new(statusCode)

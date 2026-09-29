@@ -1,6 +1,6 @@
 # Goal 14: link_user_story_to_epic
 
-Status: planned.
+Status: complete.
 
 ## Objective
 
@@ -24,7 +24,7 @@ Illustrative MCP arguments (IDs are placeholders):
 {"epicId":301,"userStoryId":102}
 ```
 
-Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/epics/api.py). Before implementing, record a pinned upstream revision or deployed-version evidence; a floating main branch is not a deployment guarantee.
+Primary verification source: [Taiga source/API](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/api.py). The implementation is based on pinned taiga-back revision `c8264ac6775103cbcc2a3a145978f2b475e9ff05`, observed on 2026-09-28; this is source evidence, not a deployed-version claim.
 
 ## Files and integration points
 
@@ -67,39 +67,39 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 4: Verify grouping workflows
 
-- [ ] Exercise initial link, repeated link, repeated link with a different requested order, and a confirmed concurrent duplicate.
-- [ ] Test allowed cross-project linking, denied access, missing parent/story, unknown validation errors, and transport ambiguity.
-- [ ] Assert no story create/update/delete request, no alteration of other links, and no automatic POST retry.
-- [ ] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
-- [ ] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify link_user_story_to_epic workflow`.
+- [x] Exercise initial link, repeated link, repeated link with a different requested order, and a confirmed concurrent duplicate.
+- [x] Test allowed cross-project linking, denied access, missing parent/story, unknown validation errors, and transport ambiguity.
+- [x] Assert no story create/update/delete request, no alteration of other links, and no automatic POST retry.
+- [x] Validate this step: run root dotnet restore, dotnet build -c Debug, and dotnet test; verify the acceptance cases below.
+- [x] Update documentation now: finalize README/reference/quickstart examples and inventory coverage notes; keep deferred features explicitly planned. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Verify link_user_story_to_epic workflow`.
 
 ## Acceptance scenarios
 
-- [ ] One call associates an existing story and epic using the correct nested route/payload.
-- [ ] Repeated calls do not create duplicates or change existing order.
-- [ ] Cross-project links are not blocked by a fabricated same-project rule.
-- [ ] Failures preserve the story and its other associations.
-- [ ] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
-- [ ] Existing tools continue to pass the compatibility checks introduced in goal 00.
+- [x] One call associates an existing story and epic using the correct nested route/payload.
+- [x] Repeated calls do not create duplicates or change existing order.
+- [x] Cross-project links are not blocked by a fabricated same-project rule.
+- [x] Failures preserve the story and its other associations.
+- [x] The tool's MCP result is valid JSON text on success and a recognizable failure on error; no credentials leak to output.
+- [x] Existing tools continue to pass the compatibility checks introduced in goal 00.
 
 ## Definition of done
 
-- [ ] Agents can organize existing stories under epics with explicit repeat-call and failure semantics.
-- [ ] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
-- [ ] The emitted MCP schema and actual invocation agree with the documented interface.
-- [ ] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
-- [ ] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
-- [ ] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
-- [ ] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
+- [x] Agents can organize existing stories under epics with explicit repeat-call and failure semantics.
+- [x] All four implementation steps and acceptance scenarios are complete with passing recorded validation.
+- [x] The emitted MCP schema and actual invocation agree with the documented interface.
+- [x] Failure/edge tests prove the goal-specific behavior, not merely that methods return non-null values.
+- [x] Documentation describes delivered scope, examples, compatibility decisions, and deferred inventory functionality.
+- [x] A separate local Git commit exists for every completed step; the final handoff lists all four hashes.
+- [x] Root solution build/tests pass; generated artifacts and unrelated changes are excluded from commits.
 
 ## Execution record
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Pinned taiga-back `c8264ac6775103cbcc2a3a145978f2b475e9ff05` checked 2026-09-28; nested lookup/payload/order semantics recorded; success, unique-duplicate, missing-link, and permission fixtures parse; baseline restore/build passed and baseline tests had 276 passes plus the pre-existing temporary-copy cleanup failure. | Specify link_user_story_to_epic contracts / current step commit |
-| 2 | Complete | `EpicStoryLinkApiTests`: 8 passing checks for initial POST, optional order omission, repeat-call order preservation, confirmed uniqueness race, unrelated 400 propagation, inaccessible epic, and pre-HTTP ID validation; Debug build passed with 0 warnings/errors. Previous Step 1 commit: `6d3f2d3`. | Implement link_user_story_to_epic API behavior / current step commit |
-| 3 | Complete | `EpicStoryLinkToolTests` passed; production STDIO `tools/list` and `tools/call` passed for required/optional arguments, first link, and repeat link; tool reference, README, quickstart, inventory, and schema assertions updated. Previous Step 2 commit: `1175ab4`. | Expose link_user_story_to_epic MCP interface / current step commit |
-| 4 | Not started | — | Verify link_user_story_to_epic workflow / pending |
+| 1 | Complete | Pinned taiga-back `c8264ac6775103cbcc2a3a145978f2b475e9ff05` checked 2026-09-28; nested lookup/payload/order semantics recorded; success, unique-duplicate, missing-link, and permission fixtures parse; baseline restore/build passed and baseline tests had 276 passes plus the pre-existing temporary-copy cleanup failure. | Specify link_user_story_to_epic contracts / `6d3f2d3` |
+| 2 | Complete | `EpicStoryLinkApiTests`: 8 passing checks for initial POST, optional order omission, repeat-call order preservation, confirmed uniqueness race, unrelated 400 propagation, inaccessible epic, and pre-HTTP ID validation; Debug build passed with 0 warnings/errors. Previous Step 1 commit: `6d3f2d3`. | Implement link_user_story_to_epic API behavior / `1175ab4` |
+| 3 | Complete | `EpicStoryLinkToolTests` passed; production STDIO `tools/list` and `tools/call` passed for required/optional arguments, first link, and repeat link; tool reference, README, quickstart, inventory, and schema assertions updated. Previous Step 2 commit: `1175ab4`. | Expose link_user_story_to_epic MCP interface / `16a681b` |
+| 4 | Complete | Focused link suite: 16 passing tests, covering initial/repeat/different-order behavior, confirmed concurrent duplicate, cross-project success, denied access, missing story, unrelated validation, and ambiguous transport; root `dotnet restore`, Debug build/test (293/293), Release build/test (293/293) all passed with 0 warnings/errors. README, reference, quickstart, inventory, and deferred-scope notes finalized. Previous Step 3 commit: `16a681b`. | Verify link_user_story_to_epic workflow / current step commit |
 
-Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
+Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. The source evidence is pinned taiga-back `c8264ac6775103cbcc2a3a145978f2b475e9ff05` observed 2026-09-28; all verification is fake-HTTP or local fake-STDIO, with no live Taiga writes. No blockers remain and unlinking, reordering existing links, and batch linking remain explicitly deferred. Do not mark a step done on the strength of an unrun check.

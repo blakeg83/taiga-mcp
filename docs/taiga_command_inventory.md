@@ -56,7 +56,7 @@ API/source basis: [issue endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | --- | --- | --- |
 | `list_epics` | New — delivered subset | `projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with verified status, assignee, tag, and text filters, including closed epics when requested. Related-story progress aggregation remains planned. |
 | `get_epic` | New — delivered subset | `epicId`; retrieve description, status, assignment, color, tags, version, and server-supplied summary fields. Related-story listing and computed progress remain planned. |
-| `create_epic` | New — delivered subset | `projectId, subject, description?, status?, assigned_to?, color?, tags?`; create one epic with optional fields sent only when supplied. Requirement flags, story linking, and bulk creation remain planned. |
+| `create_epic` | New — delivered subset | `projectId, subject, description?, status?, assigned_to?, color?, tags?`; create one epic with optional fields sent only when supplied. Requirement flags and bulk creation remain planned; story linking is provided separately by `link_user_story_to_epic`. |
 | `update_epic` | New | `epicId, version, fields`; edit epic fields, including status, assignment, color, and ordering. |
 | `delete_epic` | New | `epicId`; delete the epic grouping. Do not issue separate deletion requests for its related stories. |
 | `bulk_create_epics` | New | `projectId, subjects[], statusId?`; create several epics through the bulk endpoint and return their identities. |
