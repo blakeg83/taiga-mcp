@@ -20,8 +20,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     private readonly ConcurrentQueue<RecordedTaigaRequest> _requests = [];
     private readonly object _storyLock = new();
     private readonly object _taskLock = new();
+    private readonly object _epicStoryLinkLock = new();
     private string _userStory102 = "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Created backlog story\",\"description\":\"Acceptance: the story can be reopened.\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"tags\":[],\"milestone\":null,\"version\":4}";
     private string _task203 = "{\"id\":203,\"ref\":17,\"project\":123,\"subject\":\"Integration task\",\"description\":\"**Acceptance:** preserve Markdown and Unicode — ✓\",\"status\":11,\"status_extra_info\":{\"name\":\"Ready\"},\"assigned_to\":null,\"user_story\":102,\"milestone\":55,\"tags\":[[\"search\",\"#336699\"]],\"modified_date\":\"2026-09-28T12:00:00Z\",\"version\":2,\"is_blocked\":false,\"blocked_note\":\"\",\"is_closed\":false}";
+    private bool _epicStoryLinkExists;
+    private long _epicStoryLinkOrder;
 
     private FakeTaigaHttpServer(HttpListener listener, string baseUrl)
     {
@@ -203,6 +206,48 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             }
 
             await RespondAsync(context.Response, HttpStatusCode.Created, EpicCreateResponseBody);
+            return;
+        }
+
+        if (path == "/api/v1/epics/301/related_userstories/102")
+        {
+            bool exists;
+            long order;
+            lock (_epicStoryLinkLock)
+            {
+                exists = _epicStoryLinkExists;
+                order = _epicStoryLinkOrder;
+            }
+
+            if (request.HttpMethod == HttpMethod.Get.Method && exists)
+            {
+                await RespondAsync(
+                    context.Response,
+                    HttpStatusCode.OK,
+                    $"{{\"epic\":301,\"user_story\":102,\"order\":{order}}}");
+                return;
+            }
+
+            if (request.HttpMethod == HttpMethod.Get.Method)
+            {
+                await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"not found\"}");
+                return;
+            }
+        }
+
+        if (request.HttpMethod == HttpMethod.Post.Method && path == "/api/v1/epics/301/related_userstories")
+        {
+            var link = JsonNode.Parse(body)?.AsObject();
+            lock (_epicStoryLinkLock)
+            {
+                _epicStoryLinkExists = true;
+                _epicStoryLinkOrder = link?["order"]?.GetValue<long>() ?? 9001;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.Created,
+                $"{{\"epic\":301,\"user_story\":102,\"order\":{_epicStoryLinkOrder}}}");
             return;
         }
 

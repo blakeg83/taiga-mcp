@@ -50,6 +50,23 @@ public sealed class EpicTools
         return ToolResponseJson.Serialize(epic);
     });
 
+    [McpServerTool(Name = "link_user_story_to_epic")]
+    [Description("Associate an existing user story with an epic. Both IDs are positive internal IDs, not displayed refs. If the relationship already exists, returns its current server order with created=false and ignores a new order request; otherwise confirms both resources are accessible and creates the relationship. Cross-project eligibility is decided by Taiga; this does not move, update, or duplicate the story.")]
+    public async Task<string> LinkUserStoryToEpic(
+        [Description("Positive internal epic ID, not the displayed #ref.")] int epicId,
+        [Description("Positive internal user story ID, not the displayed #ref.")] int userStoryId,
+        [Description("Optional relationship order used only when creating a new link; an existing link keeps its server order.")] long? order = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var link = await _epics.LinkUserStoryToEpicAsync(
+            epicId,
+            userStoryId,
+            order,
+            cancellationToken);
+        return ToolResponseJson.Serialize(link);
+    });
+
     [McpServerTool(Name = "list_epics")]
     [Description("List one page of epics in a project. By default only epics with open statuses are returned; explicit statusIds take precedence over includeClosed. Filters are project-scoped and allowlisted; the result always uses the items/page/total/next_page/has_more envelope. Related stories, progress aggregation, sorting, and all-page fetching are not included.")]
     public async Task<string> ListEpics(

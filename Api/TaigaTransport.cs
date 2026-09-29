@@ -5,8 +5,16 @@ namespace TaigaMCP.Api;
 
 public sealed class TaigaRequestException : HttpRequestException
 {
-    public TaigaRequestException(string message, HttpStatusCode? status = null)
-        : base(message, null, status) { }
+    public TaigaRequestException(
+        string message,
+        HttpStatusCode? status = null,
+        bool isDuplicateRelationship = false)
+        : base(message, null, status)
+    {
+        IsDuplicateRelationship = isDuplicateRelationship;
+    }
+
+    internal bool IsDuplicateRelationship { get; }
 }
 
 internal sealed class TaigaReadResult : IDisposable
@@ -107,18 +115,21 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             count += read;
         }
         var details = new List<string>();
+        var isDuplicateRelationship = false;
         try
         {
             using var doc = JsonDocument.Parse(bytes.AsMemory(0, count));
             if (doc.RootElement.ValueKind == JsonValueKind.Object)
             {
-                string[] fields = ["version", "subject", "project", "status", "type", "priority", "severity", "assigned_to", "tags", "description", "milestone", "comment", "color"];
+                string[] fields = ["version", "subject", "project", "status", "type", "priority", "severity", "assigned_to", "tags", "description", "milestone", "comment", "color", "epic", "user_story", "order"];
                 foreach (var field in fields)
                     if (doc.RootElement.TryGetProperty(field, out _)) details.Add($"{field}: rejected");
                 if (doc.RootElement.TryGetProperty("detail", out var detail) &&
                     detail.ValueKind == JsonValueKind.String &&
                     detail.GetString()!.Contains("version", StringComparison.OrdinalIgnoreCase))
                     details.Add("version conflict");
+
+                isDuplicateRelationship = IsDuplicateRelationshipError(doc.RootElement);
             }
         }
         catch (JsonException) { }
@@ -133,6 +144,42 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             _ => "upstream failure"
         };
         throw new TaigaRequestException($"Taiga HTTP {(int)response.StatusCode}: {category}" +
-            (details.Count == 0 ? "." : $" ({string.Join("; ", details)})."), response.StatusCode);
+            (details.Count == 0 ? "." : $" ({string.Join("; ", details)})."), response.StatusCode, isDuplicateRelationship);
     }
+
+    private static bool IsDuplicateRelationshipError(JsonElement root)
+    {
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Name is not ("non_field_errors" or "__all__" or "epic" or "user_story"))
+                continue;
+
+            if (ContainsDuplicateMarker(property.Value))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsDuplicateMarker(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+            return HasDuplicateMarker(value.GetString());
+
+        if (value.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var item in value.EnumerateArray())
+            if (item.ValueKind == JsonValueKind.String && HasDuplicateMarker(item.GetString()))
+                return true;
+
+        return false;
+    }
+
+    private static bool HasDuplicateMarker(string? value)
+        => value is not null &&
+           (value.Contains("unique", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("already exists", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("already linked", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("already related", StringComparison.OrdinalIgnoreCase));
 }

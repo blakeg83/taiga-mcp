@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 21 tools:
+The current server exposes 22 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -17,12 +17,14 @@ The current server exposes 21 tools:
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
 - 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
-- 3 epic tools: `list_epics`, `get_epic`, and `create_epic`.
+- 4 epic tools: `list_epics`, `get_epic`, `create_epic`, and
+  `link_user_story_to_epic`.
 
 The first-batch documents describe 15 additional or expanded functions. The
-`list_issues`, `list_user_stories`, and the core `get_user_story` detail read
-are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Cross-resource commands remain planned.
+`list_issues`, `list_user_stories`, the core `get_user_story` detail read, and
+`link_user_story_to_epic` are delivered; the remaining goal documents describe
+planned work until their individual checklists are complete. Other
+cross-resource commands remain planned.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -62,7 +64,7 @@ tags?)`. The request maps to `POST /api/v1/epics` with `project`, `subject`,
 values stay omitted so Taiga can apply project defaults. The response will use
 the existing epic detail mapping and expose the server's authoritative `id`,
 `ref`, and nonnegative `version`. This call creates one epic only; linking
-stories and setting requirement flags remain separate planned operations.
+stories and setting requirement flags remain separate operations.
 
 The contract was checked on 2026-09-28 against pinned taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`: the epic validator accepts the
@@ -71,6 +73,51 @@ one is omitted. The model stores color as a string with a 32-character limit,
 so this client does not impose a narrower color format; Taiga remains the
 authority for color validation. The endpoint is documented at the pinned
 taiga-doc revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9`.
+
+The `link_user_story_to_epic` contract was source-verified on
+2026-09-28 against taiga-back revision
+`c8264ac6775103cbcc2a3a145978f2b475e9ff05` ([nested API viewset](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/api.py#L185-L232), [relationship serializer](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/serializers.py#L68-L71), and [relationship model](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/models.py#L96-L107)). The nested route is
+`/api/v1/epics/{epicId}/related_userstories/{userStoryId}`: the story ID is
+the nested lookup key, and creation sends `epic`, `user_story`, and optional
+`order`. A successful response contains `epic`, `user_story`, and the
+server-selected or requested `order`; the public result will rename those
+identifiers to `epic_id` and `user_story_id` and add `created`.
+
+The implementation will first read the nested relationship. A confirmed
+existing link returns `created=false` with its current order and ignores a new
+order request. A 404 is not treated as an absent link until the existing epic
+and story readers confirm that both resources are accessible. A recognized
+concurrent uniqueness validation is followed by the same relationship read and
+is reported as `created=false` only when that read confirms the link; unrelated
+validation, permission, missing-resource, and transport failures propagate.
+Cross-project linking is left to Taiga's permission and validation rules.
+The domain implementation and public MCP wrapper now follow this wire
+behavior.
+
+### `link_user_story_to_epic` contract
+
+The signature is `link_user_story_to_epic(epicId, userStoryId, order?)`. It
+returns JSON with `epic_id`, `user_story_id`, `order`, and `created`, for
+example:
+
+```json
+{"epic_id":301,"user_story_id":102,"order":9001,"created":true}
+```
+
+The call first performs `GET
+/api/v1/epics/{epicId}/related_userstories/{userStoryId}`. If the link exists,
+it returns `created=false` and the current server order, ignoring any supplied
+`order`. If the link is absent, it confirms the epic and story detail reads
+before sending one `POST /api/v1/epics/{epicId}/related_userstories` with
+`{"epic": epicId, "user_story": userStoryId}` and an `order` property only
+when supplied. The operation does not require a story or epic version and does
+not update the story, its project, or any other epic relationships. Taiga
+decides whether an accessible cross-project relationship is permitted.
+
+A recognized concurrent uniqueness response is read back and reported as
+`created=false` only when the relationship read confirms it. Unrelated 400
+responses, permission failures, missing resources, transport failures, and
+ambiguous writes are returned as safe MCP errors; no POST retry is performed.
 
 ### `get_epic` contract
 
@@ -198,8 +245,8 @@ Provide optional project-specific values when needed:
 ```
 
 The result is the authoritative created epic detail, including its internal
-`id`, display `ref`, and `version`. Use that internal ID with `get_epic` or a
-later `link_user_story_to_epic` call when that separate tool is implemented.
+`id`, display `ref`, and `version`. Use that internal ID with `get_epic` or the
+separate `link_user_story_to_epic` tool.
 This command creates only the epic and does not alter stories or project
 settings. Taiga validates project membership, status, assignee, and color.
 Invalid positive-ID/subject inputs fail before HTTP. HTTP validation and

@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; creating, reading, and listing tasks; and creating, listing, and reading epics and projects.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; creating, reading, and listing tasks; and creating, listing, reading, and linking epics and projects.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 21 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 22 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -156,9 +156,30 @@ default:
 {"projectId":123,"subject":"Saved search experience","description":"Group saved-search delivery work.","status":7,"assigned_to":42,"color":"#336699","tags":["search","saved"]}
 ```
 
-This creates only the epic. It does not create or link stories or change
-project settings; use a separate `link_user_story_to_epic` call when that
-planned tool becomes available.
+This creates only the epic. It does not create stories or change project
+settings. To organize an existing story under the new epic, call the separate
+link tool:
+
+```json
+{"epicId":301,"userStoryId":102,"order":9001}
+```
+
+The response is `{"epic_id":301,"user_story_id":102,"order":9001,"created":true}`
+when the relationship is new. A repeat call returns the existing order with
+`created=false`, even if a different order is requested.
+
+### Create a story and link it to an epic
+
+Use the returned story `id` from `create_user_story`, not its displayed `ref`,
+in the link call. The workflow is:
+
+```json
+{"projectId":123,"subject":"Allow saved searches"}
+{"epicId":301,"userStoryId":102}
+```
+
+The link operation does not move or update the story. Cross-project links are
+left to Taiga's permissions and validation.
 
 ### Update a user story
 
