@@ -1,6 +1,7 @@
 # Goal 12: get_work_item_history
 
-Status: planned; not implemented by this document.
+Status: in progress; implementation is being completed on branch
+`codex/get-work-item-history`.
 
 ## Objective
 
@@ -107,12 +108,29 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `7bab2b8d939618c65cdb65a8a2864ae956f93f86` (`7bab2b8`,
+origin/master). Baseline `dotnet test -c Debug` passed with 511 tests and no
+failures. Source evidence was rechecked on 2026-09-29 against pinned taiga-back
+revision `4d11baef9027f5598f6341d6eb4261de2840688e`: the history serializer
+exposes `id`, numeric `type`, `diff`, `values_diff`, `comment`, edit/delete
+metadata, `is_hidden`, `is_snapshot`, and safe actor data; the history viewset
+supports `issue`, `userstory`, `task`, and `epic`, applies newest-first ordering,
+and returns an array with pagination headers when `page` is supplied. This is
+pinned source evidence, not a deployed-version claim.
+
+Step 1 contract decisions: the new reader will send `page` explicitly without
+`type=comment`; map numeric `type` and clone structured `diff`/`values_diff`
+values before document disposal; omit hidden entries and never expose `snapshot`,
+`values`, `comment_html`, or `comment_versions`. Deleted comments set
+`comment_deleted=true`, suppress the top-level body, and remove comment-labelled
+or matching deleted text from structured changes while retaining separable
+non-comment fields. An unsafe unstructured deleted change will be omitted.
+`WorkItemHistoryFixtures.FullHistoryPage` covers field-only, comment-only,
+mixed/deleted, hidden, and unknown nested changes.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify get_work_item_history contracts / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug`: 511 passed. Pinned history serializer/viewset/choice sources rechecked; synthetic full-history fixture added with field, comment, mixed/deleted, hidden, and unknown nested changes. | Specify get_work_item_history contracts / pending |
 | 2 | Not started | — | Implement get_work_item_history API behavior / pending |
 | 3 | Not started | — | Expose get_work_item_history MCP tool / pending |
 | 4 | Not started | — | Verify get_work_item_history workflows / pending |

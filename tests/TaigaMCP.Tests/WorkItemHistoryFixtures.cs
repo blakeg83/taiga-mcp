@@ -2,6 +2,49 @@ namespace TaigaMCP.Tests;
 
 internal static class WorkItemHistoryFixtures
 {
+    public const string FullHistoryPage = """
+        [
+          {
+            "id":"change-entry",
+            "type":1,
+            "key":"status",
+            "diff":{"status":[1,2],"unknown_change":{"before":null,"after":"kept"}},
+            "values_diff":{"status":["Ready","Done"],"unknown_change":{"before":null,"after":"kept"}},
+            "comment":null,
+            "created_at":"2026-09-28T12:00:00Z",
+            "user":{"pk":42,"name":"Example User","username":"example","is_active":true},
+            "is_snapshot":false
+          },
+          {
+            "id":"comment-entry",
+            "type":1,
+            "comment":"Visible **comment**",
+            "created_at":"2026-09-28T12:01:00Z",
+            "user":{"pk":42,"name":"Example User","username":"example","is_active":true},
+            "edit_comment_date":"2026-09-28T12:02:00Z"
+          },
+          {
+            "id":"mixed-deleted-entry",
+            "type":1,
+            "diff":{"status":[1,2],"comment":["deleted secret","deleted secret"],"nested":{"comment":"deleted secret","safe":"preserve"}},
+            "values_diff":{"status":["Ready","Done"],"comment":"deleted secret","nested":{"payload":"deleted secret","safe":true}},
+            "comment":"deleted secret",
+            "delete_comment_date":"2026-09-28T12:03:00Z",
+            "delete_comment_user":{"pk":9,"name":"Moderator","username":"moderator","is_active":true},
+            "created_at":"2026-09-28T12:03:00Z",
+            "user":{"pk":42,"name":"Example User","username":"example","is_active":true},
+            "is_snapshot":true
+          },
+          {
+            "id":"hidden-entry",
+            "type":1,
+            "diff":{"order":[1,2]},
+            "created_at":"2026-09-28T12:04:00Z",
+            "is_hidden":true
+          }
+        ]
+        """;
+
     public const string CommentsPage = """
         [
           {
