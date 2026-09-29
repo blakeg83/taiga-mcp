@@ -1,6 +1,6 @@
 # Taiga command inventory
 
-Reviewed September 28, 2026. This inventory includes the 15 commands already
+Reviewed September 28, 2026. This inventory includes the 23 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
@@ -121,7 +121,7 @@ These are proposed common commands across the four resource kinds. Fields that a
 | `set_work_item_due_date` | New | `kind, id, version, date or null, reason?`; set or clear due-date fields for kinds that support them. |
 | `update_work_item_tags` | New; composite | `kind, id, version, add?, remove?`; read current tags and patch the merged set, retaining tag colors and unrelated tags. |
 | `list_work_item_comments` | New | `kind, id, page?`; return visible comments from history with history-entry IDs, authors, timestamps, and edit information. Issue comments are currently bundled into `get_issue`. |
-| `add_work_item_comment` | New — contract specified, implementation in progress | `kind, id, version, text`; submit a comment through the item's update API, preserving supported Markdown and mentions. The closed kind set is `issue`, `user_story`, `task`, or `epic`; the receipt returns the authoritative version and `comment_submitted=true`, not a fabricated history-entry ID. |
+| `add_work_item_comment` | Delivered subset | `kind, id, version, text`; submit a comment through the item's update API, preserving supported Markdown and mentions. The closed kind set is `issue`, `user_story`, `task`, or `epic`; the receipt returns the authoritative version and `comment_submitted=true`, not a fabricated history-entry ID. History listing/editing/deletion, attachments, and watcher management remain planned. |
 | `edit_work_item_comment` | New | `kind, id, historyEntryId, text`; edit the comment through the history API using its permissions and revision behavior. |
 | `delete_work_item_comment` | New | `kind, id, historyEntryId`; hide/delete a comment through Taiga's history action. |
 | `restore_work_item_comment` | New | `kind, id, historyEntryId`; restore a deleted comment through the undelete action when permitted. |
@@ -211,7 +211,7 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 22 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
+- The current 23 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset, optional page envelope, and goal 04 core detail read; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
 - Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. `EpicApi` and `EpicTools` now deliver the `list_epics`, `get_epic`, `create_epic`, and `link_user_story_to_epic` subsets; later epic operations remain planned. Shared wrappers can reuse underlying resource operations during a future implementation.

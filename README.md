@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, create/read/update user stories, read/list/update tasks, and create/list/read/link epics via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, create/read/update user stories, read/list/update tasks, create/list/read/link epics, and add comments to all four work-item kinds via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -9,6 +9,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
 - `update_issue(issueId, version, subject?, ..., clearFields?)`: Partially update an issue via PATCH; `subject` is optional, and `clearFields=["assigned_to"]` explicitly unassigns while omitted/null `assigned_to` leaves it unchanged.
+- `add_work_item_comment(kind, id, version, text)`: Submit a Markdown/mention-preserving comment to an `issue`, `user_story`, `task`, or `epic` using the supplied version. Returns the server's resulting version and `comment_submitted=true`.
 - `list_issue_statuses(projectId)`: List available issue statuses for a project.
 - `list_issue_severities(projectId)`: List available issue severities for a project.
 - `list_issue_types(projectId)`: List available issue types for a project.
