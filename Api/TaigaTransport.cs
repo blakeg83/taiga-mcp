@@ -45,6 +45,42 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
         return result.Document;
     }
 
+    public async Task SendNoContentAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken = default)
+    {
+        var applied = false;
+        try
+        {
+            using var http = clients.CreateClient("taiga");
+            using var response = await auth.SendAsync(http, request, cancellationToken);
+            await EnsureSuccessAsync(response, cancellationToken);
+            applied = true;
+            if (response.StatusCode != HttpStatusCode.NoContent)
+                throw new TaigaRequestException(
+                    $"Taiga returned unexpected HTTP {(int)response.StatusCode} for a no-content write; the write may already have applied. Read the relationship before retrying.",
+                    response.StatusCode);
+        }
+        catch (OperationCanceledException exception) when (IsHttpTimeout(exception, cancellationToken))
+        {
+            throw new TaigaRequestException(
+                "Taiga request timed out; the write may already have applied. Read the relationship before retrying.");
+        }
+        catch (OperationCanceledException) when (applied)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response handling was cancelled. Read the relationship before retrying.",
+                cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (TaigaRequestException) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            throw new TaigaRequestException(
+                "Taiga transport failure; the write may already have applied. Read the relationship before retrying.");
+        }
+    }
+
     internal async Task<TaigaReadResult> ReadWithHeadersAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken = default)

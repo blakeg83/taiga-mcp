@@ -158,6 +158,155 @@ public sealed class TransportTests
         }
     }
 
+    [Fact]
+    public async Task SendNoContentAsync_204DoesNotParseBodyAndDisposesResponse()
+    {
+        var content = new TrackingContent("not JSON");
+        var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            new HttpResponseMessage(HttpStatusCode.NoContent) { Content = content });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            await new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request);
+
+            Assert.True(content.Disposed);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Delete);
+        }
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
+    public async Task SendNoContentAsync_ErrorPreservesSafeStatusAndDisposes(
+        HttpStatusCode statusCode,
+        string category)
+    {
+        var content = new TrackingContent("{\"detail\":\"secret synthetic error\"}");
+        var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            new HttpResponseMessage(statusCode) { Content = content });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request));
+
+            Assert.Equal(statusCode, error.StatusCode);
+            Assert.Contains(category, error.Message);
+            Assert.DoesNotContain("secret synthetic error", error.Message);
+            Assert.True(content.Disposed);
+        }
+    }
+
+    [Fact]
+    public async Task SendNoContentAsync_UnexpectedSuccessfulStatusReportsPotentiallyApplied()
+    {
+        var content = new TrackingContent("{\"removed\":true}");
+        var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request));
+
+            Assert.Equal(HttpStatusCode.OK, error.StatusCode);
+            Assert.Contains("unexpected HTTP 200", error.Message);
+            Assert.Contains("may already have applied", error.Message);
+            Assert.True(content.Disposed);
+        }
+    }
+
+    [Fact]
+    public async Task SendNoContentAsync_Received401ReplaysOnceThenAccepts204()
+    {
+        var unauthorized = new TrackingContent("{\"detail\":\"expired\"}");
+        var success = new TrackingContent(string.Empty);
+        var attempts = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            {
+                attempts++;
+                return attempts == 1
+                    ? new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = unauthorized }
+                    : new HttpResponseMessage(HttpStatusCode.NoContent) { Content = success };
+            })
+            .AddJsonRoute(HttpMethod.Post, "/api/v1/auth/refresh", "{\"auth_token\":\"replayed-token\",\"refresh\":\"next-refresh\"}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            await new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request);
+
+            Assert.Equal(2, attempts);
+            Assert.True(unauthorized.Disposed);
+            Assert.True(success.Disposed);
+            Assert.Equal(2, handler.Requests.Count(item => item.Method == HttpMethod.Delete));
+        }
+    }
+
+    [Fact]
+    public async Task SendNoContentAsync_Repeated401StopsAfterOneReplayAndDisposesResponses()
+    {
+        var firstUnauthorized = new TrackingContent("{\"detail\":\"expired\"}");
+        var secondUnauthorized = new TrackingContent("{\"detail\":\"still expired\"}");
+        var attempts = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            {
+                attempts++;
+                var content = attempts == 1 ? firstUnauthorized : secondUnauthorized;
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = content };
+            })
+            .AddJsonRoute(HttpMethod.Post, "/api/v1/auth/refresh", "{\"auth_token\":\"replayed-token\",\"refresh\":\"next-refresh\"}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request));
+
+            Assert.Equal(HttpStatusCode.Unauthorized, error.StatusCode);
+            Assert.Equal(2, attempts);
+            Assert.True(firstUnauthorized.Disposed);
+            Assert.True(secondUnauthorized.Disposed);
+        }
+    }
+
+    [Fact]
+    public async Task SendNoContentAsync_CancellationPropagatesWithoutUpstreamError()
+    {
+        var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            throw new OperationCanceledException());
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request));
+        }
+    }
+
+    [Fact]
+    public async Task SendNoContentAsync_TransportFailureReportsPotentiallyAppliedWithoutRetry()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(HttpMethod.Delete, "/api/v1/test", new IOException("secret transport details"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request));
+
+            Assert.Contains("may already have applied", error.Message);
+            Assert.DoesNotContain("secret transport details", error.Message);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Delete);
+        }
+    }
+
     private sealed class ObservedStream(byte[] bytes, Action? beforeRead = null) : MemoryStream(bytes)
     {
         public int BytesRead { get; private set; }

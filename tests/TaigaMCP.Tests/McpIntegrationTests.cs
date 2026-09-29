@@ -781,6 +781,7 @@ public sealed class McpIntegrationTests
                 "list_user_story_statuses",
                 "resolve_project",
                 "resolve_work_item",
+                "unlink_user_story_from_epic",
                 "update_epic",
                 "update_issue",
                 "update_task",
@@ -1006,6 +1007,15 @@ public sealed class McpIntegrationTests
             Assert.Contains("one page", listEpicUserStories.Description, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("get_user_story", listEpicUserStories.Description, StringComparison.Ordinal);
             Assert.DoesNotContain("created", listEpicUserStories.Description, StringComparison.OrdinalIgnoreCase);
+
+            var unlinkUserStoryFromEpic = Assert.Single(tools, tool => tool.Name == "unlink_user_story_from_epic");
+            var unlinkProperties = unlinkUserStoryFromEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "epicId", "userStoryId" }, unlinkProperties);
+            var unlinkRequired = unlinkUserStoryFromEpic.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "epicId", "userStoryId" }, unlinkRequired);
+            Assert.Contains("204", unlinkUserStoryFromEpic.Description, StringComparison.Ordinal);
+            Assert.Contains("404", unlinkUserStoryFromEpic.Description, StringComparison.Ordinal);
 
             var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
             var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1496,6 +1506,65 @@ public sealed class McpIntegrationTests
                 cancellationToken: protocolDeadline.Token);
             Assert.False(selectedStory.IsError == true, GetText(selectedStory));
             Assert.Equal(102, JsonSerializer.Deserialize<JsonElement>(GetText(selectedStory)).GetProperty("id").GetInt32());
+
+            var unlinked = await client.CallToolAsync(
+                "unlink_user_story_from_epic",
+                new Dictionary<string, object?>
+                {
+                    ["epicId"] = 301,
+                    ["userStoryId"] = 102
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(unlinked.IsError == true, GetText(unlinked));
+            var unlinkJson = JsonSerializer.Deserialize<JsonElement>(GetText(unlinked));
+            Assert.Equal(301, unlinkJson.GetProperty("epic_id").GetInt32());
+            Assert.Equal(102, unlinkJson.GetProperty("user_story_id").GetInt32());
+            Assert.True(unlinkJson.GetProperty("removed").GetBoolean());
+            var unlinkRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "DELETE" && request.PathAndQuery == "/api/v1/epics/301/related_userstories/102");
+            Assert.Equal(string.Empty, unlinkRequest.Body);
+            Assert.DoesNotContain(taiga.Requests, request =>
+                request.Method is "PATCH" or "DELETE" &&
+                (request.PathAndQuery == "/api/v1/epics/301" || request.PathAndQuery == "/api/v1/userstories/102"));
+
+            var relationshipPageAfterUnlink = await client.CallToolAsync(
+                "list_epic_user_stories",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(relationshipPageAfterUnlink.IsError == true, GetText(relationshipPageAfterUnlink));
+            var relationshipEnvelopeAfterUnlink = JsonSerializer.Deserialize<JsonElement>(GetText(relationshipPageAfterUnlink));
+            Assert.Empty(relationshipEnvelopeAfterUnlink.GetProperty("items").EnumerateArray());
+            Assert.Equal(0, relationshipEnvelopeAfterUnlink.GetProperty("total").GetInt32());
+
+            var repeatedUnlink = await client.CallToolAsync(
+                "unlink_user_story_from_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301, ["userStoryId"] = 102 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(repeatedUnlink.IsError == true);
+            Assert.Contains("404", GetText(repeatedUnlink));
+            Assert.Contains("resource not found", GetText(repeatedUnlink), StringComparison.OrdinalIgnoreCase);
+
+            var missingUnlinkArgument = await client.CallToolAsync(
+                "unlink_user_story_from_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(missingUnlinkArgument.IsError == true);
+            var nullUnlinkArgument = await client.CallToolAsync(
+                "unlink_user_story_from_epic",
+                new Dictionary<string, object?> { ["epicId"] = null, ["userStoryId"] = 102 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(nullUnlinkArgument.IsError == true);
+
+            taiga.EpicStoryUnlinkStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenUnlink = await client.CallToolAsync(
+                "unlink_user_story_from_epic",
+                new Dictionary<string, object?> { ["epicId"] = 301, ["userStoryId"] = 102 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenUnlink.IsError == true);
+            Assert.Contains("403", GetText(forbiddenUnlink));
+            Assert.Contains("permission denied", GetText(forbiddenUnlink), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic unlink secret", GetText(forbiddenUnlink));
+            taiga.EpicStoryUnlinkStatusCode = System.Net.HttpStatusCode.NoContent;
 
             var missingRelationshipEpic = await client.CallToolAsync(
                 "list_epic_user_stories",

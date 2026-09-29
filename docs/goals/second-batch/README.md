@@ -3,10 +3,11 @@
 Status: in progress. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
 (`list_user_story_statuses`), 05 (`list_task_statuses`), 06 (`list_epic_statuses`),
-07 (`list_sprints`), 08 (`update_epic`), and 09 (`list_epic_user_stories`) are delivered; the remaining 3
-functions below are planned and are not callable until their goals ship.
-Prepared 2026-09-29 against the current 32-tool repository baseline after goal
-09.
+07 (`list_sprints`), 08 (`update_epic`), 09 (`list_epic_user_stories`), and 10
+(`unlink_user_story_from_epic`) are delivered; the remaining 2 functions below
+are planned and are not callable until their goals ship.
+Prepared 2026-09-29 against the current 33-tool repository baseline after goal
+10.
 
 ## Objective
 
@@ -57,7 +58,7 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 32 tools; completing the remaining 3 yields
+New functions build on the existing 33 tools; completing the remaining 2 yields
 35 tools unless separately authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
@@ -80,7 +81,7 @@ ships.
 2. Resolve a project #ref, retrieve item detail, and use its version for an update.
 3. Discover story/task/epic statuses and use their IDs in corresponding transitions.
 4. List sprints and place a story into a returned milestone.
-5. Create/edit an epic, link stories, list those relationships, and unlink one while preserving the story.
+5. Create/edit an epic, link stories, list those relationships, unlink one while preserving the story, and list again to confirm only the relationship changed.
 6. Submit comments, read visible conversation pages, and inspect field-change history.
 7. Verify all existing names, arguments, JSON shapes, safe errors, cancellation, and one-401 replay contracts.
 
@@ -93,7 +94,7 @@ ships.
 - [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 3 goals are intentionally unchecked.
-Goals 01 through 09 are delivered and have their own four-step evidence
-records; goals 10 through 12 remain planning documents and do not claim
+The completion boxes for the remaining 2 goals are intentionally unchecked.
+Goals 01 through 10 are delivered and have their own four-step evidence
+records; goals 11 through 12 remain planning documents and do not claim
 implementation or new application test results.
