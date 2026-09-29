@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Net;
+using System.Text;
 using TaigaMCP.Api;
 using TaigaMCP.Models;
 using Xunit;
@@ -81,4 +83,174 @@ public sealed class WorkItemResolverContractTests
     [Fact]
     public void UndefinedKindIsRejectedBeforeRouteConstruction()
         => Assert.Throws<ArgumentException>(() => WorkItemResolverContract.GetRoute((WorkItemKind)99));
+
+    [Theory]
+    [MemberData(nameof(FourKinds))]
+    public async Task ResolveAsync_UsesTheClosedByRefRouteAndExactNumericQuery(
+        WorkItemKind kind,
+        string expectedRoute,
+        string responseBody,
+        int expectedId,
+        string expectedSubject,
+        int expectedVersion)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                $"/api/v1/{expectedRoute}/by_ref",
+                responseBody);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var resolved = await CreateApi(handler, auth).ResolveAsync(12, kind, 42);
+
+            Assert.Equal(expectedId, resolved.Id);
+            Assert.Equal(expectedSubject, resolved.Subject);
+            Assert.Equal(expectedVersion, resolved.Version);
+            var request = Assert.Single(handler.Requests, item => item.Method == HttpMethod.Get);
+            Assert.Equal($"?project=12&ref=42", request.Uri.Query);
+            Assert.Equal("Bearer synthetic-token", request.Headers["Authorization"].Single());
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_PreservesMissingOptionalIdentityFields()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks/by_ref",
+                "{\"id\":405,\"ref\":42,\"project\":12}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var resolved = await CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.task, 42);
+
+            Assert.Null(resolved.Subject);
+            Assert.Null(resolved.Version);
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 12, 42)]
+    [InlineData(12, 0, 42)]
+    [InlineData(12, 99, 42)]
+    public async Task ResolveAsync_RejectsInvalidRequestBeforeHttp(int projectId, int reference, int kindValue)
+    {
+        var handler = new FakeHttpMessageHandler();
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var kind = (WorkItemKind)kindValue;
+            await Assert.ThrowsAsync<ArgumentException>(() => CreateApi(handler, auth).ResolveAsync(projectId, kind, reference));
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Theory]
+    [InlineData(WorkItemResolverFixtures.MismatchedProject, "different project")]
+    [InlineData(WorkItemResolverFixtures.MismatchedRef, "different reference")]
+    public async Task ResolveAsync_RejectsMismatchedResponseIdentity(string responseBody, string expectedMessage)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issues/by_ref", responseBody);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.issue, 42));
+
+            Assert.Contains(expectedMessage, exception.Message, StringComparison.Ordinal);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Get);
+        }
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("{\"id\":203,\"project\":12,\"ref\":42,\"version\":-1}")]
+    [InlineData("{\"id\":203,\"project\":12,\"ref\":42,\"version\":\"3\"}")]
+    public async Task ResolveAsync_RejectsMalformedRequiredOrOptionalData(string responseBody)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/issues/by_ref", responseBody);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.issue, 42));
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_PropagatesSafeLookupFailure()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/issues/by_ref",
+                "{\"detail\":\"private lookup failure\"}",
+                HttpStatusCode.NotFound);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.issue, 42));
+
+            Assert.Equal(HttpStatusCode.NotFound, exception.StatusCode);
+            Assert.Contains("resource not found", exception.Message);
+            Assert.DoesNotContain("private lookup failure", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CancellationStopsBeforeHttp()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/by_ref", WorkItemResolverFixtures.Task);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.task, 42, cancellation.Token));
+
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DisposesResponseBeforeReturningOwnedReceipt()
+    {
+        var content = new TrackingContent(WorkItemResolverFixtures.Epic);
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/by_ref",
+                _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var resolved = await CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.epic, 42);
+
+            Assert.True(content.Disposed);
+            Assert.Equal(506, resolved.Id);
+            Assert.Equal("Saved-search delivery", resolved.Subject);
+        }
+    }
+
+    private static WorkItemResolverApi CreateApi(FakeHttpMessageHandler handler, AuthClient auth)
+        => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+    private sealed class TrackingContent(string body) : StringContent(body, Encoding.UTF8, "application/json")
+    {
+        public bool Disposed { get; private set; }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+    }
 }

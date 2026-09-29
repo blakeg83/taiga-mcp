@@ -53,6 +53,16 @@ returned internal ID; for example, synthetic task ref `42` resolves to ID
 covered without making an HTTP request. The response kind is supplied by the
 closed request kind because Taiga's by-ref payload has no kind discriminator.
 
+## Step 2 implementation evidence
+
+`WorkItemResolverApi.ResolveAsync` validates positive `projectId` and `ref`,
+selects the allowlisted relative route, and sends exactly one GET request with
+`project` followed by `ref`. It owns the request and delegates response
+disposal to `TaigaTransport`; the returned DTO is an owned immutable identity
+receipt. No list scan, detail read, comment read, slug lookup, or write is
+performed. The API is registered in dependency injection, but remains
+unreachable from MCP until Step 3.
+
 ## Files and integration points
 
 - `Api/WorkItemResolverApi.cs`
@@ -79,12 +89,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement reference resolution
 
-- [ ] Add a concrete resolver API over TaigaTransport and reconstruct relative routes from the allowlist.
-- [ ] Map a small identity DTO; require positive id/project/ref and enforce request/response agreement without inventing missing identity.
-- [ ] Register the API and propagate cancellation; do not scan paged lists or fetch comments/details automatically.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement resolve_work_item API behavior`.
+- [x] Add a concrete resolver API over TaigaTransport and reconstruct relative routes from the allowlist.
+- [x] Map a small identity DTO; require positive id/project/ref and enforce request/response agreement without inventing missing identity.
+- [x] Register the API and propagate cancellation; do not scan paged lists or fetch comments/details automatically.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement resolve_work_item API behavior`.
 
 ## Step 3: Expose project reference lookup
 
@@ -135,8 +145,8 @@ stdout-contamination test while deleting a locked
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Contract tests passed; the full baseline retained the temporary-copy cleanup lock failure described above. | Specify resolve_work_item contracts / pending |
-| 2 | Not started | — | Implement resolve_work_item API behavior / pending |
+| 1 | Complete | Contract tests passed; the full baseline retained the temporary-copy cleanup lock failure described above. | Specify resolve_work_item contracts / `a1283a5` |
+| 2 | Complete | Focused resolver contract/API suite: 26 passed; Debug compilation passed; `git diff --check` passed. | Implement resolve_work_item API behavior / pending |
 | 3 | Not started | — | Expose resolve_work_item MCP tool / pending |
 | 4 | Not started | — | Verify resolve_work_item workflows / pending |
 
