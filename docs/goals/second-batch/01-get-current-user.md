@@ -1,6 +1,6 @@
 # Goal 01: get_current_user
 
-Status: in progress; contract evidence and fixtures are recorded, API/tool work remains.
+Status: in progress; API behavior is implemented, MCP exposure and final workflow verification remain.
 
 ## Objective
 
@@ -63,12 +63,19 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement the identity API
 
-- [ ] Add a concrete UserApi using TaigaTransport; own/dispose the request and returned document and pass cancellation.
-- [ ] Map the allowlisted identity fields, preserving false is_active and absent optional values.
-- [ ] Register UserApi through DI without modifying AuthClient login payloads, singleton state, or token claims.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement get_current_user API behavior`.
+- [x] Add a concrete UserApi using TaigaTransport; own/dispose the request and returned document and pass cancellation.
+- [x] Map the allowlisted identity fields, preserving false is_active and absent optional values.
+- [x] Register UserApi through DI without modifying AuthClient login payloads, singleton state, or token claims.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement get_current_user API behavior`.
+
+### Step 2 evidence
+
+- Previous checkpoint: `49cdee8` (`Specify get_current_user contracts`).
+- `UserApi.GetCurrentUserAsync` sends exactly `GET users/me`, delegates authentication, status handling, JSON parsing, cancellation, and response disposal to `TaigaTransport`, and disposes its returned `JsonDocument` after mapping.
+- Optional fields with the wrong JSON kind are treated as absent; `false` is preserved for `is_active`. Required `id` must be an integer greater than zero. No upstream private fields are modeled or forwarded.
+- Focused validation: `dotnet build TaigaMCP.sln -c Debug --no-restore -p:OutputPath=C:\Temp\TaigaMCP-goal01-step2b-debug\ -p:UseAppHost=false` passed with 0 warnings/errors; `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-build --no-restore --filter FullyQualifiedName~UserIdentityTests -p:OutputPath=C:\Temp\TaigaMCP-goal01-step2b-debug\ -p:UseAppHost=false` passed all 9 identity tests. An earlier full custom-output run reached 341 tests with 338 passing; the two identity failures were fixed, while the existing `ProductionServer_RejectsStartupStdoutContaminationInTemporaryCopy` test hit a temporary-copy cleanup lock. The focused rerun was clean.
 
 ## Step 3: Expose identity through MCP
 
@@ -109,13 +116,13 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
+Starting commit: `257149f6f5758af3e2d44f11c2ebfc446f2c99e4`. Source/deployment evidence: pinned source only; do not claim a live
 deployment version from upstream source alone.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline restore/test passed (332 tests); pinned users/me serializer reviewed; identity mapping and synthetic fixtures recorded above. | Specify get_current_user contracts / pending |
-| 2 | Not started | — | Implement get_current_user API behavior / pending |
+| 2 | Complete | UserApi mapping, cancellation, safe errors, request path, response disposal, DI registration, focused tests, and Debug build passed; public tool remains planned. | Implement get_current_user API behavior / pending |
 | 3 | Not started | — | Expose get_current_user MCP tool / pending |
 | 4 | Not started | — | Verify get_current_user workflows / pending |
 

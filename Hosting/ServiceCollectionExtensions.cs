@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AuthClient>();
         services.AddSingleton<TaigaTransport>();
         services.AddSingleton<ProjectApi>();
+        services.AddSingleton<UserApi>();
         services.AddSingleton<IssueMetadataCache>();
         services.AddSingleton<IssueApi>();
         services.AddSingleton<UserStoryApi>();
