@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
 using TaigaMCP.Models;
 using TaigaMCP.Tools;
@@ -155,6 +157,62 @@ public sealed class UserStoryStatusTests
             Assert.Null(page.Total);
             Assert.Null(page.NextPage);
             Assert.Null(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoryStatusesPage_RejectsStatusFromAnotherProject()
+    {
+        var handler = StatusRoutes("[{\"id\":10,\"project\":999,\"name\":\"Wrong project\"}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(
+                () => api.ListUserStoryStatusesPageAsync(123));
+
+            Assert.Contains("different project", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoryStatusesPage_HonorsPreCancellation()
+    {
+        var handler = StatusRoutes("[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                api.ListUserStoryStatusesPageAsync(123, cancellationToken: cancellation.Token));
+
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoryStatuses_ForbiddenResponseIsSafeToolFailure()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstory-statuses",
+                "{\"detail\":\"status permission secret\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.ListUserStoryStatuses(123));
+
+            Assert.Contains("403", exception.Message);
+            Assert.Contains("permission denied", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("status permission secret", exception.Message);
         }
     }
 

@@ -47,7 +47,13 @@ public sealed class UserStoryApi
 
         var items = new List<UserStoryStatusDto>(32);
         foreach (var status in document.RootElement.EnumerateArray())
-            items.Add(MapUserStoryStatus(status));
+        {
+            var mapped = MapUserStoryStatus(status);
+            if (mapped.Project.HasValue && mapped.Project.Value != projectId)
+                throw new TaigaRequestException("Taiga returned user story status data for a different project.");
+
+            items.Add(mapped);
+        }
 
         var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
         return new UserStoryStatusListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);

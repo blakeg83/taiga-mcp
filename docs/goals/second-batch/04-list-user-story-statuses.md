@@ -1,6 +1,6 @@
 # Goal 04: list_user_story_statuses
 
-Status: in progress; the public tool remains planned until Step 3.
+Status: complete.
 
 ## Objective
 
@@ -74,31 +74,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify discovery-to-transition flow
 
-- [ ] Fetch a custom-named closed status and pass its ID to update_user_story using get_user_story's version.
-- [ ] Test independent flags, WIP zero/null, missing optional color, empty/later pages, unknown metadata, and wrong-project data handling.
-- [ ] Cover denied access, malformed required IDs, cancellation, and unchanged existing story filter semantics.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_user_story_statuses workflows`.
+- [x] Fetch a custom-named closed status and pass its ID to update_user_story using get_user_story's version.
+- [x] Test independent flags, WIP zero/null, missing optional color, empty/later pages, unknown metadata, and wrong-project data handling.
+- [x] Cover denied access, malformed required IDs, cancellation, and unchanged existing story filter semantics.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_user_story_statuses workflows`.
 
 ## Acceptance scenarios
 
-- [ ] Closed and archived choices are visible and semantics do not depend on English names.
-- [ ] Returned IDs work with existing story update/create parameters.
-- [ ] New metadata discovery leaves legacy issue-status arrays and story list behavior unchanged.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] Closed and archived choices are visible and semantics do not depend on English names.
+- [x] Returned IDs work with existing story update/create parameters.
+- [x] New metadata discovery leaves legacy issue-status arrays and story list behavior unchanged.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] An agent can discover valid story statuses before creating or transitioning a story.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] An agent can discover valid story statuses before creating or transitioning a story.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -142,8 +142,8 @@ value when present. No status cache or story-list filter was changed.
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed (381 tests, 0 warnings/errors). Added `UserStoryStatusDto` contract fixtures/tests for localized names, independent flags, null color/WIP, and zero order/WIP. Verified pinned source revision and project filter above. | Specify list_user_story_statuses contracts / `471e6f1` |
 | 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~UserStoryStatusTests` passed (6 tests); Debug build/test passed (387 tests, 0 warnings/errors). API tests cover exact project/page query, field mapping/order, pagination, validation, malformed required IDs, and unknown metadata. | Implement list_user_story_statuses API behavior / `bafbfe2` |
-| 3 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~McpIntegrationTests` passed (11 tests); the complete Debug test rerun passed (387 tests, 0 warnings/errors). A transient first-run cleanup lock in the existing contamination test was cleared by rerunning its isolated test. Real STDIO `tools/list` and `tools/call` checks cover the required/default page schema, page 2 request, returned closed/archived metadata, and safe invalid-ID errors. Updated the reference, README, quickstart, inventory, and batch index to 27 tools. | Expose list_user_story_statuses MCP tool / pending |
-| 4 | Not started | — | Verify list_user_story_statuses workflows / pending |
+| 3 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~McpIntegrationTests` passed (11 tests); the complete Debug test rerun passed (387 tests, 0 warnings/errors). A transient first-run cleanup lock in the existing contamination test was cleared by rerunning its isolated test. Real STDIO `tools/list` and `tools/call` checks cover the required/default page schema, page 2 request, returned closed/archived metadata, and safe invalid-ID errors. Updated the reference, README, quickstart, inventory, and batch index to 27 tools. | Expose list_user_story_statuses MCP tool / `8bb12ba` |
+| 4 | Complete | Focused status/discovery/story-list coverage passed (29 tests). The fake STDIO update flow fetched `Terminado`, used its returned status ID with a fresh `get_user_story` version, and verified the forwarded PATCH. API/tool tests covered independent flags, zero/null WIP, omitted color, empty/later pages, unknown headers, wrong-project data, forbidden responses, malformed IDs, cancellation, and unchanged story-list filters. Final commands all passed: `dotnet restore`; `dotnet build -c Debug` (0 warnings/errors); `dotnet test -c Debug` (390 passed); `dotnet build -c Release --no-restore` (0 warnings/errors); `dotnet test -c Release --no-build --no-restore` (390 passed); `git diff --check`. Outputs: `bin/Debug/net8.0`, `tests/TaigaMCP.Tests/bin/Debug/net8.0`, `bin/Release/net8.0`, and `tests/TaigaMCP.Tests/bin/Release/net8.0`. | Verify list_user_story_statuses workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
