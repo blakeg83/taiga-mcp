@@ -152,7 +152,7 @@ signature `get_epic(epicId)`. It accepts the positive internal epic ID, not the
 displayed `#ref`, and returns one detail object rather than a page envelope.
 
 See the [command inventory](taiga_command_inventory.md)
-and [first-batch plan index](goals/first-batch/README.md) for the remaining
+and [second-batch plan index](goals/second-batch/README.md) for remaining
 planned coverage.
 
 ### `get_current_user` contract

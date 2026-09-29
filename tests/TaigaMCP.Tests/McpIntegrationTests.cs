@@ -35,6 +35,7 @@ public sealed class McpIntegrationTests
         Assert.Equal("integration-user", currentUserJson.GetProperty("username").GetString());
         Assert.Equal("Integration User", currentUserJson.GetProperty("full_name").GetString());
         Assert.True(currentUserJson.GetProperty("is_active").GetBoolean());
+        var currentUserId = currentUserJson.GetProperty("id").GetInt32();
         Assert.False(currentUserJson.TryGetProperty("email", out _));
         Assert.False(currentUserJson.TryGetProperty("auth_token", out _));
         Assert.False(currentUserJson.TryGetProperty("roles", out _));
@@ -117,7 +118,7 @@ public sealed class McpIntegrationTests
             ["subject"] = "Assigned sprint story",
             ["description"] = "  Acceptance: the story can be reopened.  ",
             ["status"] = 2,
-            ["assigned_to"] = 42,
+            ["assigned_to"] = currentUserId,
             ["tags"] = new[] { "search", "saved" },
             ["milestoneId"] = 55
         });
@@ -519,6 +520,7 @@ public sealed class McpIntegrationTests
                 "create_issue",
                 "create_task",
                 "create_user_story",
+                "get_current_user",
                 "get_epic",
                 "get_issue",
                 "get_task",

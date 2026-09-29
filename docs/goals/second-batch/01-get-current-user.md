@@ -1,6 +1,6 @@
 # Goal 01: get_current_user
 
-Status: in progress; the MCP tool is exposed, final identity-to-assignment verification remains.
+Status: complete; `get_current_user` is implemented, exposed, documented, and fully verified.
 
 ## Objective
 
@@ -95,31 +95,38 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify identity-to-assignment workflow
 
-- [ ] Read users/me and pass the returned ID to an existing issue/story/task assignment in fake HTTP; never hardcode a production user.
-- [ ] Cover missing/nonpositive id, optional fields, 401 bounded auth replay, 403, invalid JSON, and cancellation.
-- [ ] Verify extra upstream private fields never appear in the result or logs and all 23 baseline tools retain their contracts.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify get_current_user workflows`.
+- [x] Read users/me and pass the returned ID to an existing issue/story/task assignment in fake HTTP; never hardcode a production user.
+- [x] Cover missing/nonpositive id, optional fields, 401 bounded auth replay, 403, invalid JSON, and cancellation.
+- [x] Verify extra upstream private fields never appear in the result or logs and all 23 first-batch baseline tools retain their contracts.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify get_current_user workflows`.
+
+### Step 4 evidence
+
+- Previous checkpoint: `da569ff` (`Expose get_current_user MCP tool`).
+- The real MCP workflow reads `get_current_user`, stores its returned `id`, and uses that value in an existing assigned story create request. The fake server returns synthetic ID 42 only; no production identity or live Taiga data is used.
+- `UserIdentityTests` covers minimal/populated optional fields, private-field omission, missing/nonpositive/wrong-type/malformed IDs, safe 403 handling, pre-cancellation, response disposal, and one received-401 replay with refreshed bearer authorization. The MCP integration test confirms the 24-tool discovery contract, no public cancellation token, the users/me call, private-field suppression, and the assignment workflow.
+- Required validation: `dotnet restore` passed. `dotnet build TaigaMCP.sln -c Debug --no-restore -p:OutputPath=C:\Temp\TaigaMCP-goal01-final-debug7\ -p:UseAppHost=false` passed with 0 warnings/errors and the matching standard `dotnet test TaigaMCP.sln -c Debug --no-build --no-restore -p:OutputPath=C:\Temp\TaigaMCP-goal01-final-debug7\ -p:UseAppHost=false` passed 342/342. `dotnet build TaigaMCP.sln -c Release --no-restore -p:OutputPath=C:\Temp\TaigaMCP-goal01-final-release6\ -p:UseAppHost=false` passed with 0 warnings/errors and the matching standard `dotnet test TaigaMCP.sln -c Release --no-build --no-restore -p:OutputPath=C:\Temp\TaigaMCP-goal01-final-release6\ -p:UseAppHost=false` passed 342/342. `git diff --check` passed after this documentation update. The Windows contamination test initially hit a temporary-copy lock in several parallel full runs, then passed independently and in the clean full-suite retries; no test was skipped. No live server, credentials, generated artifacts, or unrelated files were changed by this goal.
 
 ## Acceptance scenarios
 
-- [ ] No public arguments are required and the result contains a usable numeric user ID.
-- [ ] Identity can drive an existing assignment/filter without parsing login responses.
-- [ ] Unknown/private upstream properties are omitted; malformed required identity fails safely.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] No public arguments are required and the result contains a usable numeric user ID.
+- [x] Identity can drive an existing assignment/filter without parsing login responses.
+- [x] Unknown/private upstream properties are omitted; malformed required identity fails safely.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] An agent can resolve 'me' to the authenticated user ID through a tested read-only MCP tool.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] An agent can resolve 'me' to the authenticated user ID through a tested read-only MCP tool.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -128,10 +135,10 @@ deployment version from upstream source alone.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline restore/test passed (332 tests); pinned users/me serializer reviewed; identity mapping and synthetic fixtures recorded above. | Specify get_current_user contracts / pending |
-| 2 | Complete | UserApi mapping, cancellation, safe errors, request path, response disposal, DI registration, focused tests, and Debug build passed; public tool remains planned. | Implement get_current_user API behavior / pending |
-| 3 | Complete | Public schema/call assertions and fake-HTTP users/me route added; documentation publishes the 24-tool callable contract. Exact integration command/result recorded above. | Expose get_current_user MCP tool / pending |
-| 4 | Not started | — | Verify get_current_user workflows / pending |
+| 1 | Complete | Baseline restore/test passed (332 tests); pinned users/me serializer reviewed; identity mapping and synthetic fixtures recorded above. | Specify get_current_user contracts / `49cdee8` |
+| 2 | Complete | UserApi mapping, cancellation, safe errors, request path, response disposal, DI registration, focused tests, and Debug build passed; public tool remains planned. | Implement get_current_user API behavior / `8953859` |
+| 3 | Complete | Public schema/call assertions and fake-HTTP users/me route added; documentation publishes the 24-tool callable contract. Exact integration command/result recorded above. | Expose get_current_user MCP tool / `da569ff` |
+| 4 | Complete | Full Debug/Release restore-build-test sequence, assignment workflow, auth replay, safe-error/cancellation/private-field tests, and documentation reconciliation passed; final evidence is recorded above. | Verify get_current_user workflows / this checkpoint |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified

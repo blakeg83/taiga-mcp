@@ -88,6 +88,38 @@ public sealed class UserIdentityTests
     }
 
     [Fact]
+    public async Task GetCurrentUserAsync_ReplaysOnlyReceived401WithRefreshedToken()
+    {
+        var userRequests = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Get, "/api/v1/users/me", _ =>
+                Interlocked.Increment(ref userRequests) == 1
+                    ? new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                    : new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(UserIdentityFixtures.Populated, Encoding.UTF8, "application/json")
+                    })
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/auth/refresh",
+                "{\"auth_token\":\"refreshed-token\",\"refresh\":\"next-refresh\"}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var identity = await new UserApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)).GetCurrentUserAsync();
+
+            Assert.Equal(42, identity.Id);
+            var requests = handler.Requests
+                .Where(request => request.Method == HttpMethod.Get && request.Uri.AbsolutePath == "/api/v1/users/me")
+                .ToArray();
+            Assert.Equal(2, requests.Length);
+            Assert.Equal("Bearer synthetic-token", requests[0].Headers["Authorization"].Single());
+            Assert.Equal("Bearer refreshed-token", requests[1].Headers["Authorization"].Single());
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post && request.Uri.AbsolutePath == "/api/v1/auth/refresh");
+        }
+    }
+
+    [Fact]
     public async Task GetCurrentUserAsync_CancellationStopsBeforeHttp()
     {
         var handler = new FakeHttpMessageHandler();
