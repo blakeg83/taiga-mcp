@@ -626,6 +626,9 @@ public sealed class McpIntegrationTests
 
         await using (var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: protocolDeadline.Token))
         {
+            async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
+                => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
+
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
             var expectedNames = new[]
             {
@@ -647,9 +650,10 @@ public sealed class McpIntegrationTests
                 "list_issue_statuses",
                 "list_issue_types",
                 "list_issues",
-                "list_project_members",
-                "list_projects",
-                "list_task_statuses",
+                 "list_project_members",
+                 "list_projects",
+                 "list_sprints",
+                 "list_task_statuses",
                 "list_tasks",
                 "list_user_stories",
                 "list_user_story_statuses",
@@ -672,12 +676,19 @@ public sealed class McpIntegrationTests
                 : [];
             Assert.DoesNotContain("member", listProjectsRequired);
 
-            var listProjectMembers = Assert.Single(tools, tool => tool.Name == "list_project_members");
+             var listProjectMembers = Assert.Single(tools, tool => tool.Name == "list_project_members");
             var memberProperties = listProjectMembers.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
             Assert.Equal(new[] { "projectId", "page" }, memberProperties);
             var memberRequired = listProjectMembers.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
-            Assert.Equal(new[] { "projectId" }, memberRequired);
+             Assert.Equal(new[] { "projectId" }, memberRequired);
+
+             var listSprints = Assert.Single(tools, tool => tool.Name == "list_sprints");
+             var sprintProperties = listSprints.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+             Assert.Equal(new[] { "projectId", "page", "closed" }, sprintProperties);
+             var sprintRequired = listSprints.JsonSchema.GetProperty("required").EnumerateArray()
+                 .Select(value => value.GetString()).ToArray();
+             Assert.Equal(new[] { "projectId" }, sprintRequired);
 
             async Task<string> CallMemberBoundaryAsync(Dictionary<string, object?> arguments)
             {
@@ -694,6 +705,73 @@ public sealed class McpIntegrationTests
                     return "mcp_exception";
                 }
             }
+
+            async Task<string> CallSprintBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_sprints",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
+            Assert.Equal("error_result", await CallSprintBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallSprintBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            var sprintWithoutClosed = await Call("list_sprints", new() { ["projectId"] = 123 });
+            Assert.False(sprintWithoutClosed.IsError == true, GetText(sprintWithoutClosed));
+            var sprintWithoutClosedJson = JsonSerializer.Deserialize<JsonElement>(GetText(sprintWithoutClosed));
+            Assert.Equal(55, sprintWithoutClosedJson.GetProperty("items")[0].GetProperty("id").GetInt32());
+            Assert.Equal(2, sprintWithoutClosedJson.GetProperty("total").GetInt32());
+            Assert.Equal(2, sprintWithoutClosedJson.GetProperty("next_page").GetInt32());
+            Assert.True(sprintWithoutClosedJson.GetProperty("has_more").GetBoolean());
+            var omittedClosedRequest = taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/milestones?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/milestones?project=123&page=1", omittedClosedRequest.PathAndQuery);
+
+            var sprintWithNullClosed = await Call("list_sprints", new()
+            {
+                ["projectId"] = 123,
+                ["page"] = 2,
+                ["closed"] = null
+            });
+            Assert.False(sprintWithNullClosed.IsError == true, GetText(sprintWithNullClosed));
+            Assert.Equal("/api/v1/milestones?project=123&page=2", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/milestones?", StringComparison.Ordinal)).PathAndQuery);
+
+            var openSprints = await Call("list_sprints", new()
+            {
+                ["projectId"] = 123,
+                ["page"] = 3,
+                ["closed"] = false
+            });
+            Assert.False(openSprints.IsError == true, GetText(openSprints));
+            Assert.Equal("/api/v1/milestones?project=123&page=3&closed=false", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/milestones?", StringComparison.Ordinal)).PathAndQuery);
+
+            var closedSprints = await Call("list_sprints", new()
+            {
+                ["projectId"] = 123,
+                ["page"] = 4,
+                ["closed"] = true
+            });
+            Assert.False(closedSprints.IsError == true, GetText(closedSprints));
+            Assert.Equal("/api/v1/milestones?project=123&page=4&closed=true", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/milestones?", StringComparison.Ordinal)).PathAndQuery);
+
+            var invalidSprint = await Call("list_sprints", new() { ["projectId"] = 0 });
+            Assert.True(invalidSprint.IsError == true);
+            Assert.Contains("projectId", GetText(invalidSprint));
+
+            taiga.SprintStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenSprints = await Call("list_sprints", new() { ["projectId"] = 123 });
+            Assert.True(forbiddenSprints.IsError == true);
+            Assert.Contains("403", GetText(forbiddenSprints));
+            Assert.Contains("permission denied", GetText(forbiddenSprints), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic sprint secret", GetText(forbiddenSprints));
+            taiga.SprintStatusCode = System.Net.HttpStatusCode.OK;
 
             async Task<string> CallStoryStatusBoundaryAsync(Dictionary<string, object?> arguments)
             {

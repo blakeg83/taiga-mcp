@@ -67,12 +67,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose sprint discovery
 
-- [ ] Add SprintTools/list_sprints with nullable closed binding and descriptions explaining that Taiga calls sprints milestones.
-- [ ] Document selecting the returned id as milestoneId for existing story creation/update or standalone task creation.
-- [ ] Add MCP tests that distinguish omitted closed, explicit null, false, and true.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_sprints MCP tool`.
+- [x] Add SprintTools/list_sprints with nullable closed binding and descriptions explaining that Taiga calls sprints milestones.
+- [x] Document selecting the returned id as milestoneId for existing story creation/update or standalone task creation.
+- [x] Add MCP tests that distinguish omitted closed, explicit null, false, and true.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_sprints MCP tool`.
 
 ## Step 4: Verify discover-and-schedule workflow
 
@@ -131,8 +131,8 @@ Step 1 contract decisions:
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Source review and fixtures recorded above. Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore`: passed, 408 tests. | Specify list_sprints contracts / pending |
-| 2 | Complete | `SprintListTests`: 11 passed, including query omission/false/true, mapping, nested-field omission, pagination, malformed data, safe HTTP errors, pre-cancellation, and project/page validation. Debug focused build/test passed. | Implement list_sprints API behavior / pending |
-| 3 | Not started | — | Expose list_sprints MCP tool / pending |
+| 2 | Complete | `SprintListTests`: 11 passed, including query omission/false/true, mapping, nested-field omission, pagination, malformed data, safe HTTP errors, pre-cancellation, and project/page validation. Debug focused build/test passed. | Implement list_sprints API behavior / `1919b9c` |
+| 3 | Complete | Real `tools/list`/`tools/call` integration passed: 30 discovered tools; required/default/null/false/true binding, page envelope, invalid arguments, and sanitized 403 behavior verified. Public reference, README, quickstart, inventory, and batch index updated. | Expose list_sprints MCP tool / pending |
 | 4 | Not started | — | Verify list_sprints workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

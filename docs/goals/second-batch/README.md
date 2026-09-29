@@ -2,9 +2,10 @@
 
 Status: in progress. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
-(`list_user_story_statuses`), 05 (`list_task_statuses`), and 06 (`list_epic_statuses`) are delivered; the remaining 6 functions below
-are planned and are not callable until their goals ship. Prepared 2026-09-29
-against the current 29-tool repository baseline after goal 06.
+(`list_user_story_statuses`), 05 (`list_task_statuses`), 06 (`list_epic_statuses`),
+and 07 (`list_sprints`) are delivered; the remaining 5 functions below are
+planned and are not callable until their goals ship. Prepared 2026-09-29 against
+the current 30-tool repository baseline after goal 07.
 
 ## Objective
 
@@ -55,7 +56,7 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 29 tools; completing the remaining 6 yields
+New functions build on the existing 30 tools; completing the remaining 5 yields
 35 tools unless separately authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
@@ -91,7 +92,7 @@ ships.
 - [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 6 goals are intentionally unchecked.
+The completion boxes for the remaining 5 goals are intentionally unchecked.
 Goals 01 through 06 are delivered and have their own four-step evidence
 records; the remaining goal entries are still planning documents and do not
 claim implementation or new application test results.
