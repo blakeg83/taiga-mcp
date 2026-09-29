@@ -1,6 +1,6 @@
 # Goal 06: list_epic_statuses
 
-Status: in progress; contract checkpoint complete, implementation in progress.
+Status: in progress; API checkpoint complete, MCP exposure in progress.
 
 ## Objective
 
@@ -56,12 +56,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement epic status reads
 
-- [ ] Extend EpicApi with authenticated one-page retrieval using TaigaTransport and existing page parsing.
-- [ ] Validate identity/project, preserve numeric IDs and closure booleans, and do not filter out closed statuses.
-- [ ] Avoid changing list_epics filters or introducing status caches that treat one page as a complete map.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_epic_statuses API behavior`.
+- [x] Extend EpicApi with authenticated one-page retrieval using TaigaTransport and existing page parsing.
+- [x] Validate identity/project, preserve numeric IDs and closure booleans, and do not filter out closed statuses.
+- [x] Avoid changing list_epics filters or introducing status caches that treat one page as a complete map.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_epic_statuses API behavior`.
 
 ## Step 3: Expose the lookup
 
@@ -109,8 +109,8 @@ deployment claim.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet test -c Debug`: 399 passed. Added contract fixtures/tests for localized open/closed names, zero order, missing order/color, and null omission. Verified `EpicStatusSerializer` fields and project filter against pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no deviation. | Specify list_epic_statuses contracts / pending |
-| 2 | Not started | — | Implement list_epic_statuses API behavior / pending |
+| 1 | Complete | Baseline `dotnet test -c Debug`: 399 passed. Added contract fixtures/tests for localized open/closed names, zero order, missing order/color, and null omission. Verified `EpicStatusSerializer` fields and project filter against pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no deviation. | Specify list_epic_statuses contracts / `551f15b` |
+| 2 | Complete | `EpicApi` now requests one authenticated `GET epic-statuses?project={projectId}&page={page}` and returns the standard page metadata. It maps `id/project/name/slug/order/color/is_closed`, preserves open and closed server order, rejects nonpositive inputs, malformed IDs, and mismatched projects, and does not use a cache or alter `list_epics`. Focused `EpicStatusTests`: 9 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. | Implement list_epic_statuses API behavior / pending |
 | 3 | Not started | — | Expose list_epic_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_epic_statuses workflows / pending |
 

@@ -215,6 +215,42 @@ public sealed class EpicApi
             new EpicListOptions { Page = page },
             cancellationToken)).Items;
 
+    public async Task<IReadOnlyList<EpicStatusDto>> ListEpicStatusesAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+        => (await ListEpicStatusesPageAsync(projectId, page, cancellationToken)).Items;
+
+    internal async Task<EpicStatusListPage> ListEpicStatusesPageAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"epic-statuses?project={projectId}&page={page}");
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid epic status list data.");
+
+        var items = new List<EpicStatusDto>(32);
+        foreach (var status in document.RootElement.EnumerateArray())
+        {
+            var mapped = MapEpicStatus(status);
+            if (mapped.Project.HasValue && mapped.Project.Value != projectId)
+                throw new TaigaRequestException("Taiga returned epic status data for a different project.");
+
+            items.Add(mapped);
+        }
+
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new EpicStatusListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);
+    }
+
     internal async Task<EpicListPage> ListEpicsPageAsync(
         int projectId,
         EpicListOptions options,
@@ -273,6 +309,84 @@ public sealed class EpicApi
             Modified = ReadOptionalString(epic, "modified_date"),
             Version = ReadOptionalNonnegativeInt(epic, "version")
         };
+    }
+
+    private static EpicStatusDto MapEpicStatus(JsonElement status)
+    {
+        if (status.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid epic status data.");
+
+        return new EpicStatusDto
+        {
+            Id = ReadEpicStatusRequiredPositiveInt(status, "id"),
+            Project = ReadEpicStatusOptionalPositiveInt(status, "project"),
+            Name = ReadEpicStatusOptionalString(status, "name"),
+            Slug = ReadEpicStatusOptionalString(status, "slug"),
+            Order = ReadEpicStatusOptionalInt(status, "order"),
+            Color = ReadEpicStatusOptionalString(status, "color"),
+            IsClosed = ReadEpicStatusOptionalBoolean(status, "is_closed")
+        };
+    }
+
+    private static int ReadEpicStatusRequiredPositiveInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid epic status {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadEpicStatusOptionalPositiveInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid epic status {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadEpicStatusOptionalInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+            throw new TaigaRequestException($"Taiga returned invalid epic status {propertyName} data.");
+
+        return number;
+    }
+
+    private static string? ReadEpicStatusOptionalString(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.String)
+            throw new TaigaRequestException($"Taiga returned invalid epic status {propertyName} data.");
+
+        return value.GetString();
+    }
+
+    private static bool? ReadEpicStatusOptionalBoolean(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            throw new TaigaRequestException($"Taiga returned invalid epic status {propertyName} data.");
+
+        return value.GetBoolean();
     }
 
     private static EpicDetailDto MapEpicDetail(JsonElement epic)
@@ -413,3 +527,10 @@ public sealed class EpicApi
         return value.GetString();
     }
 }
+
+internal sealed record EpicStatusListPage(
+    IReadOnlyList<EpicStatusDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
