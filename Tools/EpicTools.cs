@@ -97,4 +97,21 @@ public sealed class EpicTools
             result.NextPage,
             result.HasMore);
     });
+
+    [McpServerTool(Name = "list_epic_statuses")]
+    [Description("List one page of every selectable epic status for a project, including open and closed choices. Each result includes its project/resource-specific status ID and available name, slug, order, color, and closed flag; use a returned id with create_epic or the planned update_epic and request later pages when page metadata indicates more results. Epic statuses do not expose story-only archive or WIP fields.")]
+    public async Task<string> ListEpicStatuses(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _epics.ListEpicStatusesPageAsync(projectId, page, cancellationToken);
+        return ToolResponseJson.SerializePage(
+            result.Items,
+            result.Page,
+            result.Total,
+            result.NextPage,
+            result.HasMore);
+    });
 }

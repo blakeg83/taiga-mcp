@@ -224,6 +224,21 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/epic-statuses")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "[{\"id\":7,\"project\":123,\"name\":\"Ready\",\"slug\":\"ready\",\"order\":0,\"color\":\"#336699\",\"is_closed\":false},{\"id\":8,\"project\":123,\"name\":\"Terminé\",\"slug\":\"termine\",\"order\":1,\"color\":\"#cc0000\",\"is_closed\":true},{\"id\":9,\"project\":123,\"name\":\"Guardado\",\"slug\":\"guardado\",\"order\":2,\"color\":null,\"is_closed\":false}]",
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "3",
+                    ["x-pagination-next"] = "/api/v1/epic-statuses?project=123&page=3"
+                });
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/tasks", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(

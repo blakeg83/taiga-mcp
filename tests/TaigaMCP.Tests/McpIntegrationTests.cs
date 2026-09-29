@@ -109,6 +109,16 @@ public sealed class McpIntegrationTests
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_epic", new() { ["epicId"] = 301 })).IsError == true);
         Assert.True((await Call("get_epic", new() { ["epicId"] = 0 })).IsError == true);
+        var epicStatuses = await Call("list_epic_statuses", new() { ["projectId"] = 123 });
+        Assert.False(epicStatuses.IsError == true, GetText(epicStatuses));
+        var epicStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(epicStatuses));
+        var selectedEpicStatusId = Assert.Single(
+            epicStatusEnvelope.GetProperty("items").EnumerateArray(),
+            status => status.GetProperty("id").GetInt32() == 7)
+            .GetProperty("id")
+            .GetInt32();
+        Assert.Equal("/api/v1/epic-statuses?project=123&page=1", taiga.Requests.Last(request =>
+            request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epic-statuses?", StringComparison.Ordinal)).PathAndQuery);
         var createdEpic = await Call("create_epic", new()
         {
             ["projectId"] = 123,
@@ -130,7 +140,7 @@ public sealed class McpIntegrationTests
             ["projectId"] = 123,
             ["subject"] = "Integration epic",
             ["description"] = "  Group saved-search delivery work.  ",
-            ["status"] = 7,
+            ["status"] = selectedEpicStatusId,
             ["assigned_to"] = 42,
             ["color"] = "#336699",
             ["tags"] = new[] { "search", "saved" }
@@ -142,7 +152,7 @@ public sealed class McpIntegrationTests
             new[] { "assigned_to", "color", "description", "project", "status", "subject", "tags" },
             populatedEpicBody.EnumerateObject().Select(property => property.Name).OrderBy(name => name, StringComparer.Ordinal));
         Assert.Equal("  Group saved-search delivery work.  ", populatedEpicBody.GetProperty("description").GetString());
-        Assert.Equal(7, populatedEpicBody.GetProperty("status").GetInt32());
+        Assert.Equal(selectedEpicStatusId, populatedEpicBody.GetProperty("status").GetInt32());
         Assert.Equal(42, populatedEpicBody.GetProperty("assigned_to").GetInt32());
         Assert.Equal("#336699", populatedEpicBody.GetProperty("color").GetString());
         Assert.Equal(new[] { "search", "saved" }, populatedEpicBody.GetProperty("tags").EnumerateArray().Select(tag => tag.GetString()));
@@ -630,6 +640,7 @@ public sealed class McpIntegrationTests
                 "get_task",
                 "get_user_story",
                 "link_user_story_to_epic",
+                "list_epic_statuses",
                 "list_epics",
                 "list_issue_priorities",
                 "list_issue_severities",
@@ -716,6 +727,22 @@ public sealed class McpIntegrationTests
                 }
             }
 
+            async Task<string> CallEpicStatusBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_epic_statuses",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
             var issueProperties = listIssues.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -759,6 +786,15 @@ public sealed class McpIntegrationTests
             Assert.Equal(new[] { "projectId" }, taskStatusRequired);
             Assert.DoesNotContain("isArchived", listTaskStatuses.Description, StringComparison.Ordinal);
             Assert.DoesNotContain("wip_limit", listTaskStatuses.Description, StringComparison.Ordinal);
+
+            var listEpicStatuses = Assert.Single(tools, tool => tool.Name == "list_epic_statuses");
+            var epicStatusProperties = listEpicStatuses.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "projectId", "page" }, epicStatusProperties);
+            var epicStatusRequired = listEpicStatuses.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, epicStatusRequired);
+            Assert.DoesNotContain("isArchived", listEpicStatuses.Description, StringComparison.Ordinal);
+            Assert.DoesNotContain("wip_limit", listEpicStatuses.Description, StringComparison.Ordinal);
 
             var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
             var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1089,6 +1125,57 @@ public sealed class McpIntegrationTests
             Assert.Equal(
                 "/api/v1/epics?project=123&page=3&status=7&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 epicRequest.PathAndQuery);
+
+            var omittedEpicStatusPage = await client.CallToolAsync(
+                "list_epic_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(omittedEpicStatusPage.IsError == true, GetText(omittedEpicStatusPage));
+            var omittedEpicStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(omittedEpicStatusPage));
+            Assert.Equal(1, omittedEpicStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(3, omittedEpicStatusEnvelope.GetProperty("items").GetArrayLength());
+            Assert.Equal(JsonValueKind.Number, omittedEpicStatusEnvelope.GetProperty("total").ValueKind);
+            Assert.False(omittedEpicStatusEnvelope.GetProperty("items")[0].TryGetProperty("is_archived", out _));
+            Assert.False(omittedEpicStatusEnvelope.GetProperty("items")[0].TryGetProperty("wip_limit", out _));
+            var omittedEpicStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epic-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/epic-statuses?project=123&page=1", omittedEpicStatusRequest.PathAndQuery);
+
+            var epicStatusRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epic-statuses?", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallEpicStatusBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallEpicStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            Assert.Equal("error_result", await CallEpicStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = null }));
+            Assert.Equal(epicStatusRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epic-statuses?", StringComparison.Ordinal)));
+
+            var epicStatusPage = await client.CallToolAsync(
+                "list_epic_statuses",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 2
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(epicStatusPage.IsError == true, GetText(epicStatusPage));
+            var epicStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(epicStatusPage));
+            Assert.Equal(2, epicStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(3, epicStatusEnvelope.GetProperty("total").GetInt32());
+            Assert.Equal(3, epicStatusEnvelope.GetProperty("next_page").GetInt32());
+            Assert.True(epicStatusEnvelope.GetProperty("has_more").GetBoolean());
+            var epicStatuses = epicStatusEnvelope.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(3, epicStatuses.Length);
+            Assert.Equal("Terminé", epicStatuses[1].GetProperty("name").GetString());
+            Assert.True(epicStatuses[1].GetProperty("is_closed").GetBoolean());
+            Assert.False(epicStatuses[1].TryGetProperty("is_archived", out _));
+            Assert.False(epicStatuses[1].TryGetProperty("wip_limit", out _));
+            var returnedOpenEpicStatusId = epicStatuses[0].GetProperty("id").GetInt32();
+            var returnedClosedEpicStatusId = epicStatuses[1].GetProperty("id").GetInt32();
+            Assert.Equal(7, returnedOpenEpicStatusId);
+            Assert.Equal(8, returnedClosedEpicStatusId);
+            var epicStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epic-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/epic-statuses?project=123&page=2", epicStatusRequest.PathAndQuery);
 
             var epicDetail = await client.CallToolAsync(
                 "get_epic",

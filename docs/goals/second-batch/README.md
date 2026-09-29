@@ -2,9 +2,9 @@
 
 Status: in progress. Goals 01 (`get_current_user`), 02
 (`list_project_members`), 03 (`resolve_work_item`), 04
-(`list_user_story_statuses`), and 05 (`list_task_statuses`) are delivered; the remaining 7 functions below
+(`list_user_story_statuses`), 05 (`list_task_statuses`), and 06 (`list_epic_statuses`) are delivered; the remaining 6 functions below
 are planned and are not callable until their goals ship. Prepared 2026-09-29
-against the current 28-tool repository baseline after goal 05.
+against the current 29-tool repository baseline after goal 06.
 
 ## Objective
 
@@ -91,7 +91,7 @@ ships.
 - [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 7 goals are intentionally unchecked.
-Goals 01 through 05 are delivered and have their own four-step evidence
+The completion boxes for the remaining 6 goals are intentionally unchecked.
+Goals 01 through 06 are delivered and have their own four-step evidence
 records; the remaining goal entries are still planning documents and do not
 claim implementation or new application test results.

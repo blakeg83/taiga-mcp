@@ -1,6 +1,6 @@
 # Goal 06: list_epic_statuses
 
-Status: in progress; API checkpoint complete, MCP exposure in progress.
+Status: in progress; MCP exposure complete, final verification in progress.
 
 ## Objective
 
@@ -65,12 +65,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose the lookup
 
-- [ ] Add list_epic_statuses to EpicTools with clear epic-specific IDs and pagination descriptions.
-- [ ] Document choosing a status for existing create_epic and future update_epic; label the latter planned until goal 08 ships.
-- [ ] Add MCP schema/discovery/call coverage.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_epic_statuses MCP tool`.
+- [x] Add list_epic_statuses to EpicTools with clear epic-specific IDs and pagination descriptions.
+- [x] Document choosing a status for existing create_epic and future update_epic; label the latter planned until goal 08 ships.
+- [x] Add MCP schema/discovery/call coverage.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_epic_statuses MCP tool`.
 
 ## Step 4: Verify epic status selection
 
@@ -110,8 +110,8 @@ deployment claim.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 399 passed. Added contract fixtures/tests for localized open/closed names, zero order, missing order/color, and null omission. Verified `EpicStatusSerializer` fields and project filter against pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no deviation. | Specify list_epic_statuses contracts / `551f15b` |
-| 2 | Complete | `EpicApi` now requests one authenticated `GET epic-statuses?project={projectId}&page={page}` and returns the standard page metadata. It maps `id/project/name/slug/order/color/is_closed`, preserves open and closed server order, rejects nonpositive inputs, malformed IDs, and mismatched projects, and does not use a cache or alter `list_epics`. Focused `EpicStatusTests`: 9 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. | Implement list_epic_statuses API behavior / pending |
-| 3 | Not started | — | Expose list_epic_statuses MCP tool / pending |
+| 2 | Complete | `EpicApi` now requests one authenticated `GET epic-statuses?project={projectId}&page={page}` and returns the standard page metadata. It maps `id/project/name/slug/order/color/is_closed`, preserves open and closed server order, rejects nonpositive inputs, malformed IDs, and mismatched projects, and does not use a cache or alter `list_epics`. Focused `EpicStatusTests`: 9 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. | Implement list_epic_statuses API behavior / `0fcaf25` |
+| 3 | Complete | Added `list_epic_statuses` with `projectId` required and `page=1` default; no cancellation argument is exposed. Real MCP discovery/schema and calls cover default/page 2, missing/null argument failures, page metadata, closed choices, omission of story-only fields, and composing a returned ID with `create_epic`. Focused status tests: 9 passed; focused real MCP checks: 2 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. Updated README, tool reference, quickstart, command inventory, and batch index to 29 tools. | Expose list_epic_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_epic_statuses workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

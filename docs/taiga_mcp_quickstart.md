@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 28 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 29 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -275,6 +275,21 @@ Task status IDs are not interchangeable with story status IDs. The task status
 reader includes closed choices and does not expose story-only archive or WIP
 fields. If `next_page` is present, call the same tool with that page number.
 
+### Discover epic workflow statuses
+
+Before creating or changing an epic, call `list_epic_statuses` for its project
+and pass a returned epic-specific `id` as `status`:
+
+```json
+{"projectId":123,"page":1}
+{"items":[{"id":7,"project":123,"name":"Ready","slug":"ready","order":0,"color":"#336699","is_closed":false},{"id":8,"project":123,"name":"Terminé","slug":"termine","order":1,"color":"#cc0000","is_closed":true}],"page":1,"total":null,"next_page":null,"has_more":null}
+{"projectId":123,"subject":"Saved-search delivery","status":8}
+```
+
+Epic status IDs are not interchangeable with story or task status IDs. The
+reader includes closed choices and does not expose story-only archive or WIP
+fields. If `next_page` is present, call the same tool with that page number.
+
 ### Update a user story
 
 Read the story first and pass its returned `version` to the update. Omitted
@@ -345,6 +360,7 @@ Call the tool list_user_stories with projectId=12345 and backlogOnly=true
 Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
 Call the tool list_user_story_statuses with projectId=12345 and page=1
 Call the tool list_task_statuses with projectId=12345 and page=1
+Call the tool list_epic_statuses with projectId=12345 and page=1
 Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
