@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 25 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 26 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -119,6 +119,30 @@ Use the returned `user_id` as `assigned_to` in a later work-item call. Do not
 send `membership_id` as the assignee. Pending invitations can omit `user_id`,
 and inactive users remain visible for context; neither is silently treated as
 an active assignable account. Email and invitation text are not returned.
+
+### Resolve a work-item reference before editing
+
+Use a numeric project-local `ref` and a known kind to get the internal ID. Do
+not include the human-facing `#` and do not pass the ref to a detail or update
+tool:
+
+```json
+{"projectId":123,"kind":"task","ref":42}
+```
+
+The result is an identity receipt such as
+`{"kind":"task","id":203,"ref":42,"project":123,"subject":"Implement saved-search endpoint","version":2}`.
+Then read the authoritative detail and use its returned version for a later
+edit:
+
+```json
+{"taskId":203}
+{"taskId":203,"version":2,"status":11}
+```
+
+The same ref can identify different kinds or occur in another project. The
+resolver never guesses the kind, searches other projects, scans lists, or
+performs the subsequent read/update automatically.
 
 ### Create a user story
 
@@ -282,6 +306,7 @@ Look for `taiga` in the MCP servers list.
 List projects I belong to
 Call the tool list_projects with member=6 and page=1
 Call the tool list_project_members with projectId=12345 and page=1
+Call the tool resolve_work_item with projectId=12345, kind="task", and ref=42
 Call the tool list_issues with projectId=12345 and page=1
 Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true
 Call the tool list_user_stories with projectId=12345 and backlogOnly=true

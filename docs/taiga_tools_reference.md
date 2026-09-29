@@ -8,9 +8,9 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 25 tools:
+The current server exposes 26 tools:
 
-- 3 project tools: `list_projects`, `list_project_members`, `resolve_project`.
+- 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 identity tool: `get_current_user`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
@@ -20,13 +20,14 @@ The current server exposes 25 tools:
 - 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
 - 4 epic tools: `list_epics`, `get_epic`, `create_epic`, and
   `link_user_story_to_epic`.
-- 1 shared work-item tool: `add_work_item_comment`.
+- 2 shared work-item tools: `add_work_item_comment` and `resolve_work_item`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
-first-batch total to 23. Goals 01 and 02 of the [second batch](goals/second-batch/README.md)
-add `get_current_user` and `list_project_members`; 10 batch functions remain
-planned. The broader inventory still includes deferred fields and operations.
+first-batch total to 23. Goals 01 through 03 of the [second batch](goals/second-batch/README.md)
+add `get_current_user`, `list_project_members`, and `resolve_work_item`; 9
+batch functions remain planned. The broader inventory still includes deferred
+fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -212,6 +213,45 @@ not a public argument. At the installed MCP boundary, omitting `projectId`,
 sending `projectId:null`, or sending `page:null` produces an `IsError=true`
 tool result before HTTP; an explicit `page=4` is accepted and requests page 4.
 
+### `resolve_work_item` contract
+
+The signature is `resolve_work_item(projectId, kind, ref)`. It sends exactly one
+authenticated GET to the selected resource's project-local by-reference route:
+
+```text
+GET /api/v1/issues/by_ref?project={projectId}&ref={ref}
+GET /api/v1/userstories/by_ref?project={projectId}&ref={ref}
+GET /api/v1/tasks/by_ref?project={projectId}&ref={ref}
+GET /api/v1/epics/by_ref?project={projectId}&ref={ref}
+```
+
+`kind` is closed to `issue`, `user_story`, `task`, and `epic`. `projectId` and
+`ref` are positive numeric values; `ref` is the displayed project-local number
+without a leading `#`, not an internal ID. A successful result is a small
+identity receipt, for example:
+
+```json
+{"kind":"task","id":203,"ref":42,"project":12,"subject":"Implement saved-search endpoint","version":2}
+```
+
+The returned `id` is the value to pass to `get_task` (or the matching existing
+`get_*` tool), and the returned `version` should be used for a later versioned
+edit. The resolver does not fetch full details, scan lists, search other
+projects, infer the kind, parse slugs/URLs, or modify Taiga. The response's
+positive `id`, `ref`, and `project` are required; a ref/project mismatch is a
+safe lookup error rather than a fallback. Missing optional `subject` or
+`version` values remain omitted. A 404 is returned as a safe resource-not-found
+error, and the client does not retry or issue a write.
+
+The route and response contract was checked on 2026-09-29 against pinned
+taiga-back revision `4d11baef9027f5598f6341d6eb4261de2840688e`: the
+[ByRefMixin](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/mixins/by_ref.py),
+[issue viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/issues/api.py),
+[story viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py),
+[task viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py),
+and [epic viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py).
+This is pinned source evidence, not a deployed-version claim.
+
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.
 
@@ -221,6 +261,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | --- | --- | --- |
 | `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
+| `resolve_work_item` | `projectId`, `kind`, and `ref` required; `kind` is one of `issue`, `user_story`, `task`, or `epic` | `{ kind, id, ref, project, subject?, version? }`; identity is checked against the requested project/ref. |
 | `get_current_user` | No arguments | One identity object with required positive `id` and optional `username`, `full_name`, and `is_active`. |
 | `list_project_members` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; member items expose `membership_id`, `project`, optional `user_id`, `role_id`, `role_name`, `full_name`, `is_user_active`, `is_admin`, and `is_owner`. |
 | `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |

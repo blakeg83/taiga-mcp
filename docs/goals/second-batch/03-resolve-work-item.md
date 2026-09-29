@@ -1,6 +1,6 @@
 # Goal 03: resolve_work_item
 
-Status: Step 1 complete; callable tool remains planned until Step 3.
+Status: Step 3 complete; final workflow verification remains in Step 4.
 
 ## Objective
 
@@ -63,6 +63,17 @@ receipt. No list scan, detail read, comment read, slug lookup, or write is
 performed. The API is registered in dependency injection, but remains
 unreachable from MCP until Step 3.
 
+## Step 3 implementation evidence
+
+The `resolve_work_item` MCP tool is now callable with the exact public
+signature `resolve_work_item(projectId, kind, ref)`. The C# `@ref` parameter
+emits the required schema property name `ref`; `cancellationToken` is not
+public. The tool returns the resolver's JSON identity receipt and leaves the
+existing `resolve_project` behavior unchanged. Documentation now distinguishes
+the displayed ref from the internal ID and records the resolve -> get -> update
+workflow. The real stdio MCP fixture discovers the new tool and calls all four
+enum values against fake HTTP routes.
+
 ## Files and integration points
 
 - `Api/WorkItemResolverApi.cs`
@@ -98,12 +109,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose project reference lookup
 
-- [ ] Add the tool with public argument name ref (use C# @ref if needed); validate the emitted MCP schema uses ref.
-- [ ] Document same ref values across different projects and kinds, and the resolve -> get -> update sequence.
-- [ ] Keep resolve_project behavior unchanged and add discovery/actual-call tests for all enum values.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose resolve_work_item MCP tool`.
+- [x] Add the tool with public argument name ref (use C# @ref if needed); validate the emitted MCP schema uses ref.
+- [x] Document same ref values across different projects and kinds, and the resolve -> get -> update sequence.
+- [x] Keep resolve_project behavior unchanged and add discovery/actual-call tests for all enum values.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose resolve_work_item MCP tool`.
 
 ## Step 4: Verify references before edits
 
@@ -146,8 +157,8 @@ stdout-contamination test while deleting a locked
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Contract tests passed; the full baseline retained the temporary-copy cleanup lock failure described above. | Specify resolve_work_item contracts / `a1283a5` |
-| 2 | Complete | Focused resolver contract/API suite: 26 passed; Debug compilation passed; `git diff --check` passed. | Implement resolve_work_item API behavior / pending |
-| 3 | Not started | — | Expose resolve_work_item MCP tool / pending |
+| 2 | Complete | Focused resolver contract/API suite: 26 passed; Debug compilation passed; `git diff --check` passed. | Implement resolve_work_item API behavior / `c60f8a9` |
+| 3 | Complete | Real stdio discovery/schema and four actual MCP calls passed in the integration fixture; docs/inventory updated. | Expose resolve_work_item MCP tool / pending |
 | 4 | Not started | — | Verify resolve_work_item workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
