@@ -65,12 +65,19 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement project member retrieval
 
-- [ ] Add ProjectApi.ListProjectMembersAsync using positive project/page validation and encoded fixed query keys.
-- [ ] Use ReadWithHeadersAsync/TaigaPagination and map allowlisted DTO fields; do not fetch each user's profile.
-- [ ] Do not filter pending records out or equate membership existence with permission to assign a future item.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_project_members API behavior`.
+- [x] Add ProjectApi.ListProjectMembersAsync using positive project/page validation and encoded fixed query keys.
+- [x] Use ReadWithHeadersAsync/TaigaPagination and map allowlisted DTO fields; do not fetch each user's profile.
+- [x] Do not filter pending records out or equate membership existence with permission to assign a future item.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_project_members API behavior`.
+
+### Step 2 execution record
+
+- Previous checkpoint: `fa4c786` (`Specify list_project_members contracts`).
+- Implementation: `ProjectApi.ListProjectMembersAsync` validates positive `projectId` and `page`, sends exactly one `GET memberships?project={projectId}&page={page}`, reads pagination headers through `TaigaPagination`, and maps only the allowlisted membership fields into `ProjectMemberDto`. Required `id` and `project` values must be positive; optional `user`, `role`, strings, and booleans preserve null/missing values. The API never follows a continuation or makes per-member profile requests.
+- Source deviation: none identified against the pinned ordinary/admin serializers. Admin-only `email`, `user_email`, and invitation text are intentionally discarded at the DTO boundary. The public MCP function remains planned until Step 3.
+- Validation: focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~ProjectMemberTests` passed 6 tests. The focused suite covers query/page headers, active/inactive/pending/null-role mapping, allowlist serialization, invalid input before HTTP, malformed required identity data, and sanitized permission errors. Debug implementation build/test was run through the focused test command; full Debug build/test and cancellation coverage remain in later steps.
 
 ## Step 3: Expose the members tool
 
@@ -117,7 +124,7 @@ pinned source only; no live deployment version was inspected or claimed.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned serializer/API evidence recorded; mixed membership fixture and contract test added; `dotnet test -c Debug` baseline passed 343 tests before changes. | Specify list_project_members contracts / pending |
-| 2 | Not started | — | Implement list_project_members API behavior / pending |
+| 2 | Complete | `ProjectApi`/`ProjectMemberDto` implemented; focused ProjectMemberTests passed 6 tests with request, mapping, pagination, validation, malformed-data, and safe-error coverage. Public tool remains planned pending Step 3. | Implement list_project_members API behavior / pending |
 | 3 | Not started | — | Expose list_project_members MCP tool / pending |
 | 4 | Not started | — | Verify list_project_members workflows / pending |
 
