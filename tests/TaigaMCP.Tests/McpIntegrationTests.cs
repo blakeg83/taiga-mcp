@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -7,6 +8,63 @@ namespace TaigaMCP.Tests;
 
 public sealed class McpIntegrationTests
 {
+    [Fact]
+    public async Task ProductionServer_CurrentUserBoundary_IsSafeForOptionalFieldsAndErrors()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var assembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [assembly], CreateEnvironment(taiga), Path.GetDirectoryName(assembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        async Task<CallToolResult> CallCurrentUser()
+            => await client.CallToolAsync("get_current_user", new Dictionary<string, object?>(), cancellationToken: timeout.Token);
+
+        taiga.CurrentUserResponseBody = "{\"id\":42}";
+        var minimal = await CallCurrentUser();
+        Assert.False(minimal.IsError == true);
+        var minimalJson = JsonSerializer.Deserialize<JsonElement>(GetText(minimal));
+        Assert.Equal(42, minimalJson.GetProperty("id").GetInt32());
+        Assert.False(minimalJson.TryGetProperty("username", out _));
+        Assert.False(minimalJson.TryGetProperty("full_name", out _));
+        Assert.False(minimalJson.TryGetProperty("is_active", out _));
+
+        taiga.CurrentUserResponseBody = "{\"id\":42,\"username\":\"false-user\",\"full_name\":\"False User\",\"is_active\":false,\"email\":\"mcp-private-sentinel\",\"auth_token\":\"mcp-token-sentinel\",\"roles\":[\"mcp-role-sentinel\"]}";
+        var inactive = await CallCurrentUser();
+        Assert.False(inactive.IsError == true);
+        var inactiveJson = JsonSerializer.Deserialize<JsonElement>(GetText(inactive));
+        Assert.False(inactiveJson.GetProperty("is_active").GetBoolean());
+        Assert.DoesNotContain("mcp-private-sentinel", GetText(inactive));
+        Assert.DoesNotContain("mcp-token-sentinel", GetText(inactive));
+        Assert.DoesNotContain("mcp-role-sentinel", GetText(inactive));
+
+        taiga.CurrentUserStatusCode = HttpStatusCode.Forbidden;
+        taiga.CurrentUserResponseBody = "{\"detail\":\"mcp-forbidden-sentinel\"}";
+        var forbidden = await CallCurrentUser();
+        Assert.True(forbidden.IsError);
+        Assert.Contains("403", GetText(forbidden));
+        Assert.DoesNotContain("mcp-forbidden-sentinel", GetText(forbidden));
+
+        taiga.CurrentUserStatusCode = HttpStatusCode.OK;
+        taiga.CurrentUserResponseBody = "{\"id\":0,\"email\":\"mcp-malformed-sentinel\"}";
+        var malformedIdentity = await CallCurrentUser();
+        Assert.True(malformedIdentity.IsError);
+        Assert.Contains("current-user identity", GetText(malformedIdentity));
+        Assert.DoesNotContain("mcp-malformed-sentinel", GetText(malformedIdentity));
+
+        taiga.CurrentUserResponseBody = "{\"id\":42,";
+        var invalidJson = await CallCurrentUser();
+        Assert.True(invalidJson.IsError);
+        Assert.Contains("invalid JSON", GetText(invalidJson));
+        Assert.DoesNotContain("mcp-invalid-json-sentinel", GetText(invalidJson));
+        Assert.DoesNotContain(process.StderrLines, line =>
+            line.Contains("mcp-private-sentinel", StringComparison.Ordinal) ||
+            line.Contains("mcp-token-sentinel", StringComparison.Ordinal) ||
+            line.Contains("mcp-role-sentinel", StringComparison.Ordinal) ||
+            line.Contains("mcp-forbidden-sentinel", StringComparison.Ordinal) ||
+            line.Contains("mcp-malformed-sentinel", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task ProductionServer_AllToolsAndNullEmptyArguments_KeepContracts()
     {

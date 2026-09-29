@@ -38,6 +38,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode ProjectsStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode CurrentUserStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public string CurrentUserResponseBody { get; set; } =
+        "{\"id\":42,\"username\":\"integration-user\",\"full_name\":\"Integration User\",\"is_active\":true,\"email\":\"private@example.test\",\"auth_token\":\"must-not-escape\",\"roles\":[\"admin\"]}";
+
     public HttpStatusCode UserStoryUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
     public HttpStatusCode TaskCreateStatusCode { get; set; } = HttpStatusCode.Created;
@@ -135,8 +140,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         {
             await RespondAsync(
                 context.Response,
-                HttpStatusCode.OK,
-                "{\"id\":42,\"username\":\"integration-user\",\"full_name\":\"Integration User\",\"is_active\":true,\"email\":\"private@example.test\",\"auth_token\":\"must-not-escape\",\"roles\":[\"admin\"]}");
+                CurrentUserStatusCode,
+                CurrentUserResponseBody);
             return;
         }
 
