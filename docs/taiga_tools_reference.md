@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 22 tools:
+The current server exposes 23 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -19,6 +19,7 @@ The current server exposes 22 tools:
 - 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
 - 4 epic tools: `list_epics`, `get_epic`, `create_epic`, and
   `link_user_story_to_epic`.
+- 1 shared work-item tool: `add_work_item_comment`.
 
 The first-batch documents describe 15 additional or expanded functions. The
 `list_issues`, `list_user_stories`, the core `get_user_story` detail read, and
@@ -35,6 +36,9 @@ to the story and Taiga determines any effects on child tasks; the MCP tool does
 not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
 unsupported clear names, and set/clear collisions fail before HTTP; write
 failures are not replayed.
+
+The shared comment command is implemented for all four work-item kinds and is
+documented below.
 The `list_epics` and `get_epic` contracts are source-verified and their
 domain APIs/MCP wrappers are implemented. `list_epics` has the signature
 `list_epics(projectId, page=1, statusIds?, assignedTo?, tags?, query?,
@@ -163,6 +167,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId` and `version` required; `subject`, `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One issue object returned by Taiga after the PATCH. |
+| `add_work_item_comment` | `kind`, `id`, `version`, and `text` required; `kind` is one of `issue`, `user_story`, `task`, or `epic`; `id` is positive; `version` is nonnegative; `text` is nonblank | `{ "kind": "task", "id": 203, "version": 3, "comment_submitted": true }` after one confirmed comment-only PATCH. |
 | `list_issue_statuses` | `projectId` integer, required | Array of `{ id, name, slug, is_closed }`. |
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
@@ -178,6 +183,35 @@ show the JSON contents, not an MCP `content` wrapper.
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 | `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
+
+### `add_work_item_comment` contract
+
+The signature is `add_work_item_comment(kind, id, version, text)`. Before
+calling it, read the resource detail and use its current `version`; IDs are
+the internal numeric IDs, not displayed `#ref` values. `kind` is closed to
+`issue`, `user_story`, `task`, and `epic` and is dispatched to the matching
+route:
+
+```text
+PATCH /api/v1/issues/{id}
+PATCH /api/v1/userstories/{id}
+PATCH /api/v1/tasks/{id}
+PATCH /api/v1/epics/{id}
+```
+
+The request body contains exactly `version` and `comment`. Nonblank text is
+preserved through JSON serialization, including Markdown, mentions, line
+breaks, Unicode, and meaningful surrounding whitespace. A successful response
+is reduced to its returned nonnegative `version`; the tool returns
+`comment_submitted=true` to confirm the update was accepted. It does not fetch
+history and does not claim a history-entry ID.
+
+Invalid IDs, negative versions, and blank text fail before HTTP. HTTP errors
+retain safe status/category/version details, while malformed success responses
+and ambiguous transport failures report that the write may already have
+applied. The client does not retry comments after ambiguous failures. The
+wire behavior was checked on 2026-09-28 against Taiga backend revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`: [history snapshot comment handling](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/history/mixins.py), [OCC version handling](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/occ/mixins.py), and the [issue](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/issues/api.py), [story](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/userstories/api.py), [task](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/tasks/api.py), and [epic](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py) viewsets. This is pinned source evidence, not a deployed-version claim.
 
 ### `list_epics` contract
 
@@ -528,8 +562,10 @@ An update returns the server's authoritative detail, for example:
   verify propagation of each status; they do not claim that every stale
   version is rejected, because Taiga can accept non-overlapping stale edits.
 - Issue history filtering currently omits hidden entries, entries without a
-  string comment, and empty comments. The dedicated comment command described
-  in the plans is not implemented.
+  string comment, and empty comments. The domain APIs and shared MCP wrapper
+  now support comment-only PATCH behavior for `issue`, `user_story`, `task`,
+  and `epic`: only `comment` and the supplied `version` are written, and the
+  returned resource version is parsed without fetching history.
 - Authentication is performed against `/auth`, cached in memory per process,
   and attached as `Authorization: Bearer <token>` to Taiga requests. Tests use
   synthetic credentials and a fake `/auth` response; no live credentials are

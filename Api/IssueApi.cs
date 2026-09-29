@@ -358,6 +358,24 @@ public sealed class IssueApi
         }
     }
 
+    public Task<int> AddCommentAsync(
+        int issueId,
+        int version,
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(issueId, nameof(issueId));
+        InputValidation.Nonnegative(version, nameof(version));
+        InputValidation.Required(text, nameof(text));
+        return WorkItemCommentPatch.SendAsync(
+            _transport,
+            $"issues/{issueId}",
+            "issue",
+            version,
+            text,
+            cancellationToken);
+    }
+
     private static bool ValidateClearFields(string[]? clearFields, int? assignedTo)
     {
         if (clearFields is null) return false;

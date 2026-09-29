@@ -215,7 +215,60 @@ public sealed class McpIntegrationTests
         Assert.Equal("Returned to triage.", body.GetProperty("comment").GetString());
         Assert.Equal(3, body.GetProperty("version").GetInt32());
 
+        foreach (var (kind, id, version, path) in new[]
+        {
+            ("issue", 42, 1, "/api/v1/issues/42"),
+            ("user_story", 102, 5, "/api/v1/userstories/102"),
+            ("task", 203, 2, "/api/v1/tasks/203"),
+            ("epic", 301, 4, "/api/v1/epics/301")
+        })
+        {
+            var comment = await Call("add_work_item_comment", new()
+            {
+                ["kind"] = kind,
+                ["id"] = id,
+                ["version"] = version,
+                ["text"] = "**Progress**\n@alice — revisión ✓"
+            });
+            Assert.False(comment.IsError == true, GetText(comment));
+            var receipt = JsonSerializer.Deserialize<JsonElement>(GetText(comment));
+            Assert.Equal(kind, receipt.GetProperty("kind").GetString());
+            Assert.Equal(id, receipt.GetProperty("id").GetInt32());
+            Assert.Equal(version + 1, receipt.GetProperty("version").GetInt32());
+            Assert.True(receipt.GetProperty("comment_submitted").GetBoolean());
+            var request = taiga.Requests.Last(item => item.Method == "PATCH" && item.PathAndQuery == path);
+            using var commentBody = JsonDocument.Parse(request.Body);
+            AssertPatchProperties(commentBody.RootElement, "comment", "version");
+            Assert.Equal("**Progress**\n@alice — revisión ✓", commentBody.RootElement.GetProperty("comment").GetString());
+            Assert.Equal(version, commentBody.RootElement.GetProperty("version").GetInt32());
+        }
+
         var count = taiga.Requests.Count;
+        var invalidKind = await Call("add_work_item_comment", new()
+        {
+            ["kind"] = "feature",
+            ["id"] = 203,
+            ["version"] = 2,
+            ["text"] = "not submitted"
+        });
+        Assert.True(invalidKind.IsError);
+        var blankComment = await Call("add_work_item_comment", new()
+        {
+            ["kind"] = "task",
+            ["id"] = 203,
+            ["version"] = 2,
+            ["text"] = " "
+        });
+        Assert.True(blankComment.IsError);
+        var negativeVersion = await Call("add_work_item_comment", new()
+        {
+            ["kind"] = "task",
+            ["id"] = 203,
+            ["version"] = -1,
+            ["text"] = "not submitted"
+        });
+        Assert.True(negativeVersion.IsError);
+        Assert.Equal(count, taiga.Requests.Count);
         var invalidCreate = await Call("create_user_story", new() { ["projectId"] = 123, ["subject"] = " " });
         Assert.True(invalidCreate.IsError);
         Assert.Contains("subject must not be blank", GetText(invalidCreate));
@@ -447,6 +500,7 @@ public sealed class McpIntegrationTests
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
             var expectedNames = new[]
             {
+                "add_work_item_comment",
                 "create_epic",
                 "create_issue",
                 "create_task",
@@ -610,6 +664,17 @@ public sealed class McpIntegrationTests
             Assert.Contains("issueId", updateRequired);
             Assert.Contains("version", updateRequired);
             Assert.DoesNotContain("subject", updateRequired);
+
+            var addWorkItemComment = Assert.Single(tools, tool => tool.Name == "add_work_item_comment");
+            var commentProperties = addWorkItemComment.JsonSchema.GetProperty("properties").EnumerateObject().ToArray();
+            Assert.Equal(new[] { "kind", "id", "version", "text" }, commentProperties.Select(property => property.Name));
+            Assert.Equal(
+                new[] { "issue", "user_story", "task", "epic" },
+                commentProperties.Single(property => property.Name == "kind").Value.GetProperty("enum")
+                    .EnumerateArray().Select(value => value.GetString()));
+            var commentRequired = addWorkItemComment.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "kind", "id", "version", "text" }, commentRequired);
 
             var result = await client.CallToolAsync(
                 "list_projects",

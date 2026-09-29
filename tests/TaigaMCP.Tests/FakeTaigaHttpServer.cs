@@ -479,6 +479,25 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Patch.Method && path == "/api/v1/issues/42")
+        {
+            var patch = JsonNode.Parse(body)?.AsObject();
+            var version = patch?["version"]?.GetValue<int>() ?? -1;
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                $"{{\"id\":42,\"ref\":7,\"project\":123,\"subject\":\"Test\",\"status\":1,\"severity\":2,\"type\":3,\"priority\":4,\"version\":{version + 1}}}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Patch.Method && path == "/api/v1/epics/301")
+        {
+            var patch = JsonNode.Parse(body)?.AsObject();
+            var version = patch?["version"]?.GetValue<int>() ?? -1;
+            await RespondAsync(context.Response, HttpStatusCode.OK, $"{{\"version\":{version + 1}}}");
+            return;
+        }
+
         string? payload = path switch
         {
             "/api/v1/resolver" => "{\"project\":123}",

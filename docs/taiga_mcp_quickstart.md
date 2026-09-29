@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 22 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 23 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -199,6 +199,23 @@ conflict or ambiguous write failure. `status` is a project-specific internal
 status ID, so use an open or closed status ID from Taiga to reopen or close a
 story. Only the primary assignee is supported; multiple assignees remain
 planned.
+
+### Add a work-item comment
+
+Read the item first and use its current `version`. Select the internal ID and
+one of the four closed `kind` values. The comment text can contain Markdown,
+mentions, line breaks, and Unicode:
+
+```json
+{"kind":"task","id":203,"version":2,"text":"**Implementation complete**\n@reviewer — ready for review ✓"}
+```
+
+The result is a small receipt such as
+`{"kind":"task","id":203,"version":3,"comment_submitted":true}`.
+The command confirms the versioned PATCH succeeded; it does not return a
+history-entry ID or perform a separate history read. A version conflict,
+permission error, missing item, malformed success response, or ambiguous
+transport failure is surfaced as an error and is not automatically retried.
 
 ### CLI Mode
 ```bash

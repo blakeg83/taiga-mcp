@@ -184,6 +184,24 @@ public sealed class UserStoryApi
         }
     }
 
+    public Task<int> AddCommentAsync(
+        int userStoryId,
+        int version,
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(userStoryId, nameof(userStoryId));
+        InputValidation.Nonnegative(version, nameof(version));
+        InputValidation.Required(text, nameof(text));
+        return WorkItemCommentPatch.SendAsync(
+            _transport,
+            $"userstories/{userStoryId}",
+            "user story",
+            version,
+            text,
+            cancellationToken);
+    }
+
     internal async Task<UserStoryListPage> ListUserStoriesPageAsync(
         int projectId,
         UserStoryListOptions options,

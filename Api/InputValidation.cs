@@ -7,6 +7,11 @@ internal static class InputValidation
         if (value <= 0) throw new ArgumentException($"{name} must be positive.");
     }
 
+    public static void Nonnegative(int value, string name)
+    {
+        if (value < 0) throw new ArgumentException($"{name} must be nonnegative.");
+    }
+
     public static void Required(string? value, string name)
     {
         if (string.IsNullOrWhiteSpace(value)) throw new ArgumentException($"{name} must not be blank.");
