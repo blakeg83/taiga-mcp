@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Net;
+using TaigaMCP.Api;
 using TaigaMCP.Models;
 using Xunit;
 
@@ -122,4 +124,178 @@ public sealed class EpicStoryListFixtureTests
         Assert.Equal("3", EpicStoryListFixtures.ContinuedPageHeaders["x-pagination-next"]);
         Assert.Equal("3", EpicStoryListFixtures.ContinuedPageHeaders["x-pagination-count"]);
     }
+}
+
+public sealed class EpicStoryListApiTests
+{
+    [Fact]
+    public async Task ListEpicUserStoriesAsync_ReturnsOnePageInServerOrderWithHeaders()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                EpicStoryListFixtures.Multiple,
+                headers: EpicStoryListFixtures.ContinuedPageHeaders);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListEpicUserStoriesPageAsync(301, page: 2);
+
+            Assert.Equal(2, page.Page);
+            Assert.Equal(3, page.Total);
+            Assert.Equal(3, page.NextPage);
+            Assert.True(page.HasMore);
+            Assert.Equal(new[] { 102, 103 }, page.Items.Select(item => item.UserStoryId));
+            Assert.Equal(new[] { long.MaxValue, 17 }, page.Items.Select(item => item.Order));
+            Assert.All(page.Items, item => Assert.Equal(301, item.EpicId));
+
+            var request = Assert.Single(handler.Requests, item => item.Method == HttpMethod.Get &&
+                item.Uri.AbsolutePath == "/api/v1/epics/301/related_userstories");
+            Assert.Equal("?page=2", request.Uri.Query);
+            Assert.DoesNotContain(handler.Requests, item => item.Uri.AbsolutePath.Contains("/userstories/"));
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicUserStoriesAsync_AllowsCrossProjectStoryIdentityWithoutDetailExpansion()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                EpicStoryListFixtures.CrossProject,
+                headers: EpicStoryListFixtures.FirstPageHeaders);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListEpicUserStoriesPageAsync(301);
+
+            var relationship = Assert.Single(page.Items);
+            Assert.Equal(902, relationship.UserStoryId);
+            Assert.Equal(23, relationship.Order);
+            Assert.Equal(1, handler.Requests.Count(item => item.Method == HttpMethod.Get));
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicUserStoriesAsync_ReturnsEmptyPageAndUnknownMissingMetadata()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                EpicStoryListFixtures.Empty);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListEpicUserStoriesPageAsync(301);
+
+            Assert.Empty(page.Items);
+            Assert.Equal(1, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(301, 0)]
+    public async Task ListEpicUserStoriesAsync_RejectsNonpositiveInputsBeforeHttp(int epicId, int page)
+    {
+        var handler = new FakeHttpMessageHandler();
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                NewApi(handler, auth).ListEpicUserStoriesPageAsync(epicId, page));
+
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[{\"epic\":301,\"user_story\":0,\"order\":1}]")]
+    [InlineData("[{\"epic\":301,\"user_story\":902,\"order\":\"later\"}]")]
+    public async Task ListEpicUserStoriesAsync_RejectsMalformedSuccessfulResponses(string responseBody)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                responseBody);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListEpicUserStoriesPageAsync(301));
+
+            Assert.Contains("invalid epic", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicUserStoriesAsync_RejectsRelationshipForAnotherEpic()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                "[{\"epic\":302,\"user_story\":902,\"order\":1}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListEpicUserStoriesPageAsync(301));
+
+            Assert.Contains("different epic", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicUserStoriesAsync_PropagatesPermissionFailureSafely()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                "{\"detail\":\"synthetic relationship secret\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListEpicUserStoriesPageAsync(301));
+
+            Assert.Contains("403", exception.Message);
+            Assert.Contains("permission denied", exception.Message);
+            Assert.DoesNotContain("synthetic relationship secret", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListEpicUserStoriesAsync_PropagatesPreCancellationWithoutHttp()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                EpicStoryListFixtures.Single);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                NewApi(handler, auth).ListEpicUserStoriesPageAsync(301, cancellationToken: cancellation.Token));
+
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
+        => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
 }

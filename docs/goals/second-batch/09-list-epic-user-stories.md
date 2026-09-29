@@ -57,12 +57,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement one-page relationship reads
 
-- [ ] Extend EpicApi using TaigaTransport/TaigaPagination, validated epicId/page, and cloned/scalar response mapping.
-- [ ] Map epic and user_story to explicit *_id output names and require each epic_id to match the requested epic.
-- [ ] Preserve server order and the long order value; avoid one detail request per story or assumptions that all linked stories share a project.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_epic_user_stories API behavior`.
+- [x] Extend EpicApi using TaigaTransport/TaigaPagination, validated epicId/page, and cloned/scalar response mapping.
+- [x] Map epic and user_story to explicit *_id output names and require each epic_id to match the requested epic.
+- [x] Preserve server order and the long order value; avoid one detail request per story or assumptions that all linked stories share a project.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_epic_user_stories API behavior`.
 
 ## Step 3: Expose the linked-story index
 
@@ -116,7 +116,7 @@ batch's current pinned revision.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore` passed; 452 existing tests passed. Added source-backed empty, single, multiple, zero/large-order, cross-project-identity, and pagination fixtures plus the creation-free DTO contract. | Specify list_epic_user_stories contracts / pending |
-| 2 | Not started | — | Implement list_epic_user_stories API behavior / pending |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~EpicStoryList` passed 17 focused tests; a serial Debug build passed with 0 warnings/errors. API tests cover exact `?page=2`, empty/unknown metadata, scalar ownership, long/zero order, cross-project IDs without detail reads, malformed/mismatched responses, 403 sanitization, invalid inputs, and pre-cancellation. | Implement list_epic_user_stories API behavior / pending |
 | 3 | Not started | — | Expose list_epic_user_stories MCP tool / pending |
 | 4 | Not started | — | Verify list_epic_user_stories workflows / pending |
 

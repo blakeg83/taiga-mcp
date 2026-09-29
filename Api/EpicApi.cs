@@ -248,22 +248,78 @@ public sealed class EpicApi
 
     private static EpicUserStoryLinkDto MapUserStoryLink(JsonElement link, bool created)
     {
-        if (link.ValueKind != JsonValueKind.Object ||
-            !link.TryGetProperty("epic", out var epic) ||
-            !epic.TryGetInt32(out var epicId) || epicId <= 0 ||
-            !link.TryGetProperty("user_story", out var userStory) ||
-            !userStory.TryGetInt32(out var userStoryId) || userStoryId <= 0 ||
-            !link.TryGetProperty("order", out var order) ||
-            !order.TryGetInt64(out var relationshipOrder))
-            throw new TaigaRequestException("Taiga returned invalid epic/user story relationship data.");
+        var relationship = MapEpicUserStoryRelationship(link);
 
         return new EpicUserStoryLinkDto
         {
-            EpicId = epicId,
-            UserStoryId = userStoryId,
-            Order = relationshipOrder,
+            EpicId = relationship.EpicId,
+            UserStoryId = relationship.UserStoryId,
+            Order = relationship.Order,
             Created = created
         };
+    }
+
+    private static EpicUserStoryRelationshipDto MapEpicUserStoryRelationship(JsonElement relationship)
+    {
+        if (relationship.ValueKind != JsonValueKind.Object ||
+            !relationship.TryGetProperty("epic", out var epic) ||
+            epic.ValueKind != JsonValueKind.Number ||
+            !epic.TryGetInt32(out var epicId) || epicId <= 0 ||
+            !relationship.TryGetProperty("user_story", out var userStory) ||
+            userStory.ValueKind != JsonValueKind.Number ||
+            !userStory.TryGetInt32(out var userStoryId) || userStoryId <= 0 ||
+            !relationship.TryGetProperty("order", out var order) ||
+            order.ValueKind != JsonValueKind.Number ||
+            !order.TryGetInt64(out var relationshipOrder))
+            throw new TaigaRequestException("Taiga returned invalid epic/user story relationship data.");
+
+        return new EpicUserStoryRelationshipDto
+        {
+            EpicId = epicId,
+            UserStoryId = userStoryId,
+            Order = relationshipOrder
+        };
+    }
+
+    public async Task<IReadOnlyList<EpicUserStoryRelationshipDto>> ListEpicUserStoriesAsync(
+        int epicId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+        => (await ListEpicUserStoriesPageAsync(epicId, page, cancellationToken)).Items;
+
+    internal async Task<EpicUserStoryRelationshipListPage> ListEpicUserStoriesPageAsync(
+        int epicId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(epicId, nameof(epicId));
+        InputValidation.Positive(page, nameof(page));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"epics/{epicId}/related_userstories?page={page}");
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid epic user story relationship list data.");
+
+        var items = new List<EpicUserStoryRelationshipDto>(32);
+        foreach (var relationship in document.RootElement.EnumerateArray())
+        {
+            var mapped = MapEpicUserStoryRelationship(relationship);
+            if (mapped.EpicId != epicId)
+                throw new TaigaRequestException("Taiga returned an epic user story relationship for a different epic.");
+
+            items.Add(mapped);
+        }
+
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new EpicUserStoryRelationshipListPage(
+            items,
+            page,
+            pageInfo.Total,
+            pageInfo.NextPage,
+            pageInfo.HasMore);
     }
 
     public async Task<IReadOnlyList<EpicDto>> ListEpicsAsync(
@@ -609,6 +665,13 @@ public sealed class EpicApi
 
 internal sealed record EpicStatusListPage(
     IReadOnlyList<EpicStatusDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
+
+internal sealed record EpicUserStoryRelationshipListPage(
+    IReadOnlyList<EpicUserStoryRelationshipDto> Items,
     int Page,
     int? Total,
     int? NextPage,
