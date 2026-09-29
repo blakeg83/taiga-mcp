@@ -8,9 +8,10 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 23 tools:
+The current server exposes 24 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
+- 1 identity tool: `get_current_user`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
   `list_issue_priorities`.
@@ -154,6 +155,26 @@ See the [command inventory](taiga_command_inventory.md)
 and [first-batch plan index](goals/first-batch/README.md) for the remaining
 planned coverage.
 
+### `get_current_user` contract
+
+The signature is `get_current_user()` with no user-supplied arguments. It sends
+one authenticated `GET /api/v1/users/me` and returns an allowlisted identity
+object:
+
+```json
+{"id":42,"username":"synthetic-user","full_name":"Synthetic User","is_active":true}
+```
+
+`id` is required and must be a positive integer. `username`, `full_name`, and
+`is_active` are optional; absent values are omitted from public JSON, while
+`is_active=false` is preserved. Use the returned numeric ID as `assigned_to` or
+`assignedTo` in existing work-item calls, or convert it to a string for the
+existing `list_projects(member)` filter. Email, roles, tokens, UUIDs, and other
+upstream profile properties are not returned. A missing or malformed ID, 401,
+403, invalid JSON, cancellation, or another transport failure is surfaced as a
+safe MCP error; no credentials or raw upstream body is included. The injected
+`cancellationToken` is not a public argument.
+
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.
 
@@ -163,6 +184,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | --- | --- | --- |
 | `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
+| `get_current_user` | No arguments | One identity object with required positive `id` and optional `username`, `full_name`, and `is_active`. |
 | `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |

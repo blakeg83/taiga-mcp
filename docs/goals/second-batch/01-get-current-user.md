@@ -1,6 +1,6 @@
 # Goal 01: get_current_user
 
-Status: in progress; API behavior is implemented, MCP exposure and final workflow verification remain.
+Status: in progress; the MCP tool is exposed, final identity-to-assignment verification remains.
 
 ## Objective
 
@@ -79,12 +79,19 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose identity through MCP
 
-- [ ] Add UserTools with the explicit tool name and descriptions; the public schema has no arguments and no cancellationToken.
-- [ ] Use ToolErrors and ToolResponseJson; document using the returned id as assigned_to or assignedTo and its string form as list_projects.member.
-- [ ] Update discovery expectations by one tool and add real MCP call assertions.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose get_current_user MCP tool`.
+- [x] Add UserTools with the explicit tool name and descriptions; the public schema has no arguments and no cancellationToken.
+- [x] Use ToolErrors and ToolResponseJson; document using the returned id as assigned_to or assignedTo and its string form as list_projects.member.
+- [x] Update discovery expectations by one tool and add real MCP call assertions.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose get_current_user MCP tool`.
+
+### Step 3 evidence
+
+- Previous checkpoint: `8953859` (`Implement get_current_user API behavior`).
+- Added `UserTools.GetCurrentUser`; the MCP name is `get_current_user`, the callable has no user arguments, and the injected cancellation token is not part of the generated schema.
+- Public success JSON is an identity object such as `{"id":42,"username":"integration-user","full_name":"Integration User","is_active":true}`. Null optional fields are omitted by `ToolResponseJson`; upstream email, roles, tokens, and other private fields are never represented.
+- Real stdio integration validation uses `FakeTaigaHttpServer` for `GET /api/v1/users/me`, checks discovery and the call result, and confirms private-field suppression. `dotnet build TaigaMCP.sln -c Debug --no-restore -p:OutputPath=C:\Temp\TaigaMCP-goal01-step3b-debug\ -p:UseAppHost=false` passed with 0 warnings/errors; the matching filtered MCP integration test passed 1 test.
 
 ## Step 4: Verify identity-to-assignment workflow
 
@@ -123,7 +130,7 @@ deployment version from upstream source alone.
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline restore/test passed (332 tests); pinned users/me serializer reviewed; identity mapping and synthetic fixtures recorded above. | Specify get_current_user contracts / pending |
 | 2 | Complete | UserApi mapping, cancellation, safe errors, request path, response disposal, DI registration, focused tests, and Debug build passed; public tool remains planned. | Implement get_current_user API behavior / pending |
-| 3 | Not started | — | Expose get_current_user MCP tool / pending |
+| 3 | Complete | Public schema/call assertions and fake-HTTP users/me route added; documentation publishes the 24-tool callable contract. Exact integration command/result recorded above. | Expose get_current_user MCP tool / pending |
 | 4 | Not started | — | Verify get_current_user workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

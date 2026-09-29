@@ -1,6 +1,6 @@
 # Taiga command inventory
 
-Reviewed September 28, 2026. This inventory includes the 23 commands already
+Reviewed September 28, 2026. This inventory includes the 24 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
@@ -10,6 +10,7 @@ Detailed agent goal documents for the first 15-function implementation batch are
 
 - **Tickets** means user stories and tasks here. Taiga exposes issues, epics, user stories, and tasks as separate resources; command names preserve those distinctions.
 - **Existing** means exposed by this repository today. **Extend** means an existing command needs broader behavior. **New** means a proposed command. Parameters below describe the intended interface, not exact current signatures. The exact current signatures and JSON shapes are in the [implemented tool reference](taiga_tools_reference.md).
+- **Delivered subset** identifies implemented behavior with remaining inventory scope. **Planned — batch 2** links to an unimplemented second-batch goal; those functions are not part of today's 24-tool count.
 - Shared commands take `kind = issue | epic | user_story | task` and an internal numeric `id`. A displayed `#ref` must first be resolved within its project.
 - List commands should expose pagination, supported filters, ordering, and an explicit choice to include completed work. Return JSON with IDs, references, useful labels, versions where available, and pagination information.
 - Updates should distinguish omitted fields from explicit clearing, use Taiga's version checks where required, and report conflicts. Closing and reopening mean selecting a project status; status names must not be hardcoded.
@@ -22,7 +23,7 @@ Detailed agent goal documents for the first 15-function implementation batch are
 | `list_projects` | Existing | `member?, page?`; list accessible projects, using the configured numeric member ID when filtering by a user. |
 | `resolve_project` | Existing | `slug`; return the internal project ID. |
 | `get_project` | New | `projectId`; return project details, enabled modules, defaults, and available permission information needed to interpret work items. |
-| `get_current_user` | New | No arguments; return the authenticated user's ID for assignment, ownership, and personal filters. |
+| `get_current_user` | Delivered subset — [batch 2, goal 01](goals/second-batch/01-get-current-user.md) | No arguments; return the authenticated user's positive ID plus optional username, full name, and active state for assignment, ownership, and personal filters. |
 | `list_project_members` | New | `projectId, page?`; return membership, user, and role IDs for assigning work and selecting watchers. |
 | `list_project_roles` | New | `projectId`; return role IDs and estimation participation for role-based story points. |
 | `search_work_items` | New; composite | `projectId, query, kinds?, page?`; search selected resource lists using supported text filters and combine results with their kinds and references. Track each resource's pagination separately. |
@@ -211,7 +212,7 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 23 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
+- The current 24 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), [ProjectTools.cs](../Tools/ProjectTools.cs), and [UserTools.cs](../Tools/UserTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset, optional page envelope, and goal 04 core detail read; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
 - Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. `EpicApi` and `EpicTools` now deliver the `list_epics`, `get_epic`, `create_epic`, and `link_user_story_to_epic` subsets; later epic operations remain planned. Shared wrappers can reuse underlying resource operations during a future implementation.

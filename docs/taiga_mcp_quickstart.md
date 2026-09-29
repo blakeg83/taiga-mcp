@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 23 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 24 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -81,6 +81,25 @@ npx @modelcontextprotocol/inspector dotnet run --project ./TaigaMCP.csproj
 - Env: TAIGA__BASEURL, TAIGA__USERNAME, TAIGA__PASSWORD
 
 Click **Connect** → call tools interactively.
+
+### Identify the current account
+
+Call the no-argument tool:
+
+```json
+{}
+```
+
+It returns an identity object such as:
+
+```json
+{"id":42,"username":"synthetic-user","full_name":"Synthetic User","is_active":true}
+```
+
+Use the returned numeric `id` as `assigned_to` or `assignedTo` in existing
+work-item operations. When using the existing `list_projects` member filter,
+pass the same ID as a string, for example `{"member":"42"}`. The tool does
+not return email, roles, tokens, or other private profile fields.
 
 ### Create a user story
 

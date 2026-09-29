@@ -131,6 +131,15 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/users/me")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "{\"id\":42,\"username\":\"integration-user\",\"full_name\":\"Integration User\",\"is_active\":true,\"email\":\"private@example.test\",\"auth_token\":\"must-not-escape\",\"roles\":[\"admin\"]}");
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/projects", StringComparison.OrdinalIgnoreCase))
         {
             if (ProjectsStatusCode != HttpStatusCode.OK)

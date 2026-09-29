@@ -25,6 +25,20 @@ public sealed class McpIntegrationTests
             foreach (var property in tool.JsonSchema.GetProperty("properties").EnumerateObject())
                 Assert.False(string.IsNullOrWhiteSpace(property.Value.GetProperty("description").GetString()));
         }
+        var currentUserTool = Assert.Single(tools, tool => tool.Name == "get_current_user");
+        Assert.Empty(currentUserTool.JsonSchema.GetProperty("properties").EnumerateObject());
+        Assert.DoesNotContain("cancellationToken", currentUserTool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        var currentUser = await Call("get_current_user", new());
+        Assert.False(currentUser.IsError == true);
+        var currentUserJson = JsonSerializer.Deserialize<JsonElement>(GetText(currentUser));
+        Assert.Equal(42, currentUserJson.GetProperty("id").GetInt32());
+        Assert.Equal("integration-user", currentUserJson.GetProperty("username").GetString());
+        Assert.Equal("Integration User", currentUserJson.GetProperty("full_name").GetString());
+        Assert.True(currentUserJson.GetProperty("is_active").GetBoolean());
+        Assert.False(currentUserJson.TryGetProperty("email", out _));
+        Assert.False(currentUserJson.TryGetProperty("auth_token", out _));
+        Assert.False(currentUserJson.TryGetProperty("roles", out _));
+        Assert.Contains(taiga.Requests, request => request.Method == "GET" && request.PathAndQuery == "/api/v1/users/me");
         foreach (var member in new string?[] { null, "" })
         {
             Assert.False((await Call("list_projects", new() { ["member"] = member })).IsError == true);

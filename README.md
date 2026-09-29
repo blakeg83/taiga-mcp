@@ -5,6 +5,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
 - `resolve_project(slug)`: Resolve a Taiga project slug to its numeric ID.
+- `get_current_user()`: Identify the authenticated account and return its positive numeric ID plus available identity fields. Private profile fields are omitted.
 - `list_issues(projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?)`: Triage one page of issues with allowlisted filters. It returns the legacy array by default and an opt-in pagination envelope with `includePageInfo=true`.
 - `get_issue(issueId)`: Retrieve a single issue by its id.
 - `create_issue(projectId, subject, …)`: Create a new issue.
@@ -18,7 +19,7 @@ TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI
 Issue list filters use internal Taiga IDs. The default view is open issues;
 provide nonempty `statusIds` or `includeClosed=true` to include closed work.
 See the [implemented tool reference](docs/taiga_tools_reference.md) for the
-wire filters and envelope fields.
+wire filters and envelope fields, including the current-user identity contract.
 
 - `list_user_stories(projectId, page, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?)`: List one page of backlog or sprint stories with explicit status/assignment/text filters; the default is an array and `includePageInfo` opts into pagination metadata.
 - `list_tasks(projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of standalone or story-linked tasks. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
