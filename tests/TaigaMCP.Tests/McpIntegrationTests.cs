@@ -1280,6 +1280,8 @@ public sealed class McpIntegrationTests
             Assert.True(taskStatuses[1].GetProperty("is_closed").GetBoolean());
             Assert.False(taskStatuses[1].TryGetProperty("is_archived", out _));
             Assert.False(taskStatuses[1].TryGetProperty("wip_limit", out _));
+            var returnedOpenTaskStatusId = taskStatuses[0].GetProperty("id").GetInt32();
+            var returnedClosedTaskStatusId = taskStatuses[1].GetProperty("id").GetInt32();
             var taskStatusRequest = taiga.Requests.Last(request =>
                 request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/task-statuses?", StringComparison.Ordinal));
             Assert.Equal("/api/v1/task-statuses?project=123&page=2", taskStatusRequest.PathAndQuery);
@@ -1304,7 +1306,7 @@ public sealed class McpIntegrationTests
                     ["page"] = 2,
                     ["userStoryId"] = 102,
                     ["milestoneId"] = 55,
-                    ["statusIds"] = new[] { 11 },
+                    ["statusIds"] = new[] { returnedOpenTaskStatusId },
                     ["assignedTo"] = 42,
                     ["tags"] = new[] { "a&b" },
                     ["query"] = "fix & revisión",
@@ -1323,7 +1325,7 @@ public sealed class McpIntegrationTests
             var taskRequest = Assert.Single(taiga.Requests, request =>
                 request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/tasks?project=", StringComparison.Ordinal));
             Assert.Equal(
-                "/api/v1/tasks?project=123&page=2&status=11&user_story=102&milestone=55&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
+                $"/api/v1/tasks?project=123&page=2&status={returnedOpenTaskStatusId}&user_story=102&milestone=55&assigned_to=42&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 taskRequest.PathAndQuery);
             Assert.Equal("Bearer integration-token", taskRequest.Authorization);
 
@@ -1347,6 +1349,7 @@ public sealed class McpIntegrationTests
                 {
                     ["taskId"] = 203,
                     ["version"] = 2,
+                    ["status"] = returnedClosedTaskStatusId,
                     ["description"] = string.Empty,
                     ["tags"] = Array.Empty<string>(),
                     ["isBlocked"] = false,
@@ -1362,7 +1365,9 @@ public sealed class McpIntegrationTests
             Assert.False(updatedTaskJson.GetProperty("is_blocked").GetBoolean());
             using var updatedTaskBody = JsonDocument.Parse(
                 taiga.Requests.Last(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/203").Body);
-            AssertPatchProperties(updatedTaskBody.RootElement, "blocked_note", "description", "is_blocked", "tags", "version");
+            AssertPatchProperties(updatedTaskBody.RootElement, "blocked_note", "description", "is_blocked", "status", "tags", "version");
+            Assert.Equal(returnedClosedTaskStatusId, updatedTaskBody.RootElement.GetProperty("status").GetInt32());
+            Assert.Equal(2, updatedTaskBody.RootElement.GetProperty("version").GetInt32());
             Assert.Equal(string.Empty, updatedTaskBody.RootElement.GetProperty("blocked_note").GetString());
             Assert.False(updatedTaskBody.RootElement.TryGetProperty("assigned_to", out _));
 

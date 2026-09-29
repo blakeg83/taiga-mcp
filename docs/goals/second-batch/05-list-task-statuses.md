@@ -74,31 +74,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify task workflow selection
 
-- [ ] Use a returned status ID in a fake-HTTP update_task call and confirm the exact PATCH key/version.
-- [ ] Test custom flags/names, no unsupported archive fields, empty/later pages, invalid project/page, 403, and cancellation.
-- [ ] Retain blocking/unblocking and explicit assignee-clearing regression coverage.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_task_statuses workflows`.
+- [x] Use a returned status ID in a fake-HTTP update_task call and confirm the exact PATCH key/version.
+- [x] Test custom flags/names, no unsupported archive fields, empty/later pages, invalid project/page, 403, and cancellation.
+- [x] Retain blocking/unblocking and explicit assignee-clearing regression coverage.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_task_statuses workflows`.
 
 ## Acceptance scenarios
 
-- [ ] Task-specific status IDs and actual closure flags are available without guessing names.
-- [ ] Unsupported story metadata does not appear.
-- [ ] Status lookup composes with current task updates and preserves existing interfaces.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] Task-specific status IDs and actual closure flags are available without guessing names.
+- [x] Unsupported story metadata does not appear.
+- [x] Status lookup composes with current task updates and preserves existing interfaces.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can choose valid task workflow statuses through a paged read tool.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can choose valid task workflow statuses through a paged read tool.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -118,8 +118,8 @@ story-only metadata. These are source-backed contract fixtures, not live data.
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline focused story-status check: `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~UserStoryStatusTests` — 9 passed. Added task-specific DTO/fixture serialization checks; source revision and field deviations recorded above. | Specify list_task_statuses contracts / `61b2131` |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~TaskStatusTests` passed 8 tests; `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; `git diff --check` passed. API tests cover route/query, mapping, trusted pagination, invalid IDs/page, malformed required data, project mismatch, empty-page metadata, and pre-cancellation. Public tool remained planned at this checkpoint. Previous commit: `61b2131`. | Implement list_task_statuses API behavior / `8163734` |
-| 3 | Complete | Production MCP integration verifies 28-tool discovery, exact `projectId/page` schema and required arguments, omitted/default/null binding boundaries, successful page calls with task-only fields, and safe invalid-input errors. Public docs/reference/README/quickstart/inventory updated to 28 delivered tools. Previous commit: `8163734`. | Expose list_task_statuses MCP tool / pending |
-| 4 | Not started | — | Verify list_task_statuses workflows / pending |
+| 3 | Complete | Production MCP integration verifies 28-tool discovery, exact `projectId/page` schema and required arguments, omitted/default/null binding boundaries, successful page calls with task-only fields, and safe invalid-input errors. Public docs/reference/README/quickstart/inventory updated to 28 delivered tools. Previous commit: `8163734`. | Expose list_task_statuses MCP tool / `b0fe7ed` |
+| 4 | Complete | Returned task IDs drive task filtering and a versioned `update_task` PATCH; the body contains the returned `status` and exact caller version `2`. Task fixtures/tests cover localized/custom names, open/closed flags, empty/later pages, unsupported story fields, invalid IDs/page, project mismatch, 403, malformed data, cancellation, and existing blocking/assignee-clear behavior. Required validation: `dotnet restore` passed; `dotnet build -c Debug` passed with 0 warnings/errors; `dotnet test -c Debug` passed 399/399; `dotnet build -c Release --no-restore` passed with 0 warnings/errors; `dotnet test -c Release --no-build --no-restore` passed 399/399 on rerun after one transient temporary-copy cleanup lock; `git diff --check` passed. Debug outputs: `bin/Debug/net8.0/` and `tests/TaigaMCP.Tests/bin/Debug/net8.0/`; Release outputs: `bin/Release/net8.0/` and `tests/TaigaMCP.Tests/bin/Release/net8.0/`. Previous commit: `b0fe7ed`. | Verify list_task_statuses workflows / pending (this commit) |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
