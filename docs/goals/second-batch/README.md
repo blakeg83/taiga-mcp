@@ -92,6 +92,6 @@ ships.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
 The completion boxes for the remaining 7 goals are intentionally unchecked.
-Goals 01 through 04 are delivered and have their own four-step evidence
+Goals 01 through 05 are delivered and have their own four-step evidence
 records; the remaining goal entries are still planning documents and do not
 claim implementation or new application test results.

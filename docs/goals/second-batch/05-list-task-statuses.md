@@ -1,6 +1,6 @@
 # Goal 05: list_task_statuses
 
-Status: planned; not implemented by this document.
+Status: delivered; implemented by this document.
 
 ## Objective
 
