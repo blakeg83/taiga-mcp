@@ -1,6 +1,6 @@
 # Goal 08: update_epic
 
-Status: planned; not implemented by this document.
+Status: in progress; Step 1 completed.
 
 ## Objective
 
@@ -49,12 +49,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify epic presence-aware edits
 
-- [ ] Compare existing issue/story/task update payload construction and reuse its omission/clearing conventions.
-- [ ] Add fixtures for status-only edits, unassignment, empty description/tags, color changes, and comment-only calls.
+- [x] Compare existing issue/story/task update payload construction and reuse its omission/clearing conventions.
+- [x] Add fixtures for status-only edits, unassignment, empty description/tags, color changes, and comment-only calls.
 - [ ] Require positive IDs, nonnegative version, a real change/nonblank comment, nonblank supplied subject, and no set/clear collision; let Taiga validate color formats.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify update_epic contracts`.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify update_epic contracts`.
 
 ## Step 2: Implement versioned epic PATCH
 
@@ -109,10 +109,29 @@ deployment version from upstream source alone.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify update_epic contracts / pending |
+| 1 | Complete | Starting commit `4b4d896`; baseline `dotnet test -c Debug`: 422 passed. Focused contract fixtures cover status-only, explicit assignee clearing, empty description/tags, color, and comment-only payloads. The pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` confirms the epic writable fields and OCC version requirement; no source deviation was found. | Specify update_epic contracts / pending |
 | 2 | Not started | — | Implement update_epic API behavior / pending |
 | 3 | Not started | — | Expose update_epic MCP tool / pending |
 | 4 | Not started | — | Verify update_epic workflows / pending |
+
+### Step 1 contract decisions
+
+Existing issue, story, and task updates use a dictionary payload so omitted
+nullable arguments are distinguishable from explicit empty values and explicit
+clears. `EpicUpdateDto` follows that convention: `description=""` and
+`tags=[]` remain present, `assigned_to:null` is emitted only for the supported
+`clearFields=["assigned_to"]` case, and `version` is always present exactly as
+supplied. Status-only, color-only, and comment-only edits contain no unrelated
+fields. Subject, ID, version, change/comment, and clear collision validation
+will be enforced by the domain API in Step 2; color format validation remains
+Taiga-owned.
+
+Pinned source evidence checked 2026-09-29: the epic serializer exposes the
+detail fields and the epic validator accepts model-backed updates; the model
+defines `subject`, `description`, `status`, `assigned_to`, `color`, and tags,
+while `OCCResourceMixin` requires a nonnegative caller version and returns the
+authoritative incremented version. `epics_order`, requirement flags, blocking,
+dates, custom fields, and relationships remain out of scope.
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
