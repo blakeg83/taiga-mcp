@@ -72,6 +72,25 @@ so this client does not impose a narrower color format; Taiga remains the
 authority for color validation. The endpoint is documented at the pinned
 taiga-doc revision `7455fd37cb164bbf80198c1517fd0ef414e2a7b9`.
 
+The planned `link_user_story_to_epic` contract was source-verified on
+2026-09-28 against taiga-back revision
+`c8264ac6775103cbcc2a3a145978f2b475e9ff05` ([nested API viewset](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/api.py#L185-L232), [relationship serializer](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/serializers.py#L68-L71), and [relationship model](https://github.com/taigaio/taiga-back/blob/c8264ac6775103cbcc2a3a145978f2b475e9ff05/taiga/projects/epics/models.py#L96-L107)). The nested route is
+`/api/v1/epics/{epicId}/related_userstories/{userStoryId}`: the story ID is
+the nested lookup key, and creation sends `epic`, `user_story`, and optional
+`order`. A successful response contains `epic`, `user_story`, and the
+server-selected or requested `order`; the public result will rename those
+identifiers to `epic_id` and `user_story_id` and add `created`.
+
+The implementation will first read the nested relationship. A confirmed
+existing link returns `created=false` with its current order and ignores a new
+order request. A 404 is not treated as an absent link until the existing epic
+and story readers confirm that both resources are accessible. A recognized
+concurrent uniqueness validation is followed by the same relationship read and
+is reported as `created=false` only when that read confirms the link; unrelated
+validation, permission, missing-resource, and transport failures propagate.
+Cross-project linking is left to Taiga's permission and validation rules.
+This contract is planned until goal 14's implementation checklist is complete.
+
 ### `get_epic` contract
 
 The signature is `get_epic(epicId)`. It performs one authenticated `GET

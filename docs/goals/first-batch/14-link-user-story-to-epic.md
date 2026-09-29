@@ -39,12 +39,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 1: Verify relationship endpoint semantics
 
-- [ ] Confirm the nested lookup uses the story ID, not a separate link ID, and that creation needs epic/user_story keys.
-- [ ] Record actual success, duplicate, missing-link, and permission response fixtures; do not treat every 400/404 as a duplicate or absent accessible link.
-- [ ] Define existing-link behavior: ignore a new order request and report current order; changing order is outside this goal.
-- [ ] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
-- [ ] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify link_user_story_to_epic contracts`.
+- [x] Confirm the nested lookup uses the story ID, not a separate link ID, and that creation needs epic/user_story keys.
+- [x] Record actual success, duplicate, missing-link, and permission response fixtures; do not treat every 400/404 as a duplicate or absent accessible link.
+- [x] Define existing-link behavior: ignore a new order request and report current order; changing order is outside this goal.
+- [x] Validate this step: run baseline/focused contract checks; validate fixture JSON and record intended new cases without committing a failing suite.
+- [x] Update documentation now: record verified contract/source decisions and planned reference examples. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Specify link_user_story_to_epic contracts`.
 
 ## Step 2: Implement linking and repeat-call behavior
 
@@ -97,7 +97,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify link_user_story_to_epic contracts / pending |
+| 1 | Complete | Pinned taiga-back `c8264ac6775103cbcc2a3a145978f2b475e9ff05` checked 2026-09-28; nested lookup/payload/order semantics recorded; success, unique-duplicate, missing-link, and permission fixtures parse; baseline restore/build passed and baseline tests had 276 passes plus the pre-existing temporary-copy cleanup failure. | Specify link_user_story_to_epic contracts / current step commit |
 | 2 | Not started | — | Implement link_user_story_to_epic API behavior / pending |
 | 3 | Not started | — | Expose link_user_story_to_epic MCP interface / pending |
 | 4 | Not started | — | Verify link_user_story_to_epic workflow / pending |

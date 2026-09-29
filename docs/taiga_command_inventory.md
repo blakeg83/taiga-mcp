@@ -62,7 +62,7 @@ API/source basis: [issue endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | `bulk_create_epics` | New | `projectId, subjects[], statusId?`; create several epics through the bulk endpoint and return their identities. |
 | `list_epic_user_stories` | New | `epicId, page?`; list linked stories and their relationship order, including project context. |
 | `get_epic_user_story_link` | New | `epicId, userStoryId`; retrieve one epic/story relationship and its ordering data. |
-| `link_user_story_to_epic` | New | `epicId, userStoryId, order?`; associate an existing story with the epic. Preserve Taiga's ability to relate stories from accessible projects. |
+| `link_user_story_to_epic` | New — contract verified; implementation planned | `epicId, userStoryId, order?`; associate an existing story with the epic, preserve Taiga's ability to relate stories from accessible projects, and make repeated calls idempotent without changing existing order. |
 | `update_epic_user_story_link` | New | `epicId, userStoryId, order`; change the story's order within the epic without changing its backlog position. |
 | `unlink_user_story_from_epic` | New | `epicId, userStoryId`; remove the relationship while retaining the story. |
 | `bulk_create_epic_user_stories` | New | `epicId, projectId, subjects[]`; create new stories and associate them with the epic using the related-stories bulk endpoint. This endpoint is not a bulk linker for existing IDs. |
