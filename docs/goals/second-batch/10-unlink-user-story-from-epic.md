@@ -1,7 +1,7 @@
 # Goal 10: unlink_user_story_from_epic
 
-Status: planned; Steps 1–2 are complete; public exposure and final verification
-remain planned until later checkpoints.
+Status: planned; Steps 1–3 are complete; final preservation and full validation
+remain planned until the last checkpoint.
 
 ## Objective
 
@@ -69,12 +69,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose relationship removal
 
-- [ ] Add the tool to EpicTools with descriptions distinguishing unlinking from story/epic deletion and explaining repeated-call 404 behavior.
-- [ ] Document list_epic_user_stories -> select user_story_id -> unlink -> list again.
-- [ ] Add protocol tests for the receipt, safe failures, and cancellation invisibility in the schema.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose unlink_user_story_from_epic MCP tool`.
+- [x] Add the tool to EpicTools with descriptions distinguishing unlinking from story/epic deletion and explaining repeated-call 404 behavior.
+- [x] Document list_epic_user_stories -> select user_story_id -> unlink -> list again.
+- [x] Add protocol tests for the receipt, safe failures, and cancellation invisibility in the schema.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose unlink_user_story_from_epic MCP tool`.
 
 ## Step 4: Verify preservation and empty responses
 
@@ -148,11 +148,28 @@ Step 2 implementation and validation:
   one 401 replay, cancellation, transport failure, ID validation, and exact
   nested request ownership. The Debug build completed as part of that command.
 
+Step 3 exposure and protocol validation:
+
+- `EpicTools` now exposes `unlink_user_story_from_epic(epicId, userStoryId)`
+  with no public cancellation argument. Its description distinguishes removing a
+  relationship from deleting either work item and documents repeated-call 404
+  behavior and ambiguous-failure handling.
+- Public documentation now records the 33-tool count, the receipt/error shape,
+  the `list_epic_user_stories -> select user_story_id -> unlink -> list again`
+  workflow, and the delivered inventory scope. The batch index now reports goal
+  10 delivered and two remaining planned functions.
+- `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore
+  --filter FullyQualifiedName~McpIntegrationTests` passed all 12 real STDIO MCP
+  integration tests with 0 failures and 0 skipped. The suite verifies the 33-name
+  `tools/list`, exact required schema, cancellationToken invisibility, live
+  success receipt and nested DELETE, preservation after list-again, repeated
+  404, safe 403, and missing/null argument results.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline: 471 focused tests passed. Pinned source revision and nested DELETE/204 semantics recorded above; fixture-only tests pass. | Specify unlink_user_story_from_epic contracts / `27f1657` |
-| 2 | Complete | Focused transport/API tests: 36 passed; no warnings. 204 no-content ownership, status/error handling, cancellation, one-401 replay, exact DELETE path, receipt, and ambiguous-failure behavior recorded above. | Implement unlink_user_story_from_epic API behavior / pending |
-| 3 | Not started | — | Expose unlink_user_story_from_epic MCP tool / pending |
+| 2 | Complete | Focused transport/API tests: 35 passed; no warnings. 204 no-content ownership, status/error handling, cancellation, one-401 replay, exact DELETE path, receipt, and ambiguous-failure behavior recorded above. | Implement unlink_user_story_from_epic API behavior / `2937486` |
+| 3 | Complete | Real STDIO MCP integration suite: 12 passed; 33-tool discovery, schema, success, repeated 404, safe 403, required/null arguments, and post-unlink listing recorded above. | Expose unlink_user_story_from_epic MCP tool / pending |
 | 4 | Not started | — | Verify unlink_user_story_from_epic workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using TaigaMCP.Api;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -126,6 +127,31 @@ public sealed class EpicStoryUnlinkApiTests
             Assert.Equal(statusCode, error.StatusCode);
             Assert.DoesNotContain("Permission denied", error.Message, StringComparison.Ordinal);
             Assert.DoesNotContain("Not found", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
+        => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+}
+
+public sealed class EpicStoryUnlinkToolTests
+{
+    [Fact]
+    public async Task UnlinkUserStoryFromEpicTool_ReturnsSnakeCaseReceipt()
+    {
+        var handler = new FakeHttpMessageHandler().AddRoute(
+            HttpMethod.Delete,
+            "/api/v1/epics/301/related_userstories/102",
+            _ => EpicStoryUnlinkFixtures.NoContentResponse());
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(await new EpicTools(NewApi(handler, auth))
+                .UnlinkUserStoryFromEpic(301, 102));
+
+            Assert.Equal(301, json.GetProperty("epic_id").GetInt32());
+            Assert.Equal(102, json.GetProperty("user_story_id").GetInt32());
+            Assert.True(json.GetProperty("removed").GetBoolean());
         }
     }
 

@@ -98,6 +98,18 @@ public sealed class EpicTools
         return ToolResponseJson.Serialize(link);
     });
 
+    [McpServerTool(Name = "unlink_user_story_from_epic")]
+    [Description("Remove only the relationship between an existing epic and user story. A confirmed HTTP 204 returns { epic_id, user_story_id, removed: true }; this does not delete either work item or affect other epic links. A repeated unlink can return a Taiga 404 and is not treated as already successful; ambiguous transport failures are not retried.")]
+    public async Task<string> UnlinkUserStoryFromEpic(
+        [Description("Positive internal epic ID, not the displayed #ref.")] int epicId,
+        [Description("Positive internal user story ID, not the displayed #ref.")] int userStoryId,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _epics.UnlinkUserStoryFromEpicAsync(epicId, userStoryId, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
     [McpServerTool(Name = "list_epic_user_stories")]
     [Description("List one page of the stories already linked to an epic. Returns only epic_id, user_story_id, and the server relationship order; it does not imply creation, load full story details, calculate progress, or modify membership. Use get_user_story with a returned user_story_id when full story details are needed. Cross-project eligibility remains Taiga's decision.")]
     public async Task<string> ListEpicUserStories(

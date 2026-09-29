@@ -3,13 +3,13 @@
 ## Current state (2026-09-28)
 
 All 15 selected first-batch functions are implemented within their documented
-scope. The server exposes 32 tools; see the [tool reference](taiga_tools_reference.md)
+scope. The server exposes 33 tools; see the [tool reference](taiga_tools_reference.md)
 for exact contracts and the [completed-batch summary](goals/first-batch/README.md)
 for source/test pointers. The [second batch](goals/second-batch/README.md) has
 delivered `get_current_user`, `list_project_members`, `resolve_work_item`,
 `list_user_story_statuses`, `list_task_statuses`, `list_epic_statuses`,
-`list_sprints`, `update_epic`, and `list_epic_user_stories`; goals 10–12 remain
-implementation plans.
+`list_sprints`, `update_epic`, `list_epic_user_stories`, and
+`unlink_user_story_from_epic`; goals 11–12 remain implementation plans.
 
 Tools inject concrete domain APIs and use ToolResponseJson/ToolErrors.
 TaigaTransport owns responses and obtains a factory client per operation;

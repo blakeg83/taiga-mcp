@@ -61,6 +61,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicStoryListStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicStoryUnlinkStatusCode { get; set; } = HttpStatusCode.NoContent;
+
     public HttpStatusCode EpicCreateStatusCode { get; set; } = HttpStatusCode.Created;
 
     public HttpStatusCode EpicUpdateStatusCode { get; set; } = HttpStatusCode.OK;
@@ -398,6 +400,32 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"not found\"}");
                 return;
             }
+
+            if (request.HttpMethod == HttpMethod.Delete.Method)
+            {
+                if (EpicStoryUnlinkStatusCode != HttpStatusCode.NoContent)
+                {
+                    await RespondAsync(context.Response, EpicStoryUnlinkStatusCode, "{\"detail\":\"synthetic unlink secret\"}");
+                    return;
+                }
+
+                bool linkExists;
+                lock (_epicStoryLinkLock)
+                {
+                    linkExists = _epicStoryLinkExists;
+                    if (linkExists)
+                        _epicStoryLinkExists = false;
+                }
+
+                if (!linkExists)
+                {
+                    await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"not found\"}");
+                    return;
+                }
+
+                await RespondNoContentAsync(context.Response);
+                return;
+            }
         }
 
         if (request.HttpMethod == HttpMethod.Post.Method && path == "/api/v1/epics/301/related_userstories")
@@ -709,5 +737,13 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         await response.OutputStream.WriteAsync(bytes);
         response.Close();
+    }
+
+    private static Task RespondNoContentAsync(HttpListenerResponse response)
+    {
+        response.StatusCode = (int)HttpStatusCode.NoContent;
+        response.ContentLength64 = 0;
+        response.Close();
+        return Task.CompletedTask;
     }
 }

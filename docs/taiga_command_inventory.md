@@ -1,6 +1,6 @@
 # Taiga command inventory
 
-Reviewed September 29, 2026. This inventory includes the 32 commands already
+Reviewed September 29, 2026. This inventory includes the 33 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
@@ -10,7 +10,7 @@ The [first-batch summary](goals/first-batch/README.md) records all 15 delivered 
 
 - **Tickets** means user stories and tasks here. Taiga exposes issues, epics, user stories, and tasks as separate resources; command names preserve those distinctions.
 - **Existing** means exposed by this repository today. **Extend** means an existing command needs broader behavior. **New** means a proposed command. Parameters below describe the intended interface, not exact current signatures. The exact current signatures and JSON shapes are in the [implemented tool reference](taiga_tools_reference.md).
-- **Delivered subset** identifies implemented behavior with remaining inventory scope. **Planned — batch 2** links to an unimplemented second-batch goal; those functions are not part of today's 32-tool count.
+- **Delivered subset** identifies implemented behavior with remaining inventory scope. **Planned — batch 2** links to an unimplemented second-batch goal; those functions are not part of today's 33-tool count.
 - Shared commands take `kind = issue | epic | user_story | task` and an internal numeric `id`. A displayed `#ref` must first be resolved within its project.
 - List commands should expose pagination, supported filters, ordering, and an explicit choice to include completed work. Return JSON with IDs, references, useful labels, versions where available, and pagination information.
 - Updates should distinguish omitted fields from explicit clearing, use Taiga's version checks where required, and report conflicts. Closing and reopening mean selecting a project status; status names must not be hardcoded.
@@ -65,7 +65,7 @@ API/source basis: [issue endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | `get_epic_user_story_link` | New | `epicId, userStoryId`; retrieve one epic/story relationship and its ordering data. |
 | `link_user_story_to_epic` | New — delivered subset | `epicId, userStoryId, order?`; associate an existing story with the epic, preserve Taiga's ability to relate stories from accessible projects, and make repeated calls idempotent without changing existing order. |
 | `update_epic_user_story_link` | New | `epicId, userStoryId, order`; change the story's order within the epic without changing its backlog position. |
-| `unlink_user_story_from_epic` | Planned — [batch 2, goal 10](goals/second-batch/10-unlink-user-story-from-epic.md) | `epicId, userStoryId`; remove the relationship while retaining the story. |
+| `unlink_user_story_from_epic` | Delivered subset — [batch 2, goal 10](goals/second-batch/10-unlink-user-story-from-epic.md) | `epicId, userStoryId`; remove only the selected relationship after confirmed HTTP 204 while retaining the story, epic, and other links. A 404 is an error and ambiguous DELETE failures are not retried. |
 | `bulk_create_epic_user_stories` | New | `epicId, projectId, subjects[]`; create new stories and associate them with the epic using the related-stories bulk endpoint. This endpoint is not a bulk linker for existing IDs. |
 | `get_epic_progress` | New; composite | `epicId`; aggregate related stories by status and available estimates, showing completed/total counts and cross-project breakdowns. Label calculated totals and incomplete pagination. |
 | `list_epic_statuses` | Delivered subset | `projectId, page?`; list one page of all project epic workflow statuses, including open and closed choices, with IDs, localized names, slug, order, color, and closure flags. Story-only archive and WIP fields are not exposed. |
@@ -212,8 +212,8 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 32 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [SprintTools.cs](../Tools/SprintTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), [WorkItemResolverTools.cs](../Tools/WorkItemResolverTools.cs), [ProjectTools.cs](../Tools/ProjectTools.cs), and [UserTools.cs](../Tools/UserTools.cs).
+- The current 33 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [SprintTools.cs](../Tools/SprintTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), [WorkItemResolverTools.cs](../Tools/WorkItemResolverTools.cs), [ProjectTools.cs](../Tools/ProjectTools.cs), and [UserTools.cs](../Tools/UserTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) defaults to open issues; explicit statuses or includeClosed can retrieve closed work, and includePageInfo opts into page metadata. Issue detail still exposes a bounded field subset. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) deliver core list/detail/create/update behavior; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
-- Task list/detail/create/update, epic list/detail/create/update/link, epic relationship listing, epic status discovery, and shared comment submission are implemented. Epic relationship unlinking and shared comment/history reads remain in the second batch. Attachments, custom fields, and broader planning/admin operations remain later inventory work.
+- Task list/detail/create/update, epic list/detail/create/update/link/list/unlink, epic status discovery, and shared comment submission are implemented. Shared comment/history reads remain in the second batch. Attachments, custom fields, and broader planning/admin operations remain later inventory work.
 - Structured arbitrary dependencies, time logging, and nested epics are not assumed to be native Taiga capabilities. External references or custom fields should not be presented as equivalent native relationships.
