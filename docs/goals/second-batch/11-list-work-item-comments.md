@@ -1,6 +1,6 @@
 # Goal 11: list_work_item_comments
 
-Status: planned; not implemented by this document.
+Status: implementation in progress; public tool remains planned until Step 3.
 
 ## Objective
 
@@ -50,12 +50,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify history-backed comment reads
 
-- [ ] Verify per-kind history routes and actual paginated serialization using pinned sources; distinguish userstory route token from user_story enum value.
-- [ ] Add fixtures for visible/blank/hidden/deleted comments, edited comments, actor pk/name/username, and string UUID-like entry IDs.
-- [ ] Specify one-page header/body metadata parsing and visibility rules from contracts.md; preserve raw Markdown and omit HTML/old revisions.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_work_item_comments contracts`.
+- [x] Verify per-kind history routes and actual paginated serialization using pinned sources; distinguish userstory route token from user_story enum value.
+- [x] Add fixtures for visible/blank/hidden/deleted comments, edited comments, actor pk/name/username, and string UUID-like entry IDs.
+- [x] Specify one-page header/body metadata parsing and visibility rules from contracts.md; preserve raw Markdown and omit HTML/old revisions.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_work_item_comments contracts`.
 
 ## Step 2: Implement shared history read infrastructure
 
@@ -108,12 +108,34 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `3129d8e` (`master`). Source/deployment evidence: pinned Taiga
+backend revision `4d11baef9027f5598f6341d6eb4261de2840688e`; this is source
+evidence only and is not a live deployment claim.
+
+Step 1 contract decisions: history reads use `history/{kind-route}/{id}` with
+`type=comment` and an explicit `page` query. The enum value `user_story` maps to
+the upstream route token `userstory`; the other route tokens are `issue`,
+`task`, and `epic`. The pinned `HistoryViewSet` excludes empty comments for this
+filter, orders newest first, and returns a paginated `results` body whenever a
+page is requested. Response headers remain authoritative when present; a
+verified body `{count,next,results}` shape is the fallback when headers are
+absent. Unknown or conflicting metadata remains null. Local filtering removes
+hidden entries, blank/whitespace comments, and comments with either deletion
+marker; envelope metadata still describes the upstream page, so visible `items`
+may be empty while `next_page` remains set. Returned text is the raw comment;
+`comment_html`, revisions, diffs, snapshots, and values are not exposed.
+Actor `user.pk` maps to `user.id` when it is a positive integer. Missing or
+deleted actors retain safe name/username/activity fields without inventing an
+ID. History entry IDs are opaque strings, including UUID-like values.
+
+Step 1 validation: baseline `dotnet test -c Debug` is recorded below. The new
+fixture JSON is synthetic and does not contact Taiga; it covers visible,
+whitespace, hidden, deleted, edited, missing-actor, Unicode/Markdown, and
+UUID-like entry cases. No public behavior is exposed in this checkpoint.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_work_item_comments contracts / pending |
+| 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / pending |
 | 2 | Not started | — | Implement list_work_item_comments API behavior / pending |
 | 3 | Not started | — | Expose list_work_item_comments MCP tool / pending |
 | 4 | Not started | — | Verify list_work_item_comments workflows / pending |
