@@ -105,7 +105,7 @@ public sealed class McpIntegrationTests
             Assert.DoesNotContain("member=", taiga.Requests.Last().PathAndQuery);
         }
         Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
-        foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
+        foreach (var name in new[] { "list_issues", "list_user_stories", "list_user_story_statuses", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_epic", new() { ["epicId"] = 301 })).IsError == true);
         Assert.True((await Call("get_epic", new() { ["epicId"] = 0 })).IsError == true);
@@ -595,6 +595,7 @@ public sealed class McpIntegrationTests
                 "list_projects",
                 "list_tasks",
                 "list_user_stories",
+                "list_user_story_statuses",
                 "resolve_project",
                 "resolve_work_item",
                 "update_issue",
@@ -664,6 +665,13 @@ public sealed class McpIntegrationTests
             var storyRequired = listUserStories.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, storyRequired);
+
+            var listUserStoryStatuses = Assert.Single(tools, tool => tool.Name == "list_user_story_statuses");
+            var storyStatusProperties = listUserStoryStatuses.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "projectId", "page" }, storyStatusProperties);
+            var storyStatusRequired = listUserStoryStatuses.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, storyStatusRequired);
 
             var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
             var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1097,6 +1105,34 @@ public sealed class McpIntegrationTests
             Assert.Equal(
                 "/api/v1/userstories?project=123&page=2&status=2%2C3&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 storyRequest.PathAndQuery);
+
+            var storyStatusPage = await client.CallToolAsync(
+                "list_user_story_statuses",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 2
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(storyStatusPage.IsError == true, GetText(storyStatusPage));
+            var storyStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(storyStatusPage));
+            Assert.Equal(2, storyStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(JsonValueKind.Null, storyStatusEnvelope.GetProperty("total").ValueKind);
+            var storyStatuses = storyStatusEnvelope.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(3, storyStatuses.Length);
+            Assert.Equal("Terminado", storyStatuses[1].GetProperty("name").GetString());
+            Assert.True(storyStatuses[1].GetProperty("is_closed").GetBoolean());
+            Assert.True(storyStatuses[2].GetProperty("is_archived").GetBoolean());
+            var storyStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/userstory-statuses?project=123&page=2", storyStatusRequest.PathAndQuery);
+
+            var invalidStoryStatusCall = await client.CallToolAsync(
+                "list_user_story_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 0 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(invalidStoryStatusCall.IsError == true);
+            Assert.Contains("positive", GetText(invalidStoryStatusCall), StringComparison.OrdinalIgnoreCase);
 
             var storyDetail = await client.CallToolAsync(
                 "get_user_story",

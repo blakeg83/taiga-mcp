@@ -65,12 +65,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose status discovery
 
-- [ ] Add the public method to UserStoryTools with descriptions of resource-specific IDs, flags, and page behavior.
-- [ ] Document selecting a returned status id for create/update_user_story and checking later pages when necessary.
-- [ ] Add actual MCP invocation tests and update discovery documentation.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_user_story_statuses MCP tool`.
+- [x] Add the public method to UserStoryTools with descriptions of resource-specific IDs, flags, and page behavior.
+- [x] Document selecting a returned status id for create/update_user_story and checking later pages when necessary.
+- [x] Add actual MCP invocation tests and update discovery documentation.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_user_story_statuses MCP tool`.
 
 ## Step 4: Verify discovery-to-transition flow
 
@@ -141,8 +141,8 @@ value when present. No status cache or story-list filter was changed.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed (381 tests, 0 warnings/errors). Added `UserStoryStatusDto` contract fixtures/tests for localized names, independent flags, null color/WIP, and zero order/WIP. Verified pinned source revision and project filter above. | Specify list_user_story_statuses contracts / `471e6f1` |
-| 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~UserStoryStatusTests` passed (6 tests); Debug build/test passed (387 tests, 0 warnings/errors). API tests cover exact project/page query, field mapping/order, pagination, validation, malformed required IDs, and unknown metadata. | Implement list_user_story_statuses API behavior / pending |
-| 3 | Not started | — | Expose list_user_story_statuses MCP tool / pending |
+| 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~UserStoryStatusTests` passed (6 tests); Debug build/test passed (387 tests, 0 warnings/errors). API tests cover exact project/page query, field mapping/order, pagination, validation, malformed required IDs, and unknown metadata. | Implement list_user_story_statuses API behavior / `bafbfe2` |
+| 3 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~McpIntegrationTests` passed (11 tests); the complete Debug test rerun passed (387 tests, 0 warnings/errors). A transient first-run cleanup lock in the existing contamination test was cleared by rerunning its isolated test. Real STDIO `tools/list` and `tools/call` checks cover the required/default page schema, page 2 request, returned closed/archived metadata, and safe invalid-ID errors. Updated the reference, README, quickstart, inventory, and batch index to 27 tools. | Expose list_user_story_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_user_story_statuses workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
