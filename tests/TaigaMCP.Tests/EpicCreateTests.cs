@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -148,6 +150,44 @@ public sealed class EpicCreateTests
             Assert.Contains("may already have applied", exception.Message);
             Assert.DoesNotContain("synthetic timeout details", exception.Message);
             Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/epics"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateEpicTool_ReportsHttpTimeoutAsPotentiallyAppliedWithoutRetry()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Post,
+                "/api/v1/epics",
+                new TaskCanceledException("Synthetic HttpClient timeout", new TimeoutException("secret timeout details")));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<McpException>(() =>
+                new EpicTools(NewApi(handler, auth)).CreateEpic(123, "Saved search experience"));
+
+            Assert.Contains("timed out", exception.Message);
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.DoesNotContain("secret timeout details", exception.Message);
+            Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/epics"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateEpicAsync_PreservesCallerCancellation()
+    {
+        var handler = new FakeHttpMessageHandler();
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                NewApi(handler, auth).CreateEpicAsync(123, "Saved search experience", cancellationToken: cancellation.Token));
+
+            Assert.Empty(handler.Requests);
         }
     }
 

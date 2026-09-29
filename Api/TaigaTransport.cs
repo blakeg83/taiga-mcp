@@ -63,6 +63,11 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                     StringComparer.OrdinalIgnoreCase);
             return new TaigaReadResult(document, headers, requestUri);
         }
+        catch (OperationCanceledException exception) when (IsHttpTimeout(exception, cancellationToken))
+        {
+            throw new TaigaRequestException(
+                "Taiga request timed out; the write may already have applied. Read the entity before retrying.");
+        }
         catch (OperationCanceledException) when (write && applied)
         {
             throw new OperationCanceledException("Taiga write may already have applied; response reading was cancelled. Read the entity before retrying.", cancellationToken);
@@ -82,6 +87,11 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                 : "Taiga transport failure.");
         }
     }
+
+    private static bool IsHttpTimeout(OperationCanceledException exception, CancellationToken cancellationToken)
+        => !cancellationToken.IsCancellationRequested &&
+           exception is TaskCanceledException &&
+           exception.InnerException is TimeoutException;
 
     internal static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {

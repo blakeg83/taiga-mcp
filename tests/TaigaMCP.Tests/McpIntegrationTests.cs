@@ -1145,22 +1145,23 @@ public sealed class McpIntegrationTests
                 $"@echo off\r\necho REVIEW: non-JSON stdout contamination\r\ndotnet \"{copiedAssembly}\"\r\n",
                 System.Text.Encoding.ASCII);
 
-            await using var process = StrictMcpProcess.Start(
+            await using (var process = StrictMcpProcess.Start(
                 "cmd.exe",
                 ["/d", "/c", "call contaminated.cmd"],
                 CreateEnvironment(taiga),
-                temporaryRoot);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                temporaryRoot))
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+            {
+                await Assert.ThrowsAnyAsync<Exception>(async () =>
+                    await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token));
 
-            await Assert.ThrowsAnyAsync<Exception>(async () =>
-                await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token));
-
-            await process.ValidationCompleted.WaitAsync(timeout.Token);
-            Assert.True(
-                process.RawStdoutLines.Contains("REVIEW: non-JSON stdout contamination"),
-                $"stdout=[{string.Join(" | ", process.RawStdoutLines)}]; stderr=[{string.Join(" | ", process.StderrLines)}]; validation={process.ValidationFailure}");
-            var failure = Assert.IsType<InvalidDataException>(process.ValidationFailure);
-            Assert.Contains("not JSON", failure.Message);
+                await process.ValidationCompleted.WaitAsync(timeout.Token);
+                Assert.True(
+                    process.RawStdoutLines.Contains("REVIEW: non-JSON stdout contamination"),
+                    $"stdout=[{string.Join(" | ", process.RawStdoutLines)}]; stderr=[{string.Join(" | ", process.StderrLines)}]; validation={process.ValidationFailure}");
+                var failure = Assert.IsType<InvalidDataException>(process.ValidationFailure);
+                Assert.Contains("not JSON", failure.Message);
+            }
         }
         finally
         {
