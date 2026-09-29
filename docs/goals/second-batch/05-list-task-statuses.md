@@ -47,12 +47,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 1: Specify task-specific metadata
 
-- [ ] Compare the task serializer with the goal 04 story serializer; record that task statuses lack story archive/WIP fields.
-- [ ] Prepare localized names, open status named Done, and closed status with a non-English name.
-- [ ] Reuse only shared pagination/validation fixtures, not a DTO that invents unsupported fields.
-- [ ] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
-- [ ] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_task_statuses contracts`.
+- [x] Compare the task serializer with the goal 04 story serializer; record that task statuses lack story archive/WIP fields.
+- [x] Prepare localized names, open status named Done, and closed status with a non-English name.
+- [x] Reuse only shared pagination/validation fixtures, not a DTO that invents unsupported fields.
+- [x] Validate this step: record baseline/focused checks, confirm fixture JSON and source facts, and keep the existing suite runnable without future-behavior failures.
+- [x] Update documentation during this step: record verified contract decisions/source revision and planned examples in this goal. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Specify list_task_statuses contracts`.
 
 ## Step 2: Implement task status retrieval
 
@@ -102,12 +102,21 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Execution record
 
-Starting commit: pending. Source/deployment evidence: pending; do not claim a live
-deployment version from upstream source alone.
+Starting commit: `3705c2c` (`master`). Source evidence is pinned taiga-back
+revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no live deployment version
+was checked or claimed.
+
+Step 1 contract decisions: task statuses use the project-scoped
+`task-statuses?project={projectId}&page={page}` route and expose only `id`,
+`project`, `name`, `slug`, `order`, `color`, and `is_closed`. They do not reuse
+the story-status DTO because `is_archived` and `wip_limit` are story-only fields.
+Fixtures cover an open status named `Done`, a closed status with the localized
+name `Terminé`, zero order, false closure, null color, and the absence of
+story-only metadata. These are source-backed contract fixtures, not live data.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Not started | — | Specify list_task_statuses contracts / pending |
+| 1 | Complete | Baseline focused story-status check: `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~UserStoryStatusTests` — 9 passed. Added task-specific DTO/fixture serialization checks; source revision and field deviations recorded above. | Specify list_task_statuses contracts / pending |
 | 2 | Not started | — | Implement list_task_statuses API behavior / pending |
 | 3 | Not started | — | Expose list_task_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_task_statuses workflows / pending |
