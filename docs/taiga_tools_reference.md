@@ -121,8 +121,9 @@ structured JSON. Null-valued DTO fields are omitted. For example:
 Entries marked `is_hidden` are omitted. When either deletion marker is present,
 the comment body is suppressed, `comment_deleted=true` is returned, safe delete
 actor/date metadata is retained, and comment-labelled or matching deleted text
-is removed from `diff` and `values_diff`. An unstructured deleted change that
-cannot be separated safely is omitted. `snapshot`, raw `values`, `comment_html`,
+is removed from `diff` and `values_diff`. Unknown nested carriers and unverified
+text shapes are dropped; an unstructured deleted root that cannot be separated
+safely causes the entry to be omitted. `snapshot`, raw `values`, `comment_html`,
 and `comment_versions` are never returned. The command does not fetch later
 pages, restore historical objects, read comment revisions, or write data.
 

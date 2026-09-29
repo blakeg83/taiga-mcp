@@ -62,7 +62,7 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 - [x] Add a full-history API method sharing the existing page reader but omitting the comment-only query filter.
 - [x] Map core entry/actor fields and clone retained JSON changes before disposing documents; retain source ordering and type values.
 - [x] Omit hidden entries; remove deleted comment content from comment/diff/values_diff while retaining separable non-comment changes and deletion metadata.
-- [x] If an unknown structure prevents safe separation of deleted text, omit that entry and document/test the behavior; do not serialize raw responses wholesale.
+- [x] If an unknown structure prevents safe separation of deleted text, drop the unverified nested carrier or omit the entry for an unsafe root; do not serialize raw responses wholesale.
 - [x] Validate this step: focused `WorkItemHistoryTests` passed 11/11; Debug build passed with zero warnings; cancellation and ownership are covered.
 - [x] Update documentation during this step: the API sends `history/{route}/{id}?page=N`, supports array and verified body-page responses, and redacts deleted comment fields/text. The public function remains planned until exposed.
 - [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement get_work_item_history API behavior`.
@@ -124,7 +124,8 @@ values before document disposal; omit hidden entries and never expose `snapshot`
 `values`, `comment_html`, or `comment_versions`. Deleted comments set
 `comment_deleted=true`, suppress the top-level body, and remove comment-labelled
 or matching deleted text from structured changes while retaining separable
-non-comment fields. An unsafe unstructured deleted change will be omitted.
+known scalar/non-comment fields. Unknown nested carriers and unverified text
+shapes are dropped; an unsafe unstructured deleted root is omitted.
 `WorkItemHistoryFixtures.FullHistoryPage` covers field-only, comment-only,
 mixed/deleted, hidden, and unknown nested changes.
 
@@ -133,7 +134,7 @@ mixed/deleted, hidden, and unknown nested changes.
 | 1 | Complete | Baseline `dotnet test -c Debug`: 511 passed. Pinned history serializer/viewset/choice sources rechecked; synthetic full-history fixture added with field, comment, mixed/deleted, hidden, and unknown nested changes. | Specify get_work_item_history contracts / `47726eb` |
 | 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~WorkItemHistoryTests`: 11 passed. Debug compilation passed with zero warnings. API request is `GET history/{route}/{id}?page=N`; response mapping clones structured JSON and redacts deleted comment content. | Implement get_work_item_history API behavior / `9909a5f` |
 | 3 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~McpIntegrationTests`: 12 passed. Real STDIO discovery/calls verify the 35-name set, schema (`kind,id,page` with `kind,id` required), unfiltered page request, and safe invalid-ID result. Reference, README, quickstart, inventory, development, and batch status were reconciled. | Expose get_work_item_history MCP tool / `36ebf27` |
-| 4 | Complete | `dotnet restore`; Debug build/test passed with 0 warnings/errors and 525/525 tests; Release build/test passed with 0 warnings/errors and 525/525 tests; `git diff --check` passed. Focused history tests cover 14 cases and full MCP integration covers all four kinds with fake HTTP only. | Verify get_work_item_history workflows / `393187e` |
+| 4 | Complete | `dotnet restore`; Debug build/test passed with 0 warnings/errors and 525/525 tests; Release build/test passed with 0 warnings/errors and 525/525 tests; `git diff --check` passed. Focused history tests cover 14 cases and full MCP integration covers all four kinds with fake HTTP only. Follow-up redaction regression covers unknown nested carriers, HTML-decorated text, and escaped text. | Verify get_work_item_history workflows / `393187e` |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified

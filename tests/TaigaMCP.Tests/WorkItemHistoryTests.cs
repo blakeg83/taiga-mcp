@@ -39,8 +39,8 @@ public sealed class WorkItemHistoryTests
             Assert.Equal(9, deleted.DeleteCommentUser!.Id);
             Assert.Equal("Moderator", deleted.DeleteCommentUser.Name);
             Assert.Equal(2, deleted.Diff!.Value.GetProperty("status")[1].GetInt32());
-            Assert.Equal("preserve", deleted.Diff.Value.GetProperty("nested").GetProperty("safe").GetString());
-            Assert.True(deleted.ValuesDiff!.Value.GetProperty("nested").GetProperty("safe").GetBoolean());
+            Assert.False(deleted.Diff.Value.TryGetProperty("nested", out _));
+            Assert.False(deleted.ValuesDiff!.Value.TryGetProperty("nested", out _));
 
             var serialized = JsonSerializer.Serialize(page.Items);
             Assert.DoesNotContain("deleted secret", serialized, StringComparison.Ordinal);
@@ -135,19 +135,27 @@ public sealed class WorkItemHistoryTests
                   {
                     "id":"escaped-deleted",
                     "type":1,
-                    "comment":"deleted\nsecret ✓",
+                    "comment":"deleted secret",
                     "delete_comment_date":"2026-09-28T12:00:00Z",
-                    "diff":{"safe":["before","deleted\\nsecret ✓"],"nullable":null},
-                    "values_diff":{"nested":{"payload":"deleted\\nsecret ✓","kept":true}},
+                    "diff":{"status":["before","&lt;del&gt;deleted&lt;/del&gt; secret"],"unknown":{"payload":"deleted secret"},"nullable":null},
+                    "values_diff":{"status":["before","deleted\\u0020secret"],"unknown":{"payload":"deleted\\nsecret ✓"},"kept":true},
                     "created_at":"2026-09-28T12:00:00Z"
+                  },
+                  {
+                    "id":"unknown-nested",
+                    "type":1,
+                    "comment":null,
+                    "delete_comment_date":"2026-09-28T12:01:00Z",
+                    "diff":{"unknown":{"payload":"&lt;del&gt;deleted&lt;/del&gt; secret"}},
+                    "created_at":"2026-09-28T12:01:00Z"
                   },
                   {
                     "id":"unsafe-deleted",
                     "type":1,
                     "comment":"deleted",
-                    "delete_comment_date":"2026-09-28T12:01:00Z",
+                    "delete_comment_date":"2026-09-28T12:02:00Z",
                     "diff":"deleted",
-                    "created_at":"2026-09-28T12:01:00Z"
+                    "created_at":"2026-09-28T12:02:00Z"
                   }
                 ]
                 """);
@@ -156,16 +164,21 @@ public sealed class WorkItemHistoryTests
         {
             var page = await NewApi(handler, auth).ListWorkItemHistoryPageAsync(WorkItemKind.issue, 42);
 
-            var escaped = Assert.Single(page.Items);
+            Assert.Equal(2, page.Items.Count);
+            var escaped = Assert.Single(page.Items, item => item.Id == "escaped-deleted");
             Assert.Equal("escaped-deleted", escaped.Id);
             Assert.True(escaped.CommentDeleted);
-            var safeChanges = escaped.Diff!.Value.GetProperty("safe");
+            var safeChanges = escaped.Diff!.Value.GetProperty("status");
             Assert.Single(safeChanges.EnumerateArray());
             Assert.Equal("before", safeChanges[0].GetString());
             Assert.Equal(JsonValueKind.Null, escaped.Diff.Value.GetProperty("nullable").ValueKind);
-            var nestedChanges = escaped.ValuesDiff!.Value.GetProperty("nested");
-            Assert.True(nestedChanges.GetProperty("kept").GetBoolean());
-            Assert.False(nestedChanges.TryGetProperty("payload", out _));
+            Assert.False(escaped.Diff.Value.TryGetProperty("unknown", out _));
+            Assert.Single(escaped.ValuesDiff!.Value.GetProperty("status").EnumerateArray());
+            Assert.Equal("before", escaped.ValuesDiff.Value.GetProperty("status")[0].GetString());
+            Assert.True(escaped.ValuesDiff.Value.GetProperty("kept").GetBoolean());
+            var unknownNested = Assert.Single(page.Items, item => item.Id == "unknown-nested");
+            Assert.Null(unknownNested.Diff);
+            Assert.DoesNotContain(page.Items, item => item.Id == "unsafe-deleted");
         }
     }
 

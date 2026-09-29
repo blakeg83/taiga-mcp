@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using TaigaMCP.Models;
@@ -332,7 +333,7 @@ public sealed class WorkItemHistoryApi
         if (node is null)
             return false;
 
-        if (!TryRedactDeletedNode(node, deletedComment, out var safeNode) || safeNode is null)
+        if (!TryRedactDeletedNode(node, deletedComment, allowStrings: false, out var safeNode) || safeNode is null)
             return true;
 
         using var document = JsonDocument.Parse(safeNode.ToJsonString());
@@ -343,6 +344,7 @@ public sealed class WorkItemHistoryApi
     private static bool TryRedactDeletedNode(
         JsonNode node,
         string? deletedComment,
+        bool allowStrings,
         out JsonNode? redacted)
     {
         if (node is JsonObject obj)
@@ -357,7 +359,17 @@ public sealed class WorkItemHistoryApi
 
                 if (property.Value is null)
                     continue;
-                if (!TryRedactDeletedNode(property.Value, deletedComment, out var safeValue))
+                if (property.Value is JsonObject)
+                {
+                    obj.Remove(property.Key);
+                    continue;
+                }
+
+                if (!TryRedactDeletedNode(
+                        property.Value,
+                        deletedComment,
+                        IsSafeTextChangeField(property.Key),
+                        out var safeValue))
                 {
                     redacted = null;
                     return false;
@@ -380,7 +392,13 @@ public sealed class WorkItemHistoryApi
                 var child = array[index];
                 if (child is null)
                     continue;
-                if (!TryRedactDeletedNode(child, deletedComment, out var safeChild))
+                if (child is JsonObject or JsonArray)
+                {
+                    array.RemoveAt(index);
+                    continue;
+                }
+
+                if (!TryRedactDeletedNode(child, deletedComment, allowStrings, out var safeChild))
                 {
                     redacted = null;
                     return false;
@@ -396,10 +414,11 @@ public sealed class WorkItemHistoryApi
             return true;
         }
 
-        if (node is JsonValue value && value.TryGetValue<string>(out var text) &&
-            IsDeletedCommentText(text, deletedComment))
+        if (node is JsonValue value && value.TryGetValue<string>(out var text))
         {
-            redacted = null;
+            redacted = !allowStrings || IsDeletedCommentText(text, deletedComment)
+                ? null
+                : node;
             return true;
         }
 
@@ -409,6 +428,19 @@ public sealed class WorkItemHistoryApi
 
     private static bool IsCommentField(string name)
         => name.Contains("comment", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSafeTextChangeField(string name)
+        => name.Equals("status", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("severity", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("priority", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("type", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("assigned_to", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("owner", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("assigned_users", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("milestone", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("user_story", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("epic", StringComparison.OrdinalIgnoreCase) ||
+           name.Equals("tags", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsDeletedCommentText(string value, string? deletedComment)
     {
@@ -420,12 +452,45 @@ public sealed class WorkItemHistoryApi
         try
         {
             var decoded = JsonSerializer.Deserialize<string>($"\"{value.Replace("\"", "\\\"", StringComparison.Ordinal)}\"");
-            return decoded?.Contains(deletedComment, StringComparison.Ordinal) == true;
+            if (decoded?.Contains(deletedComment, StringComparison.Ordinal) == true)
+                return true;
         }
         catch (JsonException)
         {
-            return false;
         }
+
+        var normalizedValue = NormalizeVisibleText(value);
+        var normalizedComment = NormalizeVisibleText(deletedComment);
+        return normalizedComment.Length > 0 &&
+               normalizedValue.Contains(normalizedComment, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeVisibleText(string value)
+    {
+        var decoded = WebUtility.HtmlDecode(value);
+        var builder = new System.Text.StringBuilder(decoded.Length);
+        var inTag = false;
+        foreach (var character in decoded)
+        {
+            if (character == '<')
+            {
+                inTag = true;
+                continue;
+            }
+
+            if (character == '>')
+            {
+                inTag = false;
+                continue;
+            }
+
+            if (!inTag)
+                builder.Append(character);
+        }
+
+        return string.Join(
+            ' ',
+            builder.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private static bool IsSet(JsonElement entry, string propertyName)
