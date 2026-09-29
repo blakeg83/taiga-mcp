@@ -100,8 +100,8 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 | Step | Status | Validation evidence and documentation updated | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline restore/build passed; baseline test run had 295 passed and one pre-existing contaminated-copy cleanup failure. Pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was reviewed on 2026-09-28. Added the closed `issue`/`user_story`/`task`/`epic` vocabulary and `{ kind, id, version, comment_submitted }` receipt contract; focused contract tests pass. | Specify add_work_item_comment contracts / pending |
-| 2 | Not started | — | Implement add_work_item_comment API behavior / pending |
+| 1 | Complete | Baseline restore/build passed; baseline test run had 295 passed and one pre-existing contaminated-copy cleanup failure. Pinned Taiga backend revision `4d11baef9027f5598f6341d6eb4261de2840688e` was reviewed on 2026-09-28. Added the closed `issue`/`user_story`/`task`/`epic` vocabulary and `{ kind, id, version, comment_submitted }` receipt contract; focused contract tests pass. | Specify add_work_item_comment contracts / `1fbcba1` |
+| 2 | Complete | Added explicit PATCH methods for all four domain APIs. Each sends only `comment` and the supplied `version`, parses the authoritative returned version, performs no history/read-after-write request, and preserves safe HTTP failures. Focused domain tests pass: 14 tests, including all four routes, Markdown/Unicode preservation, invalid-input no-write checks, and safe version-error propagation without retry. | Implement add_work_item_comment API behavior / pending |
 | 3 | Not started | — | Expose add_work_item_comment MCP interface / pending |
 | 4 | Not started | — | Verify add_work_item_comment workflow / pending |
 

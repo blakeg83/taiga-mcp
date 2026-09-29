@@ -86,6 +86,24 @@ public sealed class EpicApi
         }
     }
 
+    public Task<int> AddCommentAsync(
+        int epicId,
+        int version,
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(epicId, nameof(epicId));
+        InputValidation.Nonnegative(version, nameof(version));
+        InputValidation.Required(text, nameof(text));
+        return WorkItemCommentPatch.SendAsync(
+            _transport,
+            $"epics/{epicId}",
+            "epic",
+            version,
+            text,
+            cancellationToken);
+    }
+
     public async Task<EpicUserStoryLinkDto> LinkUserStoryToEpicAsync(
         int epicId,
         int userStoryId,

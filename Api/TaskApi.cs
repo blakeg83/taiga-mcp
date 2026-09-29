@@ -166,6 +166,24 @@ public sealed class TaskApi
         }
     }
 
+    public Task<int> AddCommentAsync(
+        int taskId,
+        int version,
+        string text,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(taskId, nameof(taskId));
+        InputValidation.Nonnegative(version, nameof(version));
+        InputValidation.Required(text, nameof(text));
+        return WorkItemCommentPatch.SendAsync(
+            _transport,
+            $"tasks/{taskId}",
+            "task",
+            version,
+            text,
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<TaskDto>> ListTasksAsync(
         int projectId,
         int page = 1,
