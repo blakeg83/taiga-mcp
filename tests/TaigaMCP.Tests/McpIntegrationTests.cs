@@ -375,6 +375,17 @@ public sealed class McpIntegrationTests
         async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
             => await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
 
+        var sprintPage = await Call("list_sprints", new()
+        {
+            ["projectId"] = 123,
+            ["closed"] = false
+        });
+        Assert.False(sprintPage.IsError == true, GetText(sprintPage));
+        var sprintEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(sprintPage));
+        var milestoneId = sprintEnvelope.GetProperty("items")[0].GetProperty("id").GetInt32();
+        Assert.Equal(55, milestoneId);
+        Assert.Equal("/api/v1/milestones?project=123&page=1&closed=false", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/milestones?", StringComparison.Ordinal)).PathAndQuery);
+
         var statusPage = await Call("list_user_story_statuses", new()
         {
             ["projectId"] = 123,
@@ -412,7 +423,7 @@ public sealed class McpIntegrationTests
         {
             ["userStoryId"] = 102,
             ["version"] = 4,
-            ["milestoneId"] = 55
+            ["milestoneId"] = milestoneId
         });
         Assert.False(placedInSprint.IsError == true);
         var placedJson = JsonSerializer.Deserialize<JsonElement>(GetText(placedInSprint));
@@ -420,6 +431,7 @@ public sealed class McpIntegrationTests
         Assert.Equal(55, placedJson.GetProperty("milestone").GetInt32());
         var placedBody = JsonSerializer.Deserialize<JsonElement>(GetLastStoryPatch(taiga).Body);
         AssertPatchProperties(placedBody, "milestone", "version");
+        Assert.Equal(milestoneId, placedBody.GetProperty("milestone").GetInt32());
 
         var changedFields = await Call("update_user_story", new()
         {
@@ -1998,7 +2010,7 @@ public sealed class McpIntegrationTests
         }
         finally
         {
-            Directory.Delete(temporaryRoot, recursive: true);
+            await DeleteTemporaryApplicationCopyAsync(temporaryRoot);
         }
     }
 
@@ -2030,6 +2042,28 @@ public sealed class McpIntegrationTests
         }
 
         return temporaryRoot;
+    }
+
+    private static async Task DeleteTemporaryApplicationCopyAsync(string path)
+    {
+        var tempRoot = Path.GetFullPath(Path.GetTempPath());
+        var fullPath = Path.GetFullPath(path);
+        if (!fullPath.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Temporary application copy escaped the system temp directory.");
+
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                Directory.Delete(fullPath, recursive: true);
+                return;
+            }
+            catch (Exception exception) when
+                ((exception is IOException or UnauthorizedAccessException) && attempt < 19)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
+        }
     }
 
     private static string GetText(CallToolResult result)

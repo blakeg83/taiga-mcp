@@ -1,6 +1,6 @@
 # Goal 07: list_sprints
 
-Status: in progress on `codex/list-sprints`.
+Status: complete on `codex/list-sprints`.
 
 ## Objective
 
@@ -76,31 +76,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify discover-and-schedule workflow
 
-- [ ] List an open sprint and use its returned id in update_user_story with the story's fetched version.
-- [ ] Cover empty/later pages, unknown pagination headers, summary-header counts differing from current filter totals, and nested payload omission.
-- [ ] Test invalid IDs/pages, denied access, malformed identity/dates as appropriate to the mapped contract, and cancellation; no live sprint changes.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_sprints workflows`.
+- [x] List an open sprint and use its returned id in update_user_story with the story's fetched version.
+- [x] Cover empty/later pages, unknown pagination headers, summary-header counts differing from current filter totals, and nested payload omission.
+- [x] Test invalid IDs/pages, denied access, malformed identity/dates as appropriate to the mapped contract, and cancellation; no live sprint changes.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_sprints workflows`.
 
 ## Acceptance scenarios
 
-- [ ] The tool can list all/open/closed sprints with distinct query semantics.
-- [ ] Returned IDs are directly usable as milestoneId.
-- [ ] Dates and pagination remain accurate, without nested expansion or fabricated totals.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] The tool can list all/open/closed sprints with distinct query semantics.
+- [x] Returned IDs are directly usable as milestoneId.
+- [x] Dates and pagination remain accurate, without nested expansion or fabricated totals.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can discover existing sprint IDs and schedule work using the already-implemented story/task tools.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can discover existing sprint IDs and schedule work using the already-implemented story/task tools.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -132,8 +132,8 @@ Step 1 contract decisions:
 | --- | --- | --- | --- |
 | 1 | Complete | Source review and fixtures recorded above. Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore`: passed, 408 tests. | Specify list_sprints contracts / pending |
 | 2 | Complete | `SprintListTests`: 11 passed, including query omission/false/true, mapping, nested-field omission, pagination, malformed data, safe HTTP errors, pre-cancellation, and project/page validation. Debug focused build/test passed. | Implement list_sprints API behavior / `1919b9c` |
-| 3 | Complete | Real `tools/list`/`tools/call` integration passed: 30 discovered tools; required/default/null/false/true binding, page envelope, invalid arguments, and sanitized 403 behavior verified. Public reference, README, quickstart, inventory, and batch index updated. | Expose list_sprints MCP tool / pending |
-| 4 | Not started | — | Verify list_sprints workflows / pending |
+| 3 | Complete | Real `tools/list`/`tools/call` integration passed: 30 discovered tools; required/default/null/false/true binding, page envelope, invalid arguments, and sanitized 403 behavior verified. Public reference, README, quickstart, inventory, and batch index updated. | Expose list_sprints MCP tool / `3121e0a` |
+| 4 | Complete | Discover-open-sprint → fetched story version → `update_user_story` with returned milestone ID passed. `SprintListTests` and MCP tests cover empty/later pages, unknown metadata, differing summary counts, nested omission, malformed data, denied access, cancellation, and validation. Exact required sequence passed: `dotnet restore`; `dotnet build -c Debug`; `dotnet test -c Debug`; `dotnet build -c Release --no-restore`; `dotnet test -c Release --no-build --no-restore`; `git diff --check`. Both configurations: 419 passed, 0 failed, 0 skipped, 0 warnings/errors. The contaminated-copy test cleanup now retries generated temp-directory deletion up to 20 times for transient Windows handles. | Verify list_sprints workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
