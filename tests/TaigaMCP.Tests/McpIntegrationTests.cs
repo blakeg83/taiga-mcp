@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using Xunit;
@@ -619,6 +620,22 @@ public sealed class McpIntegrationTests
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, memberRequired);
 
+            async Task<string> CallMemberBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_project_members",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
             var issueProperties = listIssues.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -772,6 +789,14 @@ public sealed class McpIntegrationTests
             Assert.DoesNotContain("member=", projectRequest.PathAndQuery);
             Assert.Contains("page=1", projectRequest.PathAndQuery);
 
+            var memberRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/memberships", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallMemberBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallMemberBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            Assert.Equal("error_result", await CallMemberBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = null }));
+            Assert.Equal(memberRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/memberships", StringComparison.Ordinal)));
+
             var memberPage = await client.CallToolAsync(
                 "list_project_members",
                 new Dictionary<string, object?> { ["projectId"] = 123 },
@@ -796,6 +821,16 @@ public sealed class McpIntegrationTests
             var memberRequest = Assert.Single(taiga.Requests, request =>
                 request.Method == "GET" && request.PathAndQuery == "/api/v1/memberships?project=123&page=1");
             Assert.Equal("Bearer integration-token", memberRequest.Authorization);
+
+            var explicitMemberPage = await client.CallToolAsync(
+                "list_project_members",
+                new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = 4 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(explicitMemberPage.IsError == true, GetText(explicitMemberPage));
+            var explicitMemberEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(explicitMemberPage));
+            Assert.Equal(4, explicitMemberEnvelope.GetProperty("page").GetInt32());
+            Assert.Single(taiga.Requests, request =>
+                request.Method == "GET" && request.PathAndQuery == "/api/v1/memberships?project=123&page=4");
 
             var memberUserId = members[0].GetProperty("user_id").GetInt32();
             var membershipId = members[0].GetProperty("membership_id").GetInt32();

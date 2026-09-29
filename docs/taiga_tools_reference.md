@@ -208,7 +208,9 @@ a future write. Unknown pagination headers remain explicit `null` values.
 Invalid IDs, malformed required membership/project IDs, 401/403 responses,
 invalid JSON, cancellation, and other transport failures are returned as safe
 MCP errors without raw upstream bodies. The injected `cancellationToken` is
-not a public argument.
+not a public argument. At the installed MCP boundary, omitting `projectId`,
+sending `projectId:null`, or sending `page:null` produces an `IsError=true`
+tool result before HTTP; an explicit `page=4` is accepted and requests page 4.
 
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.
