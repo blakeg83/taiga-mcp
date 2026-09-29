@@ -69,12 +69,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose comment reading
 
-- [ ] Add WorkItemHistoryTools/list_work_item_comments and document opaque entry IDs versus numeric item IDs.
-- [ ] Document add_work_item_comment -> list_work_item_comments and the possibility of a filtered empty page with continuation.
-- [ ] Preserve existing get_issue response/comment behavior; do not silently replace its internal comment reader in this goal.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_work_item_comments MCP tool`.
+- [x] Add WorkItemHistoryTools/list_work_item_comments and document opaque entry IDs versus numeric item IDs.
+- [x] Document add_work_item_comment -> list_work_item_comments and the possibility of a filtered empty page with continuation.
+- [x] Preserve existing get_issue response/comment behavior; do not silently replace its internal comment reader in this goal.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_work_item_comments MCP tool`.
 
 ## Step 4: Verify conversations across all kinds
 
@@ -153,11 +153,27 @@ malformed/conflicting metadata, safe 403 handling, pre-cancellation, and
 response disposal. A Debug build passed as part of that run. No source
 deviations from the pinned history contract were found.
 
+Step 3 implementation decisions: `WorkItemHistoryTools` is a thin MCP wrapper
+over the concrete history API and returns `ToolResponseJson.SerializePage`.
+The public signature is `list_work_item_comments(kind, id, page=1)`; only
+`kind` and `id` are required in the generated schema, and `cancellationToken`
+is not exposed. Existing `get_issue` still uses its original internal comment
+reader and response shape. The reference, README, quickstart, inventory, and
+batch index now describe 34 callable tools, with full history and comment
+revision/edit/delete/restore still deferred.
+
+Step 3 validation: the real `ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure`
+MCP session passed. It verified the 34-name `tools/list` result, the new
+`kind/id/page` schema and enum, a default-page `tools/call`, exact history query,
+missing-required and explicit-null argument failures, and an invalid-ID safe
+error without an HTTP request. The existing get-issue comment path remains
+covered by the full suite.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / pending |
 | 2 | Complete | Focused `WorkItemCommentReadTests`: 17 passed; Debug build passed; DI/API/transport behavior recorded above. | Implement list_work_item_comments API behavior / pending |
-| 3 | Not started | — | Expose list_work_item_comments MCP tool / pending |
+| 3 | Complete | Real STDIO `tools/list`/`tools/call` integration passed; public docs and counts updated; API commits `349e3b6`, `20c08d3` precede this checkpoint. | Expose list_work_item_comments MCP tool / pending |
 | 4 | Not started | — | Verify list_work_item_comments workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

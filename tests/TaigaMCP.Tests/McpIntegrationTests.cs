@@ -779,6 +779,7 @@ public sealed class McpIntegrationTests
                 "list_tasks",
                 "list_user_stories",
                 "list_user_story_statuses",
+                "list_work_item_comments",
                 "resolve_project",
                 "resolve_work_item",
                 "unlink_user_story_from_epic",
@@ -1137,6 +1138,15 @@ public sealed class McpIntegrationTests
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "kind", "id", "version", "text" }, commentRequired);
 
+            var listWorkItemComments = Assert.Single(tools, tool => tool.Name == "list_work_item_comments");
+            var listCommentProperties = listWorkItemComments.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "kind", "id", "page" }, listCommentProperties);
+            var listCommentRequired = listWorkItemComments.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "kind", "id" }, listCommentRequired);
+            Assert.Contains("opaque", listWorkItemComments.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("next_page", listWorkItemComments.Description, StringComparison.Ordinal);
+
             var resolveWorkItem = Assert.Single(tools, tool => tool.Name == "resolve_work_item");
             var resolveProperties = resolveWorkItem.JsonSchema.GetProperty("properties").EnumerateObject().ToArray();
             Assert.Equal(new[] { "projectId", "kind", "ref" }, resolveProperties.Select(property => property.Name));
@@ -1217,6 +1227,64 @@ public sealed class McpIntegrationTests
             }));
             Assert.Equal(resolverRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
                 request.Method == "GET" && request.PathAndQuery.Contains("/by_ref?", StringComparison.Ordinal)));
+
+            async Task<string> CallCommentBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_work_item_comments",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
+            var commentRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallCommentBoundaryAsync(new Dictionary<string, object?>
+            {
+                ["kind"] = "issue"
+            }));
+            Assert.Equal("error_result", await CallCommentBoundaryAsync(new Dictionary<string, object?>
+            {
+                ["kind"] = "issue",
+                ["id"] = 42,
+                ["page"] = null
+            }));
+            Assert.Equal(commentRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)));
+
+            var comments = await client.CallToolAsync(
+                "list_work_item_comments",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = "issue",
+                    ["id"] = 42
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(comments.IsError == true, GetText(comments));
+            var commentEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(comments));
+            Assert.Equal(1, commentEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(JsonValueKind.Array, commentEnvelope.GetProperty("items").ValueKind);
+            Assert.Equal(JsonValueKind.Null, commentEnvelope.GetProperty("total").ValueKind);
+            Assert.Equal(
+                "/api/v1/history/issue/42?type=comment&page=1",
+                taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)).PathAndQuery);
+            var commentRequestsAfterSuccess = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal));
+            var invalidCommentId = await client.CallToolAsync(
+                "list_work_item_comments",
+                new Dictionary<string, object?> { ["kind"] = "issue", ["id"] = 0 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(invalidCommentId.IsError == true);
+            Assert.Contains("id", GetText(invalidCommentId), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(commentRequestsAfterSuccess, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/history/", StringComparison.Ordinal)));
 
             var result = await client.CallToolAsync(
                 "list_projects",
