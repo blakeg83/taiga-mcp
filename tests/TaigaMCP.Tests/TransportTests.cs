@@ -248,6 +248,34 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public async Task SendNoContentAsync_Repeated401StopsAfterOneReplayAndDisposesResponses()
+    {
+        var firstUnauthorized = new TrackingContent("{\"detail\":\"expired\"}");
+        var secondUnauthorized = new TrackingContent("{\"detail\":\"still expired\"}");
+        var attempts = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>
+            {
+                attempts++;
+                var content = attempts == 1 ? firstUnauthorized : secondUnauthorized;
+                return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = content };
+            })
+            .AddJsonRoute(HttpMethod.Post, "/api/v1/auth/refresh", "{\"auth_token\":\"replayed-token\",\"refresh\":\"next-refresh\"}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var request = new HttpRequestMessage(HttpMethod.Delete, "test"))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new TaigaTransport(new TestHttpClientFactory(handler), auth).SendNoContentAsync(request));
+
+            Assert.Equal(HttpStatusCode.Unauthorized, error.StatusCode);
+            Assert.Equal(2, attempts);
+            Assert.True(firstUnauthorized.Disposed);
+            Assert.True(secondUnauthorized.Disposed);
+        }
+    }
+
+    [Fact]
     public async Task SendNoContentAsync_CancellationPropagatesWithoutUpstreamError()
     {
         var handler = new FakeHttpMessageHandler().AddRoute(HttpMethod.Delete, "/api/v1/test", _ =>

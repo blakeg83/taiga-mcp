@@ -1,7 +1,7 @@
 # Goal 10: unlink_user_story_from_epic
 
-Status: planned; Steps 1–3 are complete; final preservation and full validation
-remain planned until the last checkpoint.
+Status: complete; all four ordered steps, acceptance scenarios, and final
+validation are complete on the feature branch.
 
 ## Objective
 
@@ -78,33 +78,33 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify preservation and empty responses
 
-- [ ] Use a stateful fake with a story linked to two epics; unlink one and prove the story, epic, and other link still exist.
-- [ ] Assert correct DELETE path and no DELETE requests to stories/epics, no PATCHes, and no unwanted preflight all-page reads.
-- [ ] Verify response disposal on 204/errors/cancellation, exact 401 replay limits, no JSON parse on 204, and no false success for 404 or transport ambiguity.
-- [ ] Run transport regression tests to ensure malformed/empty responses to existing JSON reads still fail.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify unlink_user_story_from_epic workflows`.
+- [x] Use a stateful fake with a story linked to two epics; unlink one and prove the story, epic, and other link still exist.
+- [x] Assert correct DELETE path and no DELETE requests to stories/epics, no PATCHes, and no unwanted preflight all-page reads.
+- [x] Verify response disposal on 204/errors/cancellation, exact 401 replay limits, no JSON parse on 204, and no false success for 404 or transport ambiguity.
+- [x] Run transport regression tests to ensure malformed/empty responses to existing JSON reads still fail.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify unlink_user_story_from_epic workflows`.
 
 ## Acceptance scenarios
 
-- [ ] HTTP 204 produces a valid MCP JSON removal receipt without attempting to parse an empty body.
-- [ ] Only the selected relationship is removed.
-- [ ] 403/404 and ambiguous failures are surfaced, while only received-401 auth replay is allowed.
-- [ ] Existing transport disposal, bounded error, cancellation, and JSON-read contracts remain intact.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] HTTP 204 produces a valid MCP JSON removal receipt without attempting to parse an empty body.
+- [x] Only the selected relationship is removed.
+- [x] 403/404 and ambiguous failures are surfaced, while only received-401 auth replay is allowed.
+- [x] Existing transport disposal, bounded error, cancellation, and JSON-read contracts remain intact.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can correct epic membership without deleting work items or misreporting unsuccessful removals.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can correct epic membership without deleting work items or misreporting unsuccessful removals.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -165,12 +165,35 @@ Step 3 exposure and protocol validation:
   success receipt and nested DELETE, preservation after list-again, repeated
   404, safe 403, and missing/null argument results.
 
+Step 4 preservation and final validation:
+
+- The stateful API test starts with story 102 linked to epics 301 and 302. After
+  deleting only `/epics/301/related_userstories/102`, it confirms epic 301 and
+  story 102 still read successfully, story 102 still reports two epic links,
+  and the epic 302 relationship remains. The operation request segment contains
+  exactly one nested DELETE, with no preflight reads, PATCHes, or work-item
+  DELETEs.
+- Transport tests confirm response disposal for 204 and safe errors, repeated
+  401 stops after one replay, ambiguous DELETE transport failures do not retry,
+  204 content is not parsed, cancellation remains an
+  `OperationCanceledException`, and existing JSON reads still reject malformed
+  or empty bodies through the pre-existing regression tests.
+- Final required validation passed from the repository root using the normal
+  output paths: `dotnet restore`; `dotnet build -c Debug` (0 warnings, 0
+  errors); `dotnet test -c Debug` (491 passed, 0 failed, 0 skipped);
+  `dotnet build -c Release --no-restore` (0 warnings, 0 errors); `dotnet test
+  -c Release --no-build --no-restore` (491 passed, 0 failed, 0 skipped); and
+  `git diff --check` passed. Debug artifacts were under `bin/Debug/net8.0/`
+  and `tests/TaigaMCP.Tests/bin/Debug/net8.0/`; Release artifacts were under
+  the corresponding `bin/Release/net8.0/` directories. No server was stopped,
+  and no generated artifacts, credentials, or live Taiga data were added.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline: 471 focused tests passed. Pinned source revision and nested DELETE/204 semantics recorded above; fixture-only tests pass. | Specify unlink_user_story_from_epic contracts / `27f1657` |
 | 2 | Complete | Focused transport/API tests: 35 passed; no warnings. 204 no-content ownership, status/error handling, cancellation, one-401 replay, exact DELETE path, receipt, and ambiguous-failure behavior recorded above. | Implement unlink_user_story_from_epic API behavior / `2937486` |
-| 3 | Complete | Real STDIO MCP integration suite: 12 passed; 33-tool discovery, schema, success, repeated 404, safe 403, required/null arguments, and post-unlink listing recorded above. | Expose unlink_user_story_from_epic MCP tool / pending |
-| 4 | Not started | — | Verify unlink_user_story_from_epic workflows / pending |
+| 3 | Complete | Real STDIO MCP integration suite: 12 passed; 33-tool discovery, schema, success, repeated 404, safe 403, required/null arguments, and post-unlink listing recorded above. | Expose unlink_user_story_from_epic MCP tool / `0f79710` |
+| 4 | Complete | Final focused preservation/transport suite: 38 passed. Required Debug/Release restore, build, test, and `git diff --check` sequence passed; Debug and Release each passed 491 tests with 0 warnings/errors on build. | Verify unlink_user_story_from_epic workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
