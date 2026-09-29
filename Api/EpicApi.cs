@@ -123,7 +123,21 @@ public sealed class EpicApi
         try
         {
             using var document = await _transport.ReadAsync(request, cancellationToken);
-            return MapUserStoryLink(document.RootElement, created: true);
+            try
+            {
+                return MapUserStoryLink(document.RootElement, created: true);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new OperationCanceledException(
+                    "Taiga write may already have applied; relationship response mapping was cancelled. Read the relationship before retrying.",
+                    cancellationToken);
+            }
+            catch (Exception)
+            {
+                throw new TaigaRequestException(
+                    "Taiga write may already have applied; relationship response mapping failed. Read the relationship before retrying.");
+            }
         }
         catch (TaigaRequestException exception) when (exception.IsDuplicateRelationship)
         {

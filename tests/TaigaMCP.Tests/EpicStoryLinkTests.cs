@@ -274,6 +274,30 @@ public sealed class EpicStoryLinkApiTests
         }
     }
 
+    [Theory]
+    [InlineData("{\"epic\":301,\"user_story\":102}")]
+    [InlineData("{\"epic\":301,\"user_story\":102,\"order\":\"later\"}")]
+    public async Task LinkUserStoryToEpicAsync_ReportsMalformedSuccessfulResponseAsPotentiallyApplied(string responseBody)
+    {
+        var handler = MissingLinkThenResourceRoutes()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/epics/301/related_userstories",
+                responseBody,
+                HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).LinkUserStoryToEpicAsync(301, 102));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.Contains("response mapping failed", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Post &&
+                request.Uri.AbsolutePath.EndsWith("/related_userstories", StringComparison.Ordinal));
+        }
+    }
+
     [Fact]
     public async Task LinkUserStoryToEpicAsync_DoesNotPostWhenNested404BelongsToInaccessibleEpic()
     {
@@ -362,6 +386,39 @@ public sealed class EpicStoryLinkToolTests
             Assert.False(json.GetProperty("created").GetBoolean());
         }
     }
+
+    [Fact]
+    public async Task LinkUserStoryToEpicTool_ReportsMalformedSuccessfulResponseAsPotentiallyApplied()
+    {
+        var handler = MissingLinkThenResourceRoutes()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/epics/301/related_userstories",
+                "{\"epic\":301,\"user_story\":102,\"order\":null}",
+                HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() =>
+                new EpicTools(NewApi(handler, auth)).LinkUserStoryToEpic(301, 102));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.DoesNotContain("order", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static FakeHttpMessageHandler MissingLinkThenResourceRoutes()
+        => new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories/102",
+                EpicStoryLinkFixtures.MissingLink,
+                HttpStatusCode.NotFound)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/301", EpicDetailFixtures.Rich)
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                "{\"id\":102,\"ref\":18,\"project\":123,\"status\":7,\"status_extra_info\":{\"name\":\"Ready\"},\"version\":4}");
 
     private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
         => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
