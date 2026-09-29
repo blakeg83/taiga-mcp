@@ -55,7 +55,7 @@ unassigned goals, live writes, push, PR, or merge.
 
 ## Selected behavior and boundaries
 
-New functions build on the existing 28 tools; completing the remaining 7 yields
+New functions build on the existing 29 tools; completing the remaining 6 yields
 35 tools unless separately authorized changes alter that count. No separate foundation
 goal is needed: transport/auth/cache/validation/protocol tests already exist.
 
