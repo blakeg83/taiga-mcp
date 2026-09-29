@@ -432,6 +432,7 @@ Call the tool list_epics with projectId=12345, includeClosed=false, and query="s
 Call the tool get_epic with epicId=301
 Call the tool list_epic_user_stories with epicId=301 and page=1
 Select a returned user_story_id, then call unlink_user_story_from_epic with epicId=301 and that userStoryId; a successful removal returns removed=true
+Call the tool list_epic_user_stories with epicId=301 and page=1 again to verify the selected relationship is absent
 Call the tool update_epic with epicId=301, version=4, status=8, and comment="Delivery complete."
 Call the tool get_task with taskId=203
 Call the tool update_task with taskId=203, version=2, status=11

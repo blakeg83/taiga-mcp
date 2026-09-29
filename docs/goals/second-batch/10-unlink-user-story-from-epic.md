@@ -168,11 +168,11 @@ Step 3 exposure and protocol validation:
 Step 4 preservation and final validation:
 
 - The stateful API test starts with story 102 linked to epics 301 and 302. After
-  deleting only `/epics/301/related_userstories/102`, it confirms epic 301 and
-  story 102 still read successfully, story 102 still reports two epic links,
-  and the epic 302 relationship remains. The operation request segment contains
-  exactly one nested DELETE, with no preflight reads, PATCHes, or work-item
-  DELETEs.
+  deleting only `/epics/301/related_userstories/102`, its mutable relationship
+  reads show that 301 is absent, 302 remains, epic 301 and story 102 still read
+  successfully, and the epic 302 relationship remains. The operation request
+  segment contains exactly one nested DELETE, with no preflight reads, PATCHes,
+  or work-item DELETEs.
 - Transport tests confirm response disposal for 204 and safe errors, repeated
   401 stops after one replay, ambiguous DELETE transport failures do not retry,
   204 content is not parsed, cancellation remains an

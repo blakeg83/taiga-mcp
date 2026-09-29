@@ -74,18 +74,25 @@ public sealed class EpicStoryUnlinkApiTests
     public async Task UnlinkUserStoryFromEpicAsync_PreservesStoryEpicAndOtherEpicRelationship()
     {
         var firstRelationshipExists = true;
+        var secondRelationshipExists = true;
         var handler = new FakeHttpMessageHandler()
             .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/301", EpicDetailFixtures.Rich)
-            .AddJsonRoute(
+            .AddRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                _ => JsonResponse(firstRelationshipExists
+                    ? "[{\"epic\":301,\"user_story\":102,\"order\":1}]"
+                    : "[]"))
+            .AddRoute(
                 HttpMethod.Get,
                 "/api/v1/userstories/102",
-                """
-                {"id":102,"ref":18,"project":123,"subject":"Shared story","status":7,"status_extra_info":{"name":"Ready"},"version":4,"epics":[{"id":301},{"id":302}]}
-                """)
-            .AddJsonRoute(
+                _ => JsonResponse($"{{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Shared story\",\"status\":7,\"status_extra_info\":{{\"name\":\"Ready\"}},\"version\":4,\"epics\":{(firstRelationshipExists ? "[{\"id\":301},{\"id\":302}]" : "[{\"id\":302}]")}}}"))
+            .AddRoute(
                 HttpMethod.Get,
                 "/api/v1/epics/302/related_userstories",
-                """[{"epic":302,"user_story":102,"order":2}]""")
+                _ => JsonResponse(secondRelationshipExists
+                    ? "[{\"epic\":302,\"user_story\":102,\"order\":2}]"
+                    : "[]"))
             .AddRoute(
                 HttpMethod.Delete,
                 "/api/v1/epics/301/related_userstories/102",
@@ -121,15 +128,22 @@ public sealed class EpicStoryUnlinkApiTests
 
             var epic = await epics.GetEpicAsync(301);
             var story = await new UserStoryApi(transport).GetUserStoryAsync(102);
+            var removedRelationships = await epics.ListEpicUserStoriesAsync(301);
             var otherRelationships = await epics.ListEpicUserStoriesAsync(302);
 
             Assert.Equal(301, epic.Id);
             Assert.Equal(102, story.Id);
-            Assert.Equal(2, story.Epics!.Value.GetArrayLength());
+            var remainingEpicIds = story.Epics!.Value.EnumerateArray()
+                .Select(item => item.GetProperty("id").GetInt32())
+                .ToArray();
+            Assert.DoesNotContain(301, remainingEpicIds);
+            Assert.Contains(302, remainingEpicIds);
+            Assert.Empty(removedRelationships);
             var otherRelationship = Assert.Single(otherRelationships);
             Assert.Equal(302, otherRelationship.EpicId);
             Assert.Equal(102, otherRelationship.UserStoryId);
             Assert.False(firstRelationshipExists);
+            Assert.True(secondRelationshipExists);
             Assert.DoesNotContain(handler.Requests, request =>
                 request.Method == HttpMethod.Delete &&
                 request.Uri.AbsolutePath is "/api/v1/epics/301" or "/api/v1/userstories/102");
@@ -198,6 +212,9 @@ public sealed class EpicStoryUnlinkApiTests
 
     private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
         => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+    private static HttpResponseMessage JsonResponse(string body)
+        => new(HttpStatusCode.OK) { Content = new StringContent(body) };
 }
 
 public sealed class EpicStoryUnlinkToolTests

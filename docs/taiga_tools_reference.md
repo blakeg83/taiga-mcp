@@ -182,6 +182,12 @@ single authentication replay, and ambiguous DELETE failures are not retried.
 The no-content transport path accepts HTTP 204 without parsing the body, while
 existing JSON reads still require valid JSON.
 
+The recommended correction workflow is to call `list_epic_user_stories`, select
+the returned `user_story_id`, call `unlink_user_story_from_epic`, then call
+`list_epic_user_stories` again to verify that the selected relationship is
+absent. The story and epic remain available for their normal detail reads, as do
+any other relationships.
+
 The DELETE/204 behavior was checked on 2026-09-29 against pinned taiga-back
 revision `4d11baef9027f5598f6341d6eb4261de2840688e`: the nested epic viewset
 uses `lookup_field = "user_story"`, inherits the CRUD destroy action, and the
