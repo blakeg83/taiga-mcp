@@ -203,6 +203,102 @@ public sealed class WorkItemResolverContractTests
     }
 
     [Fact]
+    public async Task ResolveAsync_PreservesSameReferenceAcrossProjectsWithoutCrossProjectSearch()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks/by_ref",
+                request => request.Uri.Query.Contains("project=12&ref=42", StringComparison.Ordinal)
+                    ? new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            "{\"id\":405,\"ref\":42,\"project\":12,\"subject\":\"Project twelve\",\"version\":1}",
+                            Encoding.UTF8,
+                            "application/json")
+                    }
+                    : new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            "{\"id\":905,\"ref\":42,\"project\":99,\"subject\":\"Project ninety-nine\",\"version\":2}",
+                            Encoding.UTF8,
+                            "application/json")
+                    });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = CreateApi(handler, auth);
+            var first = await api.ResolveAsync(12, WorkItemKind.task, 42);
+            var second = await api.ResolveAsync(99, WorkItemKind.task, 42);
+
+            Assert.Equal((405, 12, "Project twelve"), (first.Id, first.Project, first.Subject));
+            Assert.Equal((905, 99, "Project ninety-nine"), (second.Id, second.Project, second.Subject));
+            Assert.Equal(
+                new[] { "?project=12&ref=42", "?project=99&ref=42" },
+                handler.Requests
+                    .Where(request => request.Method == HttpMethod.Get)
+                    .Select(request => request.Uri.Query));
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_PropagatesSafePermissionFailure()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/by_ref",
+                "{\"detail\":\"private resolver permission secret\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.epic, 42));
+
+            Assert.Equal(HttpStatusCode.Forbidden, exception.StatusCode);
+            Assert.Contains("permission denied", exception.Message);
+            Assert.DoesNotContain("private resolver permission secret", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReplaysOnlyReceived401()
+    {
+        var lookupRequests = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(
+                HttpMethod.Get,
+                "/api/v1/issues/by_ref",
+                _ => Interlocked.Increment(ref lookupRequests) == 1
+                    ? new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                    : new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(
+                            WorkItemResolverFixtures.Issue,
+                            Encoding.UTF8,
+                            "application/json")
+                    })
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/auth/refresh",
+                "{\"auth_token\":\"refreshed-token\",\"refresh\":\"next-refresh\"}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var resolved = await CreateApi(handler, auth).ResolveAsync(12, WorkItemKind.issue, 42);
+
+            Assert.Equal(203, resolved.Id);
+            var requests = handler.Requests
+                .Where(request => request.Method == HttpMethod.Get && request.Uri.AbsolutePath.EndsWith("/issues/by_ref"))
+                .ToArray();
+            Assert.Equal(2, requests.Length);
+            Assert.Equal("Bearer synthetic-token", requests[0].Headers["Authorization"].Single());
+            Assert.Equal("Bearer refreshed-token", requests[1].Headers["Authorization"].Single());
+        }
+    }
+
+    [Fact]
     public async Task ResolveAsync_CancellationStopsBeforeHttp()
     {
         var handler = new FakeHttpMessageHandler()

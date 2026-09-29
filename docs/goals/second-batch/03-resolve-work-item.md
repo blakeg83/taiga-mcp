@@ -1,6 +1,6 @@
 # Goal 03: resolve_work_item
 
-Status: Step 3 complete; final workflow verification remains in Step 4.
+Status: Step 4 complete; resolve_work_item is delivered.
 
 ## Objective
 
@@ -74,6 +74,21 @@ the displayed ref from the internal ID and records the resolve -> get -> update
 workflow. The real stdio MCP fixture discovers the new tool and calls all four
 enum values against fake HTTP routes.
 
+## Step 4 verification evidence
+
+The final fake-HTTP and real-stdio coverage resolves all four kinds, preserves
+the same ref independently in projects 12 and 99, and exercises a synthetic
+task ref `42` resolving to internal ID `203` before `get_task` and a versioned
+`update_task`. Invalid project/ref/kind inputs make no resolver HTTP request;
+an unknown project returns a safe 404 lookup error, mismatched response
+identity is rejected, and a 403 remains a safe permission error. The resolver
+also replays only a received 401 through the existing authentication path.
+
+Final required validation passed with `dotnet restore`, Debug build/test,
+Release build/test, and `git diff --check`. Debug and Release test runs each
+reported 381 passed and 0 failed. The Debug and Release assemblies were built
+in `bin/Debug/net8.0` and `bin/Release/net8.0`; no generated output is tracked.
+
 ## Files and integration points
 
 - `Api/WorkItemResolverApi.cs`
@@ -118,31 +133,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify references before edits
 
-- [ ] Resolve a synthetic task #42 whose internal ID is 203, read get_task(203), and update using its returned version.
-- [ ] Test all four kinds, same ref in different projects, wrong kind, missing ref, mismatched response identity, and permissions.
-- [ ] Assert invalid kinds/IDs cause no HTTP and that 404 is a lookup failure, not a fallback to another kind or project.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify resolve_work_item workflows`.
+- [x] Resolve a synthetic task #42 whose internal ID is 203, read get_task(203), and update using its returned version.
+- [x] Test all four kinds, same ref in different projects, wrong kind, missing ref, mismatched response identity, and permissions.
+- [x] Assert invalid kinds/IDs cause no HTTP and that 404 is a lookup failure, not a fallback to another kind or project.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify resolve_work_item workflows`.
 
 ## Acceptance scenarios
 
-- [ ] All four supported kinds resolve through their by_ref endpoint.
-- [ ] Displayed reference and internal ID remain distinct through a subsequent detail/edit flow.
-- [ ] Invalid/mismatched identities fail instead of addressing an unintended item.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] All four supported kinds resolve through their by_ref endpoint.
+- [x] Displayed reference and internal ID remain distinct through a subsequent detail/edit flow.
+- [x] Invalid/mismatched identities fail instead of addressing an unintended item.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can reliably open a project-local #ref without manual internal-ID lookup.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can reliably open a project-local #ref without manual internal-ID lookup.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -158,8 +173,8 @@ stdout-contamination test while deleting a locked
 | --- | --- | --- | --- |
 | 1 | Complete | Contract tests passed; the full baseline retained the temporary-copy cleanup lock failure described above. | Specify resolve_work_item contracts / `a1283a5` |
 | 2 | Complete | Focused resolver contract/API suite: 26 passed; Debug compilation passed; `git diff --check` passed. | Implement resolve_work_item API behavior / `c60f8a9` |
-| 3 | Complete | Real stdio discovery/schema and four actual MCP calls passed in the integration fixture; docs/inventory updated. | Expose resolve_work_item MCP tool / pending |
-| 4 | Not started | — | Verify resolve_work_item workflows / pending |
+| 3 | Complete | Real stdio discovery/schema and four actual MCP calls passed in the integration fixture; docs/inventory updated. | Expose resolve_work_item MCP tool / `847f970` |
+| 4 | Complete | Restore, Debug/Release builds and tests, focused 29-test resolver suite, resolve→get→update flow, and `git diff --check` all passed. | Verify resolve_work_item workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified

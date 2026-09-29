@@ -90,7 +90,7 @@ No new function is added to the implemented reference until its MCP tool ships.
 - [ ] Documentation, inventory coverage, current counts, and local links match delivered behavior.
 - [ ] Goal records contain source revisions, test results, deviations, and commit evidence.
 
-The completion boxes for the remaining 10 goals are intentionally unchecked.
-Goal 01 is delivered and has its own four-step evidence record; the remaining
-goal entries are still planning documents and do not claim implementation or
-new application test results.
+The completion boxes for the remaining 9 goals are intentionally unchecked.
+Goals 01 through 03 are delivered and have their own four-step evidence
+records; the remaining goal entries are still planning documents and do not
+claim implementation or new application test results.

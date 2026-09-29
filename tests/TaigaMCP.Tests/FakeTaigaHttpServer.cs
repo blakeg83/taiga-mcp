@@ -149,6 +149,12 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/by_ref", StringComparison.OrdinalIgnoreCase))
         {
+            if (request.Url?.Query.Contains("project=999", StringComparison.Ordinal) == true)
+            {
+                await RespondAsync(context.Response, HttpStatusCode.NotFound, "{\"detail\":\"synthetic missing reference\"}");
+                return;
+            }
+
             var responseBody = path switch
             {
                 "/api/v1/issues/by_ref" => "{\"id\":42,\"ref\":42,\"project\":123,\"subject\":\"Resolved issue\",\"version\":1}",
