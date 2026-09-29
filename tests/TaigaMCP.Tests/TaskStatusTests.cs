@@ -1,4 +1,6 @@
+using System.Net;
 using System.Text.Json;
+using ModelContextProtocol;
 using TaigaMCP.Api;
 using TaigaMCP.Models;
 using TaigaMCP.Tools;
@@ -182,6 +184,28 @@ public sealed class TaskStatusTests
                 api.ListTaskStatusesPageAsync(123, cancellationToken: cancellation.Token));
 
             Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task ListTaskStatuses_ForbiddenResponseIsSafeToolFailure()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/task-statuses",
+                "{\"detail\":\"status permission secret\"}",
+                HttpStatusCode.Forbidden);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new TaskTools(new TaskApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            var exception = await Assert.ThrowsAsync<McpException>(() => tools.ListTaskStatuses(123));
+
+            Assert.Contains("403", exception.Message);
+            Assert.Contains("permission denied", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("status permission secret", exception.Message);
         }
     }
 

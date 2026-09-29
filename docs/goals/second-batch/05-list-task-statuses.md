@@ -65,12 +65,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose task status lookup
 
-- [ ] Add list_task_statuses to TaskTools with required projectId, optional page, and internal-ID descriptions.
-- [ ] Document get_task -> choose a returned task status -> update_task; never use a story status ID in the example.
-- [ ] Add MCP discovery/schema/argument binding tests.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_task_statuses MCP tool`.
+- [x] Add list_task_statuses to TaskTools with required projectId, optional page, and internal-ID descriptions.
+- [x] Document get_task -> choose a returned task status -> update_task; never use a story status ID in the example.
+- [x] Add MCP discovery/schema/argument binding tests.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_task_statuses MCP tool`.
 
 ## Step 4: Verify task workflow selection
 
@@ -116,9 +116,9 @@ story-only metadata. These are source-backed contract fixtures, not live data.
 
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline focused story-status check: `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~UserStoryStatusTests` — 9 passed. Added task-specific DTO/fixture serialization checks; source revision and field deviations recorded above. | Specify list_task_statuses contracts / pending |
-| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~TaskStatusTests` passed 8 tests; `git diff --check` passed. API tests cover route/query, mapping, trusted pagination, invalid IDs/page, malformed required data, project mismatch, empty-page metadata, and pre-cancellation. Public tool remains planned until Step 3. Previous commit: `61b2131`. | Implement list_task_statuses API behavior / pending |
-| 3 | Not started | — | Expose list_task_statuses MCP tool / pending |
+| 1 | Complete | Baseline focused story-status check: `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~UserStoryStatusTests` — 9 passed. Added task-specific DTO/fixture serialization checks; source revision and field deviations recorded above. | Specify list_task_statuses contracts / `61b2131` |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~TaskStatusTests` passed 8 tests; `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; `git diff --check` passed. API tests cover route/query, mapping, trusted pagination, invalid IDs/page, malformed required data, project mismatch, empty-page metadata, and pre-cancellation. Public tool remained planned at this checkpoint. Previous commit: `61b2131`. | Implement list_task_statuses API behavior / `8163734` |
+| 3 | Complete | Production MCP integration verifies 28-tool discovery, exact `projectId/page` schema and required arguments, omitted/default/null binding boundaries, successful page calls with task-only fields, and safe invalid-input errors. Public docs/reference/README/quickstart/inventory updated to 28 delivered tools. Previous commit: `8163734`. | Expose list_task_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_task_statuses workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

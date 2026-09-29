@@ -1,6 +1,6 @@
 # Taiga command inventory
 
-Reviewed September 29, 2026. This inventory includes the 27 commands already
+Reviewed September 29, 2026. This inventory includes the 28 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
@@ -10,7 +10,7 @@ The [first-batch summary](goals/first-batch/README.md) records all 15 delivered 
 
 - **Tickets** means user stories and tasks here. Taiga exposes issues, epics, user stories, and tasks as separate resources; command names preserve those distinctions.
 - **Existing** means exposed by this repository today. **Extend** means an existing command needs broader behavior. **New** means a proposed command. Parameters below describe the intended interface, not exact current signatures. The exact current signatures and JSON shapes are in the [implemented tool reference](taiga_tools_reference.md).
-- **Delivered subset** identifies implemented behavior with remaining inventory scope. **Planned — batch 2** links to an unimplemented second-batch goal; those functions are not part of today's 27-tool count.
+- **Delivered subset** identifies implemented behavior with remaining inventory scope. **Planned — batch 2** links to an unimplemented second-batch goal; those functions are not part of today's 28-tool count.
 - Shared commands take `kind = issue | epic | user_story | task` and an internal numeric `id`. A displayed `#ref` must first be resolved within its project.
 - List commands should expose pagination, supported filters, ordering, and an explicit choice to include completed work. Return JSON with IDs, references, useful labels, versions where available, and pagination information.
 - Updates should distinguish omitted fields from explicit clearing, use Taiga's version checks where required, and report conflicts. Closing and reopening mean selecting a project status; status names must not be hardcoded.
@@ -106,7 +106,7 @@ API/source basis: [story endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | `reorder_user_story_tasks` | New | `projectId, userStoryId, tasksWithOrder[]`; set task order within a story using `bulk_update_us_order`. |
 | `reorder_taskboard` | New | `projectId, tasksWithOrder[], statusId?, userStoryId?, milestoneId?`; set board order with `bulk_update_taskboard_order`; scope to the relevant board context. |
 | `promote_task_to_user_story` | New | `projectId, taskId`; invoke native promotion and return the created story. Current upstream promotion deletes the source task after conversion. |
-| `list_task_statuses` | Planned — [batch 2, goal 05](goals/second-batch/05-list-task-statuses.md) | `projectId`; list task status IDs, names, order, and closure flags. |
+| `list_task_statuses` | Delivered subset | `projectId, page?`; list one page of task status IDs, project/resource-specific names, slugs, order, color, and closure flags. Story-only archive/WIP fields are not exposed. |
 
 API/source basis: [task endpoints](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/endpoints.adoc), [task actions](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/tasks/api.py), [task validators](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/tasks/validators.py), and [promotion behavior](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/mixins/promote.py).
 
@@ -212,7 +212,7 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 27 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), [WorkItemResolverTools.cs](../Tools/WorkItemResolverTools.cs), [ProjectTools.cs](../Tools/ProjectTools.cs), and [UserTools.cs](../Tools/UserTools.cs).
+- The current 28 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), [WorkItemCommentTools.cs](../Tools/WorkItemCommentTools.cs), [WorkItemResolverTools.cs](../Tools/WorkItemResolverTools.cs), [ProjectTools.cs](../Tools/ProjectTools.cs), and [UserTools.cs](../Tools/UserTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) defaults to open issues; explicit statuses or includeClosed can retrieve closed work, and includePageInfo opts into page metadata. Issue detail still exposes a bounded field subset. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) deliver core list/detail/create/update behavior; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
 - Task list/detail/create/update, epic list/detail/create/link, and shared comment submission are implemented. Epic editing, relationship listing/unlinking, and shared comment/history reads are in the second batch. Attachments, custom fields, and broader planning/admin operations remain later inventory work.

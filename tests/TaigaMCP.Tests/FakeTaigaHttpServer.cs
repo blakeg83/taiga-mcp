@@ -215,6 +215,15 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             return;
         }
 
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/task-statuses")
+        {
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                "[{\"id\":11,\"project\":123,\"name\":\"Ready\",\"slug\":\"ready\",\"order\":0,\"color\":\"#00aa00\",\"is_closed\":false},{\"id\":12,\"project\":123,\"name\":\"Terminé\",\"slug\":\"termine\",\"order\":1,\"color\":null,\"is_closed\":true},{\"id\":13,\"project\":123,\"name\":\"Guardado\",\"slug\":\"guardado\",\"order\":2,\"color\":null,\"is_closed\":false}]");
+            return;
+        }
+
         if (request.HttpMethod == HttpMethod.Get.Method && path.EndsWith("/tasks", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(

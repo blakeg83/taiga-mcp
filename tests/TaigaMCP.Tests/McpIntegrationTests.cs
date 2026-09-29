@@ -638,6 +638,7 @@ public sealed class McpIntegrationTests
                 "list_issues",
                 "list_project_members",
                 "list_projects",
+                "list_task_statuses",
                 "list_tasks",
                 "list_user_stories",
                 "list_user_story_statuses",
@@ -699,6 +700,22 @@ public sealed class McpIntegrationTests
                 }
             }
 
+            async Task<string> CallTaskStatusBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_task_statuses",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
             var issueProperties = listIssues.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -733,6 +750,15 @@ public sealed class McpIntegrationTests
             var storyStatusRequired = listUserStoryStatuses.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, storyStatusRequired);
+
+            var listTaskStatuses = Assert.Single(tools, tool => tool.Name == "list_task_statuses");
+            var taskStatusProperties = listTaskStatuses.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "projectId", "page" }, taskStatusProperties);
+            var taskStatusRequired = listTaskStatuses.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, taskStatusRequired);
+            Assert.DoesNotContain("isArchived", listTaskStatuses.Description, StringComparison.Ordinal);
+            Assert.DoesNotContain("wip_limit", listTaskStatuses.Description, StringComparison.Ordinal);
 
             var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
             var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1214,6 +1240,49 @@ public sealed class McpIntegrationTests
                 cancellationToken: protocolDeadline.Token);
             Assert.True(invalidStoryStatusCall.IsError == true);
             Assert.Contains("positive", GetText(invalidStoryStatusCall), StringComparison.OrdinalIgnoreCase);
+
+            var omittedTaskStatusPage = await client.CallToolAsync(
+                "list_task_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(omittedTaskStatusPage.IsError == true, GetText(omittedTaskStatusPage));
+            var omittedTaskStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(omittedTaskStatusPage));
+            Assert.Equal(1, omittedTaskStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(3, omittedTaskStatusEnvelope.GetProperty("items").GetArrayLength());
+            Assert.False(omittedTaskStatusEnvelope.GetProperty("items")[0].TryGetProperty("is_archived", out _));
+            Assert.False(omittedTaskStatusEnvelope.GetProperty("items")[0].TryGetProperty("wip_limit", out _));
+            var omittedTaskStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/task-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/task-statuses?project=123&page=1", omittedTaskStatusRequest.PathAndQuery);
+
+            var taskStatusRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/task-statuses?", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallTaskStatusBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallTaskStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            Assert.Equal("error_result", await CallTaskStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = null }));
+            Assert.Equal(taskStatusRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/task-statuses?", StringComparison.Ordinal)));
+
+            var taskStatusPage = await client.CallToolAsync(
+                "list_task_statuses",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 2
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(taskStatusPage.IsError == true, GetText(taskStatusPage));
+            var taskStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(taskStatusPage));
+            Assert.Equal(2, taskStatusEnvelope.GetProperty("page").GetInt32());
+            var taskStatuses = taskStatusEnvelope.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(3, taskStatuses.Length);
+            Assert.Equal("Terminé", taskStatuses[1].GetProperty("name").GetString());
+            Assert.True(taskStatuses[1].GetProperty("is_closed").GetBoolean());
+            Assert.False(taskStatuses[1].TryGetProperty("is_archived", out _));
+            Assert.False(taskStatuses[1].TryGetProperty("wip_limit", out _));
+            var taskStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/task-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/task-statuses?project=123&page=2", taskStatusRequest.PathAndQuery);
 
             var storyDetail = await client.CallToolAsync(
                 "get_user_story",

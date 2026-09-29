@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 27 tools:
+The current server exposes 28 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 identity tool: `get_current_user`.
@@ -17,16 +17,17 @@ The current server exposes 27 tools:
   `list_issue_priorities`.
 - 5 user-story tools: `list_user_stories`, `list_user_story_statuses`,
   `get_user_story`, `create_user_story`, and `update_user_story`.
-- 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
+- 5 task tools: `list_tasks`, `list_task_statuses`, `get_task`, `create_task`, and `update_task`.
 - 4 epic tools: `list_epics`, `get_epic`, `create_epic`, and
   `link_user_story_to_epic`.
 - 2 shared work-item tools: `add_work_item_comment` and `resolve_work_item`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
-first-batch total to 23. Goals 01 through 04 of the [second batch](goals/second-batch/README.md)
-add `get_current_user`, `list_project_members`, `resolve_work_item`, and
-`list_user_story_statuses`; 8 batch functions remain planned. The broader
+first-batch total to 23. Goals 01 through 05 of the [second batch](goals/second-batch/README.md)
+add `get_current_user`, `list_project_members`, `resolve_work_item`,
+`list_user_story_statuses`, and `list_task_statuses`; 7 batch functions remain
+planned. The broader
 inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
@@ -276,6 +277,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issue_priorities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_user_stories` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `milestoneId`, `backlogOnly=false`, `tags`, `query`, `includeClosed=false`, `includeArchived=false`, and `includePageInfo=false` optional | Bare array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`; with `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Explicit status IDs override automatic closed/archive restrictions. |
 | `list_user_story_statuses` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; status items expose `{ id, project?, name?, slug?, order?, color?, is_closed?, is_archived?, wip_limit? }`. All returned choices are included, including closed and archived statuses; IDs are specific to the project and user-story resource. |
+| `list_task_statuses` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; status items expose `{ id, project?, name?, slug?, order?, color?, is_closed? }`. All returned choices are included, including closed statuses; IDs are specific to the project and task resource. Story-only `is_archived` and `wip_limit` fields are not exposed. |
 | `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, origin_issue?, origin_task?, epics? }`. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
 | `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, and `version`. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
@@ -310,6 +312,38 @@ filters by project with project-view permissions, and the [status
 serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/serializers.py#L44-L53)
 exposes the mapped metadata. This is pinned source evidence, not a deployed
 version claim.
+
+### `list_task_statuses` contract
+
+The signature is `list_task_statuses(projectId, page=1)`. It validates positive
+IDs, sends one request per call as
+`GET task-statuses?project={projectId}&page={page}`, and returns a standard page
+envelope. Use a returned status `id` with `create_task` or `update_task`; IDs are
+project- and resource-specific. Request a later page when `next_page` is a
+number. The result includes open and closed choices without filtering by status
+name and preserves supplied false, zero, null, localized/custom-name, color,
+and order values. Unknown pagination headers remain literal `null`; response
+DTO nulls are omitted. Story-only `is_archived` and `wip_limit` properties are
+never fabricated or exposed.
+
+The workflow is to read a task, discover the task statuses, choose a returned
+task status ID, and pass that ID with the task's current version to
+`update_task`:
+
+```json
+{"id":203,"project":123,"status_id":11,"version":2}
+{"items":[{"id":11,"project":123,"name":"Ready","slug":"ready","order":0,"color":"#00aa00","is_closed":false},{"id":12,"project":123,"name":"Terminé","slug":"termine","order":1,"is_closed":true}],"page":1,"total":null,"next_page":null,"has_more":null}
+{"taskId":203,"version":2,"status":12}
+```
+
+Invalid nonpositive `projectId` or `page` values fail before HTTP. Permission,
+transport, malformed JSON, and malformed required status data are returned as
+safe MCP errors without raw upstream bodies; the tool never writes task data.
+
+The route and fields follow the pinned taiga-back source evidence recorded in
+[the second-batch sources](goals/second-batch/sources.md), revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`. This is pinned source evidence,
+not a deployed version claim.
 
 ### `add_work_item_comment` contract
 
