@@ -56,12 +56,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement task status retrieval
 
-- [ ] Extend TaskApi with a project-scoped one-page GET through TaigaTransport.
-- [ ] Map positive identity/project and available label/order/color/closure fields; preserve false/zero.
-- [ ] Keep task list/detail/update behavior and existing status extra-info mapping unchanged.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_task_statuses API behavior`.
+- [x] Extend TaskApi with a project-scoped one-page GET through TaigaTransport.
+- [x] Map positive identity/project and available label/order/color/closure fields; preserve false/zero.
+- [x] Keep task list/detail/update behavior and existing status extra-info mapping unchanged.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_task_statuses API behavior`.
 
 ## Step 3: Expose task status lookup
 
@@ -117,7 +117,7 @@ story-only metadata. These are source-backed contract fixtures, not live data.
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline focused story-status check: `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~UserStoryStatusTests` — 9 passed. Added task-specific DTO/fixture serialization checks; source revision and field deviations recorded above. | Specify list_task_statuses contracts / pending |
-| 2 | Not started | — | Implement list_task_statuses API behavior / pending |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~TaskStatusTests` passed 8 tests; `git diff --check` passed. API tests cover route/query, mapping, trusted pagination, invalid IDs/page, malformed required data, project mismatch, empty-page metadata, and pre-cancellation. Public tool remains planned until Step 3. Previous commit: `61b2131`. | Implement list_task_statuses API behavior / pending |
 | 3 | Not started | — | Expose list_task_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_task_statuses workflows / pending |
 

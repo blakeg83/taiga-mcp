@@ -18,3 +18,10 @@ internal sealed record TaskListPage(
     int? Total,
     int? NextPage,
     bool? HasMore);
+
+internal sealed record TaskStatusListPage(
+    IReadOnlyList<Models.TaskStatusDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
