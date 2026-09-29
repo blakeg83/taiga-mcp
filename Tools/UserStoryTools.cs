@@ -114,4 +114,21 @@ public sealed class UserStoryTools
             ? ToolResponseJson.SerializePage(result.Items, result.Page, result.Total, result.NextPage, result.HasMore)
             : ToolResponseJson.Serialize(result.Items);
     });
+
+    [McpServerTool(Name = "list_user_story_statuses")]
+    [Description("List one page of every selectable user-story status for a project, including closed and archived choices. Each result includes its project/resource-specific status ID and preserves supplied name, slug, order, color, closed, archived, and WIP metadata; use a returned id with create_user_story or update_user_story and request later pages when page metadata indicates more results.")]
+    public async Task<string> ListUserStoryStatuses(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _userStories.ListUserStoryStatusesPageAsync(projectId, page, cancellationToken);
+        return ToolResponseJson.SerializePage(
+            result.Items,
+            result.Page,
+            result.Total,
+            result.NextPage,
+            result.HasMore);
+    });
 }

@@ -105,7 +105,7 @@ public sealed class McpIntegrationTests
             Assert.DoesNotContain("member=", taiga.Requests.Last().PathAndQuery);
         }
         Assert.False((await Call("resolve_project", new() { ["slug"] = "demo" })).IsError == true);
-        foreach (var name in new[] { "list_issues", "list_user_stories", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
+        foreach (var name in new[] { "list_issues", "list_user_stories", "list_user_story_statuses", "list_tasks", "list_epics", "list_issue_statuses", "list_issue_priorities", "list_issue_severities", "list_issue_types" })
             Assert.False((await Call(name, new() { ["projectId"] = 123 })).IsError == true);
         Assert.False((await Call("get_epic", new() { ["epicId"] = 301 })).IsError == true);
         Assert.True((await Call("get_epic", new() { ["epicId"] = 0 })).IsError == true);
@@ -365,6 +365,33 @@ public sealed class McpIntegrationTests
         async Task<CallToolResult> Call(string name, Dictionary<string, object?> arguments)
             => await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
 
+        var statusPage = await Call("list_user_story_statuses", new()
+        {
+            ["projectId"] = 123,
+            ["page"] = 1
+        });
+        Assert.False(statusPage.IsError == true, GetText(statusPage));
+        var statusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(statusPage));
+        var statusItems = statusEnvelope.GetProperty("items").EnumerateArray().ToArray();
+        Assert.All(statusItems, status => Assert.True(status.TryGetProperty("is_archived", out _), GetText(statusPage)));
+        var closedStatus = Assert.Single(statusItems, status =>
+            status.TryGetProperty("is_closed", out var isClosed) && isClosed.GetBoolean());
+        Assert.Equal("Terminado", closedStatus.GetProperty("name").GetString());
+        Assert.False(closedStatus.GetProperty("is_archived").GetBoolean());
+        Assert.Equal(1, closedStatus.GetProperty("order").GetInt32());
+        Assert.False(closedStatus.TryGetProperty("wip_limit", out _));
+        Assert.True(closedStatus.TryGetProperty("id", out _), GetText(statusPage));
+        var closedStatusId = closedStatus.GetProperty("id").GetInt32();
+        var readyStatus = Assert.Single(statusItems, status =>
+            status.GetProperty("id").GetInt32() == 1);
+        Assert.Equal(0, readyStatus.GetProperty("wip_limit").GetInt32());
+        var archivedStatus = Assert.Single(statusItems, status =>
+            status.GetProperty("id").GetInt32() == 3);
+        Assert.False(archivedStatus.GetProperty("is_closed").GetBoolean());
+        Assert.True(archivedStatus.GetProperty("is_archived").GetBoolean());
+        Assert.False(archivedStatus.TryGetProperty("color", out _));
+        Assert.False(archivedStatus.TryGetProperty("wip_limit", out _));
+
         var before = await Call("get_user_story", new() { ["userStoryId"] = 102 });
         Assert.False(before.IsError == true);
         var beforeJson = JsonSerializer.Deserialize<JsonElement>(GetText(before));
@@ -441,6 +468,24 @@ public sealed class McpIntegrationTests
         var emptyBody = JsonSerializer.Deserialize<JsonElement>(GetLastStoryPatch(taiga).Body);
         AssertPatchProperties(emptyBody, "description", "tags", "version");
 
+        var current = await Call("get_user_story", new() { ["userStoryId"] = 102 });
+        Assert.False(current.IsError == true);
+        var currentJson = JsonSerializer.Deserialize<JsonElement>(GetText(current));
+        var transition = await Call("update_user_story", new()
+        {
+            ["userStoryId"] = 102,
+            ["version"] = currentJson.GetProperty("version").GetInt32(),
+            ["status"] = closedStatusId
+        });
+        Assert.False(transition.IsError == true, GetText(transition));
+        var transitionJson = JsonSerializer.Deserialize<JsonElement>(GetText(transition));
+        Assert.Equal(closedStatusId, transitionJson.GetProperty("status_id").GetInt32());
+        Assert.Equal(currentJson.GetProperty("version").GetInt32() + 1, transitionJson.GetProperty("version").GetInt32());
+        var transitionBody = JsonSerializer.Deserialize<JsonElement>(GetLastStoryPatch(taiga).Body);
+        AssertPatchProperties(transitionBody, "status", "version");
+        Assert.Equal(closedStatusId, transitionBody.GetProperty("status").GetInt32());
+        Assert.Equal(currentJson.GetProperty("version").GetInt32(), transitionBody.GetProperty("version").GetInt32());
+
         var patchCount = taiga.Requests.Count(request => request.Method == "PATCH" && request.PathAndQuery == "/api/v1/userstories/102");
         var missingVersion = await Call("update_user_story", new()
         {
@@ -454,7 +499,7 @@ public sealed class McpIntegrationTests
         var failed = await Call("update_user_story", new()
         {
             ["userStoryId"] = 102,
-            ["version"] = 8,
+            ["version"] = 9,
             ["status"] = 1
         });
         Assert.True(failed.IsError);
@@ -595,6 +640,7 @@ public sealed class McpIntegrationTests
                 "list_projects",
                 "list_tasks",
                 "list_user_stories",
+                "list_user_story_statuses",
                 "resolve_project",
                 "resolve_work_item",
                 "update_issue",
@@ -637,6 +683,22 @@ public sealed class McpIntegrationTests
                 }
             }
 
+            async Task<string> CallStoryStatusBoundaryAsync(Dictionary<string, object?> arguments)
+            {
+                try
+                {
+                    var result = await client.CallToolAsync(
+                        "list_user_story_statuses",
+                        arguments,
+                        cancellationToken: protocolDeadline.Token);
+                    return result.IsError == true ? "error_result" : "success";
+                }
+                catch (McpException)
+                {
+                    return "mcp_exception";
+                }
+            }
+
             var listIssues = Assert.Single(tools, tool => tool.Name == "list_issues");
             Assert.Contains("projectId", listIssues.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
             var issueProperties = listIssues.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -664,6 +726,13 @@ public sealed class McpIntegrationTests
             var storyRequired = listUserStories.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "projectId" }, storyRequired);
+
+            var listUserStoryStatuses = Assert.Single(tools, tool => tool.Name == "list_user_story_statuses");
+            var storyStatusProperties = listUserStoryStatuses.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "projectId", "page" }, storyStatusProperties);
+            var storyStatusRequired = listUserStoryStatuses.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "projectId" }, storyStatusRequired);
 
             var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
             var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1097,6 +1166,54 @@ public sealed class McpIntegrationTests
             Assert.Equal(
                 "/api/v1/userstories?project=123&page=2&status=2%2C3&assigned_to=42&milestone__isnull=true&tags=a%26b&q=fix%20%26%20revisi%C3%B3n",
                 storyRequest.PathAndQuery);
+
+            var omittedStoryStatusPage = await client.CallToolAsync(
+                "list_user_story_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(omittedStoryStatusPage.IsError == true, GetText(omittedStoryStatusPage));
+            var omittedStoryStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(omittedStoryStatusPage));
+            Assert.Equal(1, omittedStoryStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(3, omittedStoryStatusEnvelope.GetProperty("items").GetArrayLength());
+            var omittedStoryStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/userstory-statuses?project=123&page=1", omittedStoryStatusRequest.PathAndQuery);
+
+            var statusRequestsBeforeBindingChecks = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal));
+            Assert.Equal("error_result", await CallStoryStatusBoundaryAsync(new Dictionary<string, object?>()));
+            Assert.Equal("error_result", await CallStoryStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = null }));
+            Assert.Equal("error_result", await CallStoryStatusBoundaryAsync(new Dictionary<string, object?> { ["projectId"] = 123, ["page"] = null }));
+            Assert.Equal(statusRequestsBeforeBindingChecks, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal)));
+
+            var storyStatusPage = await client.CallToolAsync(
+                "list_user_story_statuses",
+                new Dictionary<string, object?>
+                {
+                    ["projectId"] = 123,
+                    ["page"] = 2
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(storyStatusPage.IsError == true, GetText(storyStatusPage));
+            var storyStatusEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(storyStatusPage));
+            Assert.Equal(2, storyStatusEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(JsonValueKind.Null, storyStatusEnvelope.GetProperty("total").ValueKind);
+            var storyStatuses = storyStatusEnvelope.GetProperty("items").EnumerateArray().ToArray();
+            Assert.Equal(3, storyStatuses.Length);
+            Assert.Equal("Terminado", storyStatuses[1].GetProperty("name").GetString());
+            Assert.True(storyStatuses[1].GetProperty("is_closed").GetBoolean());
+            Assert.True(storyStatuses[2].GetProperty("is_archived").GetBoolean());
+            var storyStatusRequest = taiga.Requests.Last(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/userstory-statuses?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/userstory-statuses?project=123&page=2", storyStatusRequest.PathAndQuery);
+
+            var invalidStoryStatusCall = await client.CallToolAsync(
+                "list_user_story_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 0 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(invalidStoryStatusCall.IsError == true);
+            Assert.Contains("positive", GetText(invalidStoryStatusCall), StringComparison.OrdinalIgnoreCase);
 
             var storyDetail = await client.CallToolAsync(
                 "get_user_story",

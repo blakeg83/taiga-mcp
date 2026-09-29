@@ -8,15 +8,15 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 26 tools:
+The current server exposes 27 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 identity tool: `get_current_user`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
   `list_issue_priorities`.
-- 4 user-story tools: `list_user_stories`, `get_user_story`,
-  `create_user_story`, and `update_user_story`.
+- 5 user-story tools: `list_user_stories`, `list_user_story_statuses`,
+  `get_user_story`, `create_user_story`, and `update_user_story`.
 - 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
 - 4 epic tools: `list_epics`, `get_epic`, `create_epic`, and
   `link_user_story_to_epic`.
@@ -24,10 +24,10 @@ The current server exposes 26 tools:
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
-first-batch total to 23. Goals 01 through 03 of the [second batch](goals/second-batch/README.md)
-add `get_current_user`, `list_project_members`, and `resolve_work_item`; 9
-batch functions remain planned. The broader inventory still includes deferred
-fields and operations.
+first-batch total to 23. Goals 01 through 04 of the [second batch](goals/second-batch/README.md)
+add `get_current_user`, `list_project_members`, `resolve_work_item`, and
+`list_user_story_statuses`; 8 batch functions remain planned. The broader
+inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -275,6 +275,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_priorities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_user_stories` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `milestoneId`, `backlogOnly=false`, `tags`, `query`, `includeClosed=false`, `includeArchived=false`, and `includePageInfo=false` optional | Bare array of `{ id, ref, project?, subject, status_id?, status, assigned_to, modified, milestone?, version? }`; with `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Explicit status IDs override automatic closed/archive restrictions. |
+| `list_user_story_statuses` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; status items expose `{ id, project?, name?, slug?, order?, color?, is_closed?, is_archived?, wip_limit? }`. All returned choices are included, including closed and archived statuses; IDs are specific to the project and user-story resource. |
 | `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, origin_issue?, origin_task?, epics? }`. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
 | `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, and `version`. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
@@ -285,6 +286,30 @@ show the JSON contents, not an MCP `content` wrapper.
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 | `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
+
+### `list_user_story_statuses` contract
+
+The signature is `list_user_story_statuses(projectId, page=1)`. It validates
+positive IDs, sends one request per call as
+`GET userstory-statuses?project={projectId}&page={page}`, and returns a standard
+page envelope. Use the returned status `id` with `create_user_story` or
+`update_user_story`; IDs are project- and resource-specific. Request a later
+page when `next_page` is a number. The result includes closed and archived
+choices without filtering by status name, and preserves supplied false, zero,
+null, localized/custom-name, color, order, and WIP values. Unknown pagination
+headers remain literal `null`; response DTO nulls are omitted.
+
+Invalid nonpositive `projectId` or `page` values fail before HTTP. Permission,
+transport, malformed JSON, and malformed required status data are returned as
+safe MCP errors without raw upstream bodies; the tool never writes story data.
+
+The route and fields were checked on 2026-09-29 against pinned taiga-back
+revision `4d11baef9027f5598f6341d6eb4261de2840688e`: the [user-story status
+viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/api.py#L543-L556)
+filters by project with project-view permissions, and the [status
+serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/serializers.py#L44-L53)
+exposes the mapped metadata. This is pinned source evidence, not a deployed
+version claim.
 
 ### `add_work_item_comment` contract
 
@@ -527,6 +552,10 @@ User-story and metadata results:
 
 ```json
 [{"id":789,"ref":12,"project":123,"subject":"Ship the fix","status_id":1,"status":"Ready","assigned_to":42,"modified":"2026-09-28T12:02:00Z","milestone":55,"version":7}]
+```
+
+```json
+{"items":[{"id":10,"project":123,"name":"Terminado","slug":"terminado","order":0,"color":"#cc0000","is_closed":true,"is_archived":false,"wip_limit":0}],"page":1,"total":null,"next_page":null,"has_more":null}
 ```
 
 Task list results:

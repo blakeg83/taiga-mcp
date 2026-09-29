@@ -1,7 +1,7 @@
 # Taiga MCP Quickstart Guide
 
 ## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
+This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; discovering story workflow statuses; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, and linking epics; and discovering project members before assignment.
 
 ---
 
@@ -28,7 +28,7 @@ dotnet test -c Debug
 `Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 26 tools.
+See the [implemented tool reference](taiga_tools_reference.md) for all 27 tools.
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -243,6 +243,21 @@ in the link call. The workflow is:
 The link operation does not move or update the story. Cross-project links are
 left to Taiga's permissions and validation.
 
+### Discover story workflow statuses
+
+Before creating or transitioning a story, call `list_user_story_statuses` with
+the project ID. It returns a page envelope, including closed and archived
+choices, for example:
+
+```json
+{"items":[{"id":10,"project":123,"name":"Terminado","slug":"terminado","order":0,"is_closed":true,"is_archived":false,"wip_limit":0}],"page":1,"total":null,"next_page":null,"has_more":null}
+```
+
+Pass the returned status `id` as `status` to `create_user_story` or
+`update_user_story`; status IDs are specific to this project and the story
+resource. If `next_page` is present, call the same tool with that page number.
+Do not match statuses by English names.
+
 ### Update a user story
 
 Read the story first and pass its returned `version` to the update. Omitted
@@ -311,6 +326,7 @@ Call the tool list_issues with projectId=12345 and page=1
 Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true
 Call the tool list_user_stories with projectId=12345 and backlogOnly=true
 Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
+Call the tool list_user_story_statuses with projectId=12345 and page=1
 Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
 Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
 Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
