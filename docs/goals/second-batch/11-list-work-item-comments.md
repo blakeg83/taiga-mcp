@@ -194,7 +194,7 @@ credentials or live Taiga data were used.
 | 1 | Complete | Pinned source review; synthetic history fixtures; `dotnet test -c Debug` passed on 2026-09-29. | Specify list_work_item_comments contracts / `349e3b6` |
 | 2 | Complete | Focused `WorkItemCommentReadTests`: 17 passed at checkpoint; Debug build passed; DI/API/transport behavior recorded above. | Implement list_work_item_comments API behavior / `20c08d3` |
 | 3 | Complete | Real STDIO `tools/list`/`tools/call` integration passed; public docs and counts updated. | Expose list_work_item_comments MCP tool / `1e6d271` |
-| 4 | Complete | Stateful four-kind MCP read-back plus final 509-test Debug/Release validation and `git diff --check` passed. | Verify list_work_item_comments workflows / pending |
+| 4 | Complete | Stateful four-kind MCP read-back plus final 509-test Debug/Release validation and `git diff --check` passed. | Verify list_work_item_comments workflows / `f152f44` |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified
