@@ -66,12 +66,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose the linked-story index
 
-- [ ] Add list_epic_user_stories with descriptions stating its lightweight result and one-page scope.
-- [ ] Document list_epics/get_epic -> relationship list -> get_user_story for selected full details.
-- [ ] Add MCP discovery/invocation tests and preserve existing link/get_epic shapes and no-expansion defaults.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_epic_user_stories MCP tool`.
+- [x] Add list_epic_user_stories with descriptions stating its lightweight result and one-page scope.
+- [x] Document list_epics/get_epic -> relationship list -> get_user_story for selected full details.
+- [x] Add MCP discovery/invocation tests and preserve existing link/get_epic shapes and no-expansion defaults.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_epic_user_stories MCP tool`.
 
 ## Step 4: Verify group inspection
 
@@ -113,11 +113,13 @@ relationship ID. No source-shape deviation was found. The current reference's
 older link-source citation describes the same fields, but this goal uses the
 batch's current pinned revision.
 
+Previous completed step commits: Step 1 `2ce7366`; Step 2 `9012e7c`.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore` passed; 452 existing tests passed. Added source-backed empty, single, multiple, zero/large-order, cross-project-identity, and pagination fixtures plus the creation-free DTO contract. | Specify list_epic_user_stories contracts / pending |
-| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~EpicStoryList` passed 17 focused tests; a serial Debug build passed with 0 warnings/errors. API tests cover exact `?page=2`, empty/unknown metadata, scalar ownership, long/zero order, cross-project IDs without detail reads, malformed/mismatched responses, 403 sanitization, invalid inputs, and pre-cancellation. | Implement list_epic_user_stories API behavior / pending |
-| 3 | Not started | — | Expose list_epic_user_stories MCP tool / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore` passed; 452 existing tests passed. Added source-backed empty, single, multiple, zero/large-order, cross-project-identity, and pagination fixtures plus the creation-free DTO contract. | Specify list_epic_user_stories contracts / `2ce7366` |
+| 2 | Complete | `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --no-restore --filter FullyQualifiedName~EpicStoryList` passed 17 focused tests; a serial Debug build passed with 0 warnings/errors. API tests cover exact `?page=2`, empty/unknown metadata, scalar ownership, long/zero order, cross-project IDs without detail reads, malformed/mismatched responses, 403 sanitization, invalid inputs, and pre-cancellation. | Implement list_epic_user_stories API behavior / `9012e7c` |
+| 3 | Complete | `dotnet build -c Debug --no-restore` passed with 0 warnings/errors; focused relationship tests passed 18; real `ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure` passed. Discovery verified the 32-tool set and `{ epicId, page }` schema; invocation verified default `?page=1`, page metadata, no `created`, no list-time story detail request, selected `get_user_story`, missing/null argument errors, and sanitized 403. | Expose list_epic_user_stories MCP tool / pending |
 | 4 | Not started | — | Verify list_epic_user_stories workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

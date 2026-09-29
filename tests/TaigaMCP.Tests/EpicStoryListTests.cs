@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Net;
+using ModelContextProtocol.Server;
 using TaigaMCP.Api;
 using TaigaMCP.Models;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -31,6 +33,14 @@ internal static class EpicStoryListFixtures
         {
             ["x-paginated"] = "false",
             ["x-pagination-count"] = "0",
+            ["x-pagination-current"] = "1"
+        };
+
+    public static IReadOnlyDictionary<string, string> SinglePageHeaders { get; } =
+        new Dictionary<string, string>
+        {
+            ["x-paginated"] = "false",
+            ["x-pagination-count"] = "1",
             ["x-pagination-current"] = "1"
         };
 
@@ -293,6 +303,36 @@ public sealed class EpicStoryListApiTests
                 NewApi(handler, auth).ListEpicUserStoriesPageAsync(301, cancellationToken: cancellation.Token));
 
             Assert.Empty(handler.Requests);
+        }
+    }
+
+    private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
+        => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+}
+
+public sealed class EpicStoryListToolTests
+{
+    [Fact]
+    public async Task ListEpicUserStoriesToolReturnsPageEnvelopeWithoutCreationReceipt()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories",
+                EpicStoryListFixtures.Single,
+                headers: EpicStoryListFixtures.SinglePageHeaders);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(
+                await new EpicTools(NewApi(handler, auth)).ListEpicUserStories(301));
+
+            Assert.Equal(1, json.GetProperty("page").GetInt32());
+            Assert.Equal(102, json.GetProperty("items")[0].GetProperty("user_story_id").GetInt32());
+            Assert.Equal(0, json.GetProperty("items")[0].GetProperty("order").GetInt64());
+            Assert.False(json.GetProperty("items")[0].TryGetProperty("created", out _));
+            Assert.Equal(1, json.GetProperty("total").GetInt32());
+            Assert.False(json.GetProperty("has_more").GetBoolean());
         }
     }
 

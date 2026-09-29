@@ -765,6 +765,7 @@ public sealed class McpIntegrationTests
                 "get_user_story",
                 "link_user_story_to_epic",
                 "list_epic_statuses",
+                "list_epic_user_stories",
                 "list_epics",
                 "list_issue_priorities",
                 "list_issue_severities",
@@ -995,6 +996,16 @@ public sealed class McpIntegrationTests
             Assert.Equal(new[] { "projectId" }, epicStatusRequired);
             Assert.DoesNotContain("isArchived", listEpicStatuses.Description, StringComparison.Ordinal);
             Assert.DoesNotContain("wip_limit", listEpicStatuses.Description, StringComparison.Ordinal);
+
+            var listEpicUserStories = Assert.Single(tools, tool => tool.Name == "list_epic_user_stories");
+            var epicStoryProperties = listEpicUserStories.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "epicId", "page" }, epicStoryProperties);
+            var epicStoryRequired = listEpicUserStories.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "epicId" }, epicStoryRequired);
+            Assert.Contains("one page", listEpicUserStories.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("get_user_story", listEpicUserStories.Description, StringComparison.Ordinal);
+            Assert.DoesNotContain("created", listEpicUserStories.Description, StringComparison.OrdinalIgnoreCase);
 
             var listTasks = Assert.Single(tools, tool => tool.Name == "list_tasks");
             var taskProperties = listTasks.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -1452,6 +1463,61 @@ public sealed class McpIntegrationTests
             Assert.DoesNotContain(taiga.Requests, request =>
                 request.Method == "POST" && request.PathAndQuery == "/api/v1/epics/301/related_userstories" &&
                 request.Body == "{\"epic\":301,\"user_story\":102}");
+
+            var relationshipListRequestsBefore = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epics/301/related_userstories?", StringComparison.Ordinal));
+            var storyDetailRequestsBeforeRelationshipList = taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery == "/api/v1/userstories/102");
+            var relationshipPage = await client.CallToolAsync(
+                "list_epic_user_stories",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(relationshipPage.IsError == true, GetText(relationshipPage));
+            var relationshipEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(relationshipPage));
+            Assert.Equal(1, relationshipEnvelope.GetProperty("page").GetInt32());
+            Assert.Equal(1, relationshipEnvelope.GetProperty("total").GetInt32());
+            Assert.False(relationshipEnvelope.GetProperty("has_more").GetBoolean());
+            var relationship = Assert.Single(relationshipEnvelope.GetProperty("items").EnumerateArray());
+            Assert.Equal(301, relationship.GetProperty("epic_id").GetInt32());
+            Assert.Equal(102, relationship.GetProperty("user_story_id").GetInt32());
+            Assert.Equal(9001, relationship.GetProperty("order").GetInt64());
+            Assert.False(relationship.TryGetProperty("created", out _));
+            var relationshipListRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epics/301/related_userstories?", StringComparison.Ordinal));
+            Assert.Equal("/api/v1/epics/301/related_userstories?page=1", relationshipListRequest.PathAndQuery);
+            Assert.Equal(relationshipListRequestsBefore + 1, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epics/301/related_userstories?", StringComparison.Ordinal)));
+            Assert.Equal(storyDetailRequestsBeforeRelationshipList, taiga.Requests.Count(request =>
+                request.Method == "GET" && request.PathAndQuery == "/api/v1/userstories/102"));
+
+            var selectedStory = await client.CallToolAsync(
+                "get_user_story",
+                new Dictionary<string, object?> { ["userStoryId"] = relationship.GetProperty("user_story_id").GetInt32() },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(selectedStory.IsError == true, GetText(selectedStory));
+            Assert.Equal(102, JsonSerializer.Deserialize<JsonElement>(GetText(selectedStory)).GetProperty("id").GetInt32());
+
+            var missingRelationshipEpic = await client.CallToolAsync(
+                "list_epic_user_stories",
+                new Dictionary<string, object?>(),
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(missingRelationshipEpic.IsError == true);
+            var nullRelationshipPage = await client.CallToolAsync(
+                "list_epic_user_stories",
+                new Dictionary<string, object?> { ["epicId"] = 301, ["page"] = null },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(nullRelationshipPage.IsError == true);
+
+            taiga.EpicStoryListStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenRelationshipList = await client.CallToolAsync(
+                "list_epic_user_stories",
+                new Dictionary<string, object?> { ["epicId"] = 301 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenRelationshipList.IsError == true);
+            Assert.Contains("403", GetText(forbiddenRelationshipList));
+            Assert.Contains("permission denied", GetText(forbiddenRelationshipList), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic relationship list secret", GetText(forbiddenRelationshipList));
+            taiga.EpicStoryListStatusCode = System.Net.HttpStatusCode.OK;
 
             taiga.EpicDetailStatusCode = System.Net.HttpStatusCode.Forbidden;
             var forbiddenEpic = await client.CallToolAsync(

@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 31 tools:
+The current server exposes 32 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -19,8 +19,8 @@ The current server exposes 31 tools:
 - 5 user-story tools: `list_user_stories`, `list_user_story_statuses`,
   `get_user_story`, `create_user_story`, and `update_user_story`.
 - 5 task tools: `list_tasks`, `list_task_statuses`, `get_task`, `create_task`, and `update_task`.
-- 6 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
-  `update_epic`, and `link_user_story_to_epic`.
+- 7 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
+  `update_epic`, `link_user_story_to_epic`, and `list_epic_user_stories`.
 - 2 shared work-item tools: `add_work_item_comment` and `resolve_work_item`.
 
 All 15 selected first-batch functions are implemented within their defined
@@ -28,7 +28,8 @@ scope: three existing tools were expanded and twelve were added, bringing the
 first-batch total to 23. Goals 01 through 07 of the [second batch](goals/second-batch/README.md)
 add `get_current_user`, `list_project_members`, `resolve_work_item`,
 `list_user_story_statuses`, `list_task_statuses`, `list_epic_statuses`, and
-`list_sprints`; goal 08 adds `update_epic`; 4 batch functions remain planned. The broader
+`list_sprints`; goal 08 adds `update_epic`; goal 09 adds
+`list_epic_user_stories`; 3 batch functions remain planned. The broader
 inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
@@ -61,9 +62,9 @@ This contract was checked on 2026-09-28 against pinned taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e` in the [epic API source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py)
 and [epic serializer source](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py).
 
-Use the returned internal `id` with the `get_epic` command. Later story-linking
-commands will also take this internal epic ID; the displayed `ref` is for
-human-facing project context only.
+Use the returned internal `id` with the `get_epic` command and the epic story
+relationship tools; the displayed `ref` is for human-facing project context
+only.
 
 The `create_epic` MCP wrapper is implemented for goal 13. Its signature is
 `create_epic(projectId, subject, description?, status?, assigned_to?, color?,
@@ -126,6 +127,38 @@ A recognized concurrent uniqueness response is read back and reported as
 `created=false` only when the relationship read confirms it. Unrelated 400
 responses, permission failures, missing resources, transport failures, and
 ambiguous writes are returned as safe MCP errors; no POST retry is performed.
+
+### `list_epic_user_stories` contract
+
+The signature is `list_epic_user_stories(epicId, page=1)`. It validates positive
+`epicId` and `page`, then sends exactly one authenticated
+`GET /api/v1/epics/{epicId}/related_userstories?page={page}` request. The result
+is always the standard page envelope:
+
+```json
+{"items":[{"epic_id":301,"user_story_id":102,"order":9001}],"page":1,"total":1,"next_page":null,"has_more":false}
+```
+
+Each item is only a relationship identity and its server order. The response
+does not include the link tool's `created` receipt, full story details, story
+project data, or calculated epic progress. Preserve the returned order and use
+`get_user_story(userStoryId)` when a selected story needs inspection. The call
+does not write or fetch one detail object per relationship, and Taiga remains
+the authority for accessible cross-project links.
+
+Missing pagination headers remain literal `null`; a `next_page` number must be
+requested explicitly. Malformed relationship data, a returned `epic` that does
+not match the requested epic, invalid IDs, permission failures, and transport
+failures are safe MCP errors. For example, a forbidden read exposes its status
+and category without echoing the upstream body:
+
+```text
+Taiga HTTP 403: permission denied.
+```
+
+The relationship fields were checked on 2026-09-29 against pinned taiga-back
+revision `4d11baef9027f5598f6341d6eb4261de2840688e` in the [nested epic viewset](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py)
+and [relationship serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/serializers.py). The serializer supplies `epic`, `user_story`, and `order`; the nested lookup is by story ID. This is pinned source evidence, not a deployed-version claim.
 
 ### `get_epic` contract
 
@@ -335,6 +368,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `get_epic` | `epicId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, color?, tags?, modified?, is_closed?, is_blocked?, blocked_note?, client_requirement?, team_requirement?, user_stories_counts?, version }`. `epicId` is the internal ID, not displayed `#ref`; related stories and computed progress are not loaded. |
 | `create_epic` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `color`, and `tags` optional and default null | One server-created epic detail with authoritative `id`, `ref`, and `version`. Omitted optional fields use project defaults; `description=""` and `tags=[]` are explicit values. Use the separate `link_user_story_to_epic` tool for existing stories. Requirement flags, bulk creation, and custom fields remain planned. |
 | `update_epic` | `epicId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `color`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One authoritative epic detail after a versioned PATCH. Omitted fields stay unchanged; empty description/tags are explicit clears, and `clearFields=["assigned_to"]` emits JSON null. Use `list_epic_statuses` for project-specific status IDs; ordering, requirement flags, blocking, dates, custom fields, project moves, and linked-story changes remain planned. |
+| `list_epic_user_stories` | `epicId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`, where items are `{ epic_id, user_story_id, order }`. This is a one-page relationship index; use `get_user_story` for selected details. Creation state, project enrichment, progress aggregation, reordering, and all-page fetching remain out of scope. |
 | `get_task` | `taskId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, user_story?, milestone?, tags?, modified?, due_date?, due_date_reason?, due_date_status?, is_blocked?, blocked_note?, is_closed?, version }`. `taskId` is the internal ID, not displayed `#ref`; comments, attachments, and parent details are not loaded. |
 | `create_task` | `projectId`, `subject` required; `userStoryId`, `milestoneId`, `description`, `status`, `assigned_to`, and `tags` optional | One authoritative task detail. A story parent is read and must belong to `projectId`; omitted `milestoneId` inherits the parent's sprint, while an explicit value must match it. Standalone tasks may omit or select a sprint. |
 | `update_task` | `taskId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `isBlocked`, `blockedNote`, `comment`, and `clearFields` optional | One authoritative task detail after a versioned PATCH. `clearFields` accepts only `assigned_to`; description/tags/blocked note can be explicitly cleared with empty values. The client does not add compensating writes, and Taiga clears `blocked_note` whenever the saved task is unblocked. Parent story, sprint, due dates, and iocaine are unchanged and out of scope. |
