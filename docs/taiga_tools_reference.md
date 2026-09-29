@@ -8,7 +8,7 @@ will verify.
 
 ## Implemented versus planned
 
-The current server exposes 21 tools:
+The current server exposes 22 tools:
 
 - 2 project tools: `list_projects`, `resolve_project`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -17,12 +17,14 @@ The current server exposes 21 tools:
 - 4 user-story tools: `list_user_stories`, `get_user_story`,
   `create_user_story`, and `update_user_story`.
 - 4 task tools: `list_tasks`, `get_task`, `create_task`, and `update_task`.
-- 3 epic tools: `list_epics`, `get_epic`, and `create_epic`.
+- 4 epic tools: `list_epics`, `get_epic`, `create_epic`, and
+  `link_user_story_to_epic`.
 
 The first-batch documents describe 15 additional or expanded functions. The
-`list_issues`, `list_user_stories`, and the core `get_user_story` detail read
-are delivered; the remaining goal documents describe planned work until their
-individual checklists are complete. Cross-resource commands remain planned.
+`list_issues`, `list_user_stories`, the core `get_user_story` detail read, and
+`link_user_story_to_epic` are delivered; the remaining goal documents describe
+planned work until their individual checklists are complete. Other
+cross-resource commands remain planned.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -62,7 +64,7 @@ tags?)`. The request maps to `POST /api/v1/epics` with `project`, `subject`,
 values stay omitted so Taiga can apply project defaults. The response will use
 the existing epic detail mapping and expose the server's authoritative `id`,
 `ref`, and nonnegative `version`. This call creates one epic only; linking
-stories and setting requirement flags remain separate planned operations.
+stories and setting requirement flags remain separate operations.
 
 The contract was checked on 2026-09-28 against pinned taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`: the epic validator accepts the
@@ -89,8 +91,33 @@ concurrent uniqueness validation is followed by the same relationship read and
 is reported as `created=false` only when that read confirms the link; unrelated
 validation, permission, missing-resource, and transport failures propagate.
 Cross-project linking is left to Taiga's permission and validation rules.
-The domain implementation now follows this wire behavior; MCP exposure and
-caller-facing examples are completed in the later goal steps.
+The domain implementation and public MCP wrapper now follow this wire
+behavior.
+
+### `link_user_story_to_epic` contract
+
+The signature is `link_user_story_to_epic(epicId, userStoryId, order?)`. It
+returns JSON with `epic_id`, `user_story_id`, `order`, and `created`, for
+example:
+
+```json
+{"epic_id":301,"user_story_id":102,"order":9001,"created":true}
+```
+
+The call first performs `GET
+/api/v1/epics/{epicId}/related_userstories/{userStoryId}`. If the link exists,
+it returns `created=false` and the current server order, ignoring any supplied
+`order`. If the link is absent, it confirms the epic and story detail reads
+before sending one `POST /api/v1/epics/{epicId}/related_userstories` with
+`{"epic": epicId, "user_story": userStoryId}` and an `order` property only
+when supplied. The operation does not require a story or epic version and does
+not update the story, its project, or any other epic relationships. Taiga
+decides whether an accessible cross-project relationship is permitted.
+
+A recognized concurrent uniqueness response is read back and reported as
+`created=false` only when the relationship read confirms it. Unrelated 400
+responses, permission failures, missing resources, transport failures, and
+ambiguous writes are returned as safe MCP errors; no POST retry is performed.
 
 ### `get_epic` contract
 

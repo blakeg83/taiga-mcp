@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using TaigaMCP.Api;
+using TaigaMCP.Tools;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -263,6 +264,32 @@ public sealed class EpicStoryLinkApiTests
         {
             Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
         };
+
+    private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
+        => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+}
+
+public sealed class EpicStoryLinkToolTests
+{
+    [Fact]
+    public async Task LinkUserStoryToEpicTool_ReturnsPublicRelationshipShape()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/epics/301/related_userstories/102",
+                "{\"epic\":301,\"user_story\":102,\"order\":1234}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(await new EpicTools(NewApi(handler, auth)).LinkUserStoryToEpic(301, 102, 9001));
+
+            Assert.Equal(301, json.GetProperty("epic_id").GetInt32());
+            Assert.Equal(102, json.GetProperty("user_story_id").GetInt32());
+            Assert.Equal(1234, json.GetProperty("order").GetInt64());
+            Assert.False(json.GetProperty("created").GetBoolean());
+        }
+    }
 
     private static EpicApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
         => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));

@@ -62,7 +62,7 @@ API/source basis: [issue endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 | `bulk_create_epics` | New | `projectId, subjects[], statusId?`; create several epics through the bulk endpoint and return their identities. |
 | `list_epic_user_stories` | New | `epicId, page?`; list linked stories and their relationship order, including project context. |
 | `get_epic_user_story_link` | New | `epicId, userStoryId`; retrieve one epic/story relationship and its ordering data. |
-| `link_user_story_to_epic` | New — domain behavior implemented; MCP exposure planned | `epicId, userStoryId, order?`; associate an existing story with the epic, preserve Taiga's ability to relate stories from accessible projects, and make repeated calls idempotent without changing existing order. |
+| `link_user_story_to_epic` | New — delivered subset | `epicId, userStoryId, order?`; associate an existing story with the epic, preserve Taiga's ability to relate stories from accessible projects, and make repeated calls idempotent without changing existing order. |
 | `update_epic_user_story_link` | New | `epicId, userStoryId, order`; change the story's order within the epic without changing its backlog position. |
 | `unlink_user_story_from_epic` | New | `epicId, userStoryId`; remove the relationship while retaining the story. |
 | `bulk_create_epic_user_stories` | New | `epicId, projectId, subjects[]`; create new stories and associate them with the epic using the related-stories bulk endpoint. This endpoint is not a bulk linker for existing IDs. |
@@ -211,8 +211,8 @@ API basis: [status administration](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Repository coverage notes
 
-- The current 20 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
+- The current 22 tool names are implemented across [IssueTools.cs](../Tools/IssueTools.cs), [UserStoryTools.cs](../Tools/UserStoryTools.cs), [TaskTools.cs](../Tools/TaskTools.cs), [EpicTools.cs](../Tools/EpicTools.cs), and [ProjectTools.cs](../Tools/ProjectTools.cs).
 - [IssueApi.cs](../Api/IssueApi.cs) currently filters issue lists to open work and reduces details to a limited DTO. [UserStoryApi.cs](../Api/UserStoryApi.cs) and [UserStoryTools.cs](../Tools/UserStoryTools.cs) now deliver the goal 03 story filter subset, optional page envelope, and goal 04 core detail read; ordering, estimates, swimlane, and epic filters remain planned.
 - [IssueUpdateDto.cs](../Models/IssueUpdateDto.cs) uses a presence-aware PATCH representation: ordinary nulls are omitted, while the delivered issue update contract can explicitly clear `assigned_to`; create serialization still omits nulls.
-- Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. `EpicApi` and `EpicTools` now deliver the `list_epics` and `get_epic` subsets; later epic operations remain planned. Shared wrappers can reuse underlying resource operations during a future implementation.
+- Epic and task command groups, shared collaboration commands, attachments, custom fields, and planning/admin commands are new coverage. `EpicApi` and `EpicTools` now deliver the `list_epics`, `get_epic`, `create_epic`, and `link_user_story_to_epic` subsets; later epic operations remain planned. Shared wrappers can reuse underlying resource operations during a future implementation.
 - Structured arbitrary dependencies, time logging, and nested epics are not assumed to be native Taiga capabilities. External references or custom fields should not be presented as equivalent native relationships.

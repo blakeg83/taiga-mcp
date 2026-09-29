@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, create/read/update user stories, read/list/update tasks, and create/list/read epics via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. It exposes tools to list projects, resolve project IDs, manage issues, create/read/update user stories, read/list/update tasks, and create/list/read/link epics via Taiga’s REST API.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -23,7 +23,8 @@ wire filters and envelope fields.
 - `list_tasks(projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of standalone or story-linked tasks. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
 - `list_epics(projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of project epics with verified status, assignee, tag, and text filters. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
 - `get_epic(epicId)`: Retrieve one epic by its positive internal ID, including authoritative identity/version, Markdown description, status, assignment, color, tags, and available server summaries. It does not fetch related stories or compute progress.
-- `create_epic(projectId, subject, description?, status?, assigned_to?, color?, tags?)`: Create one epic and return its authoritative detail. Omitted optional fields use Taiga project defaults; story linking and requirement flags remain separate planned operations.
+- `create_epic(projectId, subject, description?, status?, assigned_to?, color?, tags?)`: Create one epic and return its authoritative detail. Omitted optional fields use Taiga project defaults; story linking and requirement flags remain separate operations.
+- `link_user_story_to_epic(epicId, userStoryId, order?)`: Associate an existing story with an epic. Repeated calls return the existing server order with `created=false` and do not change it; Taiga decides whether accessible cross-project links are permitted.
 - `get_task(taskId)`: Retrieve one task detail object by its positive internal ID, including the authoritative version, Markdown description, status/assignment, parent story, sprint, tags, due-date, and blocking fields.
 - `create_task(projectId, subject, userStoryId?, milestoneId?, description?, status?, assigned_to?, tags?)`: Create one standalone or story-linked task. A story-linked task validates its parent and inherits the parent's sprint; a matching `milestoneId` is redundant. Omitted optional fields use Taiga project defaults.
 - `update_task(taskId, version, subject?, description?, status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?)`: Versioned task edits for content, status, primary assignment, tags, blocking, and comments. Omitted fields stay unchanged; empty values are explicit, `clearFields=["assigned_to"]` unassigns, and Taiga clears `blocked_note` whenever the saved task is unblocked.

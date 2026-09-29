@@ -455,6 +455,7 @@ public sealed class McpIntegrationTests
                 "get_issue",
                 "get_task",
                 "get_user_story",
+                "link_user_story_to_epic",
                 "list_epics",
                 "list_issue_priorities",
                 "list_issue_severities",
@@ -541,6 +542,13 @@ public sealed class McpIntegrationTests
             var getEpicRequired = getEpic.JsonSchema.GetProperty("required").EnumerateArray()
                 .Select(value => value.GetString()).ToArray();
             Assert.Equal(new[] { "epicId" }, getEpicRequired);
+
+            var linkUserStoryToEpic = Assert.Single(tools, tool => tool.Name == "link_user_story_to_epic");
+            var linkProperties = linkUserStoryToEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
+            Assert.Equal(new[] { "epicId", "userStoryId", "order" }, linkProperties);
+            var linkRequired = linkUserStoryToEpic.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString()).ToArray();
+            Assert.Equal(new[] { "epicId", "userStoryId" }, linkRequired);
 
             var createEpic = Assert.Single(tools, tool => tool.Name == "create_epic");
             var createEpicProperties = createEpic.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name).ToArray();
@@ -674,6 +682,46 @@ public sealed class McpIntegrationTests
                 request.Method == "GET" && request.PathAndQuery == "/api/v1/epics/301");
             Assert.Equal("Bearer integration-token", epicDetailRequest.Authorization);
             Assert.DoesNotContain(taiga.Requests, request => request.PathAndQuery.Contains("related_userstories", StringComparison.Ordinal));
+
+            var linked = await client.CallToolAsync(
+                "link_user_story_to_epic",
+                new Dictionary<string, object?>
+                {
+                    ["epicId"] = 301,
+                    ["userStoryId"] = 102,
+                    ["order"] = 9001
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(linked.IsError == true, GetText(linked));
+            var linkedJson = JsonSerializer.Deserialize<JsonElement>(GetText(linked));
+            Assert.Equal(301, linkedJson.GetProperty("epic_id").GetInt32());
+            Assert.Equal(102, linkedJson.GetProperty("user_story_id").GetInt32());
+            Assert.Equal(9001, linkedJson.GetProperty("order").GetInt64());
+            Assert.True(linkedJson.GetProperty("created").GetBoolean());
+            var linkPost = Assert.Single(taiga.Requests, request =>
+                request.Method == "POST" && request.PathAndQuery == "/api/v1/epics/301/related_userstories");
+            using (var linkBody = JsonDocument.Parse(linkPost.Body))
+            {
+                Assert.Equal(301, linkBody.RootElement.GetProperty("epic").GetInt32());
+                Assert.Equal(102, linkBody.RootElement.GetProperty("user_story").GetInt32());
+                Assert.Equal(9001, linkBody.RootElement.GetProperty("order").GetInt64());
+            }
+
+            var repeatedLink = await client.CallToolAsync(
+                "link_user_story_to_epic",
+                new Dictionary<string, object?>
+                {
+                    ["epicId"] = 301,
+                    ["userStoryId"] = 102
+                },
+                cancellationToken: protocolDeadline.Token);
+            Assert.False(repeatedLink.IsError == true, GetText(repeatedLink));
+            var repeatedLinkJson = JsonSerializer.Deserialize<JsonElement>(GetText(repeatedLink));
+            Assert.Equal(9001, repeatedLinkJson.GetProperty("order").GetInt64());
+            Assert.False(repeatedLinkJson.GetProperty("created").GetBoolean());
+            Assert.DoesNotContain(taiga.Requests, request =>
+                request.Method == "POST" && request.PathAndQuery == "/api/v1/epics/301/related_userstories" &&
+                request.Body == "{\"epic\":301,\"user_story\":102}");
 
             taiga.EpicDetailStatusCode = System.Net.HttpStatusCode.Forbidden;
             var forbiddenEpic = await client.CallToolAsync(

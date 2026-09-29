@@ -58,12 +58,12 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 
 ## Step 3: Expose relationship creation
 
-- [ ] Add the MCP method with clear existing-story and optional-order descriptions; do not require a story/epic version if the relationship API does not use one.
-- [ ] Document a create_epic -> create_user_story -> link sequence and explain repeat-call behavior.
-- [ ] Return actual relationship order from the server without inventing a link identifier.
-- [ ] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
-- [ ] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
-- [ ] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose link_user_story_to_epic MCP interface`.
+- [x] Add the MCP method with clear existing-story and optional-order descriptions; do not require a story/epic version if the relationship API does not use one.
+- [x] Document a create_epic -> create_user_story -> link sequence and explain repeat-call behavior.
+- [x] Return actual relationship order from the server without inventing a link identifier.
+- [x] Validate this step: run MCP tools/list and actual tools/call tests for this function, including required/optional argument binding.
+- [x] Update documentation now: publish the actual tool signature, defaults, response example, and caller workflow. Update this goal's checklist and execution record with results.
+- [x] **Commit this step before starting the next one** with code, tests, and documentation together. Suggested subject: `Expose link_user_story_to_epic MCP interface`.
 
 ## Step 4: Verify grouping workflows
 
@@ -99,7 +99,7 @@ New filenames are proposed and may be consolidated with equivalent prerequisite 
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned taiga-back `c8264ac6775103cbcc2a3a145978f2b475e9ff05` checked 2026-09-28; nested lookup/payload/order semantics recorded; success, unique-duplicate, missing-link, and permission fixtures parse; baseline restore/build passed and baseline tests had 276 passes plus the pre-existing temporary-copy cleanup failure. | Specify link_user_story_to_epic contracts / current step commit |
 | 2 | Complete | `EpicStoryLinkApiTests`: 8 passing checks for initial POST, optional order omission, repeat-call order preservation, confirmed uniqueness race, unrelated 400 propagation, inaccessible epic, and pre-HTTP ID validation; Debug build passed with 0 warnings/errors. Previous Step 1 commit: `6d3f2d3`. | Implement link_user_story_to_epic API behavior / current step commit |
-| 3 | Not started | — | Expose link_user_story_to_epic MCP interface / pending |
+| 3 | Complete | `EpicStoryLinkToolTests` passed; production STDIO `tools/list` and `tools/call` passed for required/optional arguments, first link, and repeat link; tool reference, README, quickstart, inventory, and schema assertions updated. Previous Step 2 commit: `1175ab4`. | Expose link_user_story_to_epic MCP interface / current step commit |
 | 4 | Not started | — | Verify link_user_story_to_epic workflow / pending |
 
 Record baseline failures, source revision/date, approved contract changes, remaining blockers, and mock-versus-live verification here. Do not mark a step done on the strength of an unrun check.
