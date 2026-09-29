@@ -56,12 +56,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement project status reads
 
-- [ ] Add a one-page API method using transport/header parsing and positive-ID/page validation.
-- [ ] Map status fields accurately and preserve source order; do not hardcode status names or infer flags from them.
-- [ ] Do not reuse a partial page as the full internal status map or modify existing list_user_stories filtering.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_user_story_statuses API behavior`.
+- [x] Add a one-page API method using transport/header parsing and positive-ID/page validation.
+- [x] Map status fields accurately and preserve source order; do not hardcode status names or infer flags from them.
+- [x] Do not reuse a partial page as the full internal status map or modify existing list_user_stories filtering.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_user_story_statuses API behavior`.
 
 ## Step 3: Expose status discovery
 
@@ -129,10 +129,19 @@ statuses, including closed and archived choices. Null DTO properties are omitted
 by the public serializer; page metadata remains explicit JSON null when unknown.
 The legacy issue-status array and story-list behavior remain unchanged.
 
+Step 2 implementation uses `UserStoryApi` with the existing `TaigaTransport`.
+The API exposes a bare-list convenience method for domain callers and an
+internal page result for the eventual tool. Each call validates positive
+`projectId`/`page`, sends the configured project and page values, parses one JSON
+array, preserves source order, and uses `TaigaPagination` for count/continuation
+headers. A status must contain a positive numeric `id`; all other contract
+fields are presence-aware and type-checked, with `project` requiring a positive
+value when present. No status cache or story-list filter was changed.
+
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
-| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed (381 tests, 0 warnings/errors). Added `UserStoryStatusDto` contract fixtures/tests for localized names, independent flags, null color/WIP, and zero order/WIP. Verified pinned source revision and project filter above. | Specify list_user_story_statuses contracts / pending |
-| 2 | Not started | — | Implement list_user_story_statuses API behavior / pending |
+| 1 | Complete | Baseline `dotnet restore`, `dotnet build -c Debug`, and `dotnet test -c Debug` passed (381 tests, 0 warnings/errors). Added `UserStoryStatusDto` contract fixtures/tests for localized names, independent flags, null color/WIP, and zero order/WIP. Verified pinned source revision and project filter above. | Specify list_user_story_statuses contracts / `471e6f1` |
+| 2 | Complete | Focused `dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug --filter FullyQualifiedName~UserStoryStatusTests` passed (6 tests); Debug build/test passed (387 tests, 0 warnings/errors). API tests cover exact project/page query, field mapping/order, pagination, validation, malformed required IDs, and unknown metadata. | Implement list_user_story_statuses API behavior / pending |
 | 3 | Not started | — | Expose list_user_story_statuses MCP tool / pending |
 | 4 | Not started | — | Verify list_user_story_statuses workflows / pending |
 

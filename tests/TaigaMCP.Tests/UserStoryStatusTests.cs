@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TaigaMCP.Api;
 using TaigaMCP.Models;
 using TaigaMCP.Tools;
 using Xunit;
@@ -61,4 +62,109 @@ public sealed class UserStoryStatusTests
         Assert.False(root.TryGetProperty("project", out _));
         Assert.False(root.TryGetProperty("color", out _));
     }
+
+    [Fact]
+    public async Task ListUserStoryStatusesPage_MapsFieldsAndTrustedPagination()
+    {
+        var handler = StatusRoutes(
+            UserStoryStatusFixtures.LocalizedProjectStatuses,
+            new Dictionary<string, string>
+            {
+                ["x-paginated"] = "true",
+                ["x-pagination-count"] = "4",
+                ["x-pagination-next"] = "/api/v1/userstory-statuses?project=123&page=3"
+            });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var page = await api.ListUserStoryStatusesPageAsync(123, page: 2);
+
+            Assert.Equal(new[] { 10, 11 }, page.Items.Select(status => status.Id));
+            Assert.Equal("Terminado", page.Items[0].Name);
+            Assert.True(page.Items[0].IsClosed);
+            Assert.False(page.Items[0].IsArchived);
+            Assert.Equal(0, page.Items[0].Order);
+            Assert.Equal(0, page.Items[0].WipLimit);
+            Assert.False(page.Items[1].IsClosed);
+            Assert.True(page.Items[1].IsArchived);
+            Assert.Null(page.Items[1].WipLimit);
+            Assert.Equal(4, page.Total);
+            Assert.Equal(3, page.NextPage);
+            Assert.True(page.HasMore);
+
+            var request = Assert.Single(handler.Requests, item =>
+                item.Uri.AbsolutePath.EndsWith("/userstory-statuses"));
+            Assert.Equal("?project=123&page=2", request.Uri.Query);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoryStatusesPage_RejectsInvalidArgumentsBeforeHttp()
+    {
+        var handler = new FakeHttpMessageHandler();
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            await Assert.ThrowsAsync<ArgumentException>(() => api.ListUserStoryStatusesPageAsync(0));
+            await Assert.ThrowsAsync<ArgumentException>(() => api.ListUserStoryStatusesPageAsync(123, 0));
+
+            Assert.Empty(handler.Requests);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoryStatusesPage_RejectsMalformedRequiredStatusData()
+    {
+        var handler = StatusRoutes("[{\"id\":0,\"name\":\"Invalid\"}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(
+                () => api.ListUserStoryStatusesPageAsync(123));
+
+            Assert.Contains("status id", exception.Message);
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoryStatusesPage_PreservesUnknownMetadataOnEmptyPage()
+    {
+        var handler = StatusRoutes(
+            "[]",
+            new Dictionary<string, string>
+            {
+                ["x-paginated"] = "true",
+                ["x-pagination-count"] = "not-a-number",
+                ["x-pagination-next"] = "https://evil.example/userstory-statuses?page=8"
+            });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var page = await api.ListUserStoryStatusesPageAsync(123, page: 4);
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    private static FakeHttpMessageHandler StatusRoutes(
+        string statuses,
+        IReadOnlyDictionary<string, string>? headers = null)
+        => new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstory-statuses",
+                statuses,
+                headers: headers);
 }

@@ -23,6 +23,36 @@ public sealed class UserStoryApi
             new UserStoryListOptions { Page = page },
             cancellationToken)).Items;
 
+    public async Task<IReadOnlyList<UserStoryStatusDto>> ListUserStoryStatusesAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+        => (await ListUserStoryStatusesPageAsync(projectId, page, cancellationToken)).Items;
+
+    internal async Task<UserStoryStatusListPage> ListUserStoryStatusesPageAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"userstory-statuses?project={projectId}&page={page}");
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid user story status list data.");
+
+        var items = new List<UserStoryStatusDto>(32);
+        foreach (var status in document.RootElement.EnumerateArray())
+            items.Add(MapUserStoryStatus(status));
+
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new UserStoryStatusListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);
+    }
+
     public async Task<UserStoryDetailDto> GetUserStoryAsync(
         int userStoryId,
         CancellationToken cancellationToken = default)
@@ -259,6 +289,86 @@ public sealed class UserStoryApi
         return statusMap;
     }
 
+    private static UserStoryStatusDto MapUserStoryStatus(JsonElement status)
+    {
+        if (status.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid user story status data.");
+
+        return new UserStoryStatusDto
+        {
+            Id = ReadStatusRequiredPositiveInt(status, "id"),
+            Project = ReadStatusOptionalPositiveInt(status, "project"),
+            Name = ReadStatusOptionalString(status, "name"),
+            Slug = ReadStatusOptionalString(status, "slug"),
+            Order = ReadStatusOptionalInt(status, "order"),
+            Color = ReadStatusOptionalString(status, "color"),
+            IsClosed = ReadStatusOptionalBoolean(status, "is_closed"),
+            IsArchived = ReadStatusOptionalBoolean(status, "is_archived"),
+            WipLimit = ReadStatusOptionalInt(status, "wip_limit")
+        };
+    }
+
+    private static int ReadStatusRequiredPositiveInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid user story status {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadStatusOptionalPositiveInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid user story status {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadStatusOptionalInt(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+            throw new TaigaRequestException($"Taiga returned invalid user story status {propertyName} data.");
+
+        return number;
+    }
+
+    private static string? ReadStatusOptionalString(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.String)
+            throw new TaigaRequestException($"Taiga returned invalid user story status {propertyName} data.");
+
+        return value.GetString();
+    }
+
+    private static bool? ReadStatusOptionalBoolean(JsonElement status, string propertyName)
+    {
+        if (!status.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            throw new TaigaRequestException($"Taiga returned invalid user story status {propertyName} data.");
+
+        return value.GetBoolean();
+    }
+
     private static void ValidateListOptions(UserStoryListOptions options)
     {
         if (options.StatusIds is not null)
@@ -451,3 +561,10 @@ public sealed class UserStoryApi
             ? value.GetString()
             : null;
 }
+
+internal sealed record UserStoryStatusListPage(
+    IReadOnlyList<UserStoryStatusDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
