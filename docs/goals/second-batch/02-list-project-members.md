@@ -1,6 +1,6 @@
 # Goal 02: list_project_members
 
-Status: in progress; Step 1 complete; the public tool is not exposed yet.
+Status: in progress; Step 3 complete; final workflow verification remains.
 
 ## Objective
 
@@ -81,12 +81,19 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 3: Expose the members tool
 
-- [ ] Add list_project_members to ProjectTools with explicit descriptions of membership_id versus user_id.
-- [ ] Return the page envelope and document pagination and how to choose a returned user_id for assigned_to.
-- [ ] Add MCP schema/invocation tests and keep list_projects/resolve_project signatures unchanged.
-- [ ] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
-- [ ] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_project_members MCP tool`.
+- [x] Add list_project_members to ProjectTools with explicit descriptions of membership_id versus user_id.
+- [x] Return the page envelope and document pagination and how to choose a returned user_id for assigned_to.
+- [x] Add MCP schema/invocation tests and keep list_projects/resolve_project signatures unchanged.
+- [x] Validate this step: run real MCP tools/list and tools/call checks for this function, including required/default/null arguments and safe errors.
+- [x] Update documentation during this step: publish the callable signature, response/default/error examples, update tool counts and inventory delivered scope, and add a quickstart workflow. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Expose list_project_members MCP tool`.
+
+### Step 3 execution record
+
+- Previous checkpoint: `1c55973` (`Implement list_project_members API behavior`).
+- Public surface: `ProjectTools.ListProjectMembers` exposes `list_project_members(projectId, page=1)` with a required positive `projectId`, optional positive `page`, a standard page envelope, and no public cancellation argument. Its description explicitly distinguishes `membership_id` from the assignable `user_id`, retains pending/inactive records, and excludes email/invitation text.
+- Documentation: `README.md`, `docs/taiga_tools_reference.md`, `docs/taiga_mcp_quickstart.md`, `docs/taiga_command_inventory.md`, `docs/development.md`, and this batch index now describe the delivered 25-tool surface, response shape, pagination, assignment workflow, and deferred boundaries.
+- Validation: real `ProductionServer_ListsAllTools_InvokesReadTool_AndReportsUpstreamFailure` passed. `tools/list` found `list_project_members` with properties exactly `projectId,page`, required exactly `projectId`, and no `cancellationToken`; `tools/call` with the default page returned mapped active/inactive/pending records, pagination metadata, and no admin email fields. `projectId=0` returned a safe MCP error without an HTTP request. Existing `list_projects` behavior and schema assertions remained unchanged.
 
 ## Step 4: Verify member-driven assignment
 
@@ -125,7 +132,7 @@ pinned source only; no live deployment version was inspected or claimed.
 | --- | --- | --- | --- |
 | 1 | Complete | Pinned serializer/API evidence recorded; mixed membership fixture and contract test added; `dotnet test -c Debug` baseline passed 343 tests before changes. | Specify list_project_members contracts / pending |
 | 2 | Complete | `ProjectApi`/`ProjectMemberDto` implemented; focused ProjectMemberTests passed 6 tests with request, mapping, pagination, validation, malformed-data, and safe-error coverage. Public tool remains planned pending Step 3. | Implement list_project_members API behavior / pending |
-| 3 | Not started | — | Expose list_project_members MCP tool / pending |
+| 3 | Complete | Public tool exposed; real STDIO tools/list and tools/call integration passed with schema/default/error/allowlist checks; full Debug test suite passed 349 tests; public docs and 25-tool counts reconciled. | Expose list_project_members MCP tool / pending |
 | 4 | Not started | — | Verify list_project_members workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,

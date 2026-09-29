@@ -38,6 +38,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode ProjectsStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode MembershipStatusCode { get; set; } = HttpStatusCode.OK;
+
     public HttpStatusCode CurrentUserStatusCode { get; set; } = HttpStatusCode.OK;
 
     public string CurrentUserResponseBody { get; set; } =
@@ -160,6 +162,33 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 ["x-pagination-current"] = "1"
             };
             await RespondAsync(context.Response, HttpStatusCode.OK, "[{\"id\":123,\"slug\":\"demo\",\"name\":\"Demo\"}]", headers);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/memberships")
+        {
+            if (MembershipStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, MembershipStatusCode, "{\"detail\":\"synthetic membership secret\"}");
+                return;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                """
+                [
+                  {"id":501,"user":42,"project":123,"role":7,"is_admin":true,"role_name":"Product Owner","full_name":"Active User","is_user_active":true,"is_owner":true,"email":"private-admin@example.test","user_email":"private-user@example.test"},
+                  {"id":502,"user":43,"project":123,"role":null,"is_admin":false,"role_name":null,"full_name":"Inactive User","is_user_active":false,"is_owner":false,"email":"private-inactive@example.test"},
+                  {"id":503,"user":null,"project":123,"role":8,"is_admin":false,"role_name":"Developer","full_name":null,"is_user_active":false,"is_owner":null,"email":"pending@example.test","invitation_extra_text":"private invitation text"}
+                ]
+                """,
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "3",
+                    ["x-pagination-next"] = "/api/v1/memberships?project=123&page=2"
+                });
             return;
         }
 

@@ -8,9 +8,9 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 24 tools:
+The current server exposes 25 tools:
 
-- 2 project tools: `list_projects`, `resolve_project`.
+- 3 project tools: `list_projects`, `list_project_members`, `resolve_project`.
 - 1 identity tool: `get_current_user`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
@@ -24,10 +24,9 @@ The current server exposes 24 tools:
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
-first-batch total to 23. Goal 01 of the [second batch](goals/second-batch/README.md)
-adds `get_current_user` as the first delivered second-batch tool; 11 batch
-functions remain planned. The broader inventory still includes deferred fields
-and operations.
+first-batch total to 23. Goals 01 and 02 of the [second batch](goals/second-batch/README.md)
+add `get_current_user` and `list_project_members`; 10 batch functions remain
+planned. The broader inventory still includes deferred fields and operations.
 `update_user_story`
 uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
@@ -176,6 +175,41 @@ upstream profile properties are not returned. A missing or malformed ID, 401,
 safe MCP error; no credentials or raw upstream body is included. The injected
 `cancellationToken` is not a public argument.
 
+### `list_project_members` contract
+
+The signature is `list_project_members(projectId, page=1)`. It sends exactly
+one authenticated `GET /api/v1/memberships?project={projectId}&page={page}` and
+returns the standard page envelope:
+
+```json
+{
+  "items":[
+    {"membership_id":501,"project":123,"user_id":42,"role_id":7,"role_name":"Product Owner","full_name":"Active User","is_user_active":true,"is_admin":true,"is_owner":true},
+    {"membership_id":503,"project":123,"role_id":8,"role_name":"Developer","is_user_active":false}
+  ],
+  "page":1,
+  "total":3,
+  "next_page":2,
+  "has_more":true
+}
+```
+
+`projectId` and `page` must be positive. `membership_id` is the membership
+record ID; `user_id` is the Taiga account ID to use as `assigned_to` or
+`assignedTo` in a later work-item call. A pending invitation may have no
+`user_id`, and an inactive user remains visible with `is_user_active=false`;
+neither case is silently converted into an active assignable user. Optional
+role, name, activity, admin, and owner fields are omitted when the upstream
+value is absent. Admin-only `email`, `user_email`, and invitation text are
+discarded. The tool does not filter by name, read individual user profiles,
+follow pages automatically, or claim that membership guarantees permission for
+a future write. Unknown pagination headers remain explicit `null` values.
+
+Invalid IDs, malformed required membership/project IDs, 401/403 responses,
+invalid JSON, cancellation, and other transport failures are returned as safe
+MCP errors without raw upstream bodies. The injected `cancellationToken` is
+not a public argument.
+
 All tool methods return a string whose contents are JSON. The examples below
 show the JSON contents, not an MCP `content` wrapper.
 
@@ -186,6 +220,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `list_projects` | `member` string?, default `null`; `page` integer, default `1` | Array of `{ id, slug, name }` project objects. |
 | `resolve_project` | `slug` string, required | `{ "project": 123 }`. |
 | `get_current_user` | No arguments | One identity object with required positive `id` and optional `username`, `full_name`, and `is_active`. |
+| `list_project_members` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; member items expose `membership_id`, `project`, optional `user_id`, `role_id`, `role_name`, `full_name`, `is_user_active`, `is_admin`, and `is_owner`. |
 | `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |

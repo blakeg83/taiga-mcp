@@ -26,6 +26,23 @@ public sealed class ProjectTools
         return ToolResponseJson.Serialize(projects);
     });
 
+    [McpServerTool(Name = "list_project_members")]
+    [Description("List one page of project membership records. membership_id identifies the membership record; user_id identifies the Taiga account to use for a later assigned_to value. Pending records without user_id and inactive users remain visible, but membership alone does not guarantee permission for a future write. Email and invitation text are not returned.")]
+    public async Task<string> ListProjectMembers(
+        [Description("Positive internal project ID.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _projects.ListProjectMembersPageAsync(projectId, page, cancellationToken);
+        return ToolResponseJson.SerializePage(
+            result.Items,
+            result.Page,
+            result.Total,
+            result.NextPage,
+            result.HasMore);
+    });
+
     [McpServerTool(Name = "resolve_project")]
     [Description("Resolve an exact project slug to its internal project ID.")]
     public async Task<string> ResolveProject(
