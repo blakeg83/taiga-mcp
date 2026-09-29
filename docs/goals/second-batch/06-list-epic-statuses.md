@@ -1,6 +1,6 @@
 # Goal 06: list_epic_statuses
 
-Status: in progress; MCP exposure complete, final verification in progress.
+Status: complete.
 
 ## Objective
 
@@ -74,31 +74,31 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 4: Verify epic status selection
 
-- [ ] Fetch a synthetic status and pass its ID to create_epic; goal 08 adds the closing/reopening workflow.
-- [ ] Cover flags independent of names, empty/later pages, malformed identity, disabled/inaccessible project errors, and cancellation.
-- [ ] Check all existing epic detail/create/link/list response contracts remain unchanged.
-- [ ] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
-- [ ] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_epic_statuses workflows`.
+- [x] Fetch a synthetic status and pass its ID to create_epic; goal 08 adds the closing/reopening workflow.
+- [x] Cover flags independent of names, empty/later pages, malformed identity, disabled/inaccessible project errors, and cancellation.
+- [x] Check all existing epic detail/create/link/list response contracts remain unchanged.
+- [x] Validate this step: run the complete Debug and Release restore/build/test sequence plus git diff --check from execution-instructions.md; record exact results and output paths.
+- [x] Update documentation during this step: reconcile the reference/README/quickstart/inventory and this batch index with final delivered scope; verify links and examples. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Verify list_epic_statuses workflows`.
 
 ## Acceptance scenarios
 
-- [ ] All project epic status choices can be paged, including closing statuses.
-- [ ] The result uses actual IDs/flags and composes with epic creation.
-- [ ] No unrelated epic or project state changes occur.
-- [ ] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
-- [ ] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
-- [ ] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
+- [x] All project epic status choices can be paged, including closing statuses.
+- [x] The result uses actual IDs/flags and composes with epic creation.
+- [x] No unrelated epic or project state changes occur.
+- [x] Public invocation returns documented JSON text on success and a safe MCP error on failure; cancellationToken is not a public argument.
+- [x] Authentication replay occurs only under the existing received-401 rule; failures never cause an unrequested write or automatic entity-version refresh.
+- [x] Existing resource null omission, explicit clearFields behavior, and unknown pagination metadata remain compatible.
 
 ## Definition of done
 
-- [ ] Agents can discover project epic status options before creating or editing epics.
-- [ ] All four ordered steps and acceptance scenarios have passing recorded validation.
-- [ ] Schema inspection and real MCP calls agree with the documented interface.
-- [ ] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
-- [ ] Current documentation names only delivered functionality and preserves deferred scope.
-- [ ] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
-- [ ] Each completed step has a separate local commit; the handoff lists its hash and evidence.
+- [x] Agents can discover project epic status options before creating or editing epics.
+- [x] All four ordered steps and acceptance scenarios have passing recorded validation.
+- [x] Schema inspection and real MCP calls agree with the documented interface.
+- [x] Relevant malformed-data, permission, cancellation, pagination/concurrency, and transport cases are covered by meaningful tests.
+- [x] Current documentation names only delivered functionality and preserves deferred scope.
+- [x] Debug and Release build/test checks pass; generated artifacts, credentials, and unrelated changes are excluded.
+- [x] Each completed step has a separate local commit; the handoff lists its hash and evidence.
 
 ## Execution record
 
@@ -111,8 +111,8 @@ deployment claim.
 | --- | --- | --- | --- |
 | 1 | Complete | Baseline `dotnet test -c Debug`: 399 passed. Added contract fixtures/tests for localized open/closed names, zero order, missing order/color, and null omission. Verified `EpicStatusSerializer` fields and project filter against pinned revision `4d11baef9027f5598f6341d6eb4261de2840688e`; no deviation. | Specify list_epic_statuses contracts / `551f15b` |
 | 2 | Complete | `EpicApi` now requests one authenticated `GET epic-statuses?project={projectId}&page={page}` and returns the standard page metadata. It maps `id/project/name/slug/order/color/is_closed`, preserves open and closed server order, rejects nonpositive inputs, malformed IDs, and mismatched projects, and does not use a cache or alter `list_epics`. Focused `EpicStatusTests`: 9 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. | Implement list_epic_statuses API behavior / `0fcaf25` |
-| 3 | Complete | Added `list_epic_statuses` with `projectId` required and `page=1` default; no cancellation argument is exposed. Real MCP discovery/schema and calls cover default/page 2, missing/null argument failures, page metadata, closed choices, omission of story-only fields, and composing a returned ID with `create_epic`. Focused status tests: 9 passed; focused real MCP checks: 2 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. Updated README, tool reference, quickstart, command inventory, and batch index to 29 tools. | Expose list_epic_statuses MCP tool / pending |
-| 4 | Not started | — | Verify list_epic_statuses workflows / pending |
+| 3 | Complete | Added `list_epic_statuses` with `projectId` required and `page=1` default; no cancellation argument is exposed. Real MCP discovery/schema and calls cover default/page 2, missing/null argument failures, page metadata, closed choices, omission of story-only fields, and composing a returned ID with `create_epic`. Focused status tests: 9 passed; focused real MCP checks: 2 passed; full `dotnet test -c Debug`: 408 passed; `git diff --check`: passed. Updated README, tool reference, quickstart, command inventory, and batch index to 29 tools. | Expose list_epic_statuses MCP tool / `4fb294e` |
+| 4 | Complete | Focused API and real MCP verification covers returned status selection in `create_epic`, localized names with independent closure flags, empty and later pages, malformed identity, pre-cancellation, and a forbidden project response with safe error text. Exact final commands: `dotnet restore` passed; `dotnet build -c Debug` passed with 0 warnings/errors to `bin\Debug\net8.0`; `dotnet test -c Debug` passed 408/408; `dotnet build -c Release --no-restore` passed with 0 warnings/errors to `bin\Release\net8.0`; `dotnet test -c Release --no-build --no-restore` passed 408/408; `git diff --check` passed. No generated artifacts or credentials were staged. | Verify list_epic_statuses workflows / pending |
 
 Record baseline failures, evidence-backed contract changes, previous step hashes,
 exact commands/results, and remaining blockers as work proceeds. Leave unverified

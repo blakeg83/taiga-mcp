@@ -1177,6 +1177,17 @@ public sealed class McpIntegrationTests
                 request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/epic-statuses?", StringComparison.Ordinal));
             Assert.Equal("/api/v1/epic-statuses?project=123&page=2", epicStatusRequest.PathAndQuery);
 
+            taiga.EpicStatusStatusCode = System.Net.HttpStatusCode.Forbidden;
+            var forbiddenEpicStatuses = await client.CallToolAsync(
+                "list_epic_statuses",
+                new Dictionary<string, object?> { ["projectId"] = 123 },
+                cancellationToken: protocolDeadline.Token);
+            Assert.True(forbiddenEpicStatuses.IsError == true);
+            Assert.Contains("403", GetText(forbiddenEpicStatuses));
+            Assert.Contains("permission denied", GetText(forbiddenEpicStatuses), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic epic status secret", GetText(forbiddenEpicStatuses));
+            taiga.EpicStatusStatusCode = System.Net.HttpStatusCode.OK;
+
             var epicDetail = await client.CallToolAsync(
                 "get_epic",
                 new Dictionary<string, object?> { ["epicId"] = 301 },

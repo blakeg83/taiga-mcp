@@ -53,6 +53,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode EpicListStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode EpicStatusStatusCode { get; set; } = HttpStatusCode.OK;
+
     public HttpStatusCode EpicDetailStatusCode { get; set; } = HttpStatusCode.OK;
 
     public HttpStatusCode EpicCreateStatusCode { get; set; } = HttpStatusCode.Created;
@@ -226,6 +228,12 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
         if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/epic-statuses")
         {
+            if (EpicStatusStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, EpicStatusStatusCode, "{\"detail\":\"synthetic epic status secret\"}");
+                return;
+            }
+
             await RespondAsync(
                 context.Response,
                 HttpStatusCode.OK,
