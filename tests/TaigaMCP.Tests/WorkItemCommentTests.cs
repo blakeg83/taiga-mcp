@@ -138,4 +138,128 @@ public sealed class WorkItemCommentTests
             Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
         }
     }
+
+    [Theory]
+    [InlineData("issue", "/api/v1/issues/42", HttpStatusCode.Conflict, "409", "conflict")]
+    [InlineData("user_story", "/api/v1/userstories/102", HttpStatusCode.Conflict, "409", "conflict")]
+    [InlineData("task", "/api/v1/tasks/203", HttpStatusCode.Conflict, "409", "conflict")]
+    [InlineData("epic", "/api/v1/epics/301", HttpStatusCode.Conflict, "409", "conflict")]
+    [InlineData("issue", "/api/v1/issues/42", HttpStatusCode.Forbidden, "403", "permission denied")]
+    [InlineData("user_story", "/api/v1/userstories/102", HttpStatusCode.Forbidden, "403", "permission denied")]
+    [InlineData("task", "/api/v1/tasks/203", HttpStatusCode.Forbidden, "403", "permission denied")]
+    [InlineData("epic", "/api/v1/epics/301", HttpStatusCode.Forbidden, "403", "permission denied")]
+    [InlineData("issue", "/api/v1/issues/42", HttpStatusCode.NotFound, "404", "resource not found")]
+    [InlineData("user_story", "/api/v1/userstories/102", HttpStatusCode.NotFound, "404", "resource not found")]
+    [InlineData("task", "/api/v1/tasks/203", HttpStatusCode.NotFound, "404", "resource not found")]
+    [InlineData("epic", "/api/v1/epics/301", HttpStatusCode.NotFound, "404", "resource not found")]
+    public async Task DomainApis_PropagateConflictPermissionAndMissingFailuresWithoutRetry(
+        string kind,
+        string path,
+        HttpStatusCode statusCode,
+        string expectedStatus,
+        string expectedCategory)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Patch, path, "{\"detail\":\"secret synthetic-token\"}", statusCode);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateCommentCall(
+                    new TaigaTransport(new TestHttpClientFactory(handler), auth),
+                    kind,
+                    8,
+                    "text"));
+
+            Assert.Contains(expectedStatus, exception.Message);
+            Assert.Contains(expectedCategory, exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("synthetic-token", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    [Theory]
+    [InlineData("issue", "/api/v1/issues/42")]
+    [InlineData("user_story", "/api/v1/userstories/102")]
+    [InlineData("task", "/api/v1/tasks/203")]
+    [InlineData("epic", "/api/v1/epics/301")]
+    public async Task DomainApis_MalformedSuccessReportsUncertaintyWithoutRetry(string kind, string path)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddTextRoute(HttpMethod.Patch, path, "not json");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateCommentCall(
+                    new TaigaTransport(new TestHttpClientFactory(handler), auth),
+                    kind,
+                    8,
+                    "text"));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    [Theory]
+    [InlineData("issue", "/api/v1/issues/42")]
+    [InlineData("user_story", "/api/v1/userstories/102")]
+    [InlineData("task", "/api/v1/tasks/203")]
+    [InlineData("epic", "/api/v1/epics/301")]
+    public async Task DomainApis_TransportFailureDoesNotRetry(string kind, string path)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(HttpMethod.Patch, path, new HttpRequestException("secret synthetic-token"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                CreateCommentCall(
+                    new TaigaTransport(new TestHttpClientFactory(handler), auth),
+                    kind,
+                    8,
+                    "text"));
+
+            Assert.Contains("transport failure", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.DoesNotContain("synthetic-token", exception.Message);
+            Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    [Theory]
+    [InlineData("version")]
+    [InlineData("text")]
+    public async Task DomainApis_RejectNegativeVersionAndBlankTextBeforeHttp(string invalidField)
+    {
+        var handler = new FakeHttpMessageHandler();
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var transport = new TaigaTransport(new TestHttpClientFactory(handler), auth);
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                CreateCommentCall(
+                    transport,
+                    "task",
+                    invalidField == "version" ? -1 : 8,
+                    invalidField == "text" ? " " : "text"));
+
+            Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Patch);
+        }
+    }
+
+    private static Task<int> CreateCommentCall(
+        TaigaTransport transport,
+        string kind,
+        int version,
+        string text)
+        => kind switch
+        {
+            "issue" => new IssueApi(transport, new IssueMetadataCache(transport)).AddCommentAsync(42, version, text),
+            "user_story" => new UserStoryApi(transport).AddCommentAsync(102, version, text),
+            "task" => new TaskApi(transport).AddCommentAsync(203, version, text),
+            "epic" => new EpicApi(transport).AddCommentAsync(301, version, text),
+            _ => throw new InvalidOperationException()
+        };
 }

@@ -244,6 +244,31 @@ public sealed class McpIntegrationTests
         }
 
         var count = taiga.Requests.Count;
+        var invalidKind = await Call("add_work_item_comment", new()
+        {
+            ["kind"] = "feature",
+            ["id"] = 203,
+            ["version"] = 2,
+            ["text"] = "not submitted"
+        });
+        Assert.True(invalidKind.IsError);
+        var blankComment = await Call("add_work_item_comment", new()
+        {
+            ["kind"] = "task",
+            ["id"] = 203,
+            ["version"] = 2,
+            ["text"] = " "
+        });
+        Assert.True(blankComment.IsError);
+        var negativeVersion = await Call("add_work_item_comment", new()
+        {
+            ["kind"] = "task",
+            ["id"] = 203,
+            ["version"] = -1,
+            ["text"] = "not submitted"
+        });
+        Assert.True(negativeVersion.IsError);
+        Assert.Equal(count, taiga.Requests.Count);
         var invalidCreate = await Call("create_user_story", new() { ["projectId"] = 123, ["subject"] = " " });
         Assert.True(invalidCreate.IsError);
         Assert.Contains("subject must not be blank", GetText(invalidCreate));
