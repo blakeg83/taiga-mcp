@@ -58,12 +58,12 @@ ToolErrors/ToolResponseJson; concrete APIs use TaigaTransport with cancellation.
 
 ## Step 2: Implement lightweight sprint retrieval
 
-- [ ] Add SprintApi over TaigaTransport with encoded fixed query keys and input validation.
-- [ ] Map only agreed summary fields; preserve date-only values without timezone conversion and source ordering.
-- [ ] Use standard page metadata, register DI, and avoid extra stats/detail requests or client-side filtering after pagination.
-- [ ] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
-- [ ] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
-- [ ] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_sprints API behavior`.
+- [x] Add SprintApi over TaigaTransport with encoded fixed query keys and input validation.
+- [x] Map only agreed summary fields; preserve date-only values without timezone conversion and source ordering.
+- [x] Use standard page metadata, register DI, and avoid extra stats/detail requests or client-side filtering after pagination.
+- [x] Validate this step: run focused API/request/response/error tests and a Debug build; include cancellation and ownership checks appropriate to the change.
+- [x] Update documentation during this step: record implemented API semantics, source deviations, and test evidence; keep the public function labeled planned until exposed. Update this goal's checkboxes and execution record.
+- [x] **Commit this completed step before starting the next**, including code, tests, and documentation. Suggested subject: `Implement list_sprints API behavior`.
 
 ## Step 3: Expose sprint discovery
 
@@ -131,7 +131,7 @@ Step 1 contract decisions:
 | Step | Status | Validation and documentation evidence | Commit subject / hash |
 | --- | --- | --- | --- |
 | 1 | Complete | Source review and fixtures recorded above. Baseline `dotnet restore`, `dotnet build -c Debug --no-restore`, and `dotnet test -c Debug --no-restore`: passed, 408 tests. | Specify list_sprints contracts / pending |
-| 2 | Not started | — | Implement list_sprints API behavior / pending |
+| 2 | Complete | `SprintListTests`: 11 passed, including query omission/false/true, mapping, nested-field omission, pagination, malformed data, safe HTTP errors, pre-cancellation, and project/page validation. Debug focused build/test passed. | Implement list_sprints API behavior / pending |
 | 3 | Not started | — | Expose list_sprints MCP tool / pending |
 | 4 | Not started | — | Verify list_sprints workflows / pending |
 
