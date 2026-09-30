@@ -103,6 +103,16 @@ Expected criteria are compared by packet order, ID, and exact text. Legacy
 contradicts it; the original receipt is preserved and every normalization is
 reported. See the [receipt compatibility reference](../../.agents/skills/taiga-ticket-loop/references/review-receipts.md).
 
+Malformed receipts use `workflow-review.ps1 -Operation route`: lossless legacy
+normalization stays local, while other repair requests return to the original
+reviewer. `workflow-state.ps1 -Operation record-receipt-repair` stores up to two
+format/evidence repairs per result separately from the three production
+correction rounds. Exhaustion or an expired run budget returns `needs_input`.
+Evidence amendments require a fresh reviewer decision. Re-reviews bind a
+`reviewDelta` from the previous SHA; documentation amendments require a new
+commit and an explicit assessment. Reused checks need evidence IDs and a
+justification.
+
 Verification logs and evidence records live outside the mutable registry.
 `workflow-evidence.ps1` binds them to a validated packet, prepared action, exact
 profile, and committed revision. It keeps expected-red fixtures, passing

@@ -30,7 +30,7 @@ the relevant reference before each operation:
 - [review loop](references/review-loop.md) for revision-bound findings and
   correction rounds;
 - [review receipt contract](references/review-receipts.md) for the shared
-  versioned schema and legacy compatibility adapter;
+  versioned schema, bounded repair route, and legacy compatibility adapter;
 - [verification evidence contract](references/evidence-contract.md) for
   immutable check records, log hashes, and outcome classification;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,
@@ -83,8 +83,12 @@ the relevant reference before each operation:
    separate worktrees up to configured limits.
 8. Freeze the committed implementation revision, dispatch the review, and route
    changes back to the same implementation chat. Initial review is round 0 and
-   correction/re-review is limited to three rounds by default. A pass is not a
-   PR or Done receipt.
+   correction/re-review is limited to three rounds by default. Route invalid
+   receipts through the bounded repair helper and separate repair ledger; those
+   attempts do not consume code correction rounds. Require every re-review to
+   assess its revision delta. Documentation amendments need a new commit and an
+   explicit reviewer assessment; reused checks need evidence IDs and a reason.
+   A pass is not a PR or Done receipt.
 9. After current review, push only the owned branch, reconcile the remote head,
    create or update one matching PR, attach it to the relevant Codex chat, and
    link the milestone in Taiga. Automatic merge and force-push are disabled.

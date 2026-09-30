@@ -631,6 +631,96 @@ try {
         $passingFailure = Copy-JsonObject $request; $passingFailure.receipt.verdict = 'pass'; $passingFailure.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
         $passingFailureResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $passingFailure 'review-passing-failure')) $false
         Assert-True (-not $passingFailureResult.ok) 'a pass with failed checks must remain blocked'
+
+        $docAmendment = New-ReviewReceipt
+        $docAmendment.reviewDelta = @{
+            fromSha = 'prior-head'; toSha = 'head'; changedPaths = @('docs/guide.md')
+            documentationChanged = $true; documentationPaths = @('docs/guide.md')
+            documentationAssessment = 'Reviewed the updated operator guidance against the requested scope.'
+            reusedCheckIds = @('check-evidence-1'); reuseJustification = 'The amendment changes documentation only; implementation files and inputs are unchanged.'
+        }
+        $docRequest = @{ receipt = $docAmendment; expectedCriteria = $script:ReviewCriteria; currentSha = 'head'; currentScopeHash = 'scope'; currentBaseSha = 'base'; expectedRunId = 'run'; expectedActionId = 'review-0'; expectedTicketKey = 'project:1:issue:1'; correctionRound = 0; remainingMinutes = 10; previousReviewedSha = 'prior-head' }
+        $docDecision = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $docRequest 'review-documentation-amendment'))
+        Assert-Equal 'publish' $docDecision.data.decision 'a newly committed documentation delta must be assessed before publish'
+        $expiredPass = Copy-JsonObject $request; $expiredPass.receipt = New-ReviewReceipt; $expiredPass.remainingMinutes = 0
+        $expiredPassResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $expiredPass 'review-pass-after-deadline'))
+        Assert-Equal 'needs_input' $expiredPassResult.data.decision 'a passing receipt must not bypass an exhausted wall-clock budget'
+        Assert-Equal 'elapsed_budget' $expiredPassResult.data.reason 'deadline gate should be explicit'
+        $missingDocAssessment = Copy-JsonObject $docRequest; $missingDocAssessment.receipt.reviewDelta.documentationAssessment = ''
+        $missingDocAssessmentResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $missingDocAssessment 'review-documentation-unassessed')) $false
+        Assert-True (-not $missingDocAssessmentResult.ok) 'documentation delta without reviewer assessment must not pass'
+        $sameDocRevision = Copy-JsonObject $docRequest; $sameDocRevision.receipt.reviewDelta.toSha = 'prior-head'; $sameDocRevision.receipt.reviewedSha = 'prior-head'; $sameDocRevision.currentSha = 'prior-head'
+        $sameDocResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $sameDocRevision 'review-documentation-no-commit')) $false
+        Assert-True (-not $sameDocResult.ok) 'documentation amendment requires a new committed revision'
+        $unjustifiedReuse = Copy-JsonObject $docRequest; $unjustifiedReuse.receipt.reviewDelta.reuseJustification = ''
+        $unjustifiedReuseResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $unjustifiedReuse 'review-check-reuse-unjustified')) $false
+        Assert-True (-not $unjustifiedReuseResult.ok) 'reused checks require an explicit justification'
+        $missingDelta = Copy-JsonObject $docRequest; $missingDelta.receipt.Remove('reviewDelta')
+        $missingDeltaResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $missingDelta 'review-delta-missing'))
+        Assert-Equal 'missing_review_delta_assessment' $missingDeltaResult.data.reason 're-review without a bound delta must request input'
+    }
+
+    Test-Case 'route bounded receipt repairs and keep counters separate' {
+        $legacy = New-ReviewReceipt
+        $legacy.Remove('schemaVersion'); $legacy.Remove('kind')
+        $legacy.criteria[0].Remove('text')
+        $legacy.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'reviewed fix'; requestedChange = 'fix'; disposition = 'resolved' })
+        $routeRequest = @{ resultId = 'review-0'; expectedActionId = 'review-0'; receipt = $legacy; expectedCriteria = $script:ReviewCriteria; repairAttempts = 0; remainingMinutes = 10 }
+        $local = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $routeRequest 'repair-local-normalization'))
+        Assert-Equal 'local_deterministic' $local.data.route 'lossless legacy normalization should be handled locally'
+        Assert-Equal 'format' $local.data.repairKind 'lossless normalization must remain a metadata repair'
+        Assert-True (-not $local.data.requiresIndependentReview) 'lossless normalization must not pretend to amend technical evidence'
+        $localExhausted = Copy-JsonObject $routeRequest; $localExhausted.repairAttempts = 2
+        $localExhaustedResult = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $localExhausted 'repair-local-exhausted'))
+        Assert-Equal 'needs_input' $localExhaustedResult.data.decision 'repair exhaustion must stop'
+        Assert-Equal 'receipt_repair_limit' $localExhaustedResult.data.reason 'repair exhaustion should be explicit'
+        $unboundRoute = Copy-JsonObject $routeRequest; $unboundRoute.resultId = 'untrusted-result'
+        $unboundRouteResult = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $unboundRoute 'repair-unbound-result')) $false
+        Assert-True (-not $unboundRouteResult.ok) 'repair result identity must come from the trusted original review action'
+
+        $contradictory = New-ReviewReceipt
+        $contradictory.schemaVersion = 0
+        $contradictory.Remove('schemaVersion'); $contradictory.Remove('kind')
+        $contradictory.actionId = 'untrusted-action-id'
+        $contradictory.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'still unresolved'; requestedChange = 'fix'; disposition = 'resolved'; unresolved = $true })
+        $contradictionRequest = @{ resultId = 'review-0'; expectedActionId = 'review-0'; receipt = $contradictory; expectedCriteria = $script:ReviewCriteria; repairAttempts = 0; remainingMinutes = 10 }
+        $authorRoute = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $contradictionRequest 'repair-evidence-contradiction'))
+        Assert-Equal 'original_author' $authorRoute.data.route 'contradictory evidence must go back to the original receipt author'
+        Assert-Equal 'evidence' $authorRoute.data.repairKind 'contradictory evidence must be treated as semantic'
+        Assert-Equal 'review-0' $authorRoute.data.targetActionId 'repair must target the original reviewer action'
+        Assert-True $authorRoute.data.requiresIndependentReview 'evidence repair must return through independent review'
+        $budgetExpired = Copy-JsonObject $contradictionRequest; $budgetExpired.remainingMinutes = 0
+        $budgetResult = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $budgetExpired 'repair-budget-expired'))
+        Assert-Equal 'needs_input' $budgetResult.data.decision 'repair must stop when the wall-clock budget is exhausted'
+
+        $repairRoot = Join-Path $script:FixtureRoot 'receipt-repair-state'
+        $repairInit = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$repairRoot)
+        $claimed = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; repositoryIdentity = 'repair-repo'; expectedRevision = $repairInit.revision }) 'repair-claim'),'-StateRoot',$repairRoot)
+        $reserved = Invoke-PsJson $script:StateScript @('-Operation','reserve-slot','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; expectedRevision = $claimed.revision }) 'repair-reserve'),'-StateRoot',$repairRoot)
+        $preparing = Invoke-PsJson $script:StateScript @('-Operation','transition','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; toPhase = 'preparing'; expectedRevision = $reserved.revision }) 'repair-preparing'),'-StateRoot',$repairRoot)
+        $implementing = Invoke-PsJson $script:StateScript @('-Operation','transition','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; toPhase = 'implementing'; expectedRevision = $preparing.revision }) 'repair-implementing'),'-StateRoot',$repairRoot)
+        $reviewing = Invoke-PsJson $script:StateScript @('-Operation','transition','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; toPhase = 'reviewing'; expectedRevision = $implementing.revision }) 'repair-reviewing'),'-StateRoot',$repairRoot)
+        $reviewAction = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; actionId = 'review-result-action'; actionKind = 'reviewer-message'; target = @{ threadId = 'reviewer-fixture' }; expectedRevision = $reviewing.revision }) 'repair-review-action'),'-StateRoot',$repairRoot)
+        $reviewResult = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'review-result-action'; observationStatus = 'observed'; expectedRevision = $reviewAction.revision }) 'repair-review-result'),'-StateRoot',$repairRoot)
+        $repairInput = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:70'; resultId = 'review-result-action'; repairId = 'repair-attempt-1'; repairKind = 'format'; route = 'local_deterministic'; remainingMinutes = 10; expectedRevision = $reviewResult.revision }
+        $wrongAuthor = $repairInput.Clone(); $wrongAuthor.repairId = 'repair-wrong-author'; $wrongAuthor.repairKind = 'evidence'; $wrongAuthor.route = 'original_author'; $wrongAuthor.targetActionId = 'other-review-action'
+        $wrongAuthorResult = Invoke-PsJson $script:StateScript @('-Operation','record-receipt-repair','-InputPath',(New-InputPath $wrongAuthor 'repair-ledger-wrong-author'),'-StateRoot',$repairRoot) $false
+        Assert-True (-not $wrongAuthorResult.ok) 'repair must not be routed to an action other than the original author'
+        $repairOne = Invoke-PsJson $script:StateScript @('-Operation','record-receipt-repair','-InputPath',(New-InputPath $repairInput 'repair-ledger-one'),'-StateRoot',$repairRoot)
+        Assert-Equal 0 $repairOne.data.correctionRound 'metadata repair must not increment production correction rounds'
+        $unboundRepair = $repairInput.Clone(); $unboundRepair.resultId = 'unprepared-result'; $unboundRepair.repairId = 'repair-attempt-unbound'; $unboundRepair.expectedRevision = $repairOne.revision
+        $unboundRepairResult = Invoke-PsJson $script:StateScript @('-Operation','record-receipt-repair','-InputPath',(New-InputPath $unboundRepair 'repair-ledger-unbound'),'-StateRoot',$repairRoot) $false
+        Assert-True (-not $unboundRepairResult.ok) 'state must reject an unprepared result ID that could reset the repair counter'
+        $repairTwoInput = $repairInput.Clone(); $repairTwoInput.repairId = 'repair-attempt-2'; $repairTwoInput.repairKind = 'evidence'; $repairTwoInput.route = 'original_author'; $repairTwoInput.targetActionId = 'review-result-action'; $repairTwoInput.expectedRevision = $repairOne.revision
+        $repairTwo = Invoke-PsJson $script:StateScript @('-Operation','record-receipt-repair','-InputPath',(New-InputPath $repairTwoInput 'repair-ledger-two'),'-StateRoot',$repairRoot)
+        Assert-Equal 0 $repairTwo.data.correctionRound 'evidence repair must not increment production correction rounds'
+        $repairThreeInput = $repairTwoInput.Clone(); $repairThreeInput.repairId = 'repair-attempt-3'; $repairThreeInput.expectedRevision = $repairTwo.revision
+        $repairThree = Invoke-PsJson $script:StateScript @('-Operation','record-receipt-repair','-InputPath',(New-InputPath $repairThreeInput 'repair-ledger-three'),'-StateRoot',$repairRoot)
+        Assert-Equal 'needs_input' $repairThree.data.decision 'third repair attempt should exhaust the default limit of two'
+        Assert-Equal 2 $repairThree.data.repairAttempts 'blocked repair must not increment the attempt count'
+        Assert-Equal 0 $repairThree.data.correctionRound 'exhausting receipt repairs must leave code rounds unchanged'
+        $snapshot = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$repairRoot)
+        Assert-Equal 2 @($snapshot.data.registry.tickets.'project:1:issue:70'.receiptRepairs.'review-result-action'.attempts).Count 'repair attempts must persist separately in state'
     }
 
     Test-Case 'capture complete Taiga pages and reconcile uncertain writes' {

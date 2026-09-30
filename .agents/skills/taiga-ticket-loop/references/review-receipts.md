@@ -2,7 +2,7 @@
 
 `review-receipt-v1.schema.json` is the authoritative review receipt contract.
 Both `workflow-state.ps1 -Operation validate-receipt` and
-`workflow-review.ps1 -Operation validate|decide` call the same validator in
+`workflow-review.ps1 -Operation validate|route|decide` call the same validator in
 `scripts/receipt-contract.ps1`. The reviewer handoff template points to this
 schema. The contract is versioned independently from the mutable workflow
 registry.
@@ -30,6 +30,37 @@ a receipt with no expected set cannot pass validation. A pass also requires all
 criteria to pass, every check to exit zero, and no unresolved blocker, critical,
 or high finding. A `changes_requested` or `blocked` receipt may preserve failed
 checks and criteria as evidence.
+
+### Re-review delta
+
+When `workflow-review.ps1 -Operation decide` receives `previousReviewedSha`,
+the receipt must include `reviewDelta` bound from that revision to its current
+`reviewedSha`. This keeps follow-up reviews tied to the change since the prior
+verdict. The reviewer lists changed paths and explicitly assesses documentation
+changes. A documentation amendment requires a distinct committed revision,
+nonempty `documentationPaths`, and a substantive `documentationAssessment`.
+Reused checks list their evidence IDs and require a `reuseJustification`;
+otherwise checks are rerun and reported as usual. An unbound or incomplete
+delta returns `needs_input` or a field-level validation error and cannot pass.
+
+### Repair routing
+
+`workflow-review.ps1 -Operation route` accepts the receipt, trusted criteria,
+stable `resultId` equal to the trusted `expectedActionId` from the pending
+review action, current repair count, and remaining wall-clock minutes. It returns an
+already-valid receipt unchanged, applies only the shared lossless
+legacy normalizations locally, or routes the malformed receipt to its original
+`actionId`. Contradictory evidence is classified as semantic and always
+requires independent review after the author returns a corrected receipt. It
+is never resolved by coordinator inference. Missing author binding, an expired
+budget, or two exhausted attempts returns `needs_input`.
+
+Persist each dispatched repair with
+`workflow-state.ps1 -Operation record-receipt-repair`. Its per-result ledger is
+separate from `correctionRound`; state requires the original result action to be
+observed and bound to the owned ticket. The default limit is two attempts,
+including format and evidence repairs. A repair does not authorize publication. The
+repaired result returns through ordinary receipt validation and review.
 
 ## Legacy adapter
 

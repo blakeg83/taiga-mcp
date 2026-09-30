@@ -23,7 +23,17 @@ Important operations are `initialize-session`, `inspect`, `claim-ticket`,
 `cancel-intent`, `reconcile-intent`, `resume-session`, and `set-heartbeat`. All
 input and output is structured JSON. Unknown critical fields, path traversal,
 invalid IDs, stale revisions, duplicate actions, invalid phase transitions, and
-terminal dispatch are rejected.
+terminal dispatch are rejected. `record-receipt-repair` also requires a stable
+result ID, unique repair ID, repair class and route; original-author routing
+must name the receipt's original action. The result ID must resolve to an
+observed action owned by the same ticket and fencing generation.
+
+`record-receipt-repair` is available only while the owned ticket is reviewing.
+It records format/evidence repairs in a per-ticket ledger with remaining
+minutes. The default `limits.maxReceiptRepairAttempts` is two and may be
+reduced to one. Its counter is independent of `correctionRound`; exhaustion or
+no remaining time returns `needs_input` and does not create another attempt.
+Existing schema-2 tickets acquire an empty repair ledger on first use.
 
 Waiting for a dependency or merge releases an execution slot but retains the
 ticket claim. Pause and cancel are two-step controls: the intent first moves

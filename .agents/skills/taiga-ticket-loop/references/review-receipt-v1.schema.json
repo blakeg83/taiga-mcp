@@ -7,6 +7,21 @@
     "verdict": { "type": "string", "enum": ["pass", "changes_requested", "blocked"] },
     "severity": { "type": "string", "enum": ["blocker", "critical", "high", "medium", "low", "info"] },
     "disposition": { "type": "string", "enum": ["open", "fixed", "rejected_accepted", "escalated"] },
+    "reviewDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromSha", "toSha", "changedPaths", "documentationChanged", "documentationPaths", "documentationAssessment", "reusedCheckIds", "reuseJustification"],
+      "properties": {
+        "fromSha": { "type": "string", "minLength": 1 },
+        "toSha": { "type": "string", "minLength": 1 },
+        "changedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "documentationChanged": { "type": "boolean" },
+        "documentationPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "documentationAssessment": { "type": "string", "minLength": 1 },
+        "reusedCheckIds": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "reuseJustification": { "type": "string" }
+      }
+    },
     "review": {
       "type": "object",
       "additionalProperties": false,
@@ -67,7 +82,8 @@
               "disposition": { "$ref": "#/$defs/disposition" }
             }
           }
-        }
+        },
+        "reviewDelta": { "$ref": "#/$defs/reviewDelta" }
       }
     }
   },

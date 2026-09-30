@@ -154,6 +154,18 @@ function Get-ReviewReceiptValidation {
     $normalized = if ($legacy) { Normalize-LegacyReviewReceipt $Receipt @($ExpectedCriteria) $normalizations $errors } else { Copy-ReceiptNode $Receipt }
     Test-ReceiptSchemaNode $normalized $schema['$defs']['review'] 'receipt' $errors $schema
 
+    if ($normalized.Contains('reviewDelta') -and $normalized.reviewDelta -is [System.Collections.IDictionary]) {
+        $delta = $normalized.reviewDelta
+        if ($delta.documentationChanged -eq $true) {
+            if ($delta.fromSha -ceq $delta.toSha) { [void]$errors.Add('receipt.reviewDelta.toSha: documentation amendments require a new committed revision') }
+            if ([string]::IsNullOrWhiteSpace([string]$delta.documentationAssessment)) { [void]$errors.Add('receipt.reviewDelta.documentationAssessment: required when documentation changed') }
+            if (@($delta.documentationPaths).Count -eq 0) { [void]$errors.Add('receipt.reviewDelta.documentationPaths: required when documentation changed') }
+        }
+        if (@($delta.reusedCheckIds).Count -gt 0 -and [string]::IsNullOrWhiteSpace([string]$delta.reuseJustification)) {
+            [void]$errors.Add('receipt.reviewDelta.reuseJustification: required when verification checks are reused')
+        }
+    }
+
     if ($null -eq $ExpectedCriteria -or @($ExpectedCriteria).Count -eq 0) {
         [void]$errors.Add('expectedCriteria: required trusted packet criteria with id and text')
     } else {

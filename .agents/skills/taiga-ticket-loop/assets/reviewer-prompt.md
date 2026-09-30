@@ -14,3 +14,13 @@ severity/disposition, evidence, location, and requested change. Keep the
 receipt's original values; the coordinator validates it and does not interpret
 the diff or add independent technical findings. A timeout or commentary is
 not a verdict.
+
+For a re-review, include `reviewDelta` bound from the prior reviewed SHA to the
+current reviewed SHA. List the paths changed since that verdict and assess any
+documentation changes explicitly. If documentation changed, the amendment must
+be present in a new commit and `documentationPaths` plus
+`documentationAssessment` must identify what you reviewed. If reusing checks,
+list their evidence IDs and explain why the changed revision does not invalidate
+them in `reuseJustification`; otherwise rerun the necessary checks. Evidence or
+receipt corrections require a fresh independent decision and must not be
+accepted solely because the author amended the receipt.

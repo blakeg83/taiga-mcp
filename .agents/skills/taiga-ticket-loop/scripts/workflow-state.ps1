@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('initialize-session', 'inspect', 'claim-ticket', 'release-ticket', 'reserve-slot', 'release-slot', 'prepare-action', 'record-observation', 'consume-result', 'transition', 'pause-intent', 'cancel-intent', 'reconcile-intent', 'resume-session', 'set-heartbeat', 'validate-receipt')]
+    [ValidateSet('initialize-session', 'inspect', 'claim-ticket', 'release-ticket', 'reserve-slot', 'release-slot', 'prepare-action', 'record-observation', 'consume-result', 'transition', 'record-receipt-repair', 'pause-intent', 'cancel-intent', 'reconcile-intent', 'resume-session', 'set-heartbeat', 'validate-receipt')]
     [string] $Operation,
     [string] $InputPath,
     [string] $Json,
@@ -430,11 +430,16 @@ function Merge-Defaults {
     $defaults = @{
         implementationProfile = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }
         reviewerProfile = @{ model = 'gpt-6.1-sol'; effort = 'high' }
-        limits = @{ maxActiveTicketsPerRepository = 2; maxWorkerTurns = 8; maxCorrectionRounds = 3; elapsedMinutes = 120 }
+        limits = @{ maxActiveTicketsPerRepository = 2; maxWorkerTurns = 8; maxCorrectionRounds = 3; maxReceiptRepairAttempts = 2; elapsedMinutes = 120 }
         completion = @{ leafDonePolicy = 'merged'; epicDonePolicy = 'all_required_stories_merged_and_accepted' }
         branchPrefix = 'codex/'; dependencyPolicy = 'wait_for_merge'; autoPush = $true; autoCreatePr = $true; autoMerge = $false; allowForcePush = $false; useSubagents = $false
     }
     foreach ($name in $defaults.Keys) { if (-not $config.ContainsKey($name)) { $config[$name] = $defaults[$name] } }
+    if ($config.limits -isnot [System.Collections.IDictionary]) { throw 'config.limits must be an object.' }
+    foreach ($name in @('maxActiveTicketsPerRepository','maxWorkerTurns','maxCorrectionRounds','maxReceiptRepairAttempts','elapsedMinutes')) {
+        if (-not $config.limits.Contains($name)) { $config.limits[$name] = $defaults.limits[$name] }
+    }
+    if ([int]$config.limits.maxReceiptRepairAttempts -lt 1 -or [int]$config.limits.maxReceiptRepairAttempts -gt 2) { throw 'limits.maxReceiptRepairAttempts must be between 1 and 2.' }
     $config.useSubagents = $false
     if ($config.autoMerge -eq $true -or $config.allowForcePush -eq $true) { throw 'Automatic merge and force-push are disabled by contract.' }
     foreach ($profileName in @('implementationProfile', 'reviewerProfile')) {
@@ -499,7 +504,7 @@ function Invoke-Claim {
     $repository = if ($InputObject.ContainsKey('repositoryIdentity')) { Require-String $InputObject 'repositoryIdentity' } elseif ($InputObject.ContainsKey('repository')) { Require-String $InputObject 'repository' } else { 'unmapped' }
     $workType = if ($InputObject.ContainsKey('workType')) { [string]$InputObject.workType } else { ($key.Split(':')[2]) }
     $parentKey = if ($InputObject.ContainsKey('parentTicketKey')) { $parentRequested = Get-TicketKey @{ ticketKey = [string]$InputObject.parentTicketKey }; Resolve-TicketKey $State $parentRequested } else { $null }
-    $ticket = [ordered]@{ ticketKey = $key; ownerSessionId = $session.sessionId; ownerGeneration = $session.ownerGeneration; workType = $workType; repositoryIdentity = $repository; repositoryPath = if ($InputObject.ContainsKey('repositoryPath')) { [IO.Path]::GetFullPath([string]$InputObject.repositoryPath) } else { $null }; parentTicketKey = $parentKey; ownedChildTicketKeys = $children; phase = 'queued'; resumePhase = $null; controlState = $null; slotReserved = $false; hostTurnsReserved = 0; correctionRound = 0; implementation = $null; review = $null; evidence = @(); lastResultCursor = $null; claimedAt = New-UtcStamp; updatedAt = New-UtcStamp }
+    $ticket = [ordered]@{ ticketKey = $key; ownerSessionId = $session.sessionId; ownerGeneration = $session.ownerGeneration; workType = $workType; repositoryIdentity = $repository; repositoryPath = if ($InputObject.ContainsKey('repositoryPath')) { [IO.Path]::GetFullPath([string]$InputObject.repositoryPath) } else { $null }; parentTicketKey = $parentKey; ownedChildTicketKeys = $children; phase = 'queued'; resumePhase = $null; controlState = $null; slotReserved = $false; hostTurnsReserved = 0; correctionRound = 0; receiptRepairs = @{}; implementation = $null; review = $null; evidence = @(); lastResultCursor = $null; claimedAt = New-UtcStamp; updatedAt = New-UtcStamp }
     $State.tickets[$key] = $ticket
     foreach ($candidate in $allKeys) { $State.ticketAliases[$candidate] = $key }
     Add-Event $State 'ticket_claimed' @{ sessionId = $session.sessionId; ticketKey = $key; childTicketKeys = $children }
@@ -639,6 +644,49 @@ function Invoke-Transition {
     return @{ Data = @{ ticketKey = $ticket.ticketKey; from = $from; to = $to; correctionRound = $ticket.correctionRound } }
 }
 
+function Invoke-RecordReceiptRepair {
+    param([hashtable] $State, [hashtable] $InputObject)
+    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','resultId','repairId','repairKind','route','targetActionId','remainingMinutes') 'record-receipt-repair'
+    Assert-Revision $State $InputObject
+    $ticket = Assert-TicketOwner $State $InputObject
+    if ($ticket.phase -ne 'reviewing') { throw 'Receipt repairs are only allowed while the ticket remains in reviewing.' }
+    $resultId = Require-String $InputObject 'resultId'; Assert-Id $resultId 'resultId'
+    if (-not $State.actions.ContainsKey($resultId)) { throw "Original review result action was not found: $resultId" }
+    $resultAction = $State.actions[$resultId]
+    if ($resultAction.ticketKey -ne $ticket.ticketKey -or $resultAction.sessionId -ne $ticket.ownerSessionId -or [long]$resultAction.ownerGeneration -ne [long]$ticket.ownerGeneration -or $resultAction.status -ne 'observed') {
+        throw 'Original review result action must be observed and bound to the owned ticket and generation.'
+    }
+    $repairId = Require-String $InputObject 'repairId'; Assert-Id $repairId 'repairId'
+    $repairKind = Require-String $InputObject 'repairKind'
+    if ($repairKind -notin @('format','evidence')) { throw 'repairKind must be format or evidence.' }
+    $route = Require-String $InputObject 'route'
+    if ($route -notin @('local_deterministic','original_author')) { throw 'route must be local_deterministic or original_author.' }
+    if ($route -eq 'local_deterministic' -and $repairKind -ne 'format') { throw 'Local deterministic repair is permitted only for lossless format normalization.' }
+    if ($route -eq 'original_author') {
+        $targetActionId = Require-String $InputObject 'targetActionId'; Assert-Id $targetActionId 'targetActionId'
+        if ($targetActionId -cne $resultId) { throw 'Repair target must be the original action that produced this result.' }
+    }
+    $remainingMinutes = Require-NonNegativeInt $InputObject 'remainingMinutes'
+    if (-not $ticket.Contains('receiptRepairs') -or $ticket.receiptRepairs -isnot [System.Collections.IDictionary]) { $ticket.receiptRepairs = @{} }
+    if (-not $ticket.receiptRepairs.Contains($resultId)) { $ticket.receiptRepairs[$resultId] = [ordered]@{ attempts = @(); exhausted = $false } }
+    $ledger = $ticket.receiptRepairs[$resultId]
+    if (@($ledger.attempts | Where-Object { $_.repairId -eq $repairId }).Count -gt 0) { throw "Receipt repair attempt already recorded: $repairId" }
+    $session = Get-Session $State $InputObject
+    $limit = [int](Get-ConfigValue $session 'limits.maxReceiptRepairAttempts' 2)
+    $used = @($ledger.attempts).Count
+    if ($remainingMinutes -le 0 -or $used -ge $limit) {
+        $ledger.exhausted = $true
+        $reason = if ($remainingMinutes -le 0) { 'elapsed_budget' } else { 'receipt_repair_limit' }
+        Add-Event $State 'receipt_repair_blocked' @{ ticketKey = $ticket.ticketKey; resultId = $resultId; reason = $reason; attempts = $used }
+        return @{ Data = @{ decision = 'needs_input'; reason = $reason; ticketKey = $ticket.ticketKey; resultId = $resultId; repairAttempts = $used; maxRepairAttempts = $limit; correctionRound = $ticket.correctionRound } }
+    }
+    $entry = [ordered]@{ repairId = $repairId; attempt = $used + 1; repairKind = $repairKind; route = $route; targetActionId = if ($route -eq 'original_author') { $targetActionId } else { $null }; recordedAt = New-UtcStamp }
+    $ledger.attempts = @($ledger.attempts) + @($entry)
+    $ledger.exhausted = ($used + 1 -ge $limit)
+    Add-Event $State 'receipt_repair_recorded' @{ ticketKey = $ticket.ticketKey; resultId = $resultId; repairId = $repairId; attempt = ($used + 1); repairKind = $repairKind; route = $route }
+    return @{ Data = @{ decision = 'repair'; ticketKey = $ticket.ticketKey; resultId = $resultId; repair = $entry; repairAttempts = ($used + 1); maxRepairAttempts = $limit; correctionRound = $ticket.correctionRound } }
+}
+
 function Invoke-PauseIntent {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','reason') 'pause-intent'; Assert-Revision $State $InputObject
@@ -751,6 +799,7 @@ function Invoke-Mutation {
         'record-observation' { return Invoke-RecordObservation $State $InputObject }
         'consume-result' { return Invoke-ConsumeResult $State $InputObject }
         'transition' { return Invoke-Transition $State $InputObject }
+        'record-receipt-repair' { return Invoke-RecordReceiptRepair $State $InputObject }
         'pause-intent' { return Invoke-PauseIntent $State $InputObject }
         'cancel-intent' { return Invoke-CancelIntent $State $InputObject }
         'reconcile-intent' { return Invoke-ReconcileIntent $State $InputObject }

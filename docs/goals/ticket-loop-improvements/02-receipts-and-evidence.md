@@ -1,6 +1,6 @@
 # 02: Make receipts deterministic and evidence durable
 
-Status: steps 1–2 implemented offline; steps 3–4 pending.
+Status: steps 1–3 implemented offline; step 4 pending.
 Prerequisites: 01 in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -38,13 +38,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 3: Separate format repair from engineering correction
 
-- [ ] Route schema errors to a local deterministic repair where lossless, otherwise to the original receipt author. Default to at most two format/evidence repair attempts per result within the existing wall-clock budget.
-- [ ] Do not increment production correction rounds for metadata-only repair. Track repairs separately; exhaustion or ambiguous content becomes needs_input rather than an infinite loop.
-- [ ] Do not automatically accept semantic changes to evidence. The reviewer verifies evidence amendments that affect acceptance; a truthful correction may invalidate an earlier pass.
-- [ ] Distinguish documentation edits from receipt edits. Documentation changes need a new commit and reviewer assessment of that delta; unchanged code checks may be reused with explicit justification.
-- [ ] **Validate:** Replay one production correction, one documentation amendment, one metadata repair, an evidence contradiction, and repair exhaustion; prove no review or budget bypass.
-- [ ] **Update documentation:** Document routing, counters, and the default two-attempt limit.
-- [ ] **Commit before the next step:** `Bound receipt repairs separately from code corrections`.
+- [x] Route schema errors to a local deterministic repair where lossless, otherwise to the original receipt author. Default to at most two format/evidence repair attempts per result within the existing wall-clock budget.
+- [x] Do not increment production correction rounds for metadata-only repair. Track repairs separately; exhaustion or ambiguous content becomes needs_input rather than an infinite loop.
+- [x] Do not automatically accept semantic changes to evidence. The reviewer verifies evidence amendments that affect acceptance; a truthful correction may invalidate an earlier pass.
+- [x] Distinguish documentation edits from receipt edits. Documentation changes need a new commit and reviewer assessment of that delta; unchanged code checks may be reused with explicit justification.
+- [x] **Validate:** The focused review and repair fixtures passed. The full harness passed 19 fixtures, including correction routing, a documentation amendment, justified check reuse, local metadata repair, contradictory evidence, wall-clock exhaustion, and the two-attempt limit. Skill validation and `git diff --check` passed.
+- [x] **Update documentation:** Documented routing, the separate repair ledger and counter, delta assessments, new documentation commits, and justified check reuse.
+- [x] **Commit before the next step:** `Bound receipt repairs separately from code corrections`.
 
 ### Step 4: Verify compatibility and file-based ingestion
 
@@ -72,6 +72,6 @@ gates unchecked; record deviations and blockers below the table.
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
 | 1 | The shared v1 validator reproduced the legacy enum mismatch and covers alias normalization, contradiction rejection, exact profile, complete ordered criteria, failed evidence, and stale SHA. `Test-Automation.ps1` passed 17 fixtures; skill validator and `git diff --check` passed. | Review receipt schema/reference, both helper entry points, reviewer prompt, review loop, skill entry, operator guide | `f41cf10` |
-| 2 | Trusted metadata and structured evidence fixtures cover raw exit 1 on intentional shutdown, genuine failures, expected-red outcomes, assertions, external log hashes, tampering/missing files, generated counts, and reported-only provenance. `Test-Automation.ps1` passed 18 fixtures; skill validation and `git diff --check` passed. | Evidence helper/state action context, storage/classification reference, worker handoffs, operator guide, fixture guide | Recorded in step 3 |
-| 3 | Pending | Pending | Pending |
+| 2 | Trusted metadata and structured evidence fixtures cover raw exit 1 on intentional shutdown, genuine failures, expected-red outcomes, assertions, external log hashes, tampering/missing files, generated counts, and reported-only provenance. `Test-Automation.ps1` passed 18 fixtures; skill validation and `git diff --check` passed. | Evidence helper/state action context, storage/classification reference, worker handoffs, operator guide, fixture guide | `8b99623` |
+| 3 | The bounded route keeps lossless normalization local, sends other format/evidence repairs to the original receipt author, and requires a fresh independent review for evidence amendments. Per-result attempts are fenced in state, capped at two, budget-aware, and do not increment code correction rounds. Documentation deltas bind prior/current revisions, require a reviewer assessment, and require reasons for reused checks. Focused fixtures and the full 19-fixture harness passed. | Receipt schema and compatibility reference, state/review loop contracts, reviewer prompt, skill, operator guide, fixture guide | Recorded in step 4 |
 | 4 | Pending | Pending | Pending |
