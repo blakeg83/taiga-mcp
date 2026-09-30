@@ -31,6 +31,15 @@ scope hash. A no-change result is explicit and cannot fabricate a PR.
 For each check, preserve its actual process exit code and log reference so the
 coordinator can bind the result to immutable evidence files.
 
+Before reviewer dispatch, prepare the implementation/review check actions that
+will produce evidence. The coordinator freezes their IDs in the reviewer
+action; when omitted from the dispatch request it discovers eligible current
+actions for the same owned ticket. A completed reviewer result can name
+additional coordinator-prepared check IDs in its top-level
+`reviewCheckActionIds` array, but every ID is revalidated against the registry,
+packet, command, criteria, and exact worker profile. Passing receipts cannot
+bind evidence by receipt prose or by the reviewer dispatch ID alone.
+
 The `gpt-6.1-sol`/`high` reviewer inspects the exact implementation checkout and
 `base..HEAD` diff. The prompt requests no source edits and a structured receipt
 following the shared [review receipt contract](review-receipts.md):
@@ -43,3 +52,10 @@ All corrections are follow-up messages to the same implementation thread. Never
 route a result by title or by a ticket reference in free text alone. Correlate
 thread/host IDs, run/action IDs, ticket key, scope hash, and reviewed SHA. A
 commentary update, timeout, or idle state is not a receipt.
+
+For a re-review, the result also carries immutable worker metadata in
+`currentCoverage`: current revision/base, environment and dependency hashes,
+the worker's `changedKind` (`unchanged`, `documentation_only`, or `code`), and
+the changed paths. The coordinator validates the binding and delegates reuse
+eligibility to `workflow-verification.ps1`; it does not infer whether source
+changes are documentation-only.

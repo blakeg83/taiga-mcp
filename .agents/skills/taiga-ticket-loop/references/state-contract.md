@@ -36,6 +36,18 @@ performs the corresponding native desktop/provider operation and later calls
 helper and can apply one requested local phase transition. Its default output
 contains references and correlation fields, not a copied receipt or transcript.
 
+Reviewer dispatches freeze the packet ID/hash, scope hash, base SHA, reviewed
+SHA, and the eligible verification action IDs in the local action target. If
+the caller omits `reviewCheckActionIds`, `prepare-dispatch` discovers the
+already-prepared implementation/review check actions owned by the same ticket
+and fencing generation. A completed review result may supply additional
+`reviewCheckActionIds`; the facade validates each against the current registry
+before accepting its receipt and persists the binding for final publication
+revalidation. A result may also carry worker-provided `currentCoverage` with
+the current revision/base, environment/dependency hashes, `changedKind`, and
+`changedPaths`; the facade validates its shape and the verification helper
+decides whether prior evidence remains reusable.
+
 Repeated preparation of an existing action ID returns `reconcile` with the
 stored action status instead of redispatching. An observed provider client ID
 without its real thread ID remains `uncertain`; it is never treated as a

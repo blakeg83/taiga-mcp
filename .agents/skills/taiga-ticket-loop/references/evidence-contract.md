@@ -32,6 +32,16 @@ command, working directory, criterion IDs, exact profile, timestamp, optional
 input coverage, log path, log hash, and byte length. Reusing an evidence ID or
 changing a record/log causes validation to fail.
 
+When a reviewer reuses prior evidence, the completed result must provide a
+trusted `currentCoverage` object containing the current revision and base,
+environment/dependency hashes, `changedKind`, and `changedPaths`. The
+coordinator passes that worker metadata to
+`workflow-verification.ps1 -Operation reuse-evidence`; stale evidence is
+eligible only when that helper returns reusable. This preserves evidence origin
+and allows successive documentation-only revisions to reuse an older record
+while rejecting environment drift, covered-file changes, and mixed
+documentation/source changes.
+
 ## Outcome classification
 
 | Prepared action kind | Outcome rule | Counts as a passing check? |

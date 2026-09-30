@@ -70,6 +70,21 @@ function Validate-EvidenceReferences {
     return $references
 }
 
+function Invoke-WorkerCoverageValidation {
+    param([object[]] $EvidenceReferences, [System.Collections.IDictionary] $CurrentCoverage)
+    if ($null -eq $CurrentCoverage) { return @() }
+    $validationPath = Join-Path ([IO.Path]::GetTempPath()) ('.ticket-loop-reuse-' + [Guid]::NewGuid().ToString('N') + '.json')
+    $references = @($EvidenceReferences | ForEach-Object { [ordered]@{ path = [string]$_.path; sha256 = [string]$_.sha256; evidenceId = [string]$_.evidenceId } })
+    $request = [ordered]@{ evidenceReferences = $references; current = $CurrentCoverage }
+    try {
+        [IO.File]::WriteAllText($validationPath, ($request | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        $lines = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'workflow-verification.ps1') -Operation reuse-evidence -InputPath $validationPath 2>&1; $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine
+        try { $response = ConvertFrom-Json -InputObject $raw -AsHashtable -Depth 100 } catch { throw "Reuse validator returned invalid JSON: $raw" }
+        if ($exitCode -ne 0 -or $response.ok -ne $true) { throw [string]$response.error.message }
+        return @($response.data.evidence)
+    } finally { if (Test-Path -LiteralPath $validationPath -PathType Leaf) { Remove-Item -LiteralPath $validationPath -Force } }
+}
+
 function Need {
     param([hashtable] $Object, [string] $Name)
     if (-not $Object.Contains($Name) -or $null -eq $Object[$Name] -or [string]::IsNullOrWhiteSpace([string]$Object[$Name])) { throw "$Name is required." }
@@ -77,7 +92,7 @@ function Need {
 }
 
 function Get-PublicationCheckBindingErrors {
-    param([System.Collections.IDictionary] $Receipt, [object[]] $EvidenceReferences, [string] $ExpectedRunId, [string] $ExpectedActionId, [string] $ExpectedTicketKey, [string] $CurrentSha, [string] $CurrentScopeHash, [string] $CurrentBaseSha, [object[]] $AllowedEvidenceActions = @(), [string[]] $RequiredCommands = @())
+    param([System.Collections.IDictionary] $Receipt, [object[]] $EvidenceReferences, [string] $ExpectedRunId, [string] $ExpectedActionId, [string] $ExpectedTicketKey, [string] $CurrentSha, [string] $CurrentScopeHash, [string] $CurrentBaseSha, [string] $ExpectedPacketHash = '', [object[]] $AllowedEvidenceActions = @(), [string[]] $RequiredCommands = @(), [object[]] $ReuseValidation = @())
     $errors = [System.Collections.Generic.List[string]]::new(); $byId = @{}
     foreach ($reference in @($EvidenceReferences)) { if ($reference.validation -eq 'immutable_record' -and -not $byId.ContainsKey([string]$reference.evidenceId)) { $byId[[string]$reference.evidenceId] = $reference.record } }
     $coveredCriteria = @{}
@@ -93,22 +108,13 @@ function Get-PublicationCheckBindingErrors {
         $reuseIds = if ($null -ne $delta -and $delta -is [System.Collections.IDictionary]) { @($delta.reusedCheckIds | ForEach-Object { [string]$_ }) } else { @() }
         $reuseKey = if ($check.Contains('checkId')) { [string]$check.checkId } else { [string]$check.evidenceId }
         $isStale = [string]$record.checkedRevision -cne [string]$CurrentSha
-        $approvedReuse = $false
-        if ($isStale -and $null -ne $binding -and $null -ne $delta -and $delta -is [System.Collections.IDictionary] -and $reuseIds -contains $reuseKey -and -not [string]::IsNullOrWhiteSpace([string]$delta.reuseJustification)) {
-            $changedPaths = if ($delta.Contains('changedPaths') -and $delta.changedPaths -isnot [string]) { @($delta.changedPaths | ForEach-Object { [string]$_ }) } else { @() }
-            $coverage = $record.coverage
-            $trustedCoverage = $binding.coverage
-            $overlap = if ($coverage -is [System.Collections.IDictionary]) { @($changedPaths | Where-Object { @($coverage.files) -contains $_ }) } else { @('missing_coverage') }
-            $environmentMatches = $coverage -is [System.Collections.IDictionary] -and $trustedCoverage -is [System.Collections.IDictionary] -and [string]$coverage.baseSha -ceq [string]$CurrentBaseSha -and [string]$coverage.environmentHash -ceq [string]$trustedCoverage.environmentHash -and [string]$coverage.dependenciesHash -ceq [string]$trustedCoverage.dependenciesHash
-            $deltaBound = [string]$delta.fromSha -ceq [string]$record.checkedRevision -and [string]$delta.toSha -ceq [string]$CurrentSha
-            $documentationOnly = $delta.documentationChanged -eq $true -and $changedPaths.Count -gt 0
-            $provenanceShape = $coverage -is [System.Collections.IDictionary] -and [string]$record.checkedRevision -ceq [string]$coverage.revision
-            if ($deltaBound -and $documentationOnly -and $overlap.Count -eq 0 -and $environmentMatches -and $provenanceShape) { $approvedReuse = $true }
-        }
+        $reuseResult = @($ReuseValidation | Where-Object { $_ -is [System.Collections.IDictionary] -and [string]$_.evidenceId -ceq [string]$record.evidenceId } | Select-Object -First 1)[0]
+        $approvedReuse = $isStale -and $null -ne $binding -and $null -ne $delta -and $delta -is [System.Collections.IDictionary] -and $reuseIds -contains $reuseKey -and -not [string]::IsNullOrWhiteSpace([string]$delta.reuseJustification) -and $null -ne $reuseResult -and $reuseResult.reusable -eq $true
         if ([string]$record.evidenceKind -cne 'check' -or $record.acceptedAsCheckPass -ne $true -or [string]$record.outcome -cne 'passed') { [void]$errors.Add("check '$($check.evidenceId)' is not a passing check record") }
         if ([string]$record.command -cne [string]$check.command) { [void]$errors.Add("check '$($check.evidenceId)' command does not match its evidence") }
         if ([long]$record.actualExitCode -ne [long]$check.exitCode -or [long]$check.exitCode -ne 0 -or ($check.Contains('passed') -and $check.passed -ne $true)) { [void]$errors.Add("check '$($check.evidenceId)' exit/pass result does not match its evidence") }
         foreach ($name in @('runId','ticketKey','scopeHash')) { $expectedValue = switch -Exact ($name) { 'runId' { $ExpectedRunId }; 'ticketKey' { $ExpectedTicketKey }; 'scopeHash' { $CurrentScopeHash } }; if ([string]$record[$name] -cne [string]$expectedValue) { [void]$errors.Add("check '$($check.evidenceId)' $name is not bound to the reviewed input") } }
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedPacketHash) -and [string]$record.packetHash -cne [string]$ExpectedPacketHash) { [void]$errors.Add("check '$($check.evidenceId)' packet hash is not bound to the reviewed assignment") }
         if (-not $approvedReuse -and [string]$record.checkedRevision -ceq [string]$CurrentSha -and $null -eq $binding -and [string]$record.actionId -cne $ExpectedActionId) { [void]$errors.Add("check '$($check.evidenceId)' action binding is not trusted") }
         if ($record.coverage -isnot [System.Collections.IDictionary] -or [string]$record.coverage.baseSha -cne $CurrentBaseSha -or (([string]$record.coverage.revision -cne $CurrentSha -or [string]$record.checkedRevision -cne $CurrentSha) -and -not $approvedReuse)) { [void]$errors.Add("check '$($check.evidenceId)' coverage is not bound to the reviewed revision and base") }
         $expectedProfile = if ($null -ne $binding) { $binding.profile } else { [ordered]@{ model = [string]$Receipt.reviewerModel; effort = [string]$Receipt.reviewerEffort } }
@@ -122,9 +128,8 @@ function Get-PublicationCheckBindingErrors {
             if (@(Compare-Object -ReferenceObject $declaredCriteria -DifferenceObject $recordCriteria).Count -gt 0) { [void]$errors.Add("check '$($check.evidenceId)' criterion coverage does not match its evidence") }
         }
         if ($null -ne $binding -and @(Compare-Object -ReferenceObject @($binding.criterionIds) -DifferenceObject $recordCriteria).Count -gt 0) { [void]$errors.Add("check '$($check.evidenceId)' criterion coverage is not bound to its trusted action") }
-        if ([string]$record.checkedRevision -cne [string]$CurrentSha -and -not $approvedReuse) {
-            [void]$errors.Add("check '$($check.evidenceId)' reuses stale evidence without approved reuse provenance")
-        }
+        if ($null -ne $ReuseValidation -and @($ReuseValidation).Count -gt 0 -and ($null -eq $reuseResult -or $reuseResult.reusable -ne $true)) { [void]$errors.Add("check '$($check.evidenceId)' is not reusable under the trusted current worker coverage") }
+        if ($isStale -and -not $approvedReuse) { [void]$errors.Add("check '$($check.evidenceId)' reuses stale evidence without validated current-input provenance") }
         if ($errors.Count -eq $checkErrorCount -and [string]$record.command -ne '') { $passingCommands[[string]$record.command] = $true }
     }
     foreach ($criterion in @($Receipt.criteria)) { if ($criterion -is [System.Collections.IDictionary] -and -not $coveredCriteria.ContainsKey([string]$criterion.id)) { [void]$errors.Add("criterion '$($criterion.id)' has no covered passing evidence") } }
@@ -213,7 +218,8 @@ try {
         $data = $validation
     } else {
         $receipt = $validation.normalizedReceipt
-        $currentSha = Need $inputObject 'currentSha'; $currentScopeHash = Need $inputObject 'currentScopeHash'; $currentBaseSha = Need $inputObject 'currentBaseSha'; $expectedRunId = Need $inputObject 'expectedRunId'; $expectedActionId = Need $inputObject 'expectedActionId'; $expectedTicketKey = Need $inputObject 'expectedTicketKey'; $round = [int]$inputObject.correctionRound; $maxRounds = if ($inputObject.Contains('maxCorrectionRounds')) { [int]$inputObject.maxCorrectionRounds } else { 3 }; $remainingMinutes = if ($inputObject.Contains('remainingMinutes')) { [int]$inputObject.remainingMinutes } else { 1 }; $allowedEvidenceActions = if ($inputObject.Contains('allowedEvidenceActions')) { @($inputObject.allowedEvidenceActions) } else { @() }; $requiredCommands = if ($inputObject.Contains('requiredCommands')) { @($inputObject.requiredCommands | ForEach-Object { [string]$_ }) } else { @() }; $unresolvedRequirements = if ($inputObject.Contains('unresolvedRequirements')) { @($inputObject.unresolvedRequirements | ForEach-Object { [string]$_ }) } else { @() }; $bindingErrors = @()
+        $currentSha = Need $inputObject 'currentSha'; $currentScopeHash = Need $inputObject 'currentScopeHash'; $currentBaseSha = Need $inputObject 'currentBaseSha'; $expectedRunId = Need $inputObject 'expectedRunId'; $expectedActionId = Need $inputObject 'expectedActionId'; $expectedTicketKey = Need $inputObject 'expectedTicketKey'; $round = [int]$inputObject.correctionRound; $maxRounds = if ($inputObject.Contains('maxCorrectionRounds')) { [int]$inputObject.maxCorrectionRounds } else { 3 }; $remainingMinutes = if ($inputObject.Contains('remainingMinutes')) { [int]$inputObject.remainingMinutes } else { 1 }; $allowedEvidenceActions = if ($inputObject.Contains('allowedEvidenceActions')) { @($inputObject.allowedEvidenceActions) } else { @() }; $requiredCommands = if ($inputObject.Contains('requiredCommands')) { @($inputObject.requiredCommands | ForEach-Object { [string]$_ }) } else { @() }; $unresolvedRequirements = if ($inputObject.Contains('unresolvedRequirements')) { @($inputObject.unresolvedRequirements | ForEach-Object { [string]$_ }) } else { @() }; $expectedPacketHash = if ($inputObject.Contains('packetHash')) { [string]$inputObject.packetHash } else { '' }; $bindingErrors = @()
+        $reuseValidation = if ($inputObject.Contains('currentCoverage')) { @(Invoke-WorkerCoverageValidation $evidenceReferences $inputObject.currentCoverage) } else { @() }
         $deltaError = $null
         if ($inputObject.Contains('previousReviewedSha')) {
             $previousReviewedSha = Need $inputObject 'previousReviewedSha'
@@ -233,18 +239,19 @@ try {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'durable_evidence_required_for_publication'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $unresolvedRequirements.Count -gt 0) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'unresolved_requirements'; reviewedSha = $currentSha; unresolvedRequirements = $unresolvedRequirements }
-        } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $strictEvidence -and (($bindingErrors = @(Get-PublicationCheckBindingErrors $receipt $evidenceReferences $expectedRunId $expectedActionId $expectedTicketKey $currentSha $currentScopeHash $currentBaseSha $allowedEvidenceActions $requiredCommands)).Count -gt 0)) {
+        } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $strictEvidence -and (($bindingErrors = @(Get-PublicationCheckBindingErrors $receipt $evidenceReferences $expectedRunId $expectedActionId $expectedTicketKey $currentSha $currentScopeHash $currentBaseSha $expectedPacketHash $allowedEvidenceActions $requiredCommands $reuseValidation)).Count -gt 0)) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'review_checks_are_not_bound_to_passing_review_evidence'; reviewedSha = $currentSha; bindingErrors = $bindingErrors }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0) {
             $data = [ordered]@{ decision = 'publish'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'changes_requested' -and $round -lt $maxRounds -and $remainingMinutes -gt 0) {
-            $data = [ordered]@{ decision = 'correct'; nextRound = $round + 1; findings = @($receipt.findings) }
+            $data = [ordered]@{ decision = 'correct'; nextRound = $round + 1; findings = @($receipt.findings); reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'blocked') {
-            $data = [ordered]@{ decision = 'needs_input'; reason = 'review_blocked' }
+            $data = [ordered]@{ decision = 'needs_input'; reason = 'review_blocked'; reviewedSha = $currentSha }
         } else {
             $data = [ordered]@{ decision = 'needs_input'; reason = if ($round -ge $maxRounds) { 'correction_round_limit' } else { 'elapsed_budget_or_unresolved_findings' } }
         }
     }
+    if ($Operation -eq 'decide' -and $data -is [System.Collections.IDictionary]) { $data.verdict = [string]$receipt.verdict; $data.currentSha = $currentSha }
     if ($data -is [System.Collections.IDictionary]) {
         $data.evidenceReferences = $evidenceReferences
         if ($inputObject.Contains('receiptReference')) { $data.receiptReference = $inputObject.receiptReference }

@@ -136,12 +136,22 @@ function Read-ValidatedPacket {
 }
 
 function Get-TrustedEvidenceBindings {
-    param([System.Collections.IDictionary] $Action, [System.Collections.IDictionary] $Inspection, [System.Collections.IDictionary] $Owner, [System.Collections.IDictionary] $Packet)
-    if ($Action.target -isnot [System.Collections.IDictionary] -or -not $Action.target.Contains('reviewCheckActionIds')) { return @() }
-    if ($Action.target.reviewCheckActionIds -is [string] -or $Action.target.reviewCheckActionIds -isnot [System.Collections.IEnumerable]) { throw 'reviewCheckActionIds must be an array.' }
+    param([System.Collections.IDictionary] $Action, [System.Collections.IDictionary] $Inspection, [System.Collections.IDictionary] $Owner, [System.Collections.IDictionary] $Packet, [System.Collections.IDictionary] $Result = $null)
+    $targetIds = if ($Action.target -is [System.Collections.IDictionary] -and $Action.target.Contains('reviewCheckActionIds')) { @($Action.target.reviewCheckActionIds) } else { @() }
+    $resultIds = if ($null -ne $Result -and $Result.Contains('reviewCheckActionIds')) { @($Result.reviewCheckActionIds) } else { @() }
+    if ($Action.target -is [System.Collections.IDictionary] -and $Action.target.Contains('reviewCheckActionIds') -and $Action.target.reviewCheckActionIds -is [string]) { throw 'reviewCheckActionIds must be an array.' }
+    if ($null -ne $Result -and $Result.Contains('reviewCheckActionIds') -and $Result.reviewCheckActionIds -is [string]) { throw 'Worker reviewCheckActionIds must be an array.' }
+    if ($targetIds.Count -gt 0 -and $resultIds.Count -gt 0) {
+        $missingTargetIds = @($targetIds | ForEach-Object { [string]$_ } | Where-Object { @($resultIds | ForEach-Object { [string]$_ }) -notcontains $_ })
+        if ($missingTargetIds.Count -gt 0) { throw 'Worker reviewCheckActionIds omit a frozen reviewer action binding.' }
+    }
+    $actionIds = @()
+    if ($targetIds.Count -gt 0) { $actionIds = @($targetIds) + @($resultIds | Where-Object { @($targetIds | ForEach-Object { [string]$_ }) -notcontains [string]$_ }) } else { $actionIds = @($resultIds) }
+    if ($actionIds.Count -eq 0) { return @() }
+    if ($actionIds -is [string] -or $actionIds -isnot [System.Collections.IEnumerable]) { throw 'reviewCheckActionIds must be an array.' }
     $session = $Inspection.data.registry.sessions[[string]$Owner.sessionId]
     $bindings = @()
-    foreach ($actionIdValue in @($Action.target.reviewCheckActionIds)) {
+    foreach ($actionIdValue in @($actionIds)) {
         $actionId = [string]$actionIdValue
         if ([string]::IsNullOrWhiteSpace($actionId)) { throw 'reviewCheckActionIds cannot contain blank values.' }
         $checkAction = $Inspection.data.registry.actions[$actionId]
@@ -173,8 +183,22 @@ function Invoke-ReviewDecision {
     $now = [DateTimeOffset]::Parse([string]$PacketInfo.nowUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
     $remainingMinutes = [Math]::Max(0, [int][Math]::Ceiling(($deadline - $now).TotalMinutes))
     $maxRounds = if ($session.config.limits.Contains('maxCorrectionRounds')) { [int]$session.config.limits.maxCorrectionRounds } else { 3 }
-    $evidenceBindings = Get-TrustedEvidenceBindings $Action $inspection $Owner $PacketInfo.value
-    $review = [ordered]@{ receiptPath = $receipt.path; receiptSha256 = $receipt.sha256; expectedCriteria = @($PacketInfo.value.criteria); requiredCommands = @($PacketInfo.value.requiredCommands); unresolvedRequirements = @($PacketInfo.value.unresolvedRequirements); allowedEvidenceActions = $evidenceBindings; currentSha = [string]$trustedRepository.currentSha; currentScopeHash = [string]$PacketInfo.value.scopeHash; currentBaseSha = [string]$trustedRepository.baseSha; expectedRunId = [string]$PacketInfo.value.runId; expectedActionId = [string]$Result.actionId; expectedTicketKey = [string]$Owner.ticketKey; correctionRound = [int]$ticket.correctionRound; remainingMinutes = $remainingMinutes; maxCorrectionRounds = $maxRounds }
+    $targetPacketBindings = [ordered]@{ packetId = [string]$PacketInfo.value.packetId; packetHash = [string]$PacketInfo.value.packetHash; scopeHash = [string]$PacketInfo.value.scopeHash; baseSha = [string]$PacketInfo.value.repository.baseSha }
+    foreach ($name in @('packetId','packetHash','scopeHash','baseSha')) { if ($Action.target -isnot [System.Collections.IDictionary] -or -not $Action.target.Contains($name) -or [string]$Action.target[$name] -cne [string]$targetPacketBindings[$name]) { throw "The prepared reviewer action is not bound to the supplied packet $name." } }
+    $evidenceBindings = Get-TrustedEvidenceBindings $Action $inspection $Owner $PacketInfo.value $Result
+    $currentCoverage = if ($Result.Contains('currentCoverage')) { $Result.currentCoverage } elseif ($InputObject.Contains('currentCoverage')) { $InputObject.currentCoverage } else { $null }
+    if ($null -ne $currentCoverage) {
+        if ($currentCoverage -isnot [System.Collections.IDictionary]) { throw 'currentCoverage must be an object.' }
+        foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','changedKind','changedPaths')) { if (-not $currentCoverage.Contains($name)) { throw "currentCoverage.$name is required." } }
+        if ([string]$currentCoverage.revision -cne [string]$trustedRepository.currentSha -or [string]$currentCoverage.baseSha -cne [string]$PacketInfo.value.repository.baseSha) { throw 'currentCoverage is not bound to the reviewed checkout.' }
+        if ([string]$currentCoverage.changedKind -notin @('unchanged','documentation_only','code')) { throw 'currentCoverage.changedKind is not supported.' }
+        if ($currentCoverage.changedPaths -is [string] -or $currentCoverage.changedPaths -isnot [System.Collections.IEnumerable]) { throw 'currentCoverage.changedPaths must be an array.' }
+        $coveragePaths = @($currentCoverage.changedPaths | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_)) { throw 'currentCoverage.changedPaths entries must be nonblank.' }; [string]$_ })
+        if ($currentCoverage.changedKind -eq 'documentation_only' -and $coveragePaths.Count -eq 0) { throw 'documentation_only currentCoverage must identify changed paths.' }
+        if ([string]::IsNullOrWhiteSpace([string]$currentCoverage.environmentHash) -or [string]::IsNullOrWhiteSpace([string]$currentCoverage.dependenciesHash)) { throw 'currentCoverage environment and dependency hashes must be nonblank.' }
+    }
+    $review = [ordered]@{ receiptPath = $receipt.path; receiptSha256 = $receipt.sha256; expectedCriteria = @($PacketInfo.value.criteria); requiredCommands = @($PacketInfo.value.requiredCommands); unresolvedRequirements = @($PacketInfo.value.unresolvedRequirements); packetHash = [string]$PacketInfo.value.packetHash; allowedEvidenceActions = $evidenceBindings; currentSha = [string]$trustedRepository.currentSha; currentScopeHash = [string]$PacketInfo.value.scopeHash; currentBaseSha = [string]$trustedRepository.baseSha; expectedRunId = [string]$PacketInfo.value.runId; expectedActionId = [string]$Result.actionId; expectedTicketKey = [string]$Owner.ticketKey; correctionRound = [int]$ticket.correctionRound; remainingMinutes = $remainingMinutes; maxCorrectionRounds = $maxRounds }
+    if ($null -ne $currentCoverage) { $review.currentCoverage = $currentCoverage }
     if ($Action.target.Contains('previousReviewedSha') -and -not [string]::IsNullOrWhiteSpace([string]$Action.target.previousReviewedSha)) { $review.previousReviewedSha = [string]$Action.target.previousReviewedSha }
     if ($Result.Contains('previousReviewedSha') -and $Action.target.Contains('previousReviewedSha') -and [string]$Result.previousReviewedSha -cne [string]$Action.target.previousReviewedSha) { throw 'Worker previousReviewedSha does not match the frozen reviewer action.' }
     if ($Result.Contains('evidenceReferences')) { $review.evidenceReferences = $Result.evidenceReferences; if ($Result.Contains('evidenceStateRoot')) { $review.evidenceStateRoot = [string]$Result.evidenceStateRoot } }
@@ -196,7 +220,7 @@ function Invoke-AcceptResult {
     foreach ($name in @('cursor','actionId','workerId','status')) { Need $result $name | Out-Null }
     $inspection = Get-Inspection; $revision = [long]$inspection.revision
     $action = $inspection.data.registry.actions[[string]$result.actionId]
-    if ($null -eq $action) { throw 'Worker result action was not prepared for this ticket.' }
+    if ($null -eq $action) { throw "Worker result action was not prepared for this ticket: $([string]$result.actionId)." }
     if ([string]$action.ticketKey -cne [string]$owner.ticketKey -or [string]$action.sessionId -cne [string]$owner.sessionId -or [string]$action.target.workerId -cne [string]$result.workerId) { throw 'Worker result is not bound to the prepared ticket action and worker.' }
     if ($result.status -eq 'blocked') { $decision = 'needs_input' }
     elseif ($result.status -ne 'completed') { $decision = 'wait' }
@@ -216,9 +240,23 @@ function Invoke-AcceptResult {
     $reason = if ($result.Contains('reason')) { [string]$result.reason } else { "worker_$($result.status)" }
     $phase = switch ($decision) { 'publish' { 'publishing' }; 'correct' { 'correcting' }; 'needs_input' { if ($result.Contains('nextPhase')) { [string]$result.nextPhase } else { 'needs_input' } }; default { if ($decision -eq 'review' -and $result.Contains('nextPhase') -and [string]$result.nextPhase -in @('preparing','implementing','reviewing')) { [string]$result.nextPhase } else { $null } } }
     if ($decision -eq 'needs_input' -and $null -ne $phase -and $phase -ne 'needs_input') { $phase = 'needs_input' }
-    $stateResultPayload = [ordered]@{ resultId = if ($result.Contains('resultId')) { [string]$result.resultId } else { [string]$result.cursor }; actionId = [string]$result.actionId; workerId = [string]$result.workerId; status = [string]$result.status; resultReference = $resultRead.reference; summary = if ($result.Contains('summary')) { [string]$result.summary } else { $null }; decision = $decision; routeValidated = if ($decision -eq 'publish') { 'review_publish' } else { 'derived_from_validated_result' } }
-    if ($decision -eq 'publish') { $stateResultPayload.reviewedSha = [string]$review.reviewedSha; $stateResultPayload.scopeHash = [string]$resultPacket.value.scopeHash; $stateResultPayload.baseSha = [string]$resultPacket.value.repository.baseSha; $stateResultPayload.packetHash = [string]$resultPacket.value.packetHash; $stateResultPayload.receiptReference = $result.receiptReference; $stateResultPayload.evidenceReferences = if ($result.Contains('evidenceReferences')) { $result.evidenceReferences } else { @() }; $stateResultPayload.evidenceStateRoot = if ($result.Contains('evidenceStateRoot')) { [string]$result.evidenceStateRoot } else { $null } }
-    $stateResult = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = $revision; ticketKey = $owner.ticketKey; cursor = [string]$result.cursor; actionId = [string]$result.actionId; workerId = [string]$result.workerId; decision = $decision; toPhase = $phase; reason = $reason; routeValidated = if ($decision -eq 'publish') { 'review_publish' } else { 'derived_from_validated_result' }; result = $stateResultPayload }
+    $hasReview = $result.Contains('receiptReference')
+    $routeValidated = if ($decision -eq 'publish') { 'review_publish' } elseif ($hasReview) { 'review_verdict' } else { 'derived_from_validated_result' }
+    $stateResultPayload = [ordered]@{ resultId = if ($result.Contains('resultId')) { [string]$result.resultId } else { [string]$result.cursor }; actionId = [string]$result.actionId; workerId = [string]$result.workerId; status = [string]$result.status; resultReference = $resultRead.reference; summary = if ($result.Contains('summary')) { [string]$result.summary } else { $null }; decision = $decision; routeValidated = $routeValidated }
+    if ($hasReview) {
+        $stateResultPayload.reviewedSha = [string]$review.reviewedSha
+        $stateResultPayload.reviewAssessmentBound = ([string]$review.reviewedSha -cne '' -and [string]$review.reviewedSha -ceq [string]$review.currentSha)
+        $stateResultPayload.reviewVerdict = [string]$review.verdict
+        $stateResultPayload.scopeHash = [string]$resultPacket.value.scopeHash
+        $stateResultPayload.baseSha = [string]$resultPacket.value.repository.baseSha
+        $stateResultPayload.packetHash = [string]$resultPacket.value.packetHash
+        $stateResultPayload.receiptReference = $result.receiptReference
+        $stateResultPayload.evidenceReferences = if ($result.Contains('evidenceReferences')) { $result.evidenceReferences } else { @() }
+        $stateResultPayload.evidenceStateRoot = if ($result.Contains('evidenceStateRoot')) { [string]$result.evidenceStateRoot } else { $null }
+        if ($result.Contains('reviewCheckActionIds')) { $stateResultPayload.reviewCheckActionIds = @($result.reviewCheckActionIds | ForEach-Object { [string]$_ }) }
+        if ($result.Contains('currentCoverage')) { $stateResultPayload.currentCoverage = $result.currentCoverage }
+    }
+    $stateResult = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = $revision; ticketKey = $owner.ticketKey; cursor = [string]$result.cursor; actionId = [string]$result.actionId; workerId = [string]$result.workerId; decision = $decision; toPhase = $phase; reason = $reason; routeValidated = $routeValidated; result = $stateResultPayload }
     $accepted = Invoke-State 'accept-result' $stateResult
     return [ordered]@{ phase = $phase; decision = $decision; reason = $reason; actionId = [string]$result.actionId; workerId = [string]$result.workerId; requiredReferences = @($resultRead.reference) + @($result.receiptReference) + @($result.evidenceReferences); changedFields = @($accepted.data.changedFields); revision = [long]$accepted.revision }
 }
@@ -226,7 +264,7 @@ function Invoke-AcceptResult {
 function Get-PreviousReviewedSha {
     param([System.Collections.IDictionary] $Inspection, [System.Collections.IDictionary] $Owner)
     $prior = @($Inspection.data.registry.actions.Values | Where-Object {
-        $_.ticketKey -ceq $Owner.ticketKey -and $_.sessionId -ceq $Owner.sessionId -and [long]$_.ownerGeneration -eq [long]$Owner.ownerGeneration -and $_.result -is [System.Collections.IDictionary] -and [string]$_.result.routeValidated -ceq 'review_publish' -and -not [string]::IsNullOrWhiteSpace([string]$_.result.reviewedSha)
+        $_.ticketKey -ceq $Owner.ticketKey -and $_.sessionId -ceq $Owner.sessionId -and [long]$_.ownerGeneration -eq [long]$Owner.ownerGeneration -and $_.result -is [System.Collections.IDictionary] -and [string]$_.result.routeValidated -in @('review_publish','review_verdict') -and $_.result.reviewAssessmentBound -eq $true -and [string]$_.result.reviewVerdict -in @('pass','changes_requested','blocked') -and -not [string]::IsNullOrWhiteSpace([string]$_.result.reviewedSha)
     } | Sort-Object observedAt -Descending | Select-Object -First 1)[0]
     if ($null -eq $prior) { return $null }
     return [string]$prior.result.reviewedSha
@@ -291,9 +329,13 @@ function Invoke-PrepareExternal {
         if ($InputObject.reviewCheckActionIds -is [string] -or $InputObject.reviewCheckActionIds -isnot [System.Collections.IEnumerable]) { throw 'reviewCheckActionIds must be an array.' }
         $reviewCheckActionIds = @($InputObject.reviewCheckActionIds | ForEach-Object { [string]$_ })
         if (@($reviewCheckActionIds | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { throw 'reviewCheckActionIds cannot contain blank values.' }
+    } elseif ($ActionKind -eq 'worker_dispatch' -and $requiresReviewedSha) {
+        $reviewCheckActionIds = @($existingInspection.data.registry.actions.Values | Where-Object {
+            $_.ticketKey -ceq $owner.ticketKey -and $_.sessionId -ceq $owner.sessionId -and [long]$_.ownerGeneration -eq [long]$owner.ownerGeneration -and [string]$_.status -in @('pending','observed') -and [string]$_.kind -in @('implementation_check','review_check')
+        } | ForEach-Object { [string]$_.actionId } | Sort-Object)
     }
     $schemaPath = Join-Path $PSScriptRoot '..\references\review-receipt-v1.schema.json'
-    $replacements = @{ packetPath = $packet.path; packetHash = [string]$packetValue.packetHash; packetFileSha256 = $packet.sha256; packetId = [string]$packetValue.packetId; actionId = $actionId; workerId = $workerId; repositoryPath = $repositoryPath; reviewedSha = $reviewedSha; schemaPath = [IO.Path]::GetFullPath($schemaPath) }
+    $replacements = @{ packetPath = $packet.path; packetHash = [string]$packetValue.packetHash; packetFileSha256 = $packet.sha256; packetId = [string]$packetValue.packetId; actionId = $actionId; workerId = $workerId; repositoryPath = $repositoryPath; reviewedSha = $reviewedSha; reviewCheckActionIds = ($reviewCheckActionIds -join ','); schemaPath = [IO.Path]::GetFullPath($schemaPath) }
     $prompt = $template
     foreach ($name in $replacements.Keys) { $prompt = $prompt.Replace('{{' + $name + '}}', [string]$replacements[$name]) }
     if ($prompt -match '\{\{[^}]+\}\}') { throw 'Prompt contains unresolved placeholders after trusted packet rendering.' }

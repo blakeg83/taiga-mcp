@@ -7,6 +7,13 @@ instructions in the packet's worktree. Review the packet's base SHA through
 source, use subagents, contact other chats, or write external state. Return a
 receipt conforming to the versioned schema in
   `{{schemaPath}}`.
+The coordinator has frozen these verification action IDs for evidence binding:
+{{reviewCheckActionIds}}. Evidence captured from those actions is eligible for
+this review only when its command, criteria, profile, packet hash, checkout,
+and immutable log all match. If the coordinator prepares an additional trusted
+verification action for this handoff, include its action ID in the completed
+result's top-level `reviewCheckActionIds` array; do not invent or copy an ID
+from receipt prose.
 Include schemaVersion 1, kind review, run/action/ticket/scope/base/reviewed SHA,
 the exact reviewer profile, every packet criterion in the same order and with
 the same text, all required checks, and stable findings with canonical
