@@ -1,6 +1,6 @@
 # Goal 04: Implement revision-bound review and correction rules
 
-Status: not started.
+Status: implemented offline; revision-bound review and correction fixtures pass.
 
 ## Objective
 
