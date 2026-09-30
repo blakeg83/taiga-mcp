@@ -84,20 +84,20 @@ explicitly separate.
 
 ## Release acceptance
 
-- [ ] Coordinator scenario traces contain no production-source investigation,
+- [x] Coordinator scenario traces contain no production-source investigation,
   diff interpretation, test execution, or independent technical findings.
-- [ ] Workers retain responsibility for verification and correctness; required
+- [x] Workers retain responsibility for verification and correctness; required
   checks, uncertain writes, stale reviews, and unresolved defects still block.
-- [ ] Unchanged waits do not trigger worker messages, source reads, repeated
+- [x] Unchanged waits do not trigger worker messages, source reads, repeated
   full transcripts, or repeated state mutations.
-- [ ] Valid results advance with compact file references and deterministic
+- [x] Valid results advance with compact file references and deterministic
   decisions; no model-authored copy of an entire receipt is necessary.
-- [ ] Documentation/evidence amendments have bounded routing and preserve
+- [x] Documentation/evidence amendments have bounded routing and preserve
   truthful history without consuming production correction rounds.
-- [ ] Reports separate elapsed time, cached/uncached usage, model profiles,
+- [x] Reports separate elapsed time, cached/uncached usage, model profiles,
   estimates, and unknown cost. No raw-token-only optimization gate exists.
-- [ ] Existing concurrency, pause/recovery, PR, and epic fixtures remain green.
-- [ ] Offline implementation and actual-host verification are reported separately.
+- [x] Existing concurrency, pause/recovery, PR, and epic fixtures remain green.
+- [x] Offline implementation and actual-host verification are reported separately.
 - [ ] An authorized comparison uses equivalent task scope and acceptance;
   no savings or quality equivalence are claimed before measurement.
 
