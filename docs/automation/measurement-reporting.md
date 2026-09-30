@@ -10,9 +10,11 @@ Reasoning is counted inside output only when the source contract says it is;
 the report records that assumption. An API estimate is never applied to a
 ChatGPT allowance.
 
-Usage snapshots must include a stable stream ID. Deltas are emitted only inside
-the selected start/end window; missing boundary baselines and counter resets
-remain unknown, and later samples are reported but not attributed to the run.
+Usage snapshots must include a stable stream ID, with an explicit legacy
+single-stream adapter for unambiguous old exports. Exact start-boundary samples
+are baselines; intervals straddling the start without one remain unknown.
+Missing baselines and counter resets remain unknown, and later samples are
+reported but not attributed to the run.
 Long timing runs use the append-only audit stream after recent-registry
 eviction and correlate dispatch/observation/receipt events by action and worker
 when possible.

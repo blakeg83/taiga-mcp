@@ -156,14 +156,15 @@ function Invoke-ReuseEvidence {
     if (-not $InputObject.Contains('evidenceReferences') -or $InputObject.evidenceReferences -is [string]) { throw 'evidenceReferences must be an array.' }
     if (-not $InputObject.Contains('current')) { throw 'current input coverage is required.' }
     $current = $InputObject.current; $results = @(); $reusable = $true
-    foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','changedKind','changedPaths')) { Need $current $name | Out-Null }
-    if ($current.changedPaths -is [string] -or $current.changedPaths -isnot [System.Collections.IEnumerable]) { throw 'current.changedPaths must be an array.' }
+    foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','changedKind')) { Need $current $name | Out-Null }
+    if (-not $current.Contains('changedPaths') -or $current.changedPaths -is [string] -or $current.changedPaths -isnot [System.Collections.IEnumerable]) { throw 'current.changedPaths must be an array.' }
+    $currentChangedPaths = @($current.changedPaths | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_)) { throw 'current.changedPaths entries must be nonblank.' }; [string]$_ })
     foreach ($reference in @($InputObject.evidenceReferences)) {
         $item = Read-EvidenceReference $reference; $record = $item.record; $coverage = if ($record.Contains('coverage')) { $record.coverage } else { $null }; $reason = 'exact_revision'; $canReuse = $false
         $coverageRevisionMatches = $null -ne $coverage -and [string]$record.checkedRevision -ceq [string]$coverage.revision -and [string]$coverage.revision -ceq [string]$current.revision
         $environmentMatches = $null -ne $coverage -and [string]$coverage.baseSha -ceq [string]$current.baseSha -and [string]$coverage.environmentHash -ceq [string]$current.environmentHash -and [string]$coverage.dependenciesHash -ceq [string]$current.dependenciesHash
         if ($coverageRevisionMatches -and $environmentMatches) { $canReuse = $true }
-        elseif ($null -ne $coverage -and $current.changedKind -eq 'documentation_only' -and $environmentMatches) { $overlap = @($current.changedPaths | Where-Object { @($coverage.files) -contains [string]$_ }); if ($overlap.Count -eq 0) { $canReuse = $true; $reason = 'documentation_only_inputs_unchanged' } }
+        elseif ($null -ne $coverage -and [string]$record.checkedRevision -ceq [string]$coverage.revision -and $current.changedKind -eq 'documentation_only' -and $environmentMatches) { $overlap = @($currentChangedPaths | Where-Object { @($coverage.files) -contains [string]$_ }); if ($overlap.Count -eq 0) { $canReuse = $true; $reason = 'documentation_only_inputs_unchanged' } }
         if (-not $canReuse) { $reusable = $false; $reason = if ($null -eq $coverage) { 'missing_provenance' } else { 'changed_inputs' } }
         $results += [ordered]@{ evidenceId = [string]$record.evidenceId; reusable = $canReuse; reason = $reason; originalActionId = [string]$record.actionId; checkedRevision = [string]$record.checkedRevision; capturedAtUtc = if ($null -ne $item.capturedAtUtcRaw) { $item.capturedAtUtcRaw } else { [string]$record.capturedAtUtc }; provenance = $coverage }
     }

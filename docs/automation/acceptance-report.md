@@ -1,15 +1,16 @@
 # Ticket-loop improvement acceptance
 
 Offline acceptance is green on the sanitized fixtures and the full PowerShell
-harness. It covers receipt compatibility, immutable evidence, compact dispatch
-and quiet waits, worker-owned verification, usage/cost separation, migration
-boundaries, and replay of the audited failure classes.
+harness. It covers receipt compatibility, immutable evidence, trusted
+publication acceptance, compact dispatch and quiet waits, worker-owned
+verification, usage/cost separation, migration boundaries, and helper-integrated
+replay of the audited failure classes.
 
 Final offline validation was run from the TaigaMCP repository on 2026-09-30:
 
 ```text
 pwsh -NoProfile -File tests/automation/Test-Automation.ps1
-  Passed 33 automation fixtures; 0 failed
+  Passed 34 automation fixtures; 0 failed
 python C:\Users\Blake\.codex\skills\.system\skill-creator\scripts\quick_validate.py .agents/skills/taiga-ticket-loop
   valid
 git diff --check

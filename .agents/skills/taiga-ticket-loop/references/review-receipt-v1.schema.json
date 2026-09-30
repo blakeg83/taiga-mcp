@@ -61,11 +61,13 @@
             "additionalProperties": false,
             "required": ["command", "exitCode", "evidence"],
             "properties": {
+              "checkId": { "type": "string", "minLength": 1 },
               "command": { "type": "string", "minLength": 1 },
               "exitCode": { "type": "integer", "minimum": 0 },
               "evidence": { "type": "string", "minLength": 1 },
               "passed": { "type": "boolean" },
-              "evidenceId": { "type": "string", "minLength": 1 }
+              "evidenceId": { "type": "string", "minLength": 1 },
+              "criterionIds": { "type": "array", "items": { "type": "string", "minLength": 1 } }
             }
           }
         },

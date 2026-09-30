@@ -76,6 +76,40 @@ function Need {
     return [string]$Object[$Name]
 }
 
+function Get-PublicationCheckBindingErrors {
+    param([System.Collections.IDictionary] $Receipt, [object[]] $EvidenceReferences, [string] $ExpectedRunId, [string] $ExpectedActionId, [string] $ExpectedTicketKey, [string] $CurrentSha, [string] $CurrentScopeHash, [string] $CurrentBaseSha)
+    $errors = [System.Collections.Generic.List[string]]::new(); $byId = @{}
+    foreach ($reference in @($EvidenceReferences)) { if ($reference.validation -eq 'immutable_record' -and -not $byId.ContainsKey([string]$reference.evidenceId)) { $byId[[string]$reference.evidenceId] = $reference.record } }
+    $coveredCriteria = @{}
+    $checks = @($Receipt.checks)
+    foreach ($check in $checks) {
+        if ($check -isnot [System.Collections.IDictionary] -or -not $check.Contains('evidenceId') -or -not $byId.ContainsKey([string]$check.evidenceId)) { [void]$errors.Add('check evidenceId is not bound to an immutable evidence record'); continue }
+        $record = $byId[[string]$check.evidenceId]
+        $delta = if ($Receipt.Contains('reviewDelta')) { $Receipt.reviewDelta } else { $null }
+        $reuseIds = if ($null -ne $delta -and $delta -is [System.Collections.IDictionary]) { @($delta.reusedCheckIds | ForEach-Object { [string]$_ }) } else { @() }
+        $reuseKey = if ($check.Contains('checkId')) { [string]$check.checkId } else { [string]$check.evidenceId }
+        $approvedReuse = [string]$record.checkedRevision -cne [string]$CurrentSha -and $reuseIds -contains $reuseKey -and $null -ne $delta -and -not [string]::IsNullOrWhiteSpace([string]$delta.reuseJustification)
+        if ([string]$record.evidenceKind -cne 'check' -or $record.acceptedAsCheckPass -ne $true -or [string]$record.outcome -cne 'passed') { [void]$errors.Add("check '$($check.evidenceId)' is not a passing check record") }
+        if ([string]$record.command -cne [string]$check.command) { [void]$errors.Add("check '$($check.evidenceId)' command does not match its evidence") }
+        if ([long]$record.actualExitCode -ne [long]$check.exitCode -or [long]$check.exitCode -ne 0 -or ($check.Contains('passed') -and $check.passed -ne $true)) { [void]$errors.Add("check '$($check.evidenceId)' exit/pass result does not match its evidence") }
+        foreach ($name in @('runId','actionId','ticketKey','scopeHash')) { $expectedValue = switch -Exact ($name) { 'runId' { $ExpectedRunId }; 'actionId' { $ExpectedActionId }; 'ticketKey' { $ExpectedTicketKey }; 'scopeHash' { $CurrentScopeHash } }; if (-not $approvedReuse -or $name -in @('ticketKey','scopeHash')) { if ([string]$record[$name] -cne [string]$expectedValue) { [void]$errors.Add("check '$($check.evidenceId)' $name is not bound to the reviewed input") } } }
+        if ($record.coverage -isnot [System.Collections.IDictionary] -or [string]$record.coverage.baseSha -cne $CurrentBaseSha -or (([string]$record.coverage.revision -cne $CurrentSha -or [string]$record.checkedRevision -cne $CurrentSha) -and -not $approvedReuse)) { [void]$errors.Add("check '$($check.evidenceId)' coverage is not bound to the reviewed revision and base") }
+        if ($record.profile -isnot [System.Collections.IDictionary] -or [string]$record.profile.model -cne [string]$Receipt.reviewerModel -or [string]$record.profile.effort -cne [string]$Receipt.reviewerEffort) { [void]$errors.Add("check '$($check.evidenceId)' reviewer profile is not bound to the receipt") }
+        $recordCriteria = @($record.criterionIds)
+        if ($recordCriteria.Count -eq 0) { [void]$errors.Add("check '$($check.evidenceId)' has no criterion coverage") }
+        foreach ($criterionId in $recordCriteria) { $coveredCriteria[[string]$criterionId] = $true }
+        if ($check.Contains('criterionIds')) {
+            $declaredCriteria = @($check.criterionIds | ForEach-Object { [string]$_ })
+            if (@(Compare-Object -ReferenceObject $declaredCriteria -DifferenceObject $recordCriteria).Count -gt 0) { [void]$errors.Add("check '$($check.evidenceId)' criterion coverage does not match its evidence") }
+        }
+        if ([string]$record.checkedRevision -cne [string]$CurrentSha -and -not $approvedReuse) {
+            [void]$errors.Add("check '$($check.evidenceId)' reuses stale evidence without approved reuse provenance")
+        }
+    }
+    foreach ($criterion in @($Receipt.criteria)) { if ($criterion -is [System.Collections.IDictionary] -and -not $coveredCriteria.ContainsKey([string]$criterion.id)) { [void]$errors.Add("criterion '$($criterion.id)' has no covered passing evidence") } }
+    return @($errors)
+}
+
 function Get-RepairRoute {
     param([hashtable] $InputObject, [object] $Validation)
 
@@ -175,8 +209,8 @@ try {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'elapsed_budget'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and -not $strictEvidence) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'durable_evidence_required_for_publication'; reviewedSha = $currentSha }
-        } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $strictEvidence -and (@($receipt.checks | Where-Object { -not $_.Contains('evidenceId') -or $evidenceIds -notcontains [string]$_.evidenceId }).Count -gt 0)) {
-            $data = [ordered]@{ decision = 'needs_input'; reason = 'review_checks_are_not_bound_to_evidence_records'; reviewedSha = $currentSha }
+        } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $strictEvidence -and (Get-PublicationCheckBindingErrors $receipt $evidenceReferences $expectedRunId $expectedActionId $expectedTicketKey $currentSha $currentScopeHash $currentBaseSha).Count -gt 0) {
+            $data = [ordered]@{ decision = 'needs_input'; reason = 'review_checks_are_not_bound_to_passing_review_evidence'; reviewedSha = $currentSha; bindingErrors = @(Get-PublicationCheckBindingErrors $receipt $evidenceReferences $expectedRunId $expectedActionId $expectedTicketKey $currentSha $currentScopeHash $currentBaseSha) }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0) {
             $data = [ordered]@{ decision = 'publish'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'changes_requested' -and $round -lt $maxRounds -and $remainingMinutes -gt 0) {
