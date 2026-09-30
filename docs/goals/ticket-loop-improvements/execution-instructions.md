@@ -1,6 +1,7 @@
 # Execution instructions
 
-Status: planned. Creating these documents does not activate the ticket loop.
+Status: implemented offline. Reading or validating these documents does not
+activate the ticket loop or authorize an operational run.
 
 ## Preparation and boundaries
 
