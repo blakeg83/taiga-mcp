@@ -36,6 +36,13 @@ performs the corresponding native desktop/provider operation and later calls
 helper and can apply one requested local phase transition. Its default output
 contains references and correlation fields, not a copied receipt or transcript.
 
+Repeated preparation of an existing action ID returns `reconcile` with the
+stored action status instead of redispatching. An observed provider client ID
+without its real thread ID remains `uncertain`; it is never treated as a
+completed worker. The facade blocks new dispatch/publication when the supplied
+remaining budget is exhausted, while already-running actions remain available
+for bounded observation and reconciliation.
+
 `record-receipt-repair` is available only while the owned ticket is reviewing.
 It records format/evidence repairs in a per-ticket ledger with remaining
 minutes. The default `limits.maxReceiptRepairAttempts` is two and may be

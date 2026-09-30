@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','status')]
+    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','status')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath,
@@ -121,6 +121,15 @@ function Invoke-PrepareExternal {
     $owner = Get-OwnerValues $InputObject
     $packet = Resolve-Reference $InputObject.packetReference 'packet'
     $actionId = Need $InputObject 'actionId'; $workerId = Need $InputObject 'workerId'
+    if ($InputObject.Contains('remainingMinutes') -and [int]$InputObject.remainingMinutes -le 0) {
+        return [ordered]@{ phase = 'needs_input'; decision = 'needs_input'; reason = 'elapsed_budget'; actionId = $actionId; workerId = $workerId; requiredReferences = @($packet); changedFields = @(); revision = [long](Get-Inspection).revision }
+    }
+    $existingInspection = Get-Inspection
+    $existingAction = $existingInspection.data.registry.actions[$actionId]
+    if ($null -ne $existingAction) {
+        if ([string]$existingAction.ticketKey -ne [string]$owner.ticketKey -or [string]$existingAction.sessionId -ne [string]$owner.sessionId) { throw 'Action ID is owned by another ticket or session; reconcile manually.' }
+        return [ordered]@{ phase = 'reconciling'; decision = 'reconcile'; reason = 'action_already_prepared'; actionId = $actionId; workerId = $workerId; requiredReferences = @($packet); changedFields = @(); revision = [long]$existingInspection.revision; action = [ordered]@{ operation = $ExternalOperation; actionId = $actionId; workerId = $workerId; status = $existingAction.status; reconcileRequired = if ($existingAction.Contains('reconcileRequired')) { $existingAction.reconcileRequired } else { $false } } }
+    }
     $promptReference = $null
     if ($InputObject.Contains('promptReference')) {
         $promptReference = Resolve-Reference $InputObject.promptReference 'prompt'
@@ -140,11 +149,18 @@ function Invoke-RecordExternal {
     param([System.Collections.IDictionary] $InputObject)
     $owner = Get-OwnerValues $InputObject; $actionId = Need $InputObject 'actionId'; $status = Need $InputObject 'observationStatus'
     if ($status -notin @('observed','uncertain','failed')) { throw 'observationStatus must be observed, uncertain, or failed.' }
-    $external = if ($InputObject.Contains('externalReference')) { Resolve-Reference $InputObject.externalReference 'external state' } else { $null }
+    $external = $null; $externalValue = $null
+    if ($InputObject.Contains('externalReference')) {
+        $externalRead = Read-ReferenceJson $InputObject.externalReference 'external state'; $external = $externalRead.reference; $externalValue = $externalRead.value
+    }
+    $effectiveStatus = $status
+    $pendingClient = $false
+    if ($null -ne $externalValue -and $externalValue.Contains('clientThreadId') -and -not $externalValue.Contains('threadId')) { $pendingClient = $true; $effectiveStatus = 'uncertain' }
     $inspection = Get-Inspection
-    $request = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = [long]$inspection.revision; actionId = $actionId; observationStatus = $status; reconcileRequired = ($status -eq 'uncertain'); externalState = $external }
+    $externalSummary = if ($null -eq $external) { $null } else { [ordered]@{ reference = $external; provider = if ($externalValue.Contains('provider')) { [string]$externalValue.provider } else { $null }; threadId = if ($externalValue.Contains('threadId')) { [string]$externalValue.threadId } else { $null }; clientThreadId = if ($externalValue.Contains('clientThreadId')) { [string]$externalValue.clientThreadId } else { $null }; remoteHeadSha = if ($externalValue.Contains('remoteHeadSha')) { [string]$externalValue.remoteHeadSha } else { $null }; prUrl = if ($externalValue.Contains('prUrl')) { [string]$externalValue.prUrl } else { $null } } }
+    $request = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = [long]$inspection.revision; actionId = $actionId; observationStatus = $effectiveStatus; reconcileRequired = ($effectiveStatus -eq 'uncertain'); externalState = $externalSummary }
     $observed = Invoke-State 'record-observation' $request
-    return [ordered]@{ phase = $null; decision = if ($status -eq 'observed') { 'continue' } else { 'needs_input' }; reason = if ($status -eq 'observed') { 'external_outcome_recorded' } else { 'external_outcome_uncertain' }; actionId = $actionId; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @($external); changedFields = @('action.status','action.externalState'); revision = [long]$observed.revision }
+    return [ordered]@{ phase = $null; decision = if ($effectiveStatus -eq 'observed') { 'continue' } else { 'needs_input' }; reason = if ($pendingClient) { 'pending_client_id_requires_reconciliation' } elseif ($effectiveStatus -eq 'observed') { 'external_outcome_recorded' } else { 'external_outcome_uncertain' }; actionId = $actionId; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @($external); changedFields = @('action.status','action.externalState'); revision = [long]$observed.revision }
 }
 
 function Invoke-Status {
@@ -164,6 +180,7 @@ try {
         'prepare-dispatch' { Invoke-PrepareExternal $inputObject 'worker_dispatch' 'create_or_message_worker' }
         'prepare-publication' { Invoke-PrepareExternal $inputObject 'publication' 'push_or_create_pr' }
         'record-external' { Invoke-RecordExternal $inputObject }
+        'reconcile-external' { Invoke-RecordExternal $inputObject }
         'status' { Invoke-Status $inputObject }
     }
     [ordered]@{ ok = $true; operation = $Operation; data = $data } | ConvertTo-Json -Depth 100

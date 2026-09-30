@@ -28,13 +28,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 2: Preserve dispatch and recovery correctness
 
-- [ ] Construct worker prompts from templates and files; emit an action descriptor for the coordinator's native create/message tools. The helper itself must not call private desktop APIs.
-- [ ] Distinguish message accepted, worker running, worker completed, receipt valid, and review accepted. Keep pending client IDs separate from real thread IDs.
-- [ ] Reconcile uncertain creates/messages/pushes/PRs before reuse; never blindly redispatch. Record enough correlation data without copying the entire chat.
-- [ ] Enforce wall-clock and correction/repair limits before new work, including publication. Permit bounded observation of already-running work and safe pause reconciliation after expiry.
-- [ ] **Validate:** Inject interruption before/after external completion, duplicate observations, boundary-time expiry, pending IDs, and response loss. Verify one blocked ticket does not stop siblings.
-- [ ] **Update documentation:** Update action lifecycle, recovery, and limit semantics.
-- [ ] **Commit before the next step:** `Preserve recovery across compact handoffs`.
+- [x] Construct worker prompts from templates and files; emit an action descriptor for the coordinator's native create/message tools. The helper itself must not call private desktop APIs.
+- [x] Distinguish message accepted, worker running, worker completed, receipt valid, and review accepted. Keep pending client IDs separate from real thread IDs.
+- [x] Reconcile uncertain creates/messages/pushes/PRs before reuse; never blindly redispatch. Record enough correlation data without copying the entire chat.
+- [x] Enforce wall-clock and correction/repair limits before new work, including publication. Permit bounded observation of already-running work and safe pause reconciliation after expiry.
+- [x] **Validate:** Inject interruption before/after external completion, duplicate observations, boundary-time expiry, pending IDs, and response loss. Verify one blocked ticket does not stop siblings.
+- [x] **Update documentation:** Update action lifecycle, recovery, and limit semantics.
+- [x] **Commit before the next step:** `Preserve recovery across compact handoffs`.
 
 ### Step 3: Define observation and heartbeat behavior
 
@@ -72,6 +72,6 @@ gates unchecked; record deviations and blockers below the table.
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
 | 1 | Added `workflow-coordinate.ps1` with file/hash-bound dispatch, publication preparation, result acceptance/routing, external observation, and compact status operations. It delegates mutations to the existing CAS/fencing/journal state helper and returns native action descriptors without invoking desktop APIs. Synthetic progression, durable prompt/result references, malformed input, duplicate/partial state paths, and compact output passed; skill validation and `git diff --check` passed. | Coordination facade reference and operator guide | Recorded in final handoff |
-| 2 | Pending | Pending | Pending |
+| 2 | The facade returns `reconcile` for an existing action ID, blocks new dispatch at an expired budget, and treats a provider `clientThreadId` without a real `threadId` as uncertain. External state is stored as a small hashed correlation summary; no blind redispatch or full chat copy is performed. Focused recovery fixtures, skill validation, and `git diff --check` passed. | State/recovery contract and operator guidance | Recorded in final handoff |
 | 3 | Pending | Pending | Pending |
 | 4 | Pending | Pending | Pending |

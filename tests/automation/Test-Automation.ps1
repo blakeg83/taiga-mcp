@@ -217,6 +217,11 @@ try {
         Assert-Equal 'worker-1' $prepared.data.workerId 'dispatch descriptor should preserve worker identity'
         Assert-True ($prepared.data.action.operation -eq 'create_or_message_worker') 'helper should return a native action descriptor rather than call a desktop API'
         Assert-True ([string]$prepared.data.action.prompt.path -ne '') 'constructed prompt should be durable'
+        $duplicate = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $dispatch 'coordinate-duplicate-dispatch'),'-StateRoot',$coordRoot)
+        Assert-Equal 'reconcile' $duplicate.data.decision 'duplicate preparation must reconcile instead of redispatching'
+        $expired = Copy-JsonObject $dispatch; $expired.actionId = 'dispatch-expired'; $expired.remainingMinutes = 0
+        $expiredResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expired 'coordinate-expired-dispatch'),'-StateRoot',$coordRoot)
+        Assert-Equal 'needs_input' $expiredResult.data.decision 'wall-clock expiry must block new external work'
         $resultPath = Join-Path $script:FixtureRoot 'coordinate-result.json'; Write-JsonFile @{ resultId = 'result-1'; cursor = 'cursor-1'; actionId = 'dispatch-1'; workerId = 'worker-1'; status = 'completed'; decision = 'review'; nextPhase = 'preparing'; summary = 'Worker completed the assigned action.' } $resultPath
         $accept = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; resultReference = @{ path = $resultPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resultPath).Hash.ToLowerInvariant() } }
         $accepted = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $accept 'coordinate-accept'),'-StateRoot',$coordRoot)
@@ -225,6 +230,11 @@ try {
         Assert-True (@($accepted.data.requiredReferences).Count -lt 6) 'result relay should remain compact'
         $status = Invoke-PsJson $script:CoordinateScript @('-Operation','status','-InputPath',(New-InputPath @{ ticketKey = 'project:123:issue:800' } 'coordinate-status'),'-StateRoot',$coordRoot)
         Assert-Equal 'preparing' $status.data.phase 'status should report the local phase without source inspection'
+        $externalPath = Join-Path $script:FixtureRoot 'coordinate-pending.json'; Write-JsonFile @{ provider = 'desktop'; clientThreadId = 'client-pending-1' } $externalPath
+        $external = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; actionId = 'dispatch-1'; observationStatus = 'observed'; externalReference = @{ path = $externalPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $externalPath).Hash.ToLowerInvariant() } }
+        $pending = Invoke-PsJson $script:CoordinateScript @('-Operation','reconcile-external','-InputPath',(New-InputPath $external 'coordinate-pending-observation'),'-StateRoot',$coordRoot)
+        Assert-Equal 'needs_input' $pending.data.decision 'a pending client ID must remain uncertain until a real thread ID is observed'
+        Assert-Equal 'pending_client_id_requires_reconciliation' $pending.data.reason 'pending client IDs must not be treated as completed threads'
         $bad = Copy-JsonObject $accept; $bad.resultReference.path = Join-Path $script:FixtureRoot 'missing-coordinate-result.json'
         $badResult = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $bad 'coordinate-bad-result'),'-StateRoot',$coordRoot) $false
         Assert-True (-not $badResult.ok) 'missing result files must fail before state mutation'
