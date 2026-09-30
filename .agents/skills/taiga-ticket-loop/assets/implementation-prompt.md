@@ -6,4 +6,5 @@ Do not use subagents, write Taiga, message other chats, push, or create/update a
 PR. Implement the approved criteria, run {{validationCommands}}, update scoped
 docs, and commit. Return an implementation receipt with exact SHAs, clean-state
 evidence, criteria/task coverage, command exit codes, docs, commits, blockers,
-and the run/action markers.
+and the run/action markers. The coordinator does not investigate your source or
+run your checks; return the evidence needed for it to route the result.

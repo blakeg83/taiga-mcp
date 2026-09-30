@@ -102,6 +102,26 @@ merged and combined acceptance at the integrated revision. Closed-unmerged PRs,
 missing checks, response-lost writes, and ambiguous observations require
 reconciliation or user input, never blind replay.
 
+## Coordinator and worker roles
+
+The coordinator reads ticket requirements and relationships, repository
+instructions/configuration, Git identity/status/SHAs, worker statuses and
+receipts, deadlines, and provider metadata. It dispatches work, relays results,
+and handles authorized external actions. In routine operation it does not read
+production source, interpret diffs, run tests or smoke checks, diagnose
+failures, or create independent technical findings. The implementer owns source
+investigation, implementation, verification, documentation, and commits. The
+reviewer owns independent correctness assessment and technical acceptance.
+
+Missing implementation evidence goes to its producing worker; changed HEAD
+invalidates review and requires assessment of the new revision; unclear product
+requirements go to the user; and unresolved technical disagreements go from
+the reviewer to the user. Epic combined verification belongs to the
+implementer, with the reviewer assessing evidence at the integrated revision.
+These prompt and routing rules guide behavior but are not an operating-system
+sandbox. See the skill's [coordinator boundary matrix](../../.agents/skills/taiga-ticket-loop/references/coordinator-boundaries.md)
+for scenario details.
+
 ## Recovery commands
 
 Inspect a run:

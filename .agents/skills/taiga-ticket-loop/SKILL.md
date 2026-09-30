@@ -21,6 +21,8 @@ the relevant reference before each operation:
   recovery protocol;
 - [roles and handoffs](references/roles-and-handoffs.md) for ordinary worker
   prompts and checkout receipts;
+- [coordinator boundaries](references/coordinator-boundaries.md) for allowed
+  inputs, prohibited engineering work, and result routing;
 - [review loop](references/review-loop.md) for revision-bound findings and
   correction rounds;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,
@@ -43,6 +45,10 @@ the relevant reference before each operation:
    validation commands, status mappings, or authorization that cannot be
    discovered safely. A plan or skill invocation alone does not authorize
    external writes.
+   Keep the coordinator within the [role boundaries](references/coordinator-boundaries.md):
+   it reads dispatch context and provider/Git metadata, but leaves source
+   investigation, diff review, checks, diagnosis, and technical findings to
+   workers.
 3. Run the host preflight and record observed capabilities. If a requested
    capability or exact model/effort is unavailable, stop with a report; do not
    silently fall back to subagents, another model, or an SDK/private API.

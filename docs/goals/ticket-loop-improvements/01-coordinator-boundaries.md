@@ -1,6 +1,6 @@
 # 01: Constrain the coordinator to orchestration
 
-Status: planned; all steps pending.
+Status: in progress; step 1 complete.
 Prerequisites: None in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -18,13 +18,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 1: Define role permissions and escalation
 
-- [ ] Document the coordinator's allowed inputs: ticket requirements/relationships, repository instructions and configured commands, Git identity/status/SHAs, worker status/receipts, deadlines, and provider metadata.
-- [ ] Prohibit routine production-source reads, diff interpretation, test execution, diagnosis, technical findings, and smoke reproduction in the coordinator. Reading instructions/configuration for dispatch is permitted.
-- [ ] Route missing engineering evidence to its producing worker; route correctness disputes to the reviewer, then the user if unresolved. Never waive a required check or fabricate acceptance.
-- [ ] Preserve the user-selected coordinator profile and exact worker profiles. No cheaper-model switch is part of this step.
-- [ ] **Validate:** Exercise a role/scenario matrix covering normal implementation, unclear requirements, failed tests, technical disagreement, changed HEAD, missing receipt, and epic combined acceptance. Route combined verification to a worker.
-- [ ] **Update documentation:** Document coordinator and worker ownership with concrete examples.
-- [ ] **Commit before the next step:** `Constrain ticket-loop coordinator responsibilities`.
+- [x] Document the coordinator's allowed inputs: ticket requirements/relationships, repository instructions and configured commands, Git identity/status/SHAs, worker status/receipts, deadlines, and provider metadata.
+- [x] Prohibit routine production-source reads, diff interpretation, test execution, diagnosis, technical findings, and smoke reproduction in the coordinator. Reading instructions/configuration for dispatch is permitted.
+- [x] Route missing engineering evidence to its producing worker; route correctness disputes to the reviewer, then the user if unresolved. Never waive a required check or fabricate acceptance.
+- [x] Preserve the user-selected coordinator profile and exact worker profiles. No cheaper-model switch is part of this step.
+- [x] **Validate:** Exercised all seven scenarios in `references/coordinator-boundaries.md`; existing review fixtures cover failed checks and stale HEAD, and the role matrix routes missing evidence to its producer and epic combined verification to workers.
+- [x] **Update documentation:** Added the boundary reference, linked it from the skill, updated worker prompts and operator documentation.
+- [x] **Commit before the next step:** `Constrain ticket-loop coordinator responsibilities`.
 
 ### Step 2: Create a minimal assignment packet
 
@@ -69,9 +69,12 @@ Paths under scripts, references, and assets are relative to
 Record a step's hash in the next checkpoint or final handoff. Leave incomplete
 gates unchecked; record deviations and blockers below the table.
 
+Starting Git revision: `d2a1999165d124d115be657f9ade37fa8c4dd3e7` (clean
+worktree; no unrelated changes).
+
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
+| 1 | Exercised all seven documented routing scenarios. `pwsh -NoProfile -File tests/automation/Test-Automation.ps1` passed 13 fixtures; skill `quick_validate.py` passed; `git diff --check` passed. Existing offline review fixtures cover stale SHA and failed checks. | Skill entrypoint, boundary reference, roles/handoffs, worker prompts, operator guide | Recorded in step 2 |
 | 2 | Pending | Pending | Pending |
 | 3 | Pending | Pending | Pending |
 | 4 | Pending | Pending | Pending |

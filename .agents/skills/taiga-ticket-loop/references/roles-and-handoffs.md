@@ -6,6 +6,15 @@ prompt carries the run/action marker, ticket identity, scope hash, repository,
 absolute checkout, branch, captured base SHA, current HEAD, validation commands,
 and explicit no-subagent/no-independent-write rules.
 
+The coordinator reads ticket scope, repository instructions/configuration,
+Git/provider metadata, worker status, and receipts to route work. It does not
+read production source, interpret the diff, run tests/smoke checks, diagnose
+failures, or create technical findings during routine execution. Route failed
+or missing implementation evidence to its producing implementer, changed
+revisions to review, unclear product requirements to the user, and technical
+disagreements to the reviewer before escalating unresolved decisions. The
+[coordinator boundary matrix](coordinator-boundaries.md) defines these cases.
+
 The Luna implementer loads repository instructions, implements only the
 approved scope, runs the configured checks, updates documentation, and commits
 at checkpoints. Its receipt reports the exact checkout, branch, base/current
