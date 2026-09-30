@@ -1,6 +1,6 @@
 # Goal 03: Build the skill and ordinary-chat handoffs
 
-Status: not started.
+Status: implemented offline; actual ordinary-chat handoff remains unverified until an authorized smoke exercise on a host advertising the requested reviewer profile.
 
 ## Objective
 
@@ -39,7 +39,7 @@ An explicitly invoked taiga-ticket-loop skill, role templates, host-tool referen
 
 ### Step 3: Define reviewer setup and follow-up routing
 
-- [ ] Create/reuse the ordinary reviewer chat with the selected Sol/high or Astra/medium profile and scope-limited review prompt.
+- [x] Create/reuse the ordinary reviewer chat with the exact gpt-6.1-sol/high profile and scope-limited review prompt; unavailable host support is a preflight blocker.
 - [ ] Point the reviewer at that ticket's actual implementation checkout and captured base/HEAD; do not assume another checkout contains the changes. Other ticket chats must use their own branch/worktree.
 - [ ] Require no source edits, no additional agents, and a structured review receipt; document that prompts alone do not enforce filesystem read-only access.
 - [ ] Route all correction assignments through the coordinator to the same implementation thread. Persist action receipts before further dispatch.
