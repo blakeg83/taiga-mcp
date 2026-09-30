@@ -32,6 +32,12 @@ incomplete gates unchecked. Do not backfill evidence or call an unrun check
 passed. This batch's cycle applies even where historical goals recorded
 several steps in one commit.
 
+Historical deviation: this batch's earlier implementation commits did not
+fully follow the ordered documentation-and-commit cycle. The goal execution
+records preserve the actual checkpoint hashes, and the overview explicitly
+labels this deviation; subsequent correction work follows the same offline
+scope without claiming retroactive cycle compliance.
+
 ## Validation and data
 
 Use the existing self-contained PowerShell harness and synthetic fixtures:

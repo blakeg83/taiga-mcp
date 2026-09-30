@@ -136,6 +136,17 @@ function Read-EvidenceReference {
     $sha = [Security.Cryptography.SHA256]::Create(); try { $recordHash = ([Convert]::ToHexString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$wrapper.recordJson)))).ToLowerInvariant() } finally { $sha.Dispose() }
     if ([string]$wrapper.recordSha256 -cne $recordHash) { throw 'Evidence record body hash is invalid.' }
     try { $record = ConvertFrom-Json -InputObject ([string]$wrapper.recordJson) -AsHashtable -Depth 100 -DateKind String } catch { throw 'Evidence record body is not valid JSON.' }
+    foreach ($name in @('evidenceId','actionId','runId','ticketKey','scopeHash','checkedRevision','evidenceKind','outcome','actualExitCode','acceptedAsCheckPass','log','coverage')) { if (-not $record.Contains($name)) { throw "Evidence record is missing durable provenance: $name" } }
+    if ($record.log -isnot [System.Collections.IDictionary]) { throw 'Evidence record log provenance must be an object.' }
+    foreach ($name in @('path','sha256','bytes')) { Need $record.log $name | Out-Null }
+    $logPath = [IO.Path]::GetFullPath([string]$record.log.path)
+    if (-not (Test-Path -LiteralPath $logPath -PathType Leaf) -or (Get-FileSha256 $logPath) -cne [string]$record.log.sha256 -or ([IO.FileInfo]::new($logPath)).Length -ne [long]$record.log.bytes) { throw 'Evidence log provenance does not match the referenced log.' }
+    $exitCode = 0L; if (-not [long]::TryParse([string]$record.actualExitCode, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$exitCode)) { throw 'Evidence actualExitCode is invalid.' }
+    $expectedPass = [string]$record.evidenceKind -eq 'check' -and $exitCode -eq 0
+    if ($record.acceptedAsCheckPass -ne $expectedPass) { throw 'Evidence pass classification contradicts its raw exit code.' }
+    if ($record.coverage -isnot [System.Collections.IDictionary]) { throw 'Evidence coverage provenance must be an object.' }
+    foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','files')) { Need $record.coverage $name | Out-Null }
+    if ($record.coverage.files -is [string] -or $record.coverage.files -isnot [System.Collections.IEnumerable]) { throw 'Evidence coverage.files must be an array.' }
     $timestampMatch = [regex]::Match([string]$wrapper.recordJson, '"capturedAtUtc"\s*:\s*"([^"]+)"')
     return [ordered]@{ reference = $read.reference; record = $record; capturedAtUtcRaw = if ($timestampMatch.Success) { $timestampMatch.Groups[1].Value } else { $null } }
 }
@@ -145,10 +156,14 @@ function Invoke-ReuseEvidence {
     if (-not $InputObject.Contains('evidenceReferences') -or $InputObject.evidenceReferences -is [string]) { throw 'evidenceReferences must be an array.' }
     if (-not $InputObject.Contains('current')) { throw 'current input coverage is required.' }
     $current = $InputObject.current; $results = @(); $reusable = $true
+    foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','changedKind','changedPaths')) { Need $current $name | Out-Null }
+    if ($current.changedPaths -is [string] -or $current.changedPaths -isnot [System.Collections.IEnumerable]) { throw 'current.changedPaths must be an array.' }
     foreach ($reference in @($InputObject.evidenceReferences)) {
         $item = Read-EvidenceReference $reference; $record = $item.record; $coverage = if ($record.Contains('coverage')) { $record.coverage } else { $null }; $reason = 'exact_revision'; $canReuse = $false
-        if ($null -ne $coverage -and [string]$coverage.revision -ceq [string]$current.revision -and [string]$coverage.baseSha -ceq [string]$current.baseSha -and [string]$coverage.environmentHash -ceq [string]$current.environmentHash -and [string]$coverage.dependenciesHash -ceq [string]$current.dependenciesHash) { $canReuse = $true }
-        elseif ($null -ne $coverage -and $current.changedKind -eq 'documentation_only' -and [string]$coverage.baseSha -ceq [string]$current.baseSha -and [string]$coverage.environmentHash -ceq [string]$current.environmentHash -and [string]$coverage.dependenciesHash -ceq [string]$current.dependenciesHash) { $overlap = @($current.changedPaths | Where-Object { @($coverage.files) -contains [string]$_ }); if ($overlap.Count -eq 0) { $canReuse = $true; $reason = 'documentation_only_inputs_unchanged' } }
+        $coverageRevisionMatches = $null -ne $coverage -and [string]$record.checkedRevision -ceq [string]$coverage.revision -and [string]$coverage.revision -ceq [string]$current.revision
+        $environmentMatches = $null -ne $coverage -and [string]$coverage.baseSha -ceq [string]$current.baseSha -and [string]$coverage.environmentHash -ceq [string]$current.environmentHash -and [string]$coverage.dependenciesHash -ceq [string]$current.dependenciesHash
+        if ($coverageRevisionMatches -and $environmentMatches) { $canReuse = $true }
+        elseif ($null -ne $coverage -and $current.changedKind -eq 'documentation_only' -and $environmentMatches) { $overlap = @($current.changedPaths | Where-Object { @($coverage.files) -contains [string]$_ }); if ($overlap.Count -eq 0) { $canReuse = $true; $reason = 'documentation_only_inputs_unchanged' } }
         if (-not $canReuse) { $reusable = $false; $reason = if ($null -eq $coverage) { 'missing_provenance' } else { 'changed_inputs' } }
         $results += [ordered]@{ evidenceId = [string]$record.evidenceId; reusable = $canReuse; reason = $reason; originalActionId = [string]$record.actionId; checkedRevision = [string]$record.checkedRevision; capturedAtUtc = if ($null -ne $item.capturedAtUtcRaw) { $item.capturedAtUtcRaw } else { [string]$record.capturedAtUtc }; provenance = $coverage }
     }

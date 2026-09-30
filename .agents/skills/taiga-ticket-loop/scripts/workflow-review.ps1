@@ -4,7 +4,8 @@ param(
     [ValidateSet('validate','decide','route')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
-    [string] $InputPath
+    [string] $InputPath,
+    [string] $StateRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,14 +48,24 @@ function Validate-EvidenceReferences {
     param([hashtable] $InputObject)
     if (-not $InputObject.Contains('evidenceReferences')) { return @() }
     if ($InputObject.evidenceReferences -is [string] -or $InputObject.evidenceReferences -isnot [System.Collections.IEnumerable]) { throw 'evidenceReferences must be an array.' }
-    $references = @()
+    $references = @(); $strictRoot = if ($InputObject.Contains('evidenceStateRoot')) { [IO.Path]::GetFullPath((Need $InputObject 'evidenceStateRoot')) } elseif (-not [string]::IsNullOrWhiteSpace($StateRoot)) { [IO.Path]::GetFullPath($StateRoot) } else { $null }
     foreach ($reference in @($InputObject.evidenceReferences)) {
         if ($reference -isnot [System.Collections.IDictionary]) { throw 'Each evidence reference must be an object.' }
         $path = [IO.Path]::GetFullPath((Need $reference 'path'))
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Evidence reference is missing: $path" }
         $hash = Get-FileSha256 $path
         if ($reference.Contains('sha256') -and ([string]$reference.sha256).ToLowerInvariant() -cne $hash) { throw "Evidence reference hash does not match: $path" }
-        $references += [ordered]@{ path = $path; sha256 = $hash; evidenceId = if ($reference.Contains('evidenceId')) { [string]$reference.evidenceId } else { $null } }
+        $declaredId = if ($reference.Contains('evidenceId')) { Need $reference 'evidenceId' } else { $null }
+        if ($null -eq $strictRoot) {
+            $references += [ordered]@{ path = $path; sha256 = $hash; evidenceId = $declaredId; validation = 'legacy_narrative_only' }
+            continue
+        }
+        $lines = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'workflow-evidence.ps1') -Operation validate -EvidencePath $path -StateRoot $strictRoot 2>&1; $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine
+        try { $verified = ConvertFrom-Json -InputObject $raw -AsHashtable -Depth 100 } catch { throw "Evidence validator returned invalid JSON: $raw" }
+        if ($exitCode -ne 0 -or $verified.ok -ne $true) { throw [string]$verified.error.message }
+        $record = $verified.data.record
+        if ($null -ne $declaredId -and [string]$record.evidenceId -cne [string]$declaredId) { throw "Evidence ID does not match the immutable record: $path" }
+        $references += [ordered]@{ path = $path; sha256 = $hash; evidenceId = [string]$record.evidenceId; validation = 'immutable_record'; record = $record }
     }
     return $references
 }
@@ -133,9 +144,11 @@ function Get-RepairRoute {
 try {
     $inputObject = Read-ReceiptReferences (Read-Object)
     $null = Need $inputObject 'receipt'
-    $evidenceReferences = Validate-EvidenceReferences $inputObject
+    $evidenceReferences = @(Validate-EvidenceReferences $inputObject)
     $expectedCriteria = if ($inputObject.Contains('expectedCriteria')) { @($inputObject.expectedCriteria) } else { @() }
     $validation = Get-ReviewReceiptValidation $inputObject.receipt $expectedCriteria
+    $strictEvidence = $evidenceReferences.Count -gt 0 -and @($evidenceReferences | Where-Object { $_.validation -eq 'immutable_record' }).Count -eq $evidenceReferences.Count
+    $evidenceIds = @($evidenceReferences | ForEach-Object { if (-not [string]::IsNullOrWhiteSpace([string]$_.evidenceId)) { [string]$_.evidenceId } })
     if ($Operation -eq 'route') {
         $data = Get-RepairRoute $inputObject $validation
     } elseif (-not $validation.valid) {
@@ -160,6 +173,10 @@ try {
             $data = [ordered]@{ decision = 'needs_input'; reason = $deltaError; reviewedSha = $currentSha; previousReviewedSha = if ($inputObject.Contains('previousReviewedSha')) { $inputObject.previousReviewedSha } else { $null } }
         } elseif ($remainingMinutes -le 0) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'elapsed_budget'; reviewedSha = $currentSha }
+        } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and -not $strictEvidence) {
+            $data = [ordered]@{ decision = 'needs_input'; reason = 'durable_evidence_required_for_publication'; reviewedSha = $currentSha }
+        } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $strictEvidence -and (@($receipt.checks | Where-Object { -not $_.Contains('evidenceId') -or $evidenceIds -notcontains [string]$_.evidenceId }).Count -gt 0)) {
+            $data = [ordered]@{ decision = 'needs_input'; reason = 'review_checks_are_not_bound_to_evidence_records'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0) {
             $data = [ordered]@{ decision = 'publish'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'changes_requested' -and $round -lt $maxRounds -and $remainingMinutes -gt 0) {

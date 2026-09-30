@@ -9,6 +9,15 @@
   "published": false,
   "unchangedWaitMutations": 0,
   "workerIdsStable": true,
+  "events": [
+    { "kind": "wait", "waitStatus": "unchanged", "mutatesState": false },
+    { "kind": "evidence", "evidenceId": "ev-check", "rawExitCode": 0, "outcome": "passed" },
+    { "kind": "finding", "findingId": "F1", "severity": "high", "material": true, "disposition": "fixed" },
+    { "kind": "finding", "findingId": "F2", "severity": "critical", "material": true, "disposition": "open" },
+    { "kind": "receipt_repair", "repairId": "repair-1" },
+    { "kind": "receipt_repair", "repairId": "repair-2" },
+    { "kind": "deadline", "dispatchAttempt": true, "allowed": false }
+  ],
   "actions": [
     { "actor": "coordinator", "class": "bounded_wait", "operation": "wait_threads" },
     { "actor": "implementer", "class": "engineering", "operation": "run_required_checks", "workerId": "implementer-thread" },

@@ -43,8 +43,10 @@ completed worker. The facade blocks new dispatch/publication when the supplied
 remaining budget is exhausted, while already-running actions remain available
 for bounded observation and reconciliation.
 
-For observation, use `observe-wait` with the last native `wait_threads` cursor.
-An unchanged timeout returns a quiet continuation descriptor and does not read
+For observation, use `observe-wait` with one or more native wait targets. The
+returned `waitThreadsArguments` preserves the native shape
+`{ targets: [{ threadId, hostId?, afterCursor? }], timeoutMs }`, so concurrent
+ticket waits retain their host IDs and cursors. An unchanged timeout returns a quiet continuation descriptor and does not read
 source, reopen evidence, message a worker, or mutate the registry. Completion,
 changed state, and blockers are the only ordinary reasons to request one
 detailed `read_thread`; user input remains visible as a separate decision.

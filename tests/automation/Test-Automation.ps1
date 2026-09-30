@@ -201,6 +201,9 @@ try {
         Assert-True $result.data.valid 'file receipt should validate through the shared contract'
         Assert-Equal $receiptPath $result.data.receiptReference.path 'receipt reference should preserve its source path'
         Assert-Equal 'ev-file' @($result.data.evidenceReferences)[0].evidenceId 'evidence reference should retain its identity'
+        $publishAttempt = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath ($request + @{ currentSha = 'head'; currentScopeHash = 'scope'; currentBaseSha = 'base'; expectedRunId = 'run'; expectedActionId = 'review-0'; expectedTicketKey = 'project:1:issue:1'; correctionRound = 0; remainingMinutes = 10 }) 'arbitrary-evidence-publish'))
+        Assert-Equal 'needs_input' $publishAttempt.data.decision 'a hashed narrative file must not authorize publication'
+        Assert-Equal 'durable_evidence_required_for_publication' $publishAttempt.data.reason 'publication must identify why durable evidence is missing'
         [IO.File]::AppendAllText($receiptPath, "`n")
         $tampered = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $request 'receipt-file-tampered')) $false
         Assert-True (-not $tampered.ok) 'tampered receipt files must be rejected by their hash'
@@ -215,7 +218,10 @@ try {
         $init = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$coordRoot)
         $claim = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; repositoryIdentity = 'coordinate-repo'; expectedRevision = $init.revision }
         $claimed = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath $claim 'coordinate-claim'),'-StateRoot',$coordRoot)
-        $packetPath = Join-Path $script:FixtureRoot 'coordinate-packet.json'; Write-JsonFile @{ packetId = 'packet-coordinate'; scopeHash = 'scope-coordinate'; criteria = @(@{ id = 'criterion-1'; text = 'Dispatch from a durable packet.' }) } $packetPath
+        $packetContextPath = Join-Path $script:FixtureRoot 'coordinate-context.json'; [IO.File]::WriteAllText($packetContextPath, 'coordinate context', [Text.UTF8Encoding]::new($false))
+        $packetRequest = @{ packetId = 'packet-coordinate'; sessionId = 'synthetic-session-01'; runId = 'coordinate-run'; ticket = @{ ticketKey = 'project:123:issue:800'; projectId = 123; kind = 'issue'; id = 800; ref = 800; title = 'Coordinate fixture' }; contextPath = $packetContextPath; criteria = @(@{ id = 'criterion-1'; text = 'Dispatch from a durable packet.' }); repository = @{ identity = 'coordinate-repo'; repositoryPath = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; worktreePath = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; branch = 'fixture'; baseSha = ((& git rev-parse HEAD).Trim()) }; requiredCommands = @('synthetic-check'); unresolvedRequirements = @(); authority = @{ authorizedActions = @('dispatch'); excludedActions = @() }; deadline = @{ startedAtUtc = '2026-09-30T00:00:00Z'; deadlineUtc = '2099-09-30T00:00:00Z'; elapsedBudgetMinutes = 120 }; profiles = @{ coordinator = @{ model = 'gpt-6.1-sol'; effort = 'high' }; implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } } }
+        $packetCreated = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $packetRequest 'coordinate-packet-request'),'-StateRoot',$coordRoot)
+        $packetPath = [string]$packetCreated.data.packetPath
         $promptPath = Join-Path $script:FixtureRoot 'coordinate-prompt.md'; [IO.File]::WriteAllText($promptPath, 'Use packet {{packetPath}} with hash {{packetHash}} for {{workerId}}.', [Text.UTF8Encoding]::new($false))
         $dispatch = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; actionId = 'dispatch-1'; workerId = 'worker-1'; packetReference = @{ path = $packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $packetPath).Hash.ToLowerInvariant() }; promptReference = @{ path = $promptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $promptPath).Hash.ToLowerInvariant() } }
         $prepared = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $dispatch 'coordinate-dispatch'),'-StateRoot',$coordRoot)
@@ -228,12 +234,31 @@ try {
         $expired = Copy-JsonObject $dispatch; $expired.actionId = 'dispatch-expired'; $expired.remainingMinutes = 0
         $expiredResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expired 'coordinate-expired-dispatch'),'-StateRoot',$coordRoot)
         Assert-Equal 'needs_input' $expiredResult.data.decision 'wall-clock expiry must block new external work'
+        $expiredPacketRequest = Copy-JsonObject $packetRequest; $expiredPacketRequest.packetId = 'packet-coordinate-expired'; $expiredPacketRequest.deadline.startedAtUtc = '1999-01-01T00:00:00Z'; $expiredPacketRequest.deadline.deadlineUtc = '2000-01-01T02:00:00Z'
+        $expiredPacket = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $expiredPacketRequest 'coordinate-expired-packet-request'),'-StateRoot',$coordRoot)
+        $expiredPacketDispatch = Copy-JsonObject $dispatch; $expiredPacketDispatch.actionId = 'dispatch-packet-expired'; $expiredPacketDispatch.packetReference = @{ path = $expiredPacket.data.packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $expiredPacket.data.packetPath).Hash.ToLowerInvariant() }; $expiredPacketDispatch.Remove('remainingMinutes')
+        $expiredPacketResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expiredPacketDispatch 'coordinate-packet-expired-dispatch'),'-StateRoot',$coordRoot)
+        Assert-Equal 'needs_input' $expiredPacketResult.data.decision 'an expired packet must block dispatch even without a caller-supplied remainingMinutes'
+        $allPlaceholderPrompt = Join-Path $script:FixtureRoot 'coordinate-all-placeholders.md'; [IO.File]::WriteAllText($allPlaceholderPrompt, '{{packetId}} {{reviewedSha}} {{repositoryPath}} {{schemaPath}} {{packetHash}}', [Text.UTF8Encoding]::new($false))
+        $renderedDispatch = Copy-JsonObject $dispatch; $renderedDispatch.actionId = 'dispatch-rendered'; $renderedDispatch.workerId = 'reviewer-1'; $renderedDispatch.reviewedSha = 'head-review'; $renderedDispatch.promptReference = @{ path = $allPlaceholderPrompt; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $allPlaceholderPrompt).Hash.ToLowerInvariant() }
+        $rendered = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $renderedDispatch 'coordinate-rendered-dispatch'),'-StateRoot',$coordRoot)
+        $renderedPrompt = Get-Content -Raw -LiteralPath $rendered.data.action.prompt.path
+        Assert-True ($renderedPrompt -notmatch '\{\{[^}]+\}\}') 'all trusted prompt placeholders must be resolved'
+        Assert-True ([string]$rendered.data.action.packet.packetHash -ne [string]$rendered.data.action.packet.sha256) 'packet body hash must remain distinct from packet file hash'
         $resultPath = Join-Path $script:FixtureRoot 'coordinate-result.json'; Write-JsonFile @{ resultId = 'result-1'; cursor = 'cursor-1'; actionId = 'dispatch-1'; workerId = 'worker-1'; status = 'completed'; decision = 'review'; nextPhase = 'preparing'; summary = 'Worker completed the assigned action.' } $resultPath
         $accept = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; resultReference = @{ path = $resultPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resultPath).Hash.ToLowerInvariant() } }
         $accepted = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $accept 'coordinate-accept'),'-StateRoot',$coordRoot)
         Assert-Equal 'review' $accepted.data.decision 'accepted worker result should choose the next route'
         Assert-Equal 'preparing' $accepted.data.phase 'accepted result should apply its requested local phase transition'
         Assert-True (@($accepted.data.requiredReferences).Count -lt 6) 'result relay should remain compact'
+        $partialDispatch = Copy-JsonObject $dispatch; $partialDispatch.actionId = 'dispatch-partial'; $partial = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $partialDispatch 'coordinate-partial-dispatch'),'-StateRoot',$coordRoot)
+        $partialResultPath = Join-Path $script:FixtureRoot 'coordinate-partial-result.json'; Write-JsonFile @{ resultId = 'result-partial'; cursor = 'cursor-partial'; actionId = 'dispatch-partial'; workerId = 'worker-1'; status = 'completed'; decision = 'review'; nextPhase = 'invalid-phase' } $partialResultPath
+        $partialRequest = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; resultReference = @{ path = $partialResultPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $partialResultPath).Hash.ToLowerInvariant() } }
+        $partialFirst = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $partialRequest 'coordinate-partial-first'),'-StateRoot',$coordRoot) $false
+        $partialRetry = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $partialRequest 'coordinate-partial-retry'),'-StateRoot',$coordRoot) $false
+        Assert-True (-not $partialFirst.ok -and -not $partialRetry.ok) 'a failed transition validation must be retryable without redispatching'
+        $partialState = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$coordRoot)
+        Assert-True ([string]$partialState.data.registry.tickets['project:123:issue:800'].lastResultCursor -cne 'cursor-partial') 'failed transition validation must not consume the worker cursor'
         $status = Invoke-PsJson $script:CoordinateScript @('-Operation','status','-InputPath',(New-InputPath @{ ticketKey = 'project:123:issue:800' } 'coordinate-status'),'-StateRoot',$coordRoot)
         Assert-Equal 'preparing' $status.data.phase 'status should report the local phase without source inspection'
         $externalPath = Join-Path $script:FixtureRoot 'coordinate-pending.json'; Write-JsonFile @{ provider = 'desktop'; clientThreadId = 'client-pending-1' } $externalPath
@@ -327,7 +352,8 @@ try {
 
     Test-Case 'reuse verification evidence only with matching provenance' {
         $evidencePath = Join-Path $script:FixtureRoot 'reuse-evidence.json'
-        $record = @{ schemaVersion = 1; evidenceId = 'ev-reuse'; actionId = 'check-1'; checkedRevision = 'head-1'; capturedAtUtc = '2026-09-30T00:00:00Z'; coverage = @{ revision = 'head-1'; baseSha = 'base-1'; environmentHash = 'env-1'; dependenciesHash = 'deps-1'; files = @('src/app.cs') } }
+        $reuseLogPath = Join-Path $script:FixtureRoot 'reuse-evidence.log'; [IO.File]::WriteAllText($reuseLogPath, 'validated reuse log', [Text.UTF8Encoding]::new($false)); $reuseLogHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $reuseLogPath).Hash.ToLowerInvariant()
+        $record = @{ schemaVersion = 1; evidenceId = 'ev-reuse'; actionId = 'check-1'; runId = 'run-reuse'; ticketKey = 'project:1:issue:1'; scopeHash = 'scope-reuse'; checkedRevision = 'head-1'; capturedAtUtc = '2026-09-30T00:00:00Z'; evidenceKind = 'check'; outcome = 'passed'; actualExitCode = 0; assertionReportedPassed = $null; acceptedAsCheckPass = $true; log = @{ path = $reuseLogPath; sha256 = $reuseLogHash; bytes = ([IO.FileInfo]::new($reuseLogPath)).Length }; coverage = @{ revision = 'head-1'; baseSha = 'base-1'; environmentHash = 'env-1'; dependenciesHash = 'deps-1'; files = @('src/app.cs') } }
         $recordJson = $record | ConvertTo-Json -Depth 100 -Compress
         $recordHashBytes = [Security.Cryptography.SHA256]::Create(); try { $recordHash = ([Convert]::ToHexString($recordHashBytes.ComputeHash([Text.Encoding]::UTF8.GetBytes($recordJson)))).ToLowerInvariant() } finally { $recordHashBytes.Dispose() }
         Write-JsonFile @{ recordJson = $recordJson; recordSha256 = $recordHash } $evidencePath
@@ -381,21 +407,21 @@ try {
 
     Test-Case 'import cumulative usage without inventing deltas or cost' {
         $snapshots = @(
-            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-29T23:50:00Z'; counters = @{ inputTokens = 100; cachedInputTokens = 40; outputTokens = 20; reasoningTokens = 5 } },
-            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:00Z'; counters = @{ inputTokens = 150; cachedInputTokens = 60; outputTokens = 30; reasoningTokens = 8 } },
-            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:10Z'; counters = @{ inputTokens = 150; cachedInputTokens = 60; outputTokens = 30; reasoningTokens = 8 } },
-            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:20Z'; counters = @{ inputTokens = 10; cachedInputTokens = 2; outputTokens = 3; reasoningTokens = 1 } },
-            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:10:00Z'; counters = @{ inputTokens = 20; cachedInputTokens = 4; outputTokens = 5; reasoningTokens = 2 } },
-            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-10-01T00:00:00Z'; counters = @{ inputTokens = 40; cachedInputTokens = 8; outputTokens = 9; reasoningTokens = 3 } }
+            @{ streamId = 'implementer-1'; role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-29T23:50:00Z'; counters = @{ inputTokens = 100; cachedInputTokens = 40; outputTokens = 20; reasoningTokens = 5 } },
+            @{ streamId = 'implementer-1'; role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:00Z'; counters = @{ inputTokens = 150; cachedInputTokens = 60; outputTokens = 30; reasoningTokens = 8 } },
+            @{ streamId = 'implementer-1'; role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:10Z'; counters = @{ inputTokens = 150; cachedInputTokens = 60; outputTokens = 30; reasoningTokens = 8 } },
+            @{ streamId = 'implementer-1'; role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:20Z'; counters = @{ inputTokens = 10; cachedInputTokens = 2; outputTokens = 3; reasoningTokens = 1 } },
+            @{ streamId = 'implementer-1'; role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:10:00Z'; counters = @{ inputTokens = 20; cachedInputTokens = 4; outputTokens = 5; reasoningTokens = 2 } },
+            @{ streamId = 'implementer-1'; role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-10-01T00:00:00Z'; counters = @{ inputTokens = 40; cachedInputTokens = 8; outputTokens = 9; reasoningTokens = 3 } }
         )
         $input = @{ startedAtUtc = '2026-09-30T00:00:00Z'; endedAtUtc = '2026-09-30T00:20:00Z'; source = 'synthetic-usage-export'; snapshots = $snapshots }
         $imported = Invoke-PsJson $script:MeasureScript @('-Operation','import-usage','-InputPath',(New-InputPath $input 'usage-import'))
-        Assert-Equal 1 $imported.data.duplicateSnapshots 'duplicate cumulative snapshots should be ignored'
+        Assert-Equal 0 $imported.data.duplicateSnapshots 'snapshots at distinct times must not be conflated as duplicates'
         Assert-Equal 1 $imported.data.postRunSnapshots 'post-run samples must be flagged, not attributed'
         Assert-True (@($imported.data.roles)[0].segments -gt 1) 'counter reset must start a new segment'
         Assert-True $imported.data.missingUsageIsUnknown 'missing usage is not zero'
         $usage = @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; inputTokens = 1000; cachedInputTokens = 400; outputTokens = 100; reasoningIncludedInOutput = $true }
-        $cost = Invoke-PsJson $script:MeasureScript @('-Operation','cost-report','-InputPath',(New-InputPath @{ usage = @($usage); rates = @{ 'gpt-5.6-luna' = @{ inputPerMillion = 1; cachedInputPerMillion = 0.5; outputPerMillion = 2; source = 'synthetic-2026-09-30' } } } 'cost-report'))
+        $cost = Invoke-PsJson $script:MeasureScript @('-Operation','cost-report','-InputPath',(New-InputPath @{ usage = @($usage); rates = @{ 'gpt-5.6-luna' = @{ effectiveAtUtc = '2026-09-30T00:00:00Z'; inputPerMillion = 1; cachedInputPerMillion = 0.5; outputPerMillion = 2; reasoningIncludedInOutput = $true; source = 'synthetic-2026-09-30' } } } 'cost-report'))
         Assert-True ($null -ne @($cost.data.usage)[0].apiEstimateUsd) 'explicit dated rates may produce an API estimate'
         Assert-True $cost.data.rawTokensAreNotCost 'raw processing volume must not be presented as cost'
         Assert-True (-not $cost.data.actualCostAvailable) 'unattributed actual consumption must remain unavailable'
@@ -422,13 +448,19 @@ try {
         Assert-Equal 0 $replay.data.coordinatorEngineeringActions 'replay must prove coordinator-only orchestration'
         Assert-True $replay.data.publicationBlockedByMaterialEvidence 'unresolved material evidence must block publication'
         Assert-Equal 0 $replay.data.unchangedWaitMutations 'unchanged waits must remain quiet'
-        $bad = Copy-JsonObject $scenario; $bad.fullReceiptCopied = $true
+        $bad = Copy-JsonObject $scenario; $bad.events += @{ kind = 'prompt'; fullReceiptCopied = $true }
         $badResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','replay','-InputPath',(New-InputPath $bad 'acceptance-replay-bad')) $false
         Assert-True (-not $badResult.ok) 'full receipt copying must fail replay acceptance'
+        $unstable = Copy-JsonObject $scenario; $unstable.actions += @{ actor = 'implementer'; class = 'engineering'; operation = 'correct'; workerId = 'replacement-implementer' }
+        $unstableResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','replay','-InputPath',(New-InputPath $unstable 'acceptance-replay-unstable')) $false
+        Assert-True (-not $unstableResult.ok) 'replay must derive worker identity stability from actual actions'
+        $badEnum = Copy-JsonObject $scenario; $badEnum.events += @{ kind = 'finding'; findingId = 'F3'; severity = 'high'; disposition = 'resolved' }
+        $badEnumResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','replay','-InputPath',(New-InputPath $badEnum 'acceptance-replay-enum')) $false
+        Assert-True (-not $badEnumResult.ok) 'replay must reject receipt enum mismatches instead of trusting declared flags'
     }
 
     Test-Case 'verify legacy compatibility and deliberate trial plan' {
-        $records = @{ records = @(@{ schemaVersion = 1; ticketKey = 'project:1:issue:1'; phase = 'paused'; receiptPreserved = $true; evidencePreserved = $true; uncertainAction = $true; actionReconciled = $false }, @{ schemaVersion = 2; ticketKey = 'project:1:issue:2'; phase = 'reviewing'; receiptPreserved = $true; evidencePreserved = $true }) }
+        $records = @{ records = @(@{ schemaVersion = 1; ticketKey = 'project:1:issue:1'; phase = 'paused'; receipt = @{ recordId = 'receipt-1'; verdict = 'blocked' }; evidence = @(@{ evidenceId = 'ev-1'; outcome = 'failed' }); uncertainAction = $true; actionReconciled = $false }, @{ schemaVersion = 2; ticketKey = 'project:1:issue:2'; phase = 'reviewing'; receipt = @{ recordId = 'receipt-2'; verdict = 'pass' }; evidence = @(@{ evidenceId = 'ev-2'; outcome = 'passed' }) }) }
         $compatible = Invoke-PsJson $script:AcceptanceScript @('-Operation','compatibility','-InputPath',(New-InputPath $records 'acceptance-compatibility'))
         Assert-True $compatible.data.compatible 'supported v1 and v2 records should remain compatible'
         Assert-True ($compatible.data.actualRunMigrated -eq $false) 'compatibility tests must not migrate the actual audited run'
@@ -901,13 +933,16 @@ try {
         Assert-True (-not $passingFailureResult.ok) 'a pass with failed checks must remain blocked'
 
         $docAmendment = New-ReviewReceipt
+        $reviewEvidenceRoot = Join-Path $script:FixtureRoot 'review-evidence'; $reviewLogPath = Join-Path $reviewEvidenceRoot 'evidence\logs\doc-check.log'; New-Item -ItemType Directory -Path (Split-Path -Parent $reviewLogPath) -Force | Out-Null; [IO.File]::WriteAllText($reviewLogPath, 'documentation review check passed', [Text.UTF8Encoding]::new($false)); $reviewLogHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $reviewLogPath).Hash.ToLowerInvariant(); $reviewEvidenceRecord = @{ schemaVersion = 1; evidenceId = 'ev-doc'; runId = 'run'; actionId = 'review-0'; ticketKey = 'project:1:issue:1'; scopeHash = 'scope'; checkedRevision = 'head'; evidenceKind = 'check'; outcome = 'passed'; actualExitCode = 0; assertionReportedPassed = $null; acceptedAsCheckPass = $true; coverage = @{ revision = 'head'; baseSha = 'base'; environmentHash = 'env'; dependenciesHash = 'deps'; files = @('docs/guide.md') }; log = @{ path = $reviewLogPath; sha256 = $reviewLogHash; bytes = ([IO.FileInfo]::new($reviewLogPath)).Length } }; $reviewEvidenceJson = $reviewEvidenceRecord | ConvertTo-Json -Depth 100 -Compress; $reviewEvidenceHash = (Get-FileHash -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes($reviewEvidenceJson))) -Algorithm SHA256).Hash.ToLowerInvariant()
+        $reviewEvidencePath = Join-Path $reviewEvidenceRoot 'evidence\run\review-0\ev-doc.json'; New-Item -ItemType Directory -Path (Split-Path -Parent $reviewEvidencePath) -Force | Out-Null; Write-JsonFile @{ recordJson = $reviewEvidenceJson; recordSha256 = $reviewEvidenceHash } $reviewEvidencePath
+        $docAmendment.checks[0].evidenceId = 'ev-doc'
         $docAmendment.reviewDelta = @{
             fromSha = 'prior-head'; toSha = 'head'; changedPaths = @('docs/guide.md')
             documentationChanged = $true; documentationPaths = @('docs/guide.md')
             documentationAssessment = 'Reviewed the updated operator guidance against the requested scope.'
             reusedCheckIds = @('check-evidence-1'); reuseJustification = 'The amendment changes documentation only; implementation files and inputs are unchanged.'
         }
-        $docRequest = @{ receipt = $docAmendment; expectedCriteria = $script:ReviewCriteria; currentSha = 'head'; currentScopeHash = 'scope'; currentBaseSha = 'base'; expectedRunId = 'run'; expectedActionId = 'review-0'; expectedTicketKey = 'project:1:issue:1'; correctionRound = 0; remainingMinutes = 10; previousReviewedSha = 'prior-head' }
+        $docRequest = @{ receipt = $docAmendment; expectedCriteria = $script:ReviewCriteria; currentSha = 'head'; currentScopeHash = 'scope'; currentBaseSha = 'base'; expectedRunId = 'run'; expectedActionId = 'review-0'; expectedTicketKey = 'project:1:issue:1'; correctionRound = 0; remainingMinutes = 10; previousReviewedSha = 'prior-head'; evidenceStateRoot = $reviewEvidenceRoot; evidenceReferences = @(@{ path = $reviewEvidencePath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $reviewEvidencePath).Hash.ToLowerInvariant(); evidenceId = 'ev-doc' }) }
         $docDecision = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $docRequest 'review-documentation-amendment'))
         Assert-Equal 'publish' $docDecision.data.decision 'a newly committed documentation delta must be assessed before publish'
         $expiredPass = Copy-JsonObject $request; $expiredPass.receipt = New-ReviewReceipt; $expiredPass.remainingMinutes = 0

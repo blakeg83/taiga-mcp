@@ -14,7 +14,7 @@ Implementation/reviewer prompt assets, references/roles-and-handoffs.md, review 
 Paths under scripts, references, and assets are relative to
 `.agents/skills/taiga-ticket-loop/`. Keep changes within this goal's scope.
 
-See the [worker verification contract](../../.agents/skills/taiga-ticket-loop/references/verification-contract.md)
+See the [worker verification contract](../../../.agents/skills/taiga-ticket-loop/references/verification-contract.md)
 for the plan and optional smoke-entry shape.
 
 ## Ordered steps
@@ -77,4 +77,4 @@ gates unchecked; record deviations and blockers below the table.
 | 1 | `workflow-verification.ps1` creates immutable worker-owned plans, preserves mandatory full-suite/TDD/browser requirements, and marks shared-output checks for serialization. Planning/adequacy fixtures passed. | Verification plan contract and worker guidance | `631a1fa` |
 | 2 | Optional smoke contracts validate existing commands, disposable setup/cleanup, and capabilities without executing services. Missing cleanup, capability, and failed setup fixtures block. | Smoke entry-point guidance | `169fade` |
 | 3 | Evidence reuse requires immutable record hashes plus revision/base/environment/dependency provenance. Exact revision and unchanged docs-only reuse are labeled; code changes and missing provenance invalidate reuse. | Evidence reuse guidance | `aade2ef` |
-| 4 | Worker handoff traces cover same-chat corrections, seeded UI versus actual interaction, intentional host-stop exits, and shared-output sequencing. The full 27-fixture harness, skill validation, and `git diff --check` passed; actual host remains unverified. | Worker prompts, verification contract, regression fixture | Recorded in final handoff |
+| 4 | Worker handoff traces cover same-chat corrections, seeded UI versus actual interaction, intentional host-stop exits, and shared-output sequencing. The final 33-fixture harness and repository validation matrix are recorded in the acceptance report; actual host remains unverified. | Worker prompts, verification contract, regression fixture | `310fa0c` |

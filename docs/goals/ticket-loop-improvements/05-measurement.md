@@ -1,6 +1,6 @@
 # 05: Measure time and model usage without equating tokens to cost
 
-Status: planned; all steps pending.
+Status: implemented offline; actual-host usage and attributable cost remain pending an authorized trial.
 Prerequisites: 02–04 in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -14,7 +14,7 @@ A small local reporting helper, versioned run/evidence metadata, synthetic usage
 Paths under scripts, references, and assets are relative to
 `.agents/skills/taiga-ticket-loop/`. Keep changes within this goal's scope.
 
-See the [measurement contract](../../.agents/skills/taiga-ticket-loop/references/measurement-contract.md)
+See the [measurement contract](../../../.agents/skills/taiga-ticket-loop/references/measurement-contract.md)
 for timing, usage, cost, and comparison semantics.
 
 ## Ordered steps
@@ -74,7 +74,7 @@ gates unchecked; record deviations and blockers below the table.
 
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | `workflow-measure.ps1` records injected phase events, separates observation latency from worker duration, retains bounded recent state plus append-only audit, and emits advisory stall alerts. Timing fixture passed. | Measurement contract and timing guidance | Recorded in final handoff |
-| 2 | Usage import detects duplicate cumulative samples, reset segments, missing counters, and post-run samples without adding request counts or zero-filling. Synthetic usage fixture passed. | Usage interpretation guidance | `5d7f9e7` |
-| 3 | Cost reporting separates raw usage, model profiles, dated API estimates, actual monetary consumption, and subscription attribution; unavailable fields stay unknown. Synthetic rate/cached-input fixture passed. | Economics-aware reporting guidance | `3cd9110` |
-| 4 | Comparison reporting exposes quality, wall time, role usage, coordination, repairs, and cost availability, and refuses unequal scope/profile comparisons. Higher-token equivalent runs remain acceptable. Synthetic comparison fixture passed. | Comparison template and limitations | Recorded in final handoff |
+| 1 | `workflow-measure.ps1` records injected phase events, separates observation latency from worker duration, retains bounded recent state plus append-only audit, correlates action/worker timing, and emits advisory stall alerts. Timing and long-run audit fixtures passed. | Measurement contract and timing guidance | `5d7f9e7` |
+| 2 | Usage import requires stream identity, detects reset segments and missing boundaries, excludes post-run deltas, and never zero-fills missing usage. Synthetic usage fixture passed. | Usage interpretation guidance | `3cd9110` |
+| 3 | Cost reporting separates raw usage, model profiles, dated API estimates, actual monetary consumption, and subscription attribution; incomplete rates/counters stay unavailable. Synthetic rate/cached-input fixture passed. | Economics-aware reporting guidance | `c52f1b1` |
+| 4 | Comparison reporting exposes quality, wall time, role usage, coordination, repairs, and cost availability, and refuses missing or unequal scope/profile comparisons. Higher-token equivalent runs remain acceptable. Synthetic comparison fixture passed. | Comparison template and limitations | `8e64b19` |

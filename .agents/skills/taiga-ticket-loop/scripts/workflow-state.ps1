@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('initialize-session', 'inspect', 'claim-ticket', 'release-ticket', 'reserve-slot', 'release-slot', 'prepare-action', 'record-observation', 'consume-result', 'transition', 'record-receipt-repair', 'pause-intent', 'cancel-intent', 'reconcile-intent', 'resume-session', 'set-heartbeat', 'validate-receipt')]
+    [ValidateSet('initialize-session', 'inspect', 'claim-ticket', 'release-ticket', 'reserve-slot', 'release-slot', 'prepare-action', 'record-observation', 'consume-result', 'accept-result', 'transition', 'record-receipt-repair', 'pause-intent', 'cancel-intent', 'reconcile-intent', 'resume-session', 'set-heartbeat', 'validate-receipt')]
     [string] $Operation,
     [string] $InputPath,
     [string] $Json,
@@ -559,9 +559,16 @@ function Invoke-ReleaseSlot {
 
 function Invoke-PrepareAction {
     param([hashtable] $State, [hashtable] $InputObject)
-    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','actionId','ticketKey','projectId','kind','id','actionKind','target','input','inputDigest','leaseSeconds') 'prepare-action'
+    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','actionId','ticketKey','projectId','kind','id','actionKind','target','input','inputDigest','leaseSeconds','packetDeadlineUtc','packetNowUtc') 'prepare-action'
     Assert-Revision $State $InputObject; $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
     if ($session.state -in @('pausing','cancelling','paused','cancelled','completed')) { throw "Session is not accepting new actions: $($session.state)." }
+    if ($InputObject.ContainsKey('packetDeadlineUtc')) {
+        $deadline = [DateTimeOffset]::MinValue; $now = [DateTimeOffset]::MinValue
+        if (-not [DateTimeOffset]::TryParse([string]$InputObject.packetDeadlineUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$deadline)) { throw 'packetDeadlineUtc must be an ISO-8601 timestamp.' }
+        $nowText = if ($InputObject.ContainsKey('packetNowUtc')) { [string]$InputObject.packetNowUtc } else { [DateTimeOffset]::UtcNow.ToString('o') }
+        if (-not [DateTimeOffset]::TryParse($nowText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$now)) { throw 'packetNowUtc must be an ISO-8601 timestamp.' }
+        if ($now -ge $deadline) { throw 'The assignment packet deadline has elapsed; observation or reconciliation is required.' }
+    }
     $actionId = Require-String $InputObject 'actionId'; Assert-Id $actionId 'actionId'
     if ($State.actions.ContainsKey($actionId)) { throw "Action already exists; reconcile it instead of preparing again: $actionId" }
     $actionKind = Require-String $InputObject 'actionKind'; $target = if ($InputObject.ContainsKey('target')) { $InputObject.target } else { [ordered]@{} }
@@ -626,6 +633,65 @@ function Invoke-ConsumeResult {
     return @{ Data = @{ consumed = $true; cursor = $cursor } }
 }
 
+function Assert-TransitionAllowed {
+    param([hashtable] $State, [hashtable] $InputObject, [hashtable] $Ticket, [string] $To)
+    $from = [string]$Ticket.phase
+    $map = if ($Ticket.workType -eq 'epic') { $script:ParentTransitions } else { $script:LeafTransitions }
+    if (-not $map.ContainsKey($from) -or $map[$from] -notcontains $To) { throw "Invalid transition $from -> $To for $($Ticket.ticketKey)." }
+    if ($To -in @('paused','cancelled')) { throw "Use reconcile-intent after quiescence to enter $To." }
+    Assert-DispatchAllowed $State (Get-Session $State $InputObject) $Ticket
+    if ($To -in @('implementing','correcting','reviewing','publishing') -and -not $Ticket.slotReserved) { throw 'An execution slot must be reserved before an active worker phase.' }
+}
+
+function Invoke-AcceptResult {
+    param([hashtable] $State, [hashtable] $InputObject)
+    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','cursor','actionId','workerId','result','decision','toPhase','reason','routeValidated') 'accept-result'
+    Assert-Revision $State $InputObject
+    $ticket = Assert-TicketOwner $State $InputObject
+    $cursor = Require-String $InputObject 'cursor'
+    if ($ticket.lastResultCursor -eq $cursor) { throw 'Worker result cursor was already consumed.' }
+    $actionId = Require-String $InputObject 'actionId'
+    if (-not $State.actions.ContainsKey($actionId)) { throw "Result action was not prepared: $actionId" }
+    $action = $State.actions[$actionId]
+    if ($action.ticketKey -cne $ticket.ticketKey -or $action.sessionId -cne $ticket.ownerSessionId -or [long]$action.ownerGeneration -ne [long]$ticket.ownerGeneration) { throw 'Result action is not bound to the owned ticket and generation.' }
+    if ($action.status -notin @('pending','observed')) { throw "Result action is not acceptably pending: $($action.status)." }
+    $workerId = Require-String $InputObject 'workerId'
+    $targetWorkerId = if ($action.target -is [System.Collections.IDictionary] -and $action.target.ContainsKey('workerId')) { [string]$action.target.workerId } else { '' }
+    if ([string]::IsNullOrWhiteSpace($targetWorkerId) -or $workerId -cne $targetWorkerId) { throw 'Result workerId does not match the prepared action target.' }
+    $decision = Require-String $InputObject 'decision'
+    if ($decision -notin @('wait','review','needs_input','correct','publish')) { throw "Unsupported result decision: $decision" }
+    if ($decision -eq 'publish' -and [string]$InputObject.routeValidated -cne 'review_publish') { throw 'Publication requires a validated review route.' }
+    $toPhase = if ($InputObject.ContainsKey('toPhase') -and $null -ne $InputObject.toPhase -and -not [string]::IsNullOrWhiteSpace([string]$InputObject.toPhase)) { [string]$InputObject.toPhase } else { $null }
+    if ($decision -eq 'publish' -and $toPhase -cne 'publishing') { throw 'Publication must transition to publishing.' }
+    if ($decision -eq 'correct' -and $toPhase -cne 'correcting') { throw 'Correction must transition to correcting.' }
+    if ($decision -eq 'needs_input' -and $null -ne $toPhase -and $toPhase -ne 'needs_input') { throw 'Needs-input results may only enter needs_input.' }
+    if ($null -ne $toPhase) { Assert-TransitionAllowed $State $InputObject $ticket $toPhase }
+
+    $ticket.lastResultCursor = $cursor
+    $ticket.lastResult = if ($InputObject.ContainsKey('result')) { $InputObject.result } else { $null }
+    $ticket.lastResultActionId = $actionId
+    $ticket.updatedAt = New-UtcStamp
+    $action.result = if ($InputObject.ContainsKey('result')) { $InputObject.result } else { $null }
+    $action.observedAt = New-UtcStamp
+    $action.reconcileRequired = $false
+    Add-Event $State 'worker_result_consumed' @{ ticketKey = $ticket.ticketKey; cursor = $cursor; actionId = $actionId; workerId = $workerId; decision = $decision }
+    $changed = @('lastResultCursor','action.result')
+    if ($null -ne $toPhase) {
+        $from = [string]$ticket.phase
+        $ticket.phase = $toPhase
+        $ticket.updatedAt = New-UtcStamp
+        if ($InputObject.ContainsKey('reason')) { $ticket.lastTransitionReason = $InputObject.reason }
+        if ($toPhase -eq 'correcting') {
+            $ticket.correctionRound = [int]$ticket.correctionRound + 1
+            $limit = [int](Get-ConfigValue (Get-Session $State $InputObject) 'limits.maxCorrectionRounds' 3)
+            if ($ticket.correctionRound -gt $limit) { throw "Correction round limit exhausted: $limit" }
+        }
+        Add-Event $State 'phase_transitioned' @{ ticketKey = $ticket.ticketKey; from = $from; to = $toPhase; source = 'accept-result' }
+        $changed += 'phase'
+    }
+    return @{ Data = @{ consumed = $true; cursor = $cursor; decision = $decision; ticketKey = $ticket.ticketKey; actionId = $actionId; workerId = $workerId; from = if ($null -ne $toPhase) { $from } else { $null }; to = $toPhase; changedFields = $changed } }
+}
+
 $script:LeafTransitions = @{
     queued = @('waiting_dependency','preparing','paused','cancelled','needs_input'); waiting_dependency = @('preparing','paused','cancelled','needs_input'); preparing = @('implementing','needs_input','paused','cancelled'); implementing = @('reviewing','correcting','needs_input','paused','cancelled'); reviewing = @('correcting','publishing','needs_input','paused','cancelled'); correcting = @('implementing','reviewing','needs_input','paused','cancelled'); publishing = @('awaiting_merge','finalizing','needs_input','paused','cancelled'); awaiting_merge = @('finalizing','correcting','needs_input','paused','cancelled'); finalizing = @('complete','needs_input','paused','cancelled'); paused = @('queued','waiting_dependency','preparing','implementing','correcting','reviewing','publishing','awaiting_merge','finalizing','needs_input','cancelled'); needs_input = @('queued','waiting_dependency','preparing','implementing','correcting','reviewing','publishing','awaiting_merge','finalizing','paused','cancelled')
 }
@@ -635,11 +701,7 @@ function Invoke-Transition {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','toPhase','resumePhase','reason','evidence') 'transition'
     Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject; $to = Require-String $InputObject 'toPhase'; $from = [string]$ticket.phase
-    $map = if ($ticket.workType -eq 'epic') { $script:ParentTransitions } else { $script:LeafTransitions }
-    if (-not $map.ContainsKey($from) -or $map[$from] -notcontains $to) { throw "Invalid transition $from -> $to for $($ticket.ticketKey)." }
-    if ($to -in @('paused','cancelled')) { throw "Use reconcile-intent after quiescence to enter $to." }
-    Assert-DispatchAllowed $State (Get-Session $State $InputObject) $ticket
-    if ($to -in @('implementing','correcting','reviewing','publishing') -and -not $ticket.slotReserved) { throw 'An execution slot must be reserved before an active worker phase.' }
+    Assert-TransitionAllowed $State $InputObject $ticket $to
     $ticket.phase = $to; $ticket.updatedAt = New-UtcStamp; if ($InputObject.ContainsKey('resumePhase')) { $ticket.resumePhase = $InputObject.resumePhase }
     if ($InputObject.ContainsKey('reason')) { $ticket.lastTransitionReason = $InputObject.reason }
     if ($InputObject.ContainsKey('evidence')) { $ticket.evidence = @($ticket.evidence) + @($InputObject.evidence) }
@@ -802,6 +864,7 @@ function Invoke-Mutation {
         'prepare-action' { return Invoke-PrepareAction $State $InputObject }
         'record-observation' { return Invoke-RecordObservation $State $InputObject }
         'consume-result' { return Invoke-ConsumeResult $State $InputObject }
+        'accept-result' { return Invoke-AcceptResult $State $InputObject }
         'transition' { return Invoke-Transition $State $InputObject }
         'record-receipt-repair' { return Invoke-RecordReceiptRepair $State $InputObject }
         'pause-intent' { return Invoke-PauseIntent $State $InputObject }

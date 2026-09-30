@@ -82,6 +82,12 @@ has validation and documentation evidence in its goal record. All 24
 checkpoints are implemented offline; actual-host and publication gates remain
 explicitly separate.
 
+Historical execution note: the implementation was delivered through the
+recorded focused commits, but later documentation reconciliation and the
+offline review corrections were not committed as a strict one-step-at-a-time
+cycle. The commit hashes in each goal are provenance checkpoints, not a claim
+that every later documentation edit landed before the next historical step.
+
 ## Release acceptance
 
 - [x] Coordinator scenario traces contain no production-source investigation,

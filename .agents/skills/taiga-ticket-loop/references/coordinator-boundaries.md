@@ -12,7 +12,7 @@ receipts; implementation and correctness judgments stay with the workers.
 | Ticket requirements, relationships, status, and user clarifications | Define the requested scope, dependencies, and acceptance criteria. |
 | Repository instructions, configured commands, and integration capabilities | Include required instructions and commands in the worker handoff. Reading a command is not permission to run it. |
 | Git identity, checkout/branch identity, clean status, base/head SHAs | Bind actions and receipts to the correct repository and revision. Do not inspect source or interpret a diff. |
-| Worker IDs, status, receipts, and evidence references | Wait, detect completion/blockers, validate bindings, and route results. A status or commentary update is not a receipt. |
+| Worker IDs, status, receipts, and evidence references | Wait, detect completion/blockers, validate bindings, and route results. A status or commentary update is not a receipt; a worker-supplied route cannot authorize publication. |
 | Deadlines, budgets, and provider metadata | Decide whether a permitted action can proceed and reconcile external state. |
 
 During routine ticket execution, the coordinator does not read production
@@ -54,3 +54,10 @@ The coordinator's request, wait, metadata-read, and receipt-read events remain
 distinct from the implementer's and reviewer's engineering actions. A changed
 user requirement produces a newly captured scope and immutable packet before
 work resumes.
+
+Compact result acceptance is one fenced local mutation: the cursor, prepared
+action/worker binding, and any phase transition are validated before the
+registry is written. A failed transition therefore remains retryable without
+redispatching. New external dispatch also validates the immutable packet's
+session/ticket/worktree, authority, and deadline; after expiry, observation and
+reconciliation remain possible but new work does not.
