@@ -48,7 +48,7 @@ function Invoke-RecordPhase {
     $state.events=@($state.events)+@($event);$state.updatedAtUtc=$InputObject.atUtc; if(@($state.events).Count -gt 1000){$state.events=@($state.events | Select-Object -Last 1000)};Write-AtomicJson (Join-Path $root 'measurement-registry.json') $state
     $auditPath=Join-Path $root 'measurement-audit.ndjson';[IO.File]::AppendAllText($auditPath,(($event|ConvertTo-Json -Depth 100 -Compress)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))
     $alerts=@();$stallMinutes=if($InputObject.Contains('stallAfterMinutes')){[double]$InputObject.stallAfterMinutes}else{$null};if($null -ne $stallMinutes -and $kind -eq 'wait'){$prior=@(Read-AllEvents $root $runId|Where-Object{$_.eventId -cne $eventId -and $_.eventKind -notin @('wait','pause','resume') -and ((-not $InputObject.Contains('actionId') -and [string]$_.phase -ceq [string]$event.phase) -or ($InputObject.Contains('actionId') -and [string]$_.actionId -ceq [string]$event.actionId))}|Sort-Object {Get-Stamp ([string]$_.atUtc) 'progress.atUtc'});if($prior.Count -gt 0){$gap=($at-(Get-Stamp ([string]$prior[-1].atUtc) 'progress.atUtc')).TotalMinutes;if($gap -gt $stallMinutes){$alerts+=([ordered]@{kind='stalled_phase';gapMinutes=$gap;action='observe_or_escalate';cancelsWorker=$false;changesModel=$false})}}}
-    return [ordered]@{event=$event;alerts=$alerts;registryEventCount=@($allEvents).Count;auditPath=$auditPath;registryRetainsLast=1000;auditIsComplete=$true}
+    return [ordered]@{event=$event;alerts=$alerts;registryEventCount=@($state.events).Count;auditPath=$auditPath;registryRetainsLast=1000;auditIsComplete=$true}
 }
 
 function Invoke-SummarizeTiming {

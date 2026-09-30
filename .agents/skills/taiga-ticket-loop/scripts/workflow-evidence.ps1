@@ -25,14 +25,30 @@ function Get-CanonicalRoot {
     return $full.TrimEnd('\', '/')
 }
 
+function Convert-JsonElement {
+    param([System.Text.Json.JsonElement] $Element)
+    switch ($Element.ValueKind.ToString()) {
+        'Object' { $object = [ordered]@{}; foreach ($property in $Element.EnumerateObject()) { $object[$property.Name] = Convert-JsonElement $property.Value }; return $object }
+        'Array' { $items = [System.Collections.Generic.List[object]]::new(); foreach ($item in $Element.EnumerateArray()) { [void]$items.Add((Convert-JsonElement $item)) }; return ,$items.ToArray() }
+        'String' { return $Element.GetString() }
+        'Number' { $integer = 0L; if ($Element.TryGetInt64([ref]$integer)) { return $integer }; return $Element.GetDouble() }
+        'True' { return $true }
+        'False' { return $false }
+        'Null' { return $null }
+        default { throw "Unsupported JSON value kind: $($Element.ValueKind)." }
+    }
+}
+
 function Read-JsonObject {
     param([string] $Path, [string] $Name)
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Name file was not found." }
+    $document = $null
     try {
-        $value = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $Path) -AsHashtable -Depth 100
+        $document = [System.Text.Json.JsonDocument]::Parse([IO.File]::ReadAllText($Path))
+        $value = Convert-JsonElement $document.RootElement
         if ($value -isnot [System.Collections.IDictionary]) { throw "$Name must be a JSON object." }
         return $value
-    } catch { throw "$Name file is not valid JSON: $($_.Exception.Message)" }
+    } catch { throw "$Name file is not valid JSON: $($_.Exception.Message)" } finally { if ($null -ne $document) { $document.Dispose() } }
 }
 
 function Need-String {
