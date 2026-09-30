@@ -75,6 +75,6 @@ gates unchecked; record deviations and blockers below the table.
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
 | 1 | `workflow-measure.ps1` records injected phase events, separates observation latency from worker duration, retains bounded recent state plus append-only audit, and emits advisory stall alerts. Timing fixture passed. | Measurement contract and timing guidance | Recorded in final handoff |
-| 2 | Usage import detects duplicate cumulative samples, reset segments, missing counters, and post-run samples without adding request counts or zero-filling. Synthetic usage fixture passed. | Usage interpretation guidance | Recorded in final handoff |
+| 2 | Usage import detects duplicate cumulative samples, reset segments, missing counters, and post-run samples without adding request counts or zero-filling. Synthetic usage fixture passed. | Usage interpretation guidance | `5d7f9e7` |
 | 3 | Cost reporting separates raw usage, model profiles, dated API estimates, actual monetary consumption, and subscription attribution; unavailable fields stay unknown. Synthetic rate/cached-input fixture passed. | Economics-aware reporting guidance | Recorded in final handoff |
 | 4 | Comparison reporting exposes quality, wall time, role usage, coordination, repairs, and cost availability, and refuses unequal scope/profile comparisons. Higher-token equivalent runs remain acceptable. Synthetic comparison fixture passed. | Comparison template and limitations | Recorded in final handoff |
