@@ -15,6 +15,7 @@ $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticke
 $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
 $script:VerificationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-verification.ps1'
+$script:MeasureScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-measure.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
 $script:Passed = 0
@@ -357,6 +358,58 @@ try {
         $sequencing = @($traces.scenarios | Where-Object name -eq 'shared-output-sequencing')[0]
         Assert-True $sequencing.expected.buildsSerialized 'checks sharing outputs must serialize'
         Assert-True $sequencing.expected.independentReadMayBatch 'independent reads may be batched'
+    }
+
+    Test-Case 'record phase timing with an injected clock' {
+        $measureRoot = Join-Path $script:FixtureRoot 'measure-state'
+        $base = '2026-09-30T00:00:00Z'
+        $events = @(
+            @{ eventId = 'evt-dispatch'; runId = 'measure-run'; eventKind = 'dispatch'; phase = 'implementing'; atUtc = $base; workerReportedDurationSeconds = $null },
+            @{ eventId = 'evt-observed'; runId = 'measure-run'; eventKind = 'result_observed'; phase = 'implementing'; atUtc = '2026-09-30T00:00:10Z'; workerReportedDurationSeconds = 5 },
+            @{ eventId = 'evt-receipt'; runId = 'measure-run'; eventKind = 'receipt_accepted'; phase = 'reviewing'; atUtc = '2026-09-30T00:00:20Z' }
+        )
+        foreach ($event in $events) { $record = Copy-JsonObject $event; $record.stallAfterMinutes = 0.1; $saved = Invoke-PsJson $script:MeasureScript @('-Operation','record-phase','-InputPath',(New-InputPath $record "measure-$($event.eventId)"),'-StateRoot',$measureRoot) }
+        $summary = Invoke-PsJson $script:MeasureScript @('-Operation','summarize-timing','-InputPath',(New-InputPath @{ runId = 'measure-run' } 'measure-summary'),'-StateRoot',$measureRoot)
+        Assert-Equal 10 $summary.data.dispatchToObservationSeconds 'observation latency should use supplied event times'
+        Assert-Equal 10 $summary.data.observationToReceiptSeconds 'receipt latency should be separate from worker duration'
+        Assert-Equal 5 @($summary.data.workerReportedDurations)[0].seconds 'worker-reported duration must remain separate'
+        Assert-True ($summary.data.unknownWorkerDurationCount -gt 0) 'unreported worker duration must remain unknown'
+        Assert-True (Test-Path -LiteralPath (Join-Path $measureRoot 'measurement-audit.ndjson')) 'append-only measurement audit should be retained'
+    }
+
+    Test-Case 'import cumulative usage without inventing deltas or cost' {
+        $snapshots = @(
+            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-29T23:50:00Z'; counters = @{ inputTokens = 100; cachedInputTokens = 40; outputTokens = 20; reasoningTokens = 5 } },
+            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:00Z'; counters = @{ inputTokens = 150; cachedInputTokens = 60; outputTokens = 30; reasoningTokens = 8 } },
+            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:10Z'; counters = @{ inputTokens = 150; cachedInputTokens = 60; outputTokens = 30; reasoningTokens = 8 } },
+            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:00:20Z'; counters = @{ inputTokens = 10; cachedInputTokens = 2; outputTokens = 3; reasoningTokens = 1 } },
+            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-09-30T00:10:00Z'; counters = @{ inputTokens = 20; cachedInputTokens = 4; outputTokens = 5; reasoningTokens = 2 } },
+            @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; atUtc = '2026-10-01T00:00:00Z'; counters = @{ inputTokens = 40; cachedInputTokens = 8; outputTokens = 9; reasoningTokens = 3 } }
+        )
+        $input = @{ startedAtUtc = '2026-09-30T00:00:00Z'; endedAtUtc = '2026-09-30T00:20:00Z'; source = 'synthetic-usage-export'; snapshots = $snapshots }
+        $imported = Invoke-PsJson $script:MeasureScript @('-Operation','import-usage','-InputPath',(New-InputPath $input 'usage-import'))
+        Assert-Equal 1 $imported.data.duplicateSnapshots 'duplicate cumulative snapshots should be ignored'
+        Assert-Equal 1 $imported.data.postRunSnapshots 'post-run samples must be flagged, not attributed'
+        Assert-True (@($imported.data.roles)[0].segments -gt 1) 'counter reset must start a new segment'
+        Assert-True $imported.data.missingUsageIsUnknown 'missing usage is not zero'
+        $usage = @{ role = 'implementer'; model = 'gpt-5.6-luna'; effort = 'xhigh'; inputTokens = 1000; cachedInputTokens = 400; outputTokens = 100; reasoningIncludedInOutput = $true }
+        $cost = Invoke-PsJson $script:MeasureScript @('-Operation','cost-report','-InputPath',(New-InputPath @{ usage = @($usage); rates = @{ 'gpt-5.6-luna' = @{ inputPerMillion = 1; cachedInputPerMillion = 0.5; outputPerMillion = 2; source = 'synthetic-2026-09-30' } } } 'cost-report'))
+        Assert-True ($null -ne @($cost.data.usage)[0].apiEstimateUsd) 'explicit dated rates may produce an API estimate'
+        Assert-True $cost.data.rawTokensAreNotCost 'raw processing volume must not be presented as cost'
+        Assert-True (-not $cost.data.actualCostAvailable) 'unattributed actual consumption must remain unavailable'
+    }
+
+    Test-Case 'compare equivalent runs without a raw-token optimization gate' {
+        $common = @{ scopeHash = 'scope'; repositoryRequirementsHash = 'requirements'; profilesHash = 'profiles' }
+        $manual = Copy-JsonObject $common; $manual.name = 'manual'; $manual.quality = 'accepted'; $manual.acceptedDefects = 0; $manual.wallClockSeconds = 120; $manual.totalTokens = 200; $manual.usage = @{ implementer = 150; coordinator = 50 }; $manual.coordinationActions = 20; $manual.repairCounts = @{ format = 1 }; $manual.actualCost = $null
+        $automated = Copy-JsonObject $common; $automated.name = 'automated'; $automated.quality = 'accepted'; $automated.acceptedDefects = 0; $automated.wallClockSeconds = 100; $automated.totalTokens = 300; $automated.usage = @{ implementer = 250; coordinator = 50 }; $automated.coordinationActions = 8; $automated.repairCounts = @{ format = 0 }
+        $report = Invoke-PsJson $script:MeasureScript @('-Operation','comparison-report','-InputPath',(New-InputPath @{ runs = @($manual,$automated) } 'comparison-report'))
+        Assert-True $report.data.comparable 'equivalent scope and profiles should allow comparison'
+        Assert-Equal 100 $report.data.rawTokenDifference 'report may show raw usage without making it a gate'
+        Assert-True $report.data.rawTokenReductionIsNotAReleaseGate 'higher raw usage must not fail acceptance'
+        $different = Copy-JsonObject $automated; $different.profilesHash = 'different-profile'
+        $incomparable = Invoke-PsJson $script:MeasureScript @('-Operation','comparison-report','-InputPath',(New-InputPath @{ runs = @($manual,$different) } 'comparison-incomparable'))
+        Assert-True (-not $incomparable.data.comparable) 'different worker profiles must be disclosed as incomparable'
     }
 
     Test-Case 'capture immutable verification evidence and classify outcomes' {
