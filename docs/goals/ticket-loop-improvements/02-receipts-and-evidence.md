@@ -1,6 +1,6 @@
 # 02: Make receipts deterministic and evidence durable
 
-Status: step 1 implemented offline; steps 2–4 pending.
+Status: steps 1–2 implemented offline; steps 3–4 pending.
 Prerequisites: 01 in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -28,13 +28,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 2: Capture evidence once and generate metadata
 
-- [ ] Provide constructors that fill run/action IDs, criterion IDs, branch/base/head, profile, and timestamps from trusted run metadata rather than model transcription.
-- [ ] Store evidence as immutable records with IDs, hashes, origin action, checked revision, command/working directory, actual exit, outcome, and log reference. Keep large outputs outside the registry.
-- [ ] Represent expected-red failures, passing assertions, and intentional host shutdown separately; retain raw exit codes. An intentional stop never converts a failing test to a pass.
-- [ ] Generate test counts from structured results when available. Preserve unknown or reported-only values with provenance instead of inventing precise totals.
-- [ ] **Validate:** Test actual exit 1 during intentional host stop, genuine test failure, expected-red fixture failure versus behavior failure, tampered evidence, missing files, and metadata generation.
-- [ ] **Update documentation:** Document evidence storage/lifetime and outcome classification.
-- [ ] **Commit before the next step:** `Generate receipts from preserved verification evidence`.
+- [x] Provide constructors that fill run/action IDs, criterion IDs/text, branch/base/head, profile, and timestamps from validated packets, prepared actions, and committed Git metadata rather than model transcription.
+- [x] Store evidence as immutable records with IDs, hashes, origin action, checked revision, command/working directory, actual exit, outcome, and log reference. Keep large outputs outside the registry.
+- [x] Represent expected-red failures, passing assertions, and intentional host shutdown separately; retain raw exit codes. An intentional stop never converts a failing test to a pass.
+- [x] Generate test counts from structured results when available. Preserve unknown or reported-only values with provenance instead of inventing precise totals.
+- [x] **Validate:** Tested actual exit 1 during intentional host stop, genuine test failure, expected-red fixture failure versus behavior failure, record/log tampering, missing record/log files, metadata generation, and reported-only counts. Evidence fixtures pass.
+- [x] **Update documentation:** Documented evidence storage/lifetime, trusted metadata sources, validation, and outcome classification.
+- [x] **Commit before the next step:** `Generate receipts from preserved verification evidence`.
 
 ### Step 3: Separate format repair from engineering correction
 
@@ -71,7 +71,7 @@ gates unchecked; record deviations and blockers below the table.
 
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | The shared v1 validator reproduced the legacy enum mismatch and covers alias normalization, contradiction rejection, exact profile, complete ordered criteria, failed evidence, and stale SHA. `Test-Automation.ps1` passed 17 fixtures; skill validator and `git diff --check` passed. | Review receipt schema/reference, both helper entry points, reviewer prompt, review loop, skill entry, operator guide | Recorded in step 2 |
-| 2 | Pending | Pending | Pending |
+| 1 | The shared v1 validator reproduced the legacy enum mismatch and covers alias normalization, contradiction rejection, exact profile, complete ordered criteria, failed evidence, and stale SHA. `Test-Automation.ps1` passed 17 fixtures; skill validator and `git diff --check` passed. | Review receipt schema/reference, both helper entry points, reviewer prompt, review loop, skill entry, operator guide | `f41cf10` |
+| 2 | Trusted metadata and structured evidence fixtures cover raw exit 1 on intentional shutdown, genuine failures, expected-red outcomes, assertions, external log hashes, tampering/missing files, generated counts, and reported-only provenance. `Test-Automation.ps1` passed 18 fixtures; skill validation and `git diff --check` passed. | Evidence helper/state action context, storage/classification reference, worker handoffs, operator guide, fixture guide | Recorded in step 3 |
 | 3 | Pending | Pending | Pending |
 | 4 | Pending | Pending | Pending |

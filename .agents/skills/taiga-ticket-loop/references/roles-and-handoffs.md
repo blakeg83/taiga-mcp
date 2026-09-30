@@ -28,6 +28,8 @@ approved scope, runs the configured checks, updates documentation, and commits
 at checkpoints. Its receipt reports the exact checkout, branch, base/current
 SHA, criteria and task coverage, check exit codes, docs, commits, blockers, and
 scope hash. A no-change result is explicit and cannot fabricate a PR.
+For each check, preserve its actual process exit code and log reference so the
+coordinator can bind the result to immutable evidence files.
 
 The `gpt-6.1-sol`/`high` reviewer inspects the exact implementation checkout and
 `base..HEAD` diff. The prompt requests no source edits and a structured receipt

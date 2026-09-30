@@ -103,6 +103,15 @@ Expected criteria are compared by packet order, ID, and exact text. Legacy
 contradicts it; the original receipt is preserved and every normalization is
 reported. See the [receipt compatibility reference](../../.agents/skills/taiga-ticket-loop/references/review-receipts.md).
 
+Verification logs and evidence records live outside the mutable registry.
+`workflow-evidence.ps1` binds them to a validated packet, prepared action, exact
+profile, and committed revision. It keeps expected-red fixtures, passing
+assertions, ordinary check failures, and intentional host shutdowns separate
+while retaining raw exit codes. Counts come from validated structured records;
+reported-only counts retain their source and timestamp. The
+[evidence contract](../../.agents/skills/taiga-ticket-loop/references/evidence-contract.md)
+documents storage, validation, and retention.
+
 One PR is created or reused per executable leaf/story ticket. PR delivery,
 checks, merge provenance, and Taiga Done are separate facts. Default leaf Done
 requires an observed merge; an epic additionally requires every required story

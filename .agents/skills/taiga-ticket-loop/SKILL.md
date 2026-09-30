@@ -31,6 +31,8 @@ the relevant reference before each operation:
   correction rounds;
 - [review receipt contract](references/review-receipts.md) for the shared
   versioned schema and legacy compatibility adapter;
+- [verification evidence contract](references/evidence-contract.md) for
+  immutable check records, log hashes, and outcome classification;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,
   status mapping, branch, provider, and merge evidence;
 - [scheduling and epics](references/scheduling-and-epics.md) for concurrency,

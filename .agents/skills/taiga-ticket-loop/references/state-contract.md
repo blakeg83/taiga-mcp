@@ -55,3 +55,12 @@ The helper preserves a source receipt and returns a separately normalized v1
 view plus explicit normalization records for legacy input. Validation errors
 name the failing field so routine formatting repairs do not require source
 inspection.
+
+## Verification evidence
+
+Prepared check actions retain only a small validated `evidenceContext` in the
+registry. Use `workflow-evidence.ps1` to initialize trusted per-action metadata,
+capture observed process results and external logs, validate immutable file
+hashes, and summarize structured outcomes. See the
+[verification evidence contract](evidence-contract.md) for storage layout,
+lifetime, and classifications. Large logs never enter the registry.

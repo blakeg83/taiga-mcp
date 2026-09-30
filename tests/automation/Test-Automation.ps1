@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string] $Only)
 
 $ErrorActionPreference = 'Stop'
 $script:Root = Join-Path ([IO.Path]::GetTempPath()) ("TaigaMCP automation {0}" -f ([Guid]::NewGuid().ToString('N')))
@@ -10,6 +10,7 @@ $script:PacketScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticke
 $script:PreflightScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-preflight.ps1'
 $script:RoleTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-role-traces.json'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
+$script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
 $script:Passed = 0
@@ -70,6 +71,7 @@ function New-ReviewReceipt {
 
 function Test-Case {
     param([string] $Name, [scriptblock] $Body)
+    if (-not [string]::IsNullOrWhiteSpace($Only) -and $Name -notlike "*$Only*") { return }
     try { & $Body; $script:Passed++; Write-Output "PASS $Name" } catch { $script:Failed++; Write-Output "FAIL $Name :: $($_.Exception.Message)" }
 }
 
@@ -178,6 +180,131 @@ try {
         $passingFailure.receipt.verdict = 'pass'
         $passingResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $passingFailure 'receipt-pass-failed-check')) $false
         Assert-True (-not $passingResult.ok) 'passing review must reject failed checks'
+    }
+
+    Test-Case 'capture immutable verification evidence and classify outcomes' {
+        $evidenceRoot = Join-Path $script:FixtureRoot 'evidence state'
+        $worktree = Join-Path $script:FixtureRoot 'evidence worktree'
+        New-Item -ItemType Directory -Path $worktree -Force | Out-Null
+        $null = & git -C $worktree init --quiet
+        Assert-Equal 0 $LASTEXITCODE 'fixture worktree should initialize'
+        $null = & git -C $worktree config user.name 'Automation Fixture'
+        $null = & git -C $worktree config user.email 'automation@example.invalid'
+        [IO.File]::WriteAllText((Join-Path $worktree 'fixture.txt'), 'synthetic committed source', [Text.UTF8Encoding]::new($false))
+        $null = & git -C $worktree add --all
+        $null = & git -C $worktree commit --quiet -m 'Create evidence fixture'
+        Assert-Equal 0 $LASTEXITCODE 'fixture source should commit'
+        $null = & git -C $worktree branch -M 'codex/evidence-fixture'
+        Assert-Equal 0 $LASTEXITCODE 'fixture branch should be set'
+        $baseSha = (& git -C $worktree rev-parse HEAD).Trim()
+
+        $contextPath = Join-Path $script:FixtureRoot 'evidence ticket context.md'
+        [IO.File]::WriteAllText($contextPath, 'Synthetic evidence packet context.', [Text.UTF8Encoding]::new($false))
+        $packetRequest = @{
+            packetId = 'evidence-packet'; sessionId = 'synthetic-session-01'; runId = 'evidence-run-01'
+            ticket = @{ ticketKey = 'project:123:issue:456'; projectId = 123; kind = 'issue'; id = 456; ref = 7; title = 'Evidence fixture' }
+            contextPath = $contextPath
+            criteria = @(@{ id = 'criterion-01'; text = 'Keep evidence tied to the committed result.' })
+            repository = @{ identity = 'evidence-repo'; repositoryPath = $worktree; worktreePath = $worktree; branch = 'codex/evidence-fixture'; baseSha = $baseSha }
+            requiredCommands = @('dotnet test -c Debug'); unresolvedRequirements = @()
+            authority = @{ authorizedActions = @('run local checks'); excludedActions = @('publish') }
+            deadline = @{ startedAtUtc = '2026-09-30T12:00:00Z'; deadlineUtc = '2026-09-30T14:00:00Z'; elapsedBudgetMinutes = 120 }
+            profiles = @{ coordinator = @{ model = 'gpt-6.1-sol'; effort = 'high' }; implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } }
+        }
+        $packetCreated = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $packetRequest 'evidence-packet-create'),'-StateRoot',$evidenceRoot)
+        $init = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$evidenceRoot)
+        $claimRequest = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:456'; repositoryIdentity = 'evidence-repo'; repositoryPath = $worktree; scopeHash = $packetCreated.data.scopeHash; expectedRevision = $init.revision }
+        $claimed = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath $claimRequest 'evidence-ticket-claim'),'-StateRoot',$evidenceRoot)
+        $revision = [pscustomobject]@{ value = $claimed.revision }
+        $stateScriptPath = $script:StateScript
+        $evidenceScriptPath = $script:EvidenceScript
+        $fixtureDirectory = $script:FixtureRoot
+        $packetData = $packetCreated.data
+        $prepareAction = {
+            param([string] $ActionId, [string] $ActionKind, [string] $Command)
+            $request = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:456'; actionId = $ActionId; actionKind = $ActionKind; input = @{ command = $Command; workingDirectory = $worktree; criterionIds = @('criterion-01') }; expectedRevision = $revision.value }
+            $prepared = Invoke-PsJson $stateScriptPath @('-Operation','prepare-action','-InputPath',(New-InputPath $request "evidence-$ActionId"),'-StateRoot',$evidenceRoot)
+            $revision.value = $prepared.revision
+            return $prepared
+        }.GetNewClosure()
+        $captureAction = {
+            param([string] $ActionId, [string] $ActionKind, [long] $ExitCode, [bool] $AssertionPassed = $true)
+            $action = & $prepareAction $ActionId $ActionKind 'dotnet test -c Debug'
+            $metadataRequest = @{ packetPath = $packetData.packetPath; packetHash = $packetData.packetHash; actionId = $ActionId }
+            $metadata = Invoke-PsJson $evidenceScriptPath @('-Operation','initialize-run','-InputPath',(New-InputPath $metadataRequest "metadata-$ActionId"),'-StateRoot',$evidenceRoot)
+            $logPath = Join-Path $fixtureDirectory "${ActionId}.log"
+            [IO.File]::WriteAllText($logPath, "Synthetic log for $ActionId with result $ExitCode.", [Text.UTF8Encoding]::new($false))
+            $captureRequest = @{ metadataPath = $metadata.data.metadataPath; actualExitCode = $ExitCode; logPath = $logPath }
+            if ($action.data.action.kind -eq 'assertion') { $captureRequest.assertionPassed = $AssertionPassed }
+            return Invoke-PsJson $evidenceScriptPath @('-Operation','capture','-InputPath',(New-InputPath $captureRequest "capture-$ActionId"),'-StateRoot',$evidenceRoot)
+        }.GetNewClosure()
+
+        $shutdown = & $captureAction 'shutdown-action' 'intentional_host_shutdown' 1
+        Assert-Equal 1 $shutdown.data.evidence.actualExitCode 'intentional shutdown must retain raw exit 1'
+        Assert-Equal 'intentional_stop_failed' $shutdown.data.evidence.outcome 'shutdown failure must remain separate from test pass'
+        Assert-True (-not $shutdown.data.evidence.acceptedAsCheckPass) 'intentional stop cannot become a passing check'
+        Assert-Equal 'gpt-5.6-luna' $shutdown.data.evidence.profile.model 'profile must come from the packet'
+        Assert-Equal 'shutdown-action' $shutdown.data.evidence.actionId 'action ID must come from the prepared registry action'
+        Assert-Equal 'criterion-01' $shutdown.data.evidence.criterionIds[0] 'criterion IDs must be checked against packet metadata'
+        Assert-Equal 'Keep evidence tied to the committed result.' $shutdown.data.evidence.criteria[0].text 'criterion text must come from the packet'
+        Assert-Equal 'codex/evidence-fixture' $shutdown.data.evidence.repository.branch 'branch must come from Git metadata'
+        Assert-Equal $baseSha $shutdown.data.evidence.repository.baseSha 'base SHA must come from the assignment packet'
+        Assert-Equal $baseSha $shutdown.data.evidence.checkedRevision 'checked SHA must come from the committed worktree'
+        Assert-Equal $packetCreated.data.packetHash $shutdown.data.evidence.packetHash 'packet binding must be copied from trusted metadata'
+        $capturedAt = [DateTimeOffset]::MinValue
+        Assert-True ([DateTimeOffset]::TryParse($shutdown.data.evidence.capturedAtUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$capturedAt)) 'timestamp must be generated from the helper clock'
+        Assert-True (Test-Path -LiteralPath $shutdown.data.evidence.log.path -PathType Leaf) 'large log should live in the external evidence store'
+
+        $failedCheck = & $captureAction 'failed-check-action' 'implementation_check' 1
+        Assert-Equal 'failed' $failedCheck.data.evidence.outcome 'genuine nonzero check must be a failure'
+        $expectedRed = & $captureAction 'expected-red-failure-action' 'expected_red_fixture' 1
+        Assert-Equal 'expected_red_failure' $expectedRed.data.evidence.outcome 'expected-red fixture failure must be classified separately'
+        $unexpectedRedPass = & $captureAction 'expected-red-pass-action' 'expected_red_fixture' 0
+        Assert-Equal 'unexpected_pass' $unexpectedRedPass.data.evidence.outcome 'an expected-red fixture that passes must be visible as unexpected'
+        $assertion = & $captureAction 'assertion-action' 'assertion' 0 $true
+        Assert-Equal 'assertion_passed' $assertion.data.evidence.outcome 'structured passing assertions have their own outcome'
+        $passedCheck = & $captureAction 'passing-check-action' 'implementation_check' 0
+        Assert-Equal 'passed' $passedCheck.data.evidence.outcome 'zero-exit checks should count as passed'
+
+        $summaryRequest = @{
+            evidencePaths = @($shutdown.data.evidencePath, $failedCheck.data.evidencePath, $expectedRed.data.evidencePath, $unexpectedRedPass.data.evidencePath, $assertion.data.evidencePath, $passedCheck.data.evidencePath)
+            reportedOnly = @(@{ name = 'workerReportedTestCount'; value = $null; source = 'worker summary'; reportedAtUtc = '2026-09-30T13:00:00Z' })
+        }
+        $summary = Invoke-PsJson $script:EvidenceScript @('-Operation','summarize','-InputPath',(New-InputPath $summaryRequest 'evidence-summary'),'-StateRoot',$evidenceRoot)
+        Assert-Equal 1 $summary.data.computed.checksPassed 'summary should count structured passing checks'
+        Assert-Equal 1 $summary.data.computed.checksFailed 'summary should count structured failing checks'
+        Assert-Equal 1 $summary.data.computed.expectedRedFailures 'expected-red results must have their own count'
+        Assert-Equal 1 $summary.data.computed.expectedRedUnexpectedPasses 'unexpected expected-red passes must have their own count'
+        Assert-Equal 1 $summary.data.computed.intentionalShutdownFailures 'intentional stop errors must remain visible'
+        Assert-Equal 'reported_only' $summary.data.reportedOnly[0].status 'unknown counts must remain reported-only'
+        Assert-Equal 'worker summary' $summary.data.reportedOnly[0].source 'reported count provenance must be preserved'
+
+        $shutdownLogPath = $shutdown.data.evidence.log.path
+        $originalLog = [IO.File]::ReadAllText($shutdownLogPath)
+        [IO.File]::WriteAllText($shutdownLogPath, $originalLog + 'tampered', [Text.UTF8Encoding]::new($false))
+        $tamperedLog = Invoke-PsJson $script:EvidenceScript @('-Operation','validate','-EvidencePath',$shutdown.data.evidencePath,'-StateRoot',$evidenceRoot) $false
+        Assert-True (-not $tamperedLog.ok) 'tampered external log must fail its content hash'
+        [IO.File]::WriteAllText($shutdownLogPath, $originalLog, [Text.UTF8Encoding]::new($false))
+
+        $missingLogBackup = Join-Path $script:FixtureRoot 'missing-log-backup.tmp'
+        [IO.File]::Copy($shutdownLogPath, $missingLogBackup, $false)
+        Remove-Item -LiteralPath $shutdownLogPath -Force
+        $missingLog = Invoke-PsJson $script:EvidenceScript @('-Operation','validate','-EvidencePath',$shutdown.data.evidencePath,'-StateRoot',$evidenceRoot) $false
+        [IO.File]::Copy($missingLogBackup, $shutdownLogPath, $false)
+        Remove-Item -LiteralPath $missingLogBackup -Force
+        Assert-True (-not $missingLog.ok) 'missing external log must block evidence validation'
+
+        $missingResult = Invoke-PsJson $script:EvidenceScript @('-Operation','validate','-EvidencePath',(Join-Path $script:FixtureRoot 'missing-evidence.json'),'-StateRoot',$evidenceRoot) $false
+        Assert-True (-not $missingResult.ok) 'missing evidence files must fail validation'
+        $tamperedEnvelope = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $failedCheck.data.evidencePath) -AsHashtable -Depth 100
+        $tamperedRecord = ConvertFrom-Json -InputObject $tamperedEnvelope.recordJson -AsHashtable -Depth 100
+        $tamperedRecord.actualExitCode = 0
+        $tamperedEnvelope.recordJson = ConvertTo-Json -InputObject $tamperedRecord -Depth 100 -Compress
+        Write-JsonFile $tamperedEnvelope $failedCheck.data.evidencePath
+        $tamperedResult = Invoke-PsJson $script:EvidenceScript @('-Operation','validate','-EvidencePath',$failedCheck.data.evidencePath,'-StateRoot',$evidenceRoot) $false
+        Assert-True (-not $tamperedResult.ok) 'tampered evidence record must fail hash verification'
+        $registryText = Get-Content -Raw -LiteralPath (Join-Path $evidenceRoot 'registry.json')
+        Assert-True (-not $registryText.Contains('Synthetic log for')) 'large log content must stay outside the registry'
     }
 
     Test-Case 'create immutable scope packets bound to context and checkout' {

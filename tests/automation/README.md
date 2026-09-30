@@ -20,4 +20,8 @@ binding, immutable hash-bound assignment packets and full-context artifacts,
 exact-profile/browser/authority preflight, null-hasMore pagination with
 authoritative totals, duplicate/contradictory page rejection, coordinator-only
 role traces, stable worker identities through corrections, and a verified local
-push. A nonzero exit code means a fixture failed.
+push. Evidence cases also cover immutable record/log hashes, trusted packet and
+action metadata, raw exit preservation, expected-red and intentional-shutdown
+classification, structured counts, and reported-only provenance. Run one case
+while developing with `pwsh -NoProfile -File tests/automation/Test-Automation.ps1 -Only evidence`.
+A nonzero exit code means a fixture failed.

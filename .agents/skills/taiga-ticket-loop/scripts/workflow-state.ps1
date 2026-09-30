@@ -562,10 +562,30 @@ function Invoke-PrepareAction {
     $actionKind = Require-String $InputObject 'actionKind'; $target = if ($InputObject.ContainsKey('target')) { $InputObject.target } else { [ordered]@{} }
     $payload = if ($InputObject.ContainsKey('input')) { $InputObject.input } else { [ordered]@{} }
     $digest = if ($InputObject.ContainsKey('inputDigest')) { Require-String $InputObject 'inputDigest' } else { Get-Hash $payload }
+    $evidenceContext = $null
+    if ($actionKind -in @('implementation_check','review_check','expected_red_fixture','assertion','intentional_host_shutdown')) {
+        if ($payload -isnot [System.Collections.IDictionary]) { throw 'Verification action input must be an object.' }
+        Assert-AllowedKeys $payload @('command','workingDirectory','criterionIds') 'verification action input'
+        $command = Require-String $payload 'command' 'verification action input'
+        $workingDirectory = [IO.Path]::GetFullPath((Require-String $payload 'workingDirectory' 'verification action input'))
+        if (-not (Test-Path -LiteralPath $workingDirectory -PathType Container)) { throw 'Verification workingDirectory must be an existing directory.' }
+        if (-not $payload.ContainsKey('criterionIds') -or $payload.criterionIds -is [string] -or $payload.criterionIds -isnot [System.Collections.IEnumerable]) { throw 'Verification action criterionIds must be an array.' }
+        $criterionIds = [System.Collections.Generic.List[string]]::new(); $seenCriteria = @{}
+        foreach ($criterionValue in $payload.criterionIds) {
+            $criterionId = [string]$criterionValue
+            Assert-Id $criterionId 'criterionId'
+            if ($seenCriteria.ContainsKey($criterionId)) { throw "Verification action repeats criterionId: $criterionId" }
+            $seenCriteria[$criterionId] = $true
+            [void]$criterionIds.Add($criterionId)
+        }
+        if ($criterionIds.Count -eq 0) { throw 'Verification action must identify at least one criterionId.' }
+        $evidenceContext = [ordered]@{ command = $command; workingDirectory = $workingDirectory; criterionIds = $criterionIds.ToArray() }
+    }
     $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { (Assert-TicketOwner $State $InputObject).ticketKey } else { $null }
     if ($null -ne $ticketKey) { Assert-DispatchAllowed $State $session $State.tickets[$ticketKey] }
     $leaseSeconds = if ($InputObject.ContainsKey('leaseSeconds')) { [double]$InputObject.leaseSeconds } else { 900.0 }
     $action = [ordered]@{ actionId = $actionId; sessionId = $session.sessionId; ownerGeneration = $session.ownerGeneration; ticketKey = $ticketKey; kind = $actionKind; target = $target; inputDigest = $digest; status = 'pending'; preparedAt = New-UtcStamp; leaseUntil = [DateTime]::UtcNow.AddSeconds($leaseSeconds).ToString('o'); receipt = $null }
+    if ($null -ne $evidenceContext) { $action.evidenceContext = $evidenceContext }
     $State.actions[$actionId] = $action; Add-Event $State 'action_prepared' @{ actionId = $actionId; kind = $actionKind; ticketKey = $ticketKey }
     return @{ Data = @{ action = $action } }
 }
