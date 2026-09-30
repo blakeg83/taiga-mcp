@@ -1,5 +1,11 @@
 # Taiga ticket-loop automation
 
+The [ticket-loop improvement plan](../goals/ticket-loop-improvements/README.md)
+records the 2026-09-30 trial findings and the next six implementation goals.
+Those improvements are planned, not delivered by the documentation update.
+The trial exercised ordinary worker chats and review but stopped at the user's
+request before push/PR delivery; it is not full publication acceptance evidence.
+
 This repository contains an explicitly invoked repo-local skill at
 `.agents/skills/taiga-ticket-loop/`. It coordinates ordinary Codex chats
 outside the .NET MCP server. It is not installed globally and it does not
@@ -43,10 +49,10 @@ remain off. The full copyable template is in
 `.agents/skills/taiga-ticket-loop/assets/operational-invocation-template.md`.
 
 The implementer is exactly `gpt-5.6-luna` with `xhigh`. The reviewer is exactly
-`gpt-6.1-sol` with `high`. The current planning host advertised
-`gpt-5.6-luna/xhigh`, `gpt-6-sol/high`, and `gpt-6-astra/medium`, but not
-`gpt-6.1-sol/high`; an operational run must therefore stop at preflight until
-the requested reviewer identifier is available. No silent fallback is allowed.
+`gpt-6.1-sol` with `high`. The original planning host did not advertise the
+requested reviewer; the supplied 2026-09-30 trial records show that profile
+running on the trial host. Check actual availability for each run and stop if
+the requested profile is unavailable. No silent fallback is allowed.
 
 ## State and recovery
 

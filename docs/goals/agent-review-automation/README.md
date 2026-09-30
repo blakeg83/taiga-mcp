@@ -1,7 +1,13 @@
 # Agent implementation and review automation
 
-Status: implemented offline; no operational worker chats, schedules, live Taiga writes, production pushes, or PRs have been created by this implementation.
-Implemented 2026-09-29 against TaigaMCP commit `e3cd6a9` and its unchanged 35 MCP tools. Actual host/provider smoke remains pending because this host does not advertise the requested `gpt-6.1-sol`/`high` reviewer profile. Scope includes concurrent tickets, fresh-base feature branches, PR delivery, and epic coordination.
+Status: baseline implemented offline. A separately authorized 2026-09-30 trial exercised ordinary worker chats, review, a heartbeat, and a Taiga status update, then paused at the user's request before push/PR delivery. Full host/provider release acceptance remains unverified.
+Implemented 2026-09-29 against TaigaMCP commit `e3cd6a9` and its unchanged 35 MCP tools. Historical planning-host profile availability is not a current capability check. Scope includes concurrent tickets, fresh-base feature branches, PR delivery, and epic coordination.
+
+The [ticket-loop improvement batch](../ticket-loop-improvements/README.md)
+contains six planned goals and 24 step commits based on the trial audit.
+It prioritizes coordinator role boundaries and receipt reliability while
+preserving worker profiles and distinguishing processing volume from cost.
+The following nine goals remain the baseline implementation record.
 
 ## Goal and location
 

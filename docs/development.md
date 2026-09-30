@@ -33,7 +33,7 @@ limitations describe that earlier work, not the current release. This
 documentation reconciliation checked source, schemas described in the reference,
 and links; it did not rerun application tests or validate a live deployment.
 
-For the repo-local coordinator skill/helper, see [agent implementation and review automation](goals/agent-review-automation/README.md) and the [automation operator guide](automation/README.md). Its nine goals cover concurrent ordinary chats, fresh-base feature branches, reviewed PR delivery, and story/epic acceptance. The offline helper/fixtures are implemented outside the .NET server; no operational chats, schedules, live Taiga writes, pushes, PRs, or merges were activated.
+For the repo-local coordinator skill/helper, see [agent implementation and review automation](goals/agent-review-automation/README.md) and the [automation operator guide](automation/README.md). Its nine baseline goals cover concurrent ordinary chats, fresh-base feature branches, reviewed PR delivery, and story/epic acceptance. The offline helper/fixtures are implemented outside the .NET server. A separately authorized trial exercised worker chats and review, then paused before publication. The [ticket-loop improvement batch](goals/ticket-loop-improvements/README.md) adds six planned goals for coordinator boundaries, reliable evidence, efficient coordination, and cost-aware measurement; it makes no runtime changes by itself.
 
 ## Verified cleanup baseline (2026-09-28)
 

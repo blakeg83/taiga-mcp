@@ -119,7 +119,8 @@ If a server locks normal outputs, use a unique external output directory for
 build/tests; do not stop that server. See the developer guide for the exact command.
 ## Implementation Planning
 
-- [Agent implementation and review automation](docs/goals/agent-review-automation/README.md): implemented repo-local separate-chat Luna implementation and exact `gpt-6.1-sol`/`high` review, concurrent tickets in isolated feature branches from a freshly fetched base, authorized PR delivery, and story/epic completion gates. Nine ordered goals include evidence records and offline fixtures. No subagents or automatic merging; operational actions remain explicitly authorized and the requested reviewer profile is currently unavailable on this host.
+- [Agent implementation and review automation](docs/goals/agent-review-automation/README.md): implemented repo-local separate-chat Luna implementation and exact `gpt-6.1-sol`/`high` review, concurrent tickets in isolated feature branches from a freshly fetched base, authorized PR delivery, and story/epic completion gates. Nine ordered goals include evidence records and offline fixtures. No subagents or automatic merging; operational actions require scoped authorization and per-run capability checks.
+- [Ticket-loop improvements](docs/goals/ticket-loop-improvements/README.md): planned follow-up to the first operational audit. Six goals and 24 commit checkpoints cover coordinator role boundaries, reliable receipts, scripted coordination, worker-owned verification, and measurement that distinguishes token usage from cost.
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
 - [Completed first batch](docs/goals/first-batch/README.md): delivered scope for all 15 selected functions, with links to current source and tests.
