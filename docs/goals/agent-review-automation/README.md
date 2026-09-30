@@ -1,7 +1,7 @@
 # Agent implementation and review automation
 
-Status: planned; no automation, skill, helper, worker chats, schedules, pushes, or PRs have been created by these plans.
-Prepared 2026-09-29 against TaigaMCP commit `3f047a5` and its 35 implemented MCP tools. Scope revised to include concurrent tickets, fresh-base feature branches, PR delivery, and epic coordination.
+Status: implemented offline; no operational worker chats, schedules, live Taiga writes, production pushes, or PRs have been created by this implementation.
+Implemented 2026-09-29 against TaigaMCP commit `e3cd6a9` and its unchanged 35 MCP tools. Actual host/provider smoke remains pending because this host does not advertise the requested `gpt-6.1-sol`/`high` reviewer profile. Scope includes concurrent tickets, fresh-base feature branches, PR delivery, and epic coordination.
 
 ## Goal and location
 
@@ -16,7 +16,7 @@ The skill/helper source will initially live in this repository under `.agents/sk
 | Explicitly invoked Codex skill | Procedure, role prompts, configuration, and host contracts. |
 | Ordinary coordinator chat | Own a selected work session, dispatch ready tickets, relay findings, track PRs and epic completion. |
 | Ordinary implementation chat per executable ticket | GPT-5.6 Luna with `xhigh`; implement, test, document, commit, and correct findings. |
-| Ordinary reviewer chat per executable ticket | GPT-6 Sol with `high`, or GPT-6 Astra with `medium`, selected per ticket/session. |
+| Ordinary reviewer chat per executable ticket | Exact `gpt-6.1-sol` with `high`; unavailable host capability blocks an operational run rather than causing fallback. |
 | PowerShell 7 state helper | Persist sessions, ticket claims, repository slots, action journal, dependency graph, and evidence. No desktop-tool calls. |
 | Optional heartbeat per coordinator session | Continue all its active tickets and merge observations; reuse one schedule. |
 | Existing Taiga MCP connection | Read requirements/relationships and update discussion/status. |
@@ -59,7 +59,7 @@ flowchart TD
     A[Select tickets or epic and confirm scope] --> B[Resolve dependencies and claim ready tickets]
     B --> C[Fetch base and create branch plus worktree]
     C --> D[Luna implements and commits]
-    D --> E[Sol or Astra reviews the captured revision]
+    D --> E[gpt-6.1-sol reviews the captured revision]
     E -->|Changes required and budget remains| D
     E -->|Pass| F[Push reviewed branch and create or update PR]
     E -->|Blocked or exhausted| G[Needs input for this ticket]
@@ -74,7 +74,7 @@ A blocked ticket does not stop unrelated eligible tickets. Waiting for merge ret
 
 ## Ordered implementation goals
 
-All goals are unimplemented. Keep existing 01–06 filenames stable; those goals build the core, and 07–09 complete the expanded release.
+All nine goals are implemented in the repo-local skill/helper and offline fixtures. Keep existing 01–06 filenames stable; those goals build the core, and 07–09 complete the expanded release. Actual desktop/provider operation is recorded separately from offline correctness.
 
 | Goal | Deliverable | Depends on |
 | --- | --- | --- |

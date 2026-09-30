@@ -1,6 +1,6 @@
 # Goal 09: Coordinate epics and validate the expanded release
 
-Status: not started.
+Status: implemented offline; actual expanded chat/provider smoke is pending and was not authorized by this implementation request.
 
 ## Objective
 
@@ -83,7 +83,6 @@ Record deviations, blockers and unverified behavior below.
 
 This is a future user instruction, not authorization granted by the plan:
 
-> Run goal 09's expanded local smoke exercise. Create ordinary Luna 5.6 xhigh implementation and selected Sol 6 high or Astra medium review chats for two independent synthetic stories and one dependent story in a disposable local Git project. Coordinate their messages and create a temporary session heartbeat. Use a local bare Git remote plus fake GitHub and Taiga adapters; simulate PR and merge observations without production writes. Verify concurrent isolated worktrees, one correction/re-review cycle, dependency release and epic acceptance, then disable the heartbeat and report evidence. Do not use subagents.
+> Run goal 09's expanded local smoke exercise. Create ordinary gpt-5.6-luna/xhigh implementation and exact gpt-6.1-sol/high review chats for two independent synthetic stories and one dependent story in a disposable local Git project. Coordinate their messages and create a temporary session heartbeat. Use a local bare Git remote plus fake GitHub and Taiga adapters; simulate PR and merge observations without production writes. Verify concurrent isolated worktrees, one correction/re-review cycle, dependency release and epic acceptance, then disable the heartbeat and report evidence. Do not use subagents.
 
 An optional real GitHub publish check requires a separately named disposable repository and explicit authorization. It is not required to mutate a production repository or live Taiga data to pass the automated suite.
-

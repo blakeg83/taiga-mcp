@@ -119,7 +119,7 @@ If a server locks normal outputs, use a unique external output directory for
 build/tests; do not stop that server. See the developer guide for the exact command.
 ## Implementation Planning
 
-- [Agent implementation and review automation](docs/goals/agent-review-automation/README.md): planned separate-chat Luna implementation and Sol/Astra review, concurrent tickets in isolated feature branches from a freshly fetched base, automatic authorized PR delivery, and story/epic completion gates. Nine ordered goals include step checklists, commit checkpoints, and definitions of done. No subagents or automatic merging; these plans activate no automation.
+- [Agent implementation and review automation](docs/goals/agent-review-automation/README.md): implemented repo-local separate-chat Luna implementation and exact `gpt-6.1-sol`/`high` review, concurrent tickets in isolated feature branches from a freshly fetched base, authorized PR delivery, and story/epic completion gates. Nine ordered goals include evidence records and offline fixtures. No subagents or automatic merging; operational actions remain explicitly authorized and the requested reviewer profile is currently unavailable on this host.
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
 - [Completed first batch](docs/goals/first-batch/README.md): delivered scope for all 15 selected functions, with links to current source and tests.
@@ -149,3 +149,13 @@ such as Done/Archived never determine filtering. Issue lists use
 `status__is_closed=false` only: unsupported issue archive filtering and
 redundant status-exclusion requests were removed. These are behavior
 corrections, not behavior-preserving refactoring.
+## Agent ticket-loop automation
+
+The repository also ships an explicitly invoked, repo-local
+`.agents/skills/taiga-ticket-loop/` workflow for coordinating selected Taiga
+tickets and epics through ordinary implementation/review chats, isolated fresh
+base branches, bounded corrections, PR evidence, and recovery. It runs outside
+the .NET MCP server and does not activate external writes by itself. See the
+[automation operator guide](docs/automation/README.md) and run the offline
+PowerShell 7 fixtures with `pwsh -NoProfile -File
+tests/automation/Test-Automation.ps1`.
