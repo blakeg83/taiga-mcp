@@ -18,7 +18,14 @@ function Convert-ToCanonicalValue {
         foreach ($key in @($Value.Keys | ForEach-Object { [string]$_ } | Sort-Object)) { $canonical[$key] = Convert-ToCanonicalValue $Value[$key] }
         return $canonical
     }
-    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) { return @($Value | ForEach-Object { Convert-ToCanonicalValue $_ }) }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        $items = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $Value) {
+            $converted = Convert-ToCanonicalValue $item
+            [void]$items.Add($converted)
+        }
+        return ,$items.ToArray()
+    }
     return $Value
 }
 function Hash-Object { param([object]$Value); $bytes = [Text.Encoding]::UTF8.GetBytes((Convert-ToCanonicalValue $Value | ConvertTo-Json -Depth 100 -Compress)); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }

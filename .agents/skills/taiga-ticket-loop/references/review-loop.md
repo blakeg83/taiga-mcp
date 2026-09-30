@@ -21,8 +21,11 @@ Findings have stable IDs, severity, evidence/file/line where useful, requested
 change, and a disposition: fixed, rejected with evidence and reviewer accepted,
 or escalated. A receipt must identify the exact run, action, ticket, scope,
 base, reviewed SHA, and `gpt-6.1-sol`/`high` reviewer. Every criterion must be
-an identified passing result with evidence, and every check must identify its
-command, exit code `0`, and evidence. Blocking findings cannot coexist with a
-pass. Publishing requires current reviewed SHA equality, unchanged scope,
-criteria/check evidence, and no unresolved blocking finding. Code-complete,
-PR-delivered, integrated, and Taiga-finalized are separate facts.
+an identified result with evidence, and every check must identify its command,
+exit code, and evidence. Failed criteria/checks are valid evidence for a
+`changes_requested` or `blocked` verdict; a `pass` must contain only passing
+criteria and zero-exit checks. Blocking findings cannot coexist with a pass.
+Publishing requires current reviewed SHA equality, unchanged scope,
+passing criteria/check evidence, and no unresolved blocking finding.
+Code-complete, PR-delivered, integrated, and Taiga-finalized are separate
+facts.

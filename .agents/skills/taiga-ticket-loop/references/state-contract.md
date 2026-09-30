@@ -35,3 +35,9 @@ to the action's session and owner generation and rechecks the action's ticket
 owner. Recovery reconciles the external target before another action. A
 pending chat client ID is not a thread ID, and action markers are correlation
 identifiers rather than provider idempotency keys.
+
+The current registry schema is version 2. On read, a version-1 registry is
+migrated by collapsing duplicate parent/child ticket records into one
+canonical parent and adding `ticketAliases`; divergent duplicate records are
+rejected for manual recovery rather than silently discarded. A successful
+migration is persisted during inspection or the next mutation.

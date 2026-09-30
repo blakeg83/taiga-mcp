@@ -10,7 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$script:SchemaVersion = 1
+$script:SchemaVersion = 2
 $script:MaxEvents = 200
 
 function New-UtcStamp { return [DateTime]::UtcNow.ToString('o') }
@@ -57,7 +57,12 @@ function Convert-ToHashtable {
         return $result
     }
     if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @($Value | ForEach-Object { Convert-ToHashtable $_ })
+        $items = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $Value) {
+            $converted = Convert-ToHashtable $item
+            [void]$items.Add($converted)
+        }
+        return ,$items.ToArray()
     }
     return $Value
 }
@@ -147,7 +152,12 @@ function Convert-ToCanonicalValue {
         return $canonical
     }
     if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
-        return @($Value | ForEach-Object { Convert-ToCanonicalValue $_ })
+        $items = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $Value) {
+            $converted = Convert-ToCanonicalValue $item
+            [void]$items.Add($converted)
+        }
+        return ,$items.ToArray()
     }
     return $Value
 }
@@ -181,23 +191,94 @@ function Assert-Registry {
     if (-not $State.ContainsKey('events')) { $State.events = @() }
 }
 
+function Migrate-Registry {
+    param([hashtable] $State)
+    if (-not $State.ContainsKey('schemaVersion')) { throw 'Registry schema version is missing.' }
+    $version = [int]$State.schemaVersion
+    if ($version -eq $script:SchemaVersion) { return @{ State = $State; Migrated = $false } }
+    if ($version -ne 1) { throw "Unsupported registry schema version: $version." }
+    if (-not $State.ContainsKey('tickets') -or $State.tickets -isnot [System.Collections.IDictionary]) { throw 'Legacy ticket registry is invalid.' }
+    $canonicalTickets = @{}
+    $aliases = @{}
+    if ($State.ContainsKey('ticketAliases') -and $State.ticketAliases -is [System.Collections.IDictionary]) {
+        foreach ($alias in $State.ticketAliases.Keys) { $aliases[[string]$alias] = [string]$State.ticketAliases[$alias] }
+    }
+    foreach ($entry in @($State.tickets.GetEnumerator())) {
+        $recordKey = ([string]$entry.Key).ToLowerInvariant()
+        $record = $entry.Value
+        if ($record -isnot [System.Collections.IDictionary]) { throw "Legacy ticket record is invalid: $recordKey." }
+        $canonical = if ($record.ContainsKey('ticketKey') -and -not [string]::IsNullOrWhiteSpace([string]$record.ticketKey)) { [string]$record.ticketKey } elseif ($record.ContainsKey('parentTicketKey') -and -not [string]::IsNullOrWhiteSpace([string]$record.parentTicketKey)) { [string]$record.parentTicketKey } else { $recordKey }
+        $canonical = $canonical.ToLowerInvariant()
+        if ($canonicalTickets.ContainsKey($canonical)) {
+            if ((Get-Hash $canonicalTickets[$canonical]) -ne (Get-Hash $record)) { throw "Legacy ticket records for '$canonical' diverge; manual recovery is required." }
+        } else {
+            $record.ticketKey = $canonical
+            $canonicalTickets[$canonical] = $record
+        }
+        $candidateAliases = @($recordKey, $canonical) + @($record.ownedChildTicketKeys)
+        foreach ($aliasValue in $candidateAliases) {
+            if ([string]::IsNullOrWhiteSpace([string]$aliasValue)) { continue }
+            $alias = ([string]$aliasValue).ToLowerInvariant()
+            if ($aliases.ContainsKey($alias) -and [string]$aliases[$alias] -ne $canonical) { throw "Legacy ticket alias '$alias' maps to divergent canonical tickets; manual recovery is required." }
+            $aliases[$alias] = $canonical
+        }
+    }
+    foreach ($canonical in @($canonicalTickets.Keys)) {
+        $aliases[$canonical] = [string]$canonical
+        $record = $canonicalTickets[$canonical]
+        $record.ownedChildTicketKeys = @($record.ownedChildTicketKeys | ForEach-Object { if (-not [string]::IsNullOrWhiteSpace([string]$_)) { ([string]$_).ToLowerInvariant() } })
+        foreach ($child in @($record.ownedChildTicketKeys)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$child)) { $aliases[([string]$child).ToLowerInvariant()] = [string]$canonical }
+        }
+        if ($record.ContainsKey('parentTicketKey') -and -not [string]::IsNullOrWhiteSpace([string]$record.parentTicketKey)) {
+            $parentAlias = ([string]$record.parentTicketKey).ToLowerInvariant()
+            if ($aliases.ContainsKey($parentAlias)) { $record.parentTicketKey = [string]$aliases[$parentAlias] }
+        }
+    }
+    if ($State.ContainsKey('actions') -and $State.actions -is [System.Collections.IDictionary]) {
+        foreach ($action in $State.actions.Values) {
+            if ($action -is [System.Collections.IDictionary] -and $action.ContainsKey('ticketKey') -and $null -ne $action.ticketKey) {
+                $actionAlias = ([string]$action.ticketKey).ToLowerInvariant()
+                if ($aliases.ContainsKey($actionAlias)) { $action.ticketKey = [string]$aliases[$actionAlias] }
+            }
+        }
+    }
+    if ($State.ContainsKey('repositories') -and $State.repositories -is [System.Collections.IDictionary]) {
+        foreach ($repository in $State.repositories.Values) {
+            if ($repository -isnot [System.Collections.IDictionary] -or -not $repository.ContainsKey('slotOwners')) { continue }
+            $owners = [System.Collections.Generic.List[string]]::new()
+            foreach ($owner in @($repository.slotOwners)) {
+                $ownerAlias = ([string]$owner).ToLowerInvariant()
+                $canonicalOwner = if ($aliases.ContainsKey($ownerAlias)) { [string]$aliases[$ownerAlias] } else { $ownerAlias }
+                if (-not $owners.Contains($canonicalOwner)) { [void]$owners.Add($canonicalOwner) }
+            }
+            $repository.slotOwners = $owners.ToArray()
+        }
+    }
+    $State.tickets = $canonicalTickets
+    $State.ticketAliases = $aliases
+    $State.schemaVersion = $script:SchemaVersion
+    return @{ State = $State; Migrated = $true }
+}
+
 function Read-Registry {
     param([string] $Root)
     $statePath = Join-Path $Root 'registry.json'
     $backupPath = Join-Path $Root 'registry.json.bak'
     if (-not (Test-Path -LiteralPath $statePath)) {
         if (Test-Path -LiteralPath $backupPath) {
-            try { $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $backupPath) -AsHashtable -Depth 100); Assert-Registry $candidate; return @{ State = $candidate; Recovered = $true } } catch { throw 'Registry primary is absent and backup is invalid; manual recovery is required.' }
+            try { $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $backupPath) -AsHashtable -Depth 100); $migration = Migrate-Registry $candidate; $candidate = $migration.State; Assert-Registry $candidate; return @{ State = $candidate; Recovered = $true; Migrated = $migration.Migrated } } catch { throw 'Registry primary is absent and backup is invalid; manual recovery is required.' }
         }
         throw "Registry is not initialized at $Root."
     }
     try {
         $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $statePath) -AsHashtable -Depth 100)
+        $migration = Migrate-Registry $candidate; $candidate = $migration.State
         Assert-Registry $candidate
-        return @{ State = $candidate; Recovered = $false }
+        return @{ State = $candidate; Recovered = $false; Migrated = $migration.Migrated }
     } catch {
         if (Test-Path -LiteralPath $backupPath) {
-            try { $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $backupPath) -AsHashtable -Depth 100); Assert-Registry $candidate; return @{ State = $candidate; Recovered = $true } } catch { }
+            try { $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $backupPath) -AsHashtable -Depth 100); $migration = Migrate-Registry $candidate; $candidate = $migration.State; Assert-Registry $candidate; return @{ State = $candidate; Recovered = $true; Migrated = $migration.Migrated } } catch { }
         }
         throw "Registry is malformed and no valid backup is available: $($_.Exception.Message)"
     }
@@ -560,8 +641,25 @@ function Invoke-ReconcileIntent {
 function Invoke-Resume {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','reason') 'resume-session'; Assert-Revision $State $InputObject
-    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; if ($session.state -in @('cancelled','completed')) { throw "Session cannot be resumed from $($session.state)." }; $session.state = 'running'; $session.controlState = $null; $session.pauseIntent = $null; $session.cancelIntent = $null
-    $changed = @(); if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { $ticket = Assert-TicketOwner $State $InputObject; if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $ticket.controlState = $null; $ticket.pauseIntent = $null; $changed += $ticket.ticketKey } elseif ($ticket.controlState -eq 'pausing') { $ticket.controlState = $null; $ticket.pauseIntent = $null } } else { foreach ($ticket in @($State.tickets.Values | Where-Object { $_.ownerSessionId -eq $session.sessionId -and ($_.phase -eq 'paused' -or $_.controlState -eq 'pausing') })) { if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $changed += $ticket.ticketKey }; $ticket.controlState = $null; $ticket.pauseIntent = $null } }
+    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
+    $scoped = $InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')
+    if ($scoped) {
+        if ($session.state -in @('pausing','cancelling','paused','cancelled','completed') -or $null -ne $session.controlState) { throw 'A ticket-scoped resume cannot clear a session-wide control; resume the session explicitly.' }
+        $ticket = Assert-TicketOwner $State $InputObject
+        if ($ticket.controlState -eq 'cancelling') { throw 'A ticket-scoped resume cannot clear a cancellation intent.' }
+        $changed = @()
+        if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $ticket.controlState = $null; $ticket.pauseIntent = $null; $changed += $ticket.ticketKey }
+        elseif ($ticket.controlState -eq 'pausing') { $ticket.controlState = $null; $ticket.pauseIntent = $null }
+        Add-Event $State 'ticket_resumed' @{ sessionId = $session.sessionId; ticketKey = $ticket.ticketKey }
+        return @{ Data = @{ state = $session.state; resumedTickets = $changed } }
+    }
+    if ($session.state -in @('cancelled','completed')) { throw "Session cannot be resumed from $($session.state)." }
+    $session.state = 'running'; $session.controlState = $null; $session.pauseIntent = $null; $session.cancelIntent = $null
+    $changed = @()
+    foreach ($ticket in @($State.tickets.Values | Where-Object { $_.ownerSessionId -eq $session.sessionId -and ($_.phase -eq 'paused' -or $_.controlState -eq 'pausing') })) {
+        if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $changed += $ticket.ticketKey }
+        $ticket.controlState = $null; $ticket.pauseIntent = $null
+    }
     Add-Event $State 'session_resumed' @{ sessionId = $session.sessionId; tickets = $changed }
     return @{ Data = @{ state = $session.state; resumedTickets = $changed } }
 }
@@ -594,18 +692,22 @@ function Validate-ReviewReceipt {
     if (-not $Receipt.ContainsKey('criteria') -or @($Receipt.criteria).Count -eq 0) { throw 'Review receipt must include at least one criterion result.' }
     if (-not $Receipt.ContainsKey('checks') -or @($Receipt.checks).Count -eq 0) { throw 'Review receipt must include at least one check result.' }
     $criterionIds = @{}
+    $criterionFailures = [System.Collections.Generic.List[string]]::new()
     foreach ($criterion in @($Receipt.criteria)) {
         if ($criterion -isnot [System.Collections.IDictionary]) { throw 'Each criterion result must be an object.' }
         $criterionId = Require-String $criterion 'id' 'criterion result'; Require-String $criterion 'evidence' 'criterion result' | Out-Null
-        if ($criterion.passed -ne $true) { throw "Criterion did not pass: $criterionId." }
+        if (-not $criterion.ContainsKey('passed') -or $criterion.passed -isnot [bool]) { throw "Criterion result has an invalid passed value: $criterionId." }
+        if ($criterion.passed -ne $true) { [void]$criterionFailures.Add($criterionId) }
         if ($criterionIds.ContainsKey($criterionId)) { throw "Duplicate criterion result: $criterionId." }
         $criterionIds[$criterionId] = $true
     }
+    $checkFailures = [System.Collections.Generic.List[string]]::new()
     foreach ($check in @($Receipt.checks)) {
         if ($check -isnot [System.Collections.IDictionary]) { throw 'Each check result must be an object.' }
         $command = Require-String $check 'command' 'check result'; Require-String $check 'evidence' 'check result' | Out-Null
         $exitCode = Require-NonNegativeInt $check 'exitCode' 'check result'
-        if ($exitCode -ne 0 -or ($check.ContainsKey('passed') -and $check.passed -ne $true)) { throw "Required check did not pass: $command." }
+        if ($check.ContainsKey('passed') -and $check.passed -isnot [bool]) { throw "Check result has an invalid passed value: $command." }
+        if ($exitCode -ne 0 -or ($check.ContainsKey('passed') -and $check.passed -ne $true)) { [void]$checkFailures.Add($command) }
     }
     if (-not $Receipt.ContainsKey('findings')) { throw 'Review receipt must include findings.' }
     $findingIds = @{}
@@ -616,8 +718,9 @@ function Validate-ReviewReceipt {
         $findingIds[$findingId] = $true
     }
     $blocking = @($Receipt.findings | Where-Object { $_.severity -in @('blocker','critical','high') -and $_.disposition -notin @('fixed','rejected_accepted') })
+    if ($Receipt.verdict -eq 'pass' -and ($criterionFailures.Count -gt 0 -or $checkFailures.Count -gt 0)) { throw 'A passing review must contain only passing criteria and zero-exit checks.' }
     if ($Receipt.verdict -eq 'pass' -and $blocking.Count -gt 0) { throw 'A passing review cannot retain unresolved blocking findings.' }
-    return [ordered]@{ valid = $true; kind = 'review'; verdict = $Receipt.verdict; reviewedSha = $Receipt.reviewedSha; blockingFindings = $blocking.Count }
+    return [ordered]@{ valid = $true; kind = 'review'; verdict = $Receipt.verdict; reviewedSha = $Receipt.reviewedSha; blockingFindings = $blocking.Count; criterionFailures = $criterionFailures.Count; checkFailures = $checkFailures.Count }
 }
 
 function Invoke-ValidateReceipt {
@@ -663,7 +766,12 @@ try {
         }
         $output = $script:Output
     } elseif ($Operation -eq 'inspect') {
-        $loaded = Read-Registry $root; $script:OutputRevision = $loaded.State.revision; $output = New-Result $Operation @{ registry = $loaded.State } $loaded.Recovered
+        Invoke-Locked $root {
+            $loaded = Read-Registry $root
+            if ($loaded.Migrated) { Write-Registry $root $loaded.State }
+            $script:OutputRevision = $loaded.State.revision; $script:Output = New-Result $Operation @{ registry = $loaded.State } $loaded.Recovered
+        }
+        $output = $script:Output
     } else {
         Invoke-Locked $root {
             $loaded = Read-Registry $root; $state = $loaded.State; $result = Invoke-Mutation $state $inputObject; $state.revision = [long]$state.revision + 1; $state.updatedAt = New-UtcStamp; if ($state.sessions.ContainsKey([string]$inputObject.sessionId)) { $state.sessions[[string]$inputObject.sessionId].updatedAt = New-UtcStamp }; Write-Registry $root $state; $script:OutputRevision = $state.revision; $script:Output = New-Result $Operation $result.Data $loaded.Recovered

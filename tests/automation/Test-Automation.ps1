@@ -28,6 +28,11 @@ function Write-JsonFile {
     [IO.File]::WriteAllText($Path, $json, [Text.UTF8Encoding]::new($false))
 }
 
+function Copy-JsonObject {
+    param([object] $Value)
+    return ConvertFrom-Json -InputObject ($Value | ConvertTo-Json -Depth 100) -AsHashtable -Depth 100
+}
+
 function Invoke-PsJson {
     param([string] $ScriptPath, [string[]] $Arguments, [bool] $ExpectSuccess = $true)
     $lines = & pwsh -NoProfile -File $ScriptPath @Arguments 2>&1
@@ -59,6 +64,11 @@ try {
     Test-Case 'validate exact reviewer profile' {
         $result = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-Json','{"receipt":{"runId":"r","actionId":"a","ticketKey":"t","scopeHash":"s","baseSha":"b","reviewedSha":"c","verdict":"pass","reviewerModel":"gpt-6.1-sol","reviewerEffort":"high","findings":[],"criteria":[{"id":"criterion-1","passed":true,"evidence":"fixture"}],"checks":[{"command":"test","exitCode":0,"evidence":"fixture","passed":true}]}}')
         Assert-True $result.ok 'review receipt should validate'
+        $correction = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-Json','{"receipt":{"runId":"r","actionId":"a","ticketKey":"t","scopeHash":"s","baseSha":"b","reviewedSha":"c","verdict":"changes_requested","reviewerModel":"gpt-6.1-sol","reviewerEffort":"high","findings":[{"id":"F1","severity":"high","evidence":"fixture","requestedChange":"fix"}],"criteria":[{"id":"criterion-1","passed":false,"evidence":"failed fixture"}],"checks":[{"command":"test","exitCode":1,"evidence":"failed fixture","passed":false}]}}')
+        Assert-Equal 1 $correction.data.criterionFailures 'failed criteria should remain review evidence'
+        Assert-Equal 1 $correction.data.checkFailures 'failed checks should remain review evidence'
+        $passingFailure = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-Json','{"receipt":{"runId":"r","actionId":"a","ticketKey":"t","scopeHash":"s","baseSha":"b","reviewedSha":"c","verdict":"pass","reviewerModel":"gpt-6.1-sol","reviewerEffort":"high","findings":[],"criteria":[{"id":"criterion-1","passed":true,"evidence":"fixture"}],"checks":[{"command":"test","exitCode":1,"evidence":"failed fixture","passed":false}]}}') $false
+        Assert-True (-not $passingFailure.ok) 'passing review must reject failed checks'
         $badConfig = @{ sessionId = 'wrong-profile'; coordinator = @{ threadId = 't'; hostId = 'local' }; config = @{ reviewerProfile = @{ model = 'gpt-6-sol'; effort = 'high' } } }
         $badPath = New-InputPath $badConfig 'bad-profile'
         $bad = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$badPath,'-StateRoot',(Join-Path $script:FixtureRoot 'bad-profile')) $false
@@ -72,6 +82,28 @@ try {
         $inspect = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$stateRoot)
         Assert-True $inspect.ok 'inspect should succeed'
         [IO.File]::AppendAllText((Join-Path $stateRoot 'notes.txt'), '✓ λ')
+    }
+
+    Test-Case 'migrate legacy duplicated ticket claims safely' {
+        $legacyRoot = Join-Path $script:FixtureRoot 'legacy-state'
+        New-Item -ItemType Directory -Path $legacyRoot -Force | Out-Null
+        $legacyTicket = [ordered]@{ ticketKey = 'project:1:story:10'; ownerSessionId = 'legacy-session'; ownerGeneration = 1; phase = 'queued'; ownedChildTicketKeys = @('project:1:task:11'); repositoryIdentity = 'legacy-repo' }
+        $legacy = [ordered]@{ schemaVersion = 1; revision = 4; createdAt = '2026-01-01T00:00:00Z'; updatedAt = '2026-01-01T00:00:00Z'; sessions = @{}; tickets = [ordered]@{ 'project:1:story:10' = $legacyTicket; 'project:1:task:11' = (Copy-JsonObject $legacyTicket) }; repositories = [ordered]@{ 'legacy-repo' = @{ slotOwners = @('project:1:task:11') } }; actions = [ordered]@{ 'legacy-action' = @{ ticketKey = 'project:1:task:11'; status = 'observed' } }; events = @() }
+        [IO.File]::WriteAllText((Join-Path $legacyRoot 'registry.json'), ($legacy | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        $migrated = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$legacyRoot)
+        Assert-Equal 2 $migrated.data.registry.schemaVersion 'legacy registry schema should migrate'
+        Assert-Equal 1 @($migrated.data.registry.tickets.Keys).Count 'legacy duplicate tickets should collapse'
+        Assert-Equal 'project:1:story:10' $migrated.data.registry.ticketAliases.'project:1:task:11' 'legacy child alias should resolve'
+        Assert-Equal 'project:1:story:10' $migrated.data.registry.actions.'legacy-action'.ticketKey 'legacy action should resolve through the canonical ticket'
+        Assert-Equal 'project:1:story:10' $migrated.data.registry.repositories.'legacy-repo'.slotOwners[0] 'legacy slot owner should resolve through the canonical ticket'
+        $persisted = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath (Join-Path $legacyRoot 'registry.json')) -AsHashtable -Depth 100
+        Assert-Equal 2 $persisted.schemaVersion 'migration should persist the new schema'
+        $divergentRoot = Join-Path $script:FixtureRoot 'legacy-divergent'
+        New-Item -ItemType Directory -Path $divergentRoot -Force | Out-Null
+        $divergent = Copy-JsonObject $legacy; $divergent.tickets.'project:1:task:11'.phase = 'implementing'
+        [IO.File]::WriteAllText((Join-Path $divergentRoot 'registry.json'), ($divergent | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        $divergentResult = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$divergentRoot) $false
+        Assert-True (-not $divergentResult.ok) 'divergent legacy duplicates must require manual recovery'
     }
 
     Test-Case 'claim ticket, reserve two slots, and reject overflow' {
@@ -118,8 +150,13 @@ try {
         $digestA = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:456'; actionId = 'hash-action-a'; actionKind = 'hash-test'; input = $hashA; expectedRevision = $resumed.revision }) 'hash-action-a'),'-StateRoot',$stateRoot)
         $digestB = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:456'; actionId = 'hash-action-b'; actionKind = 'hash-test'; input = $hashB; expectedRevision = $digestA.revision }) 'hash-action-b'),'-StateRoot',$stateRoot)
         Assert-Equal $digestA.data.action.inputDigest $digestB.data.action.inputDigest 'equivalent input must hash identically across helper processes'
-        $observedA = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'hash-action-a'; observationStatus = 'observed'; expectedRevision = $digestB.revision }) 'hash-observed-a'),'-StateRoot',$stateRoot)
-        $null = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'hash-action-b'; observationStatus = 'observed'; expectedRevision = $observedA.revision }) 'hash-observed-b'),'-StateRoot',$stateRoot)
+        $shapeArray = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:456'; actionId = 'shape-action-array'; actionKind = 'hash-test'; input = @{ items = @('a') }; expectedRevision = $digestB.revision }) 'shape-action-array'),'-StateRoot',$stateRoot)
+        $shapeScalar = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:456'; actionId = 'shape-action-scalar'; actionKind = 'hash-test'; input = @{ items = 'a' }; expectedRevision = $shapeArray.revision }) 'shape-action-scalar'),'-StateRoot',$stateRoot)
+        Assert-True ($shapeArray.data.action.inputDigest -ne $shapeScalar.data.action.inputDigest) 'array and scalar payloads must hash differently'
+        $observedA = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'hash-action-a'; observationStatus = 'observed'; expectedRevision = $shapeScalar.revision }) 'hash-observed-a'),'-StateRoot',$stateRoot)
+        $observedB = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'hash-action-b'; observationStatus = 'observed'; expectedRevision = $observedA.revision }) 'hash-observed-b'),'-StateRoot',$stateRoot)
+        $observedC = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'shape-action-array'; observationStatus = 'observed'; expectedRevision = $observedB.revision }) 'shape-observed-array'),'-StateRoot',$stateRoot)
+        $null = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; actionId = 'shape-action-scalar'; observationStatus = 'observed'; expectedRevision = $observedC.revision }) 'shape-observed-scalar'),'-StateRoot',$stateRoot)
     }
 
     Test-Case 'enforce canonical aliases, fencing, and quiescent controls' {
@@ -168,6 +205,25 @@ try {
         Assert-True (-not $final.data.registry.tickets.'project:1:issue:20'.slotReserved) 'reconciled action should release the slot'
     }
 
+    Test-Case 'keep session controls during ticket-scoped resume' {
+        $sessionControlRoot = Join-Path $script:FixtureRoot 'session-control'
+        $init = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$sessionControlRoot)
+        $claimA = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:30'; repositoryIdentity = 'session-repo'; expectedRevision = $init.revision }) 'session-claim-a'),'-StateRoot',$sessionControlRoot)
+        $claimB = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:31'; repositoryIdentity = 'session-repo'; expectedRevision = $claimA.revision }) 'session-claim-b'),'-StateRoot',$sessionControlRoot)
+        $pause = Invoke-PsJson $script:StateScript @('-Operation','pause-intent','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; reason = 'session pause'; expectedRevision = $claimB.revision }) 'session-pause'),'-StateRoot',$sessionControlRoot)
+        $ticketResumeDuringPause = Invoke-PsJson $script:StateScript @('-Operation','resume-session','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:30'; expectedRevision = $pause.revision }) 'ticket-resume-during-pause'),'-StateRoot',$sessionControlRoot) $false
+        Assert-True (-not $ticketResumeDuringPause.ok) 'ticket resume must not clear session pause'
+        $siblingActionDuringPause = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:31'; actionId = 'session-pause-sibling'; actionKind = 'worker-message'; expectedRevision = $pause.revision }) 'sibling-action-during-pause'),'-StateRoot',$sessionControlRoot) $false
+        Assert-True (-not $siblingActionDuringPause.ok) 'session pause must block sibling actions'
+        $resumed = Invoke-PsJson $script:StateScript @('-Operation','resume-session','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $pause.revision }) 'session-resume'),'-StateRoot',$sessionControlRoot)
+        $cancel = Invoke-PsJson $script:StateScript @('-Operation','cancel-intent','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; reason = 'session cancel'; expectedRevision = $resumed.revision }) 'session-cancel'),'-StateRoot',$sessionControlRoot)
+        $ticketResumeDuringCancel = Invoke-PsJson $script:StateScript @('-Operation','resume-session','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:30'; expectedRevision = $cancel.revision }) 'ticket-resume-during-cancel'),'-StateRoot',$sessionControlRoot) $false
+        Assert-True (-not $ticketResumeDuringCancel.ok) 'ticket resume must not clear session cancellation'
+        $siblingActionDuringCancel = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:1:issue:31'; actionId = 'session-cancel-sibling'; actionKind = 'worker-message'; expectedRevision = $cancel.revision }) 'sibling-action-during-cancel'),'-StateRoot',$sessionControlRoot) $false
+        Assert-True (-not $siblingActionDuringCancel.ok) 'session cancellation must block sibling actions'
+        $null = Invoke-PsJson $script:StateScript @('-Operation','resume-session','-InputPath',(New-InputPath (@{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $cancel.revision }) 'session-resume-after-cancel'),'-StateRoot',$sessionControlRoot)
+    }
+
     Test-Case 'recover from a truncated primary snapshot' {
         $statePath = Join-Path $stateRoot 'registry.json'; [IO.File]::WriteAllText($statePath, '{"schemaVersion":')
         $recovered = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$stateRoot)
@@ -201,11 +257,14 @@ try {
         $mismatchedResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $mismatched 'review-mismatched'))
         Assert-Equal 'stale_or_mismatched_review_input' $mismatchedResult.data.reason 'receipt identity must bind to the expected run'
         $failedCriteria = $request.Clone(); $failedCriteria.receipt = $receipt.Clone(); $failedCriteria.receipt.criteria = @(@{ id = 'criterion-1'; passed = $false; evidence = 'failed fixture' })
-        $failedCriteriaResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $failedCriteria 'review-failed-criteria')) $false
-        Assert-True (-not $failedCriteriaResult.ok) 'failed criteria must not be publishable'
+        $failedCriteriaResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $failedCriteria 'review-failed-criteria'))
+        Assert-Equal 'correct' $failedCriteriaResult.data.decision 'failed criteria should route a correction'
         $failedCheck = $request.Clone(); $failedCheck.receipt = $receipt.Clone(); $failedCheck.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
-        $failedCheckResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $failedCheck 'review-failed-check')) $false
-        Assert-True (-not $failedCheckResult.ok) 'failed checks must not be publishable'
+        $failedCheckResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $failedCheck 'review-failed-check'))
+        Assert-Equal 'correct' $failedCheckResult.data.decision 'failed checks should route a correction'
+        $passingFailure = $request.Clone(); $passingFailure.receipt = $receipt.Clone(); $passingFailure.receipt.verdict = 'pass'; $passingFailure.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
+        $passingFailureResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $passingFailure 'review-passing-failure')) $false
+        Assert-True (-not $passingFailureResult.ok) 'a pass with failed checks must remain blocked'
     }
 
     Test-Case 'capture complete Taiga pages and reconcile uncertain writes' {
@@ -223,6 +282,21 @@ try {
         $orderedResultA = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $orderedA 'taiga-order-a'))
         $orderedResultB = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $orderedB 'taiga-order-b'))
         Assert-Equal $orderedResultA.data.requirementsHash $orderedResultB.data.requirementsHash 'equivalent context must hash identically across helper processes'
+        $emptyShape = Copy-JsonObject $orderedA; $emptyShape.detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ items = @() } })
+        $nullShape = Copy-JsonObject $orderedA; $nullShape.detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ items = $null } })
+        $emptyHash = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $emptyShape 'taiga-empty-array'))
+        $nullHash = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $nullShape 'taiga-null-array'))
+        Assert-True ($emptyHash.data.requirementsHash -ne $nullHash.data.requirementsHash) 'empty arrays and null must hash differently'
+        $arrayShape = Copy-JsonObject $orderedA; $arrayShape.detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ items = @('a') } })
+        $scalarShape = Copy-JsonObject $orderedA; $scalarShape.detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ items = 'a' } })
+        $arrayHash = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $arrayShape 'taiga-single-array'))
+        $scalarHash = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $scalarShape 'taiga-single-scalar'))
+        Assert-True ($arrayHash.data.requirementsHash -ne $scalarHash.data.requirementsHash) 'singleton arrays and scalars must hash differently'
+        $nestedShape = Copy-JsonObject $orderedA; $nestedShape.detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ items = @(, @('a', 'b')) } })
+        $flatShape = Copy-JsonObject $orderedA; $flatShape.detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ items = @('a', 'b') } })
+        $nestedHash = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $nestedShape 'taiga-nested-array'))
+        $flatHash = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $flatShape 'taiga-flat-array'))
+        Assert-True ($nestedHash.data.requirementsHash -ne $flatHash.data.requirementsHash) 'nested arrays and flat arrays must hash differently'
         $mappings = @{ statusMappings = @{ issue = @{ start = 1; review = 2; awaitingMerge = 3; done = 4 }; task = @{ start = 5; review = 6; awaitingMerge = 7; done = 8 }; story = @{ start = 9; review = 10; awaitingMerge = 11; done = 12 }; epic = @{ start = 13; review = 14; awaitingMerge = 15; done = 16 } } }
         $status = Invoke-PsJson $script:TaigaScript @('-Operation','validate-status-mappings','-InputPath',(New-InputPath $mappings 'taiga-status'))
         Assert-True $status.data.valid 'resource-specific status mapping should pass'

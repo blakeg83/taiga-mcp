@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sessionId": "synthetic-session-01",
   "coordinator": { "threadId": "coordinator-thread", "hostId": "local" },
   "authorization": {

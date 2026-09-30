@@ -56,7 +56,9 @@ State is outside all worktrees at
 CAS revision, sessions, ticket claims, repository/host reservations, actions,
 worker cursors, evidence, and bounded events. Writes use an exclusive short
 lock, a flushed same-directory temporary file, atomic replacement, and a valid
-`.bak` snapshot. Inspect first after a crash; a pending or uncertain action is
+`.bak` snapshot. Version-1 registries are migrated to the current
+canonical-ticket schema on read; divergent legacy duplicates stop for manual
+recovery. Inspect first after a crash; a pending or uncertain action is
 reconciled against its target before another call. Do not free an uncertain
 slot merely because its lease expired.
 
@@ -77,8 +79,10 @@ Each executable ticket fetches its configured remote and records a fresh base
 SHA before creating a unique `codex/<kind>-<ref>-<slug>-<run-suffix>` branch and
 managed worktree. The reviewed `base..HEAD` revision must equal the pushed PR
 head. A review receipt is accepted only when it is bound to the expected
-run/action/ticket, exact `gpt-6.1-sol`/`high` settings, passing criteria with
-evidence, and zero-exit checks with evidence. Target movement is compared with
+run/action/ticket, exact `gpt-6.1-sol`/`high` settings, structurally complete
+criteria/check evidence, and (for publication) passing criteria with zero-exit
+checks. A `changes_requested` or `blocked` receipt may retain failed checks as
+evidence for correction. Target movement is compared with
 the recorded target/base SHA rather than feature HEAD; movement, source edits,
 changed requirements, or new material PR feedback invalidate approval and
 return through the same implementation/review chats. The default review budget
