@@ -1,6 +1,6 @@
 # Goal 02: Implement durable state and local ownership
 
-Status: not started.
+Status: implemented offline; helper and recovery fixtures pass.
 
 ## Objective
 
