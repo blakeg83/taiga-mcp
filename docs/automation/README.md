@@ -28,15 +28,19 @@ you do not need to repeat the repository path, remote, or base branch.
 The shortest useful invocation is:
 
 ```text
-Use $taiga-ticket-loop for Taiga issue project 123, ref 42, internal ID 456.
-Authorize creating/reusing the worker chats and worktree, messaging those
-chats, Taiga progress updates, pushing the reviewed branch, and creating or
-updating its PR. Do not merge automatically.
+Use $taiga-ticket-loop with the standard authorized-run profile for ticket/epic
+42 in the GroceryRecipeWizard project.
 ```
 
-Add dependencies, validation commands, status choices, or a different
-repository mapping only when they are not discoverable or differ from the
-defaults. Automatic merge and force-push remain off.
+The reusable profile authorizes the selected worker chats, worktree/branch,
+Taiga progress updates, reviewed push/PR delivery, Codex PR attachment, and one
+coordinator heartbeat for continuation/merge observation. It excludes automatic
+merge, force-push, deployment, branch deletion, credentials, unrelated scope,
+and writes outside the selected ticket/epic. Add dependencies, validation
+commands, status choices, or a different repository mapping only when they are
+not discoverable or differ from the defaults. Automatic merge and force-push
+remain off. The full copyable template is in
+`.agents/skills/taiga-ticket-loop/assets/operational-invocation-template.md`.
 
 The implementer is exactly `gpt-5.6-luna` with `xhigh`. The reviewer is exactly
 `gpt-6.1-sol` with `high`. The current planning host advertised

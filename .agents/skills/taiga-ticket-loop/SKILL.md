@@ -77,13 +77,29 @@ the relevant reference before each operation:
     Keep unchanged waits quiet. Pause, cancel, resume, and uncertain outcomes
     are explicit states; never resolve them by blind replay.
 
-The shortest valid operational start is: "Use `$taiga-ticket-loop` for Taiga
-issue/story/task/epic X; authorize the required actions listed below." The
+## Standard authorized-run profile
+
+You may use the phrase `standard authorized-run profile` as a reusable explicit
+authorization. It authorizes the coordinator, for the selected ticket or epic
+only, to create or reuse the implementation/reviewer chats, message those
+chats, create managed worktrees and feature branches, write Taiga milestone
+comments/statuses, push the owned reviewed branch, create or update its PR,
+attach the PR to the relevant Codex chat, and create or reuse one coordinator
+heartbeat for continuation and merge observation.
+
+It does not authorize automatic merge, force-push, deployment, branch deletion,
+unrelated chats or tickets, credentials, or live writes outside the selected
+scope. The exact worker profiles remain `gpt-5.6-luna`/`xhigh` and
+`gpt-6.1-sol`/`high`; an unavailable profile is a preflight blocker.
+
+The shortest valid operational start is: "Use `$taiga-ticket-loop` with the
+standard authorized-run profile for Taiga issue/story/task/epic X in project Y."
+The
 coordinator should discover the current repo, verify the fresh base, load
 status mappings and repository instructions, and ask focused questions only
 when discovery cannot resolve them. The user must still state the selected
-scope and authorize chat/worktree, Taiga, push/PR, and optional heartbeat
-actions; those permissions cannot be inferred from the working directory.
+scope; the named profile supplies the scoped operational permissions, but those
+permissions cannot be inferred from the working directory alone.
 
 Tests use synthetic Taiga/GitHub data and local bare remotes only. See
 `docs/automation/README.md` for installation, runbook, and recovery examples.
