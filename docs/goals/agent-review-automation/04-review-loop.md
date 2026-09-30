@@ -71,9 +71,9 @@ Complete this table as work proceeds. Record each commit hash in the following s
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Implementation receipt and clean committed revision requirements implemented. | Review reference | `bd6a212` |
+| 2 | Verdict, stable findings, and blocking-disposition validation implemented. | Review reference and receipt validator | `d278883` |
+| 3 | Initial round plus three bounded corrections with needs_input escalation implemented. | Review decision script | `d278883` |
+| 4 | Stale SHA/scope/base invalidation and publish gate covered by fixtures. | Acceptance documentation | `7d82733` |
 
 Record deviations, blockers, and unverified behavior below; do not replace missing evidence with a checked box.

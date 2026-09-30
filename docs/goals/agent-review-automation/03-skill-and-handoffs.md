@@ -71,9 +71,9 @@ Complete this table as work proceeds. Record each commit hash in the following s
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Explicit-only skill, no-subagent policy, entry procedure, and unavailable-tool behavior implemented. | `SKILL.md`, host reference | `33061fc` |
+| 2 | Luna prompt and exact checkout/base/HEAD receipt implemented. | Implementation prompt | `bd6a212` |
+| 3 | Exact gpt-6.1-sol/high reviewer prompt and same-chat correction routing documented. | Reviewer and handoff references | `bd6a212` |
+| 4 | Offline identity/receipt behavior covered; real chat IDs and host smoke remain pending. | Goal record | `62223a9` |
 
 Record deviations, blockers, and unverified behavior below; do not replace missing evidence with a checked box.

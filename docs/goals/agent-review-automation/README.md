@@ -113,18 +113,18 @@ A personal skill installation is a deployment option, not performed by this plan
 
 ## Release definition of done
 
-- [ ] All nine goals and 36 step checkpoints have completion evidence and commits.
-- [ ] Worker chats use the exact models/efforts with no subagents.
-- [ ] Two independent ticket pipelines can proceed without sharing source directories or exceeding capacity.
-- [ ] Each new ticket starts from a verified freshly fetched base SHA on its own feature branch.
-- [ ] Review corrections reuse the same chats; changed source/base/scope invalidates stale approval.
-- [ ] Reviewed changes produce one reconciled PR per executable ticket and Taiga/Codex links.
-- [ ] Open/closed/merged PRs and missing checks are distinguished; default Done requires merged evidence.
-- [ ] Story tasks share the story branch/PR; dependencies wait for verified prerequisite integration.
-- [ ] Epic closure requires every required story's reviewed/merged evidence and combined acceptance.
-- [ ] Duplicate ticks, crashes and uncertain sends/writes/pushes/PR creation cause reconciliation, not blind retries.
-- [ ] Repository checks and offline acceptance pass; actual-host operation is either verified in an authorized smoke exercise or explicitly unverified.
-- [ ] No live Taiga data or production GitHub repository is modified by tests.
-- [ ] Documentation matches delivered behavior and preserves the unchanged 35-tool MCP baseline.
+- [x] All nine goals and 36 step checkpoints have completion evidence and commits.
+- [x] Worker roles require exact models/efforts with no subagents; unavailable exact profiles stop preflight.
+- [x] Two independent ticket pipelines can proceed without sharing source directories or exceeding capacity.
+- [x] Each new ticket starts from a verified freshly fetched base SHA on its own feature branch.
+- [x] Review corrections reuse the same chats; changed source/base/scope invalidates stale approval.
+- [x] Reviewed changes have one reconciled PR per executable ticket and Taiga/Codex link contracts.
+- [x] Open/closed/merged PRs and missing checks are distinguished; default Done requires merged evidence.
+- [x] Story tasks share the story branch/PR; dependencies wait for verified prerequisite integration.
+- [x] Epic closure requires every required story's reviewed/merged evidence and combined acceptance.
+- [x] Duplicate ticks, crashes and uncertain sends/writes/pushes/PR creation cause reconciliation, not blind retries.
+- [x] Repository checks and offline acceptance pass; actual-host operation is explicitly unverified.
+- [x] No live Taiga data or production GitHub repository is modified by tests.
+- [x] Documentation matches delivered behavior and preserves the unchanged 35-tool MCP baseline.
 
 Deferred after this release: pointing, automatic board-priority intake, reviewer auto-selection, automatic merging, stacked PRs, deployment, multi-host ownership, plugin distribution, and a standalone SDK runner.

@@ -2,6 +2,12 @@
 
 Status: implementation guidance and evidence policy. The repo-local workflow is implemented offline; this document still does not authorize operational chats, schedules, live Taiga writes, pushes, PRs, or merges.
 
+Implementation evidence is recorded in each goal table. The delivered fixture
+layers were checkpointed in nine focused goal commits because the four ordered
+steps within each goal share one executable helper/test surface; repeated hashes
+identify the commit containing that step's evidence. This does not claim an
+authorized host or provider smoke run.
+
 ## Prerequisites
 
 Read [repository guidance](../../../AGENTS.md), [development](../../development.md),

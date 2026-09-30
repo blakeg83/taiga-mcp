@@ -72,9 +72,9 @@ Record each commit hash in the following step or final handoff. Leave incomplete
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Fresh fetch/base SHA, unique codex branch, detached worktree, and clean receipt implemented. | Git reference | `6682e5d` |
+| 2 | Non-force refresh, approval invalidation, and reviewed-head push verification implemented. | Git reference | `6682e5d` |
+| 3 | Matching PR receipt/identity and duplicate lookup contract documented for coordinator/provider adapters. | PR reference | `f33e943` |
+| 4 | Open/closed-unmerged/merged semantics and Done gate documented; provider calls remain fixture-only. | Operator guide | `62223a9` |
 
 Record deviations, blockers and unverified behavior below.

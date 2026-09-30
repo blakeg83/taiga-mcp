@@ -73,9 +73,13 @@ Complete this table as work proceeds. Record each commit hash in the following s
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Host schemas, Git/PowerShell/gh preflight recorded; exact gpt-6.1-sol/high is unavailable on this host and is not substituted. | Host contract and capability boundary | `33061fc` |
+| 2 | Synthetic configuration, authority defaults, exact profiles, and forbidden fallback validated. | Skill entrypoint and synthetic run | `33061fc` |
+| 3 | Worker/reviewer receipts and synthetic failure boundaries documented. | Handoff references and fixtures | `bd6a212` |
+| 4 | Skill metadata validator passed; actual host smoke remains pending. | Goal status and source evidence | `62223a9` |
 
 Record deviations, blockers, and unverified behavior below; do not replace missing evidence with a checked box.
+
+Implementation note: the host-dependent exact reviewer capability and operational
+smoke remain unverified; the offline skill/fixture contract stops rather than
+falling back.

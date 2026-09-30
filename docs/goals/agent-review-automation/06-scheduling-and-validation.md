@@ -72,10 +72,10 @@ Complete this table as work proceeds. Record each commit hash in the following s
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Heartbeat identity/state contract and quiet unchanged-wait procedure documented; actual schedule not created. | Operator guide | `7d82733` |
+| 2 | Pause/cancel/resume intents and interrupted-state recovery implemented and fixture-tested. | State and operator references | `4e78975` |
+| 3 | Offline PowerShell/Git/Taiga/review harness passes 9 fixtures; authorized ordinary-chat smoke not run. | Offline acceptance record | `7d82733` |
+| 4 | Installation, recovery, limits, and deferred provider/host boundaries published. | Operator guide and README | `62223a9` |
 
 Record deviations, blockers, and unverified behavior below; do not replace missing evidence with a checked box.
 

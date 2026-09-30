@@ -72,9 +72,9 @@ Record each commit hash in the following step or final handoff. Leave incomplete
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Selected-scope, parent/task routing, duplicate, cycle, repository, and priority validation implemented. | Scheduling reference | `f89035b` |
+| 2 | Two-per-repository and separate host worker-turn capacity enforced by state/planner fixtures. | Scheduling reference | `4e78975` |
+| 3 | Dependency readiness and local Git conflict-refresh behavior implemented; external merge observation remains coordinator/provider work. | Git and scheduling references | `6682e5d` |
+| 4 | Scoped lifecycle recovery and independent sibling preservation covered by state fixtures. | Operator guide | `7d82733` |
 
 Record deviations, blockers and unverified behavior below.

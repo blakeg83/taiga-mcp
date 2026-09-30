@@ -72,10 +72,10 @@ Record each commit hash in the following step or final handoff. Leave incomplete
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Required-story scope, cross-project mapping, shared-story deduplication, and existing-evidence rules implemented. | Epic/scheduling references | `f89035b` |
+| 2 | Independent story scheduling, dependency sequencing, and partial-progress rules implemented. | Epic/scheduling references | `f89035b` |
+| 3 | Integrated acceptance requires all merged stories, current criteria, checks, and epic acceptance before Done. | Taiga finalization and operator guide | `f33e943` |
+| 4 | Expanded offline fixture matrix passes; actual expanded host/provider smoke remains pending. | Release documentation | `62223a9` |
 
 Record deviations, blockers and unverified behavior below.
 

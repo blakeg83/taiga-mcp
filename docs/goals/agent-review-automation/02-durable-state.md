@@ -73,9 +73,9 @@ Complete this table as work proceeds. Record each commit hash in the following s
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Versioned JSON registry, atomic replacement, backup recovery, path/secret/schema validation implemented. | State reference | `4e78975` |
+| 2 | Per-ticket claims, repository/host slots, CAS revisions, and capacity guards implemented. | Ownership and concurrency rules | `4e78975` |
+| 3 | Action journal, observations, cursor uniqueness, lifecycle, pause/cancel/resume implemented. | Operation and transition reference | `4e78975` |
+| 4 | Truncation recovery and offline harness pass; state remains local one-host bookkeeping. | Recovery fixture documentation | `7d82733` |
 
 Record deviations, blockers, and unverified behavior below; do not replace missing evidence with a checked box.

@@ -71,9 +71,9 @@ Complete this table as work proceeds. Record each commit hash in the following s
 
 | Step | Result and evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
-| 2 | Pending | Pending | Pending |
-| 3 | Pending | Pending | Pending |
-| 4 | Pending | Pending | Pending |
+| 1 | Complete-page context capture, story tasks, and epic membership boundaries implemented. | Taiga reference and fixtures | `f33e943` |
+| 2 | Resource-specific status validation and milestone payloads implemented. | Taiga reference | `f33e943` |
+| 3 | Conflict, response-loss, and no-blind-retry reconciliation implemented. | Taiga adapter script | `f33e943` |
+| 4 | Merge/criteria/check/epic acceptance finalization gate implemented; 35 MCP tools unchanged. | Operator guide | `7d82733` |
 
 Record deviations, blockers, and unverified behavior below; do not replace missing evidence with a checked box.
