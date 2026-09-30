@@ -32,7 +32,9 @@ session, not from a promise that every Codex client has them.
 
 Model identifiers observed on the planning host: `gpt-5.6-luna` supports `xhigh`,
 `gpt-6-sol` supports `high`, and `gpt-6-astra` supports `medium`.
-Resolve support again on the destination host and preserve these exact choices.
+The requested reviewer profile is now exactly `gpt-6.1-sol` with `high`; it was
+not advertised by this host on 2026-09-29. Resolve support again on the
+destination host and preserve the requested profile without fallback.
 
 ## Repository evidence
 

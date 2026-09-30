@@ -1,0 +1,6 @@
+interface:
+  display_name: "Taiga ticket loop"
+  short_description: "Coordinate reviewed Taiga ticket delivery"
+  default_prompt: "Use $taiga-ticket-loop for this explicitly authorized Taiga ticket or epic run."
+policy:
+  allow_implicit_invocation: false

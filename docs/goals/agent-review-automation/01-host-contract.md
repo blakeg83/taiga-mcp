@@ -1,6 +1,6 @@
 # Goal 01: Verify host capabilities and define run configuration
 
-Status: not started.
+Status: implemented offline; exact reviewer-host capability remains pending because this host advertises gpt-6-sol/high and gpt-6-astra/medium, not the requested gpt-6.1-sol/high.
 
 ## Objective
 
@@ -20,7 +20,7 @@ A capability matrix, versioned run configuration, example worker receipts, and o
 ### Step 1: Inspect the host and record compatibility
 
 - [ ] Read the currently exposed app tool schemas and record support for project lookup, ordinary chat creation, explicit model/effort, follow-up messaging, result reads/waits, managed worktrees, heartbeat updates, and PR artifact attachment. Verify Git fetch/branch/push plus an authenticated GitHub CLI or connector for PR create/read/update/checks; do not expose credentials.
-- [ ] Verify the installed host advertises gpt-5.6-luna/xhigh, gpt-6-sol/high, and gpt-6-astra/medium. Record requested versus observable settings; identify anything that still requires the later smoke exercise.
+- [ ] Verify the installed host advertises gpt-5.6-luna/xhigh and the requested gpt-6.1-sol/high. Record requested versus observable settings; this planning host currently exposes gpt-6-sol/high and gpt-6-astra/medium instead, so the exact reviewer profile remains pending and must not be silently substituted.
 - [ ] Record PowerShell 7 availability, canonical repository path, existing instructions, and source baseline. Do not inspect credentials or private conversations unrelated to the assignment.
 - [ ] Define unsupported-host behavior: stop with a capability report instead of switching to subagents or an SDK/private API.
 - [ ] **Validate:** Validate the matrix against actual schemas; use fixtures for unsupported models, absent tools, and unavailable scheduling.

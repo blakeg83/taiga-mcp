@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "synthetic-session-01",
+  "coordinator": { "threadId": "coordinator-thread", "hostId": "local" },
+  "authorization": {
+    "createOrReuseChats": true,
+    "messageWorkers": true,
+    "createWorktrees": true,
+    "writeTaiga": false,
+    "pushAndCreatePr": false,
+    "scheduleHeartbeat": false,
+    "observeMerge": true
+  },
+  "config": {
+    "repository": { "identity": "synthetic-repo", "path": "C:/fixtures/repo", "fetchRemote": "origin", "baseBranch": "master", "pushRemote": "origin", "githubRepository": "example/repo" },
+    "reviewerProfile": { "model": "gpt-6.1-sol", "effort": "high" },
+    "implementationProfile": { "model": "gpt-5.6-luna", "effort": "xhigh" },
+    "limits": { "maxActiveTicketsPerRepository": 2, "maxWorkerTurns": 4, "maxCorrectionRounds": 3, "elapsedMinutes": 120 },
+    "completion": { "leafDonePolicy": "merged", "epicDonePolicy": "all_required_stories_merged_and_accepted" },
+    "branchPrefix": "codex/", "dependencyPolicy": "wait_for_merge", "autoPush": true, "autoCreatePr": true, "autoMerge": false, "allowForcePush": false, "useSubagents": false
+  },
+  "scope": [ { "projectId": 123, "kind": "issue", "id": 456, "ref": 7, "repository": "synthetic-repo" } ],
+  "dependencies": [],
+  "statusMappings": { "issue": { "start": 1, "review": 2, "awaitingMerge": 3, "done": 4 } }
+}

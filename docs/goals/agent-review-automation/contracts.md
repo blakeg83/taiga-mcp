@@ -10,7 +10,7 @@ multiple executable ticket runs into their mapped code repositories on one host.
 
 - Coordinator: ordinary chat; retain its chosen model. Own workflow state, dispatch, Taiga writes and GitHub publication/observation actions.
 - Implementer per ticket: ordinary chat, `gpt-5.6-luna`/`xhigh`.
-- Reviewer per ticket: ordinary chat, selected `gpt-6-sol`/`high` or `gpt-6-astra`/`medium`.
+- Reviewer per ticket: ordinary chat, exact `gpt-6.1-sol`/`high`.
 - No subagents, implicit delegation, silent model fallback, or unrequested extra reviewers.
 - One source writer per ticket. Implementation and review for that ticket are sequential; other tickets may progress.
 - Workers return evidence to their original chats. The coordinator routes feedback and performs or explicitly dispatches journaled Git operations; no competing publication writers.
