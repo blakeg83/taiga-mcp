@@ -16,3 +16,16 @@ services or performs browser/database/HTTPS work.
 Checks that share compiler or other output directories are serialized. Safe
 independent reads may be batched. A required check cannot be waived because a
 shorter command is convenient.
+
+## Evidence reuse
+
+Each captured evidence record may carry input coverage: checked revision, base
+SHA, covered files, environment hash, and dependency hash. Exact-revision
+reuse is allowed only when all those inputs match. A documentation-only delta
+may reuse a check when its covered source files do not overlap and base,
+environment, and dependency inputs remain unchanged. Source/base/environment/
+dependency drift invalidates reuse.
+
+Reuse returns the original evidence ID, action, checked revision, and capture
+timestamp and is labeled `freshlyExecuted: false`. The reviewer must approve
+reuse; it is never relabeled as a new browser click or a newly run test.
