@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "runId": "sanitized-audit-run",
+  "ticketKey": "project:1:issue:42",
+  "coordinatorEngineeringActions": 0,
+  "fullReceiptCopied": false,
+  "maxReceiptRepairs": 2,
+  "unresolvedMaterialEvidence": true,
+  "published": false,
+  "unchangedWaitMutations": 0,
+  "workerIdsStable": true,
+  "actions": [
+    { "actor": "coordinator", "class": "bounded_wait", "operation": "wait_threads" },
+    { "actor": "implementer", "class": "engineering", "operation": "run_required_checks", "workerId": "implementer-thread" },
+    { "actor": "reviewer", "class": "engineering", "operation": "review_exact_revision", "workerId": "reviewer-thread" }
+  ]
+}

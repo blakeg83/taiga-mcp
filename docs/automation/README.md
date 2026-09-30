@@ -1,8 +1,9 @@
 # Taiga ticket-loop automation
 
 The [ticket-loop improvement plan](../goals/ticket-loop-improvements/README.md)
-records the 2026-09-30 trial findings and the next six implementation goals.
-Those improvements are planned, not delivered by the documentation update.
+records the 2026-09-30 trial findings and the six delivered offline improvement
+goals. Offline helper acceptance is separate from actual-host and publication
+verification, which remain pending without a separately authorized trial.
 The trial exercised ordinary worker chats and review but stopped at the user's
 request before push/PR delivery; it is not full publication acceptance evidence.
 
@@ -21,6 +22,12 @@ pwsh -NoProfile -File tests/automation/Test-Automation.ps1
 The harness uses synthetic state and Taiga/provider observations plus a local
 bare Git remote. It does not contact live Taiga or GitHub. Actual host and
 provider smoke evidence remains separate from fixture success.
+
+The delivered local helpers include compact coordination, worker-owned
+verification, timing/usage/cost measurement, and sanitized acceptance replay.
+See [measurement reporting](measurement-reporting.md), the
+[comparison template](comparison-template.md), and the
+[deliberate trial guide](installation-and-trial.md).
 
 ## Explicit operational start
 

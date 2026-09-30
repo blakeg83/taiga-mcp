@@ -16,6 +16,8 @@ $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-tic
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
 $script:VerificationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-verification.ps1'
 $script:MeasureScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-measure.ps1'
+$script:AcceptanceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-acceptance.ps1'
+$script:AcceptanceScenarioPath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-acceptance-scenario.json'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
 $script:Passed = 0
@@ -410,6 +412,42 @@ try {
         $different = Copy-JsonObject $automated; $different.profilesHash = 'different-profile'
         $incomparable = Invoke-PsJson $script:MeasureScript @('-Operation','comparison-report','-InputPath',(New-InputPath @{ runs = @($manual,$different) } 'comparison-incomparable'))
         Assert-True (-not $incomparable.data.comparable) 'different worker profiles must be disclosed as incomparable'
+    }
+
+    Test-Case 'replay sanitized ticket-loop audit regressions offline' {
+        $scenario = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $script:AcceptanceScenarioPath) -AsHashtable -Depth 100
+        $scenarioReference = @{ path = $script:AcceptanceScenarioPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $script:AcceptanceScenarioPath).Hash.ToLowerInvariant() }
+        $replay = Invoke-PsJson $script:AcceptanceScript @('-Operation','replay','-InputPath',(New-InputPath @{ scenarioReference = $scenarioReference } 'acceptance-replay'))
+        Assert-True $replay.data.offline 'audit replay must be fixture-only'
+        Assert-Equal 0 $replay.data.coordinatorEngineeringActions 'replay must prove coordinator-only orchestration'
+        Assert-True $replay.data.publicationBlockedByMaterialEvidence 'unresolved material evidence must block publication'
+        Assert-Equal 0 $replay.data.unchangedWaitMutations 'unchanged waits must remain quiet'
+        $bad = Copy-JsonObject $scenario; $bad.fullReceiptCopied = $true
+        $badResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','replay','-InputPath',(New-InputPath $bad 'acceptance-replay-bad')) $false
+        Assert-True (-not $badResult.ok) 'full receipt copying must fail replay acceptance'
+    }
+
+    Test-Case 'verify legacy compatibility and deliberate trial plan' {
+        $records = @{ records = @(@{ schemaVersion = 1; ticketKey = 'project:1:issue:1'; phase = 'paused'; receiptPreserved = $true; evidencePreserved = $true; uncertainAction = $true; actionReconciled = $false }, @{ schemaVersion = 2; ticketKey = 'project:1:issue:2'; phase = 'reviewing'; receiptPreserved = $true; evidencePreserved = $true }) }
+        $compatible = Invoke-PsJson $script:AcceptanceScript @('-Operation','compatibility','-InputPath',(New-InputPath $records 'acceptance-compatibility'))
+        Assert-True $compatible.data.compatible 'supported v1 and v2 records should remain compatible'
+        Assert-True ($compatible.data.actualRunMigrated -eq $false) 'compatibility tests must not migrate the actual audited run'
+        $unsupported = @{ records = @(@{ schemaVersion = 99; ticketKey = 'project:1:issue:3'; phase = 'queued' }) }
+        $unsupportedResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','compatibility','-InputPath',(New-InputPath $unsupported 'acceptance-unsupported')) $false
+        Assert-True (-not $unsupportedResult.ok) 'unsupported records must fail closed'
+        $trial = @{ ticketKey = 'project:1:issue:42'; repository = 'TaigaMCP'; workerProfiles = @{ implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } }; authorization = @{ createChats = $true; messageWorkers = $true }; stopConditions = @('pause before publication unless separately authorized') }
+        $trialResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','trial-plan','-InputPath',(New-InputPath $trial 'acceptance-trial-plan'))
+        Assert-True $trialResult.data.ready 'future trial plan should be explicit and executable by native tools'
+        Assert-True (-not $trialResult.data.executes) 'reading or validating a trial plan must not start operations'
+        Assert-True (-not $trialResult.data.automaticMerge) 'automatic merge must remain disabled'
+    }
+
+    Test-Case 'report offline acceptance separately from host and publication gates' {
+        $report = Invoke-PsJson $script:AcceptanceScript @('-Operation','acceptance-report','-InputPath',(New-InputPath @{ offlineGates = @($true,$true,$true); actualHostVerified = $false; publicationVerified = $false; qualityEvidence = 'synthetic'; costEvidence = 'unknown' } 'acceptance-report'))
+        Assert-True $report.data.offlineAccepted 'all offline gates should be accepted'
+        Assert-True (-not $report.data.actualHostVerified) 'actual host should remain visibly pending'
+        Assert-True (-not $report.data.overallOperationalAcceptance) 'pending host/publication gates must prevent operational acceptance'
+        Assert-True $report.data.rawTokensAreNotAcceptanceGate 'raw tokens must not be a release gate'
     }
 
     Test-Case 'capture immutable verification evidence and classify outcomes' {
