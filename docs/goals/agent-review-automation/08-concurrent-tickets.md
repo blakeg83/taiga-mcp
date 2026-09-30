@@ -1,6 +1,6 @@
 # Goal 08: Schedule independent tickets concurrently
 
-Status: not started.
+Status: implemented offline; claim/slot/dependency scheduling and recovery fixtures pass.
 
 ## Objective
 
@@ -78,4 +78,3 @@ Record each commit hash in the following step or final handoff. Leave incomplete
 | 4 | Pending | Pending | Pending |
 
 Record deviations, blockers and unverified behavior below.
-
