@@ -102,8 +102,11 @@ try {
         New-Item -ItemType Directory -Path $divergentRoot -Force | Out-Null
         $divergent = Copy-JsonObject $legacy; $divergent.tickets.'project:1:task:11'.phase = 'implementing'
         [IO.File]::WriteAllText((Join-Path $divergentRoot 'registry.json'), ($divergent | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $divergentRoot 'registry.json.bak'), ($legacy | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
         $divergentResult = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$divergentRoot) $false
         Assert-True (-not $divergentResult.ok) 'divergent legacy duplicates must require manual recovery'
+        $primaryAfterConflict = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath (Join-Path $divergentRoot 'registry.json')) -AsHashtable -Depth 100
+        Assert-Equal 1 $primaryAfterConflict.schemaVersion 'migration conflict must preserve the primary snapshot'
     }
 
     Test-Case 'claim ticket, reserve two slots, and reject overflow' {

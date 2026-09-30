@@ -39,5 +39,7 @@ identifiers rather than provider idempotency keys.
 The current registry schema is version 2. On read, a version-1 registry is
 migrated by collapsing duplicate parent/child ticket records into one
 canonical parent and adding `ticketAliases`; divergent duplicate records are
-rejected for manual recovery rather than silently discarded. A successful
-migration is persisted during inspection or the next mutation.
+rejected for manual recovery rather than silently discarded or replaced by an
+older backup. JSON parse corruption may recover from `.bak`, but migration and
+unsupported-schema errors fail closed. A successful migration is persisted
+during inspection or the next mutation.

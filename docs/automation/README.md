@@ -58,7 +58,8 @@ worker cursors, evidence, and bounded events. Writes use an exclusive short
 lock, a flushed same-directory temporary file, atomic replacement, and a valid
 `.bak` snapshot. Version-1 registries are migrated to the current
 canonical-ticket schema on read; divergent legacy duplicates stop for manual
-recovery. Inspect first after a crash; a pending or uncertain action is
+recovery without falling back to an older snapshot. Only malformed JSON may
+recover from `.bak`. Inspect first after a crash; a pending or uncertain action is
 reconciled against its target before another call. Do not free an uncertain
 slot merely because its lease expired.
 

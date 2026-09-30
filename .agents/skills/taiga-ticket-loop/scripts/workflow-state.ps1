@@ -261,27 +261,50 @@ function Migrate-Registry {
     return @{ State = $State; Migrated = $true }
 }
 
+function Read-RegistryFile {
+    param([string] $Path)
+    return Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $Path) -AsHashtable -Depth 100)
+}
+
 function Read-Registry {
     param([string] $Root)
     $statePath = Join-Path $Root 'registry.json'
     $backupPath = Join-Path $Root 'registry.json.bak'
     if (-not (Test-Path -LiteralPath $statePath)) {
-        if (Test-Path -LiteralPath $backupPath) {
-            try { $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $backupPath) -AsHashtable -Depth 100); $migration = Migrate-Registry $candidate; $candidate = $migration.State; Assert-Registry $candidate; return @{ State = $candidate; Recovered = $true; Migrated = $migration.Migrated } } catch { throw 'Registry primary is absent and backup is invalid; manual recovery is required.' }
-        }
-        throw "Registry is not initialized at $Root."
+        if (-not (Test-Path -LiteralPath $backupPath)) { throw "Registry is not initialized at $Root." }
+        try { $candidate = Read-RegistryFile $backupPath } catch { throw 'Registry primary is absent and backup is invalid; manual recovery is required.' }
+        $migration = Migrate-Registry $candidate
+        $candidate = $migration.State
+        try { Assert-Registry $candidate } catch { throw 'Registry primary is absent and backup is invalid; manual recovery is required.' }
+        return @{ State = $candidate; Recovered = $true; Migrated = $migration.Migrated }
     }
-    try {
-        $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $statePath) -AsHashtable -Depth 100)
-        $migration = Migrate-Registry $candidate; $candidate = $migration.State
-        Assert-Registry $candidate
-        return @{ State = $candidate; Recovered = $false; Migrated = $migration.Migrated }
-    } catch {
+
+    $primaryParseError = $null
+    try { $candidate = Read-RegistryFile $statePath } catch { $primaryParseError = $_.Exception }
+    if ($null -ne $primaryParseError) {
+        if (-not (Test-Path -LiteralPath $backupPath)) { throw "Registry is malformed and no valid backup is available: $($primaryParseError.Message)" }
+        try { $candidate = Read-RegistryFile $backupPath } catch { throw "Registry is malformed and no valid backup is available: $($primaryParseError.Message)" }
+        $migration = Migrate-Registry $candidate
+        $candidate = $migration.State
+        try { Assert-Registry $candidate } catch { throw "Registry is malformed and no valid backup is available: $($primaryParseError.Message)" }
+        return @{ State = $candidate; Recovered = $true; Migrated = $migration.Migrated }
+    }
+
+    # Migration and unsupported-schema failures are semantic conflicts, not
+    # malformed JSON. Never hide them by falling back to an older snapshot.
+    $migration = Migrate-Registry $candidate
+    $candidate = $migration.State
+    try { Assert-Registry $candidate } catch {
         if (Test-Path -LiteralPath $backupPath) {
-            try { $candidate = Convert-ToHashtable (ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $backupPath) -AsHashtable -Depth 100); $migration = Migrate-Registry $candidate; $candidate = $migration.State; Assert-Registry $candidate; return @{ State = $candidate; Recovered = $true; Migrated = $migration.Migrated } } catch { }
+            try { $candidate = Read-RegistryFile $backupPath } catch { throw "Registry is malformed and no valid backup is available: $($_.Exception.Message)" }
+            $backupMigration = Migrate-Registry $candidate
+            $candidate = $backupMigration.State
+            try { Assert-Registry $candidate } catch { throw "Registry is malformed and no valid backup is available: $($_.Exception.Message)" }
+            return @{ State = $candidate; Recovered = $true; Migrated = $backupMigration.Migrated }
         }
         throw "Registry is malformed and no valid backup is available: $($_.Exception.Message)"
     }
+    return @{ State = $candidate; Recovered = $false; Migrated = $migration.Migrated }
 }
 
 function Write-Registry {
