@@ -16,6 +16,49 @@ function Read-Object {
     catch { throw "Input is not valid JSON: $($_.Exception.Message)" }
 }
 
+function Get-FileSha256 {
+    param([string] $Path)
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([Convert]::ToHexString($sha.ComputeHash($stream))).ToLowerInvariant() }
+    finally { $sha.Dispose(); $stream.Dispose() }
+}
+
+function Read-ReceiptReferences {
+    param([hashtable] $InputObject)
+    if (-not $InputObject.Contains('receiptPath')) { return $InputObject }
+    $path = [IO.Path]::GetFullPath((Need $InputObject 'receiptPath'))
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'receiptPath does not identify an existing file.' }
+    if ($InputObject.Contains('receiptSha256')) {
+        $expectedHash = Need $InputObject 'receiptSha256'
+        if ($expectedHash -notmatch '^[0-9a-fA-F]{64}$' -or (Get-FileSha256 $path) -cne $expectedHash.ToLowerInvariant()) { throw 'receiptPath hash does not match receiptSha256.' }
+    }
+    try { $receipt = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $path) -AsHashtable -Depth 100 }
+    catch { throw "receiptPath is not valid JSON: $($_.Exception.Message)" }
+    if ($receipt -isnot [System.Collections.IDictionary]) { throw 'receiptPath JSON must be an object.' }
+    $copy = @{}
+    foreach ($key in $InputObject.Keys) { if ($key -notin @('receiptPath','receiptSha256')) { $copy[$key] = $InputObject[$key] } }
+    $copy.receipt = $receipt
+    $copy.receiptReference = [ordered]@{ path = $path; sha256 = Get-FileSha256 $path }
+    return $copy
+}
+
+function Validate-EvidenceReferences {
+    param([hashtable] $InputObject)
+    if (-not $InputObject.Contains('evidenceReferences')) { return @() }
+    if ($InputObject.evidenceReferences -is [string] -or $InputObject.evidenceReferences -isnot [System.Collections.IEnumerable]) { throw 'evidenceReferences must be an array.' }
+    $references = @()
+    foreach ($reference in @($InputObject.evidenceReferences)) {
+        if ($reference -isnot [System.Collections.IDictionary]) { throw 'Each evidence reference must be an object.' }
+        $path = [IO.Path]::GetFullPath((Need $reference 'path'))
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Evidence reference is missing: $path" }
+        $hash = Get-FileSha256 $path
+        if ($reference.Contains('sha256') -and ([string]$reference.sha256).ToLowerInvariant() -cne $hash) { throw "Evidence reference hash does not match: $path" }
+        $references += [ordered]@{ path = $path; sha256 = $hash; evidenceId = if ($reference.Contains('evidenceId')) { [string]$reference.evidenceId } else { $null } }
+    }
+    return $references
+}
+
 function Need {
     param([hashtable] $Object, [string] $Name)
     if (-not $Object.Contains($Name) -or $null -eq $Object[$Name] -or [string]::IsNullOrWhiteSpace([string]$Object[$Name])) { throw "$Name is required." }
@@ -88,8 +131,9 @@ function Get-RepairRoute {
 }
 
 try {
-    $inputObject = Read-Object
+    $inputObject = Read-ReceiptReferences (Read-Object)
     $null = Need $inputObject 'receipt'
+    $evidenceReferences = Validate-EvidenceReferences $inputObject
     $expectedCriteria = if ($inputObject.Contains('expectedCriteria')) { @($inputObject.expectedCriteria) } else { @() }
     $validation = Get-ReviewReceiptValidation $inputObject.receipt $expectedCriteria
     if ($Operation -eq 'route') {
@@ -125,6 +169,10 @@ try {
         } else {
             $data = [ordered]@{ decision = 'needs_input'; reason = if ($round -ge $maxRounds) { 'correction_round_limit' } else { 'elapsed_budget_or_unresolved_findings' } }
         }
+    }
+    if ($data -is [System.Collections.IDictionary]) {
+        $data.evidenceReferences = $evidenceReferences
+        if ($inputObject.Contains('receiptReference')) { $data.receiptReference = $inputObject.receiptReference }
     }
     [ordered]@{ ok = $true; operation = $Operation; data = $data } | ConvertTo-Json -Depth 100; exit 0
 } catch {

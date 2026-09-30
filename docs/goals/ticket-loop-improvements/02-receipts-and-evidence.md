@@ -1,6 +1,6 @@
 # 02: Make receipts deterministic and evidence durable
 
-Status: steps 1–3 implemented offline; step 4 pending.
+Status: implemented offline; actual-host behavior remains pending an authorized trial.
 Prerequisites: 01 in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -48,21 +48,21 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 4: Verify compatibility and file-based ingestion
 
-- [ ] Consume receipt/evidence files through validated paths and hashes; never require the coordinator to embed a complete receipt in a shell command.
-- [ ] Preserve supported legacy inputs through explicit adapters and fixtures. Reject missing evidence, unsafe paths, stale review bindings, and conflicting run ownership.
-- [ ] Archive prior receipts by action/revision and reference reused evidence; never regenerate old narrative to carry it forward.
-- [ ] Run the full helper harness with representative legacy and new receipts.
-- [ ] **Validate:** Confirm both validators agree, cumulative evidence remains immutable, and a passed result with a genuinely open high finding still blocks.
-- [ ] **Update documentation:** Update examples and recovery guidance to use file references.
-- [ ] **Commit before the next step:** `Verify receipt compatibility and evidence reuse`.
+- [x] Consume receipt/evidence files through validated paths and hashes; never require the coordinator to embed a complete receipt in a shell command.
+- [x] Preserve supported legacy inputs through explicit adapters and fixtures. Reject missing evidence, unsafe paths, stale review bindings, and conflicting run ownership.
+- [x] Archive prior receipts by action/revision and reference reused evidence; never regenerate old narrative to carry it forward.
+- [x] Run the full helper harness with representative legacy and new receipts.
+- [x] **Validate:** Confirm both validators agree, cumulative evidence remains immutable, and a passed result with a genuinely open high finding still blocks.
+- [x] **Update documentation:** Update examples and recovery guidance to use file references.
+- [x] **Commit before the next step:** `Verify receipt compatibility and evidence reuse`.
 
 ## Definition of done
 
-- [ ] One authoritative contract drives validation and templates.
-- [ ] The audited enum mismatch is handled without a coding round or false acceptance.
-- [ ] Metadata and prior results are preserved rather than repeatedly rewritten.
-- [ ] Bounded repairs cannot evade technical review, deadlines, or correction limits.
-- [ ] Each completed step has validation evidence, documentation updates, and its own commit.
+- [x] One authoritative contract drives validation and templates.
+- [x] The audited enum mismatch is handled without a coding round or false acceptance.
+- [x] Metadata and prior results are preserved rather than repeatedly rewritten.
+- [x] Bounded repairs cannot evade technical review, deadlines, or correction limits.
+- [x] Each completed step has validation evidence, documentation updates, and its own commit.
 
 ## Execution record
 
@@ -74,4 +74,4 @@ gates unchecked; record deviations and blockers below the table.
 | 1 | The shared v1 validator reproduced the legacy enum mismatch and covers alias normalization, contradiction rejection, exact profile, complete ordered criteria, failed evidence, and stale SHA. `Test-Automation.ps1` passed 17 fixtures; skill validator and `git diff --check` passed. | Review receipt schema/reference, both helper entry points, reviewer prompt, review loop, skill entry, operator guide | `f41cf10` |
 | 2 | Trusted metadata and structured evidence fixtures cover raw exit 1 on intentional shutdown, genuine failures, expected-red outcomes, assertions, external log hashes, tampering/missing files, generated counts, and reported-only provenance. `Test-Automation.ps1` passed 18 fixtures; skill validation and `git diff --check` passed. | Evidence helper/state action context, storage/classification reference, worker handoffs, operator guide, fixture guide | `8b99623` |
 | 3 | The bounded route keeps lossless normalization local, sends other format/evidence repairs to the original receipt author, and requires a fresh independent review for evidence amendments. Per-result attempts are fenced in state, capped at two, budget-aware, and do not increment code correction rounds. Documentation deltas bind prior/current revisions, require a reviewer assessment, and require reasons for reused checks. Focused fixtures and the full 19-fixture harness passed. | Receipt schema and compatibility reference, state/review loop contracts, reviewer prompt, skill, operator guide, fixture guide | Recorded in step 4 |
-| 4 | Pending | Pending | Pending |
+| 4 | Receipt and evidence references are read from immutable files, checked against SHA-256 values, and rejected when missing or tampered. Both helper entry points still use the same validator; the open-high and legacy fixtures remain blocking. Focused file-ingestion and full helper harness passed; skill validation and `git diff --check` passed. | Receipt compatibility reference, evidence guidance, operator guide, fixture coverage | Recorded in final handoff |

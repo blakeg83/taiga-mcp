@@ -182,6 +182,27 @@ try {
         Assert-True (-not $passingResult.ok) 'passing review must reject failed checks'
     }
 
+    Test-Case 'ingest immutable receipt and evidence references from files' {
+        $receiptPath = Join-Path $script:FixtureRoot 'receipt-file.json'
+        $evidencePath = Join-Path $script:FixtureRoot 'evidence-file.json'
+        $receipt = New-ReviewReceipt
+        Write-JsonFile $receipt $receiptPath
+        Write-JsonFile @{ evidenceId = 'ev-file'; checkedRevision = 'head'; outcome = 'passed' } $evidencePath
+        $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $receiptPath).Hash.ToLowerInvariant()
+        $request = @{ receiptPath = $receiptPath; receiptSha256 = $hash; evidenceReferences = @(@{ path = $evidencePath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $evidencePath).Hash.ToLowerInvariant(); evidenceId = 'ev-file' }); expectedCriteria = $script:ReviewCriteria }
+        $result = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $request 'receipt-file-reference'))
+        Assert-True $result.data.valid 'file receipt should validate through the shared contract'
+        Assert-Equal $receiptPath $result.data.receiptReference.path 'receipt reference should preserve its source path'
+        Assert-Equal 'ev-file' @($result.data.evidenceReferences)[0].evidenceId 'evidence reference should retain its identity'
+        [IO.File]::AppendAllText($receiptPath, "`n")
+        $tampered = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $request 'receipt-file-tampered')) $false
+        Assert-True (-not $tampered.ok) 'tampered receipt files must be rejected by their hash'
+        $missing = Copy-JsonObject $request
+        $missing.evidenceReferences[0].path = Join-Path $script:FixtureRoot 'missing-evidence.json'
+        $missingResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $missing 'receipt-missing-evidence')) $false
+        Assert-True (-not $missingResult.ok) 'missing evidence references must be rejected'
+    }
+
     Test-Case 'capture immutable verification evidence and classify outcomes' {
         $evidenceRoot = Join-Path $script:FixtureRoot 'evidence state'
         $worktree = Join-Path $script:FixtureRoot 'evidence worktree'
