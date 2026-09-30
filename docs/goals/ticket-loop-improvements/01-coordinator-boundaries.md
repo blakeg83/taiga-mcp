@@ -1,6 +1,6 @@
 # 01: Constrain the coordinator to orchestration
 
-Status: in progress; steps 1–3 complete.
+Status: implemented offline; actual-host behavior remains pending an authorized trial.
 Prerequisites: None in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -48,21 +48,21 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 4: Verify coordinator-only scenarios
 
-- [ ] Add synthetic normal and blocked traces asserting that coordinator instructions/action plans never require code review or test execution.
-- [ ] Prove that the same implementation and reviewer IDs survive corrections, and that user-supplied changed requirements return through scope capture.
-- [ ] Keep request/wait/read/provider operations distinguishable from actual engineering actions; document that prompts are a behavioral boundary, not an OS sandbox.
-- [ ] Run the full helper harness and record any actual-host behavior as unverified until the final authorized trial.
-- [ ] **Validate:** Run role routing scenarios, helper harness, and diff checks; confirm no worker defaults or release gates changed.
-- [ ] **Update documentation:** Update the operator role diagram and this goal's execution record.
-- [ ] **Commit before the next step:** `Verify coordinator role boundaries`.
+- [x] Add synthetic normal and blocked traces asserting that coordinator instructions/action plans never require code review or test execution.
+- [x] Prove that the same implementation and reviewer IDs survive corrections, and that user-supplied changed requirements return through scope capture.
+- [x] Keep request/wait/read/provider operations distinguishable from actual engineering actions; document that prompts are a behavioral boundary, not an OS sandbox.
+- [x] Run the full helper harness and record any actual-host behavior as unverified until the final authorized trial.
+- [x] **Validate:** Role traces and the full harness passed 16 fixtures; `quick_validate.py` and `git diff --check` passed. Exact worker profiles remain unchanged; no release gates were changed.
+- [x] **Update documentation:** Added the operator role diagram and execution evidence.
+- [x] **Commit before the next step:** `Verify coordinator role boundaries`.
 
 ## Definition of done
 
-- [ ] The coordinator contract and all handoff templates consistently delegate engineering work.
-- [ ] Compact packets preserve requirements and exact identities without repeated full context.
-- [ ] Preflight resolves supported integration metadata without inventing certainty.
-- [ ] Existing worker profiles, source ownership, and completion gates remain intact.
-- [ ] Each completed step has validation evidence, documentation updates, and its own commit.
+- [x] The coordinator contract and all handoff templates consistently delegate engineering work.
+- [x] Compact packets preserve requirements and exact identities without repeated full context.
+- [x] Preflight resolves supported integration metadata without inventing certainty.
+- [x] Existing worker profiles, source ownership, and completion gates remain intact.
+- [x] Each completed step has validation evidence, documentation updates, and its own commit.
 
 ## Execution record
 
@@ -76,5 +76,5 @@ worktree; no unrelated changes).
 | --- | --- | --- | --- |
 | 1 | Exercised all seven documented routing scenarios. `pwsh -NoProfile -File tests/automation/Test-Automation.ps1` passed 13 fixtures; skill `quick_validate.py` passed; `git diff --check` passed. Existing offline review fixtures cover stale SHA and failed checks. | Skill entrypoint, boundary reference, roles/handoffs, worker prompts, operator guide | `f9f3c69a9857b9a24cbd0c690d8b902fecff1ff0` |
 | 2 | Packet fixture covers complete/missing criteria, stable order, long context, exact profiles and checkout, immutable/tamper detection, unresolved requirements, and inaccessible inputs. Full harness passed 14 fixtures; skill validation and `git diff --check` passed. | Skill entrypoint, packet contract, worker prompts, roles/handoffs, operator guide, fixture guide | `87a8acc9b337346ccc0d474a9f7f7322c91558a8` |
-| 3 | Full harness passed 15 fixtures, including complete/incomplete totals with null flags, ambiguous null headers, duplicate/contradictory pages, exact profile, equivalent browser capability, and missing authority. Official Taiga pagination headers checked; skill validation and `git diff --check` passed. | Preflight helper, host/troubleshooting references, Taiga Git/PR guidance, operator guide, historical host record, fixture guide | Recorded in step 4 |
-| 4 | Pending | Pending | Pending |
+| 3 | Full harness passed 15 fixtures, including complete/incomplete totals with null flags, ambiguous null headers, duplicate/contradictory pages, exact profile, equivalent browser capability, and missing authority. Official Taiga pagination headers checked; skill validation and `git diff --check` passed. | Preflight helper, host/troubleshooting references, Taiga Git/PR guidance, operator guide, historical host record, fixture guide | `0189c70265c9ce710f97f22ecc5a33c51fb00504` |
+| 4 | Synthetic normal and blocked traces verify coordinator-only orchestration, stable worker IDs through corrections, and new packet capture before changed-scope dispatch. Full harness passed 16 fixtures; skill validation and `git diff --check` passed. Actual-host behavior remains unverified. | Role trace fixture, coordinator boundary reference, operator role diagram, fixture guide | Recorded in goal 02 step 1 |

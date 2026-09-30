@@ -36,3 +36,21 @@ workflow boundaries, not an operating-system sandbox.
 The selected coordinator profile is preserved. Worker profiles remain exactly
 `gpt-5.6-luna`/`xhigh` for implementation and `gpt-6.1-sol`/`high` for review;
 role boundaries do not authorize changing a model or effort.
+
+## Handoff flow
+
+```mermaid
+flowchart LR
+    User -->|scope and authorization| Coordinator
+    Coordinator -->|packet, request, bounded wait| Implementer
+    Implementer -->|implementation and verification receipt| Coordinator
+    Coordinator -->|frozen revision and packet| Reviewer
+    Reviewer -->|review receipt| Coordinator
+    Coordinator -->|same implementation chat for correction| Implementer
+    Coordinator -->|unclear requirement or unresolved dispute| User
+```
+
+The coordinator's request, wait, metadata-read, and receipt-read events remain
+distinct from the implementer's and reviewer's engineering actions. A changed
+user requirement produces a newly captured scope and immutable packet before
+work resumes.

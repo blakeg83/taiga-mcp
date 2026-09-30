@@ -8,6 +8,7 @@ $script:GitScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-l
 $script:PlanScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-plan.ps1'
 $script:PacketScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-packet.ps1'
 $script:PreflightScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-preflight.ps1'
+$script:RoleTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-role-traces.json'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
@@ -164,6 +165,47 @@ try {
         $authorityResult = Invoke-PsJson $script:PreflightScript @('-Operation','validate','-InputPath',(New-InputPath $missingAuthority 'preflight-authority'))
         Assert-True (-not $authorityResult.data.ready) 'missing operational authority must block the requested actions'
         Assert-Equal 5 $authorityResult.data.missingAuthorizedActions.Count 'all missing external actions should be reported'
+    }
+
+    Test-Case 'coordinator role traces keep engineering work with workers' {
+        $traceDocument = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $script:RoleTracePath) -AsHashtable -Depth 100
+        Assert-Equal 1 $traceDocument.schemaVersion 'role trace schema version'
+        $coordinatorClasses = @('metadata_read','provider_read','worker_request','bounded_wait','receipt_read','scope_capture','correction_route','authorization_block')
+        foreach ($scenario in $traceDocument.scenarios) {
+            Assert-True (@($scenario.actions).Count -gt 0) "scenario must have actions: $($scenario.name)"
+            foreach ($action in $scenario.actions) {
+                if ($action.actor -eq 'coordinator') {
+                    Assert-True ($coordinatorClasses -contains $action.class) "coordinator action must be orchestration-only: $($scenario.name)/$($action.operation)"
+                    Assert-True ($action.operation -notmatch '(?i)read_source|inspect_diff|review_code|run_test|diagnos|smoke_test|technical_finding') "coordinator trace must not require engineering work: $($scenario.name)/$($action.operation)"
+                }
+                if ($action.class -eq 'engineering') { Assert-True ($action.actor -in @('implementer','reviewer')) "engineering operation must belong to a worker: $($scenario.name)/$($action.operation)" }
+            }
+        }
+        $normal = @($traceDocument.scenarios | Where-Object name -eq 'normal-review-correction-and-user-scope-change')[0]
+        Assert-Equal 'gpt-5.6-luna' $normal.workers.implementerModel 'implementer profile must stay exact through correction'
+        Assert-Equal 'xhigh' $normal.workers.implementerEffort 'implementer effort must stay exact through correction'
+        Assert-Equal 'gpt-6.1-sol' $normal.workers.reviewerModel 'reviewer profile must stay exact through correction'
+        Assert-Equal 'high' $normal.workers.reviewerEffort 'reviewer effort must stay exact through correction'
+        $implementationTargets = @($normal.actions | Where-Object { $_.operation -in @('dispatch_implementation','route_review_finding','route_new_scope_to_same_implementer') } | ForEach-Object { $_.workerId } | Select-Object -Unique)
+        $reviewTargets = @($normal.actions | Where-Object { $_.operation -in @('dispatch_review','dispatch_updated_revision_for_review') } | ForEach-Object { $_.workerId } | Select-Object -Unique)
+        Assert-Equal 1 $implementationTargets.Count 'implementation thread must remain stable across corrections'
+        Assert-Equal $normal.workers.implementerThreadId $implementationTargets[0] 'implementation actions must target the original thread'
+        Assert-Equal 1 $reviewTargets.Count 'reviewer thread must remain stable across review rounds'
+        Assert-Equal $normal.workers.reviewerThreadId $reviewTargets[0] 'review actions must target the original thread'
+        $actions = @($normal.actions)
+        $userChangeIndex = -1; $newScopeIndex = -1; $newRouteIndex = -1; $oldScopePacketId = $null
+        for ($index = 0; $index -lt $actions.Count; $index++) {
+            if ($actions[$index].operation -eq 'clarify_changed_requirement') { $userChangeIndex = $index }
+            if ($actions[$index].operation -eq 'capture_scope' -and $actions[$index].scopeHash -eq 'scope-v1') { $oldScopePacketId = $actions[$index].packetId }
+            if ($actions[$index].operation -eq 'capture_scope' -and $actions[$index].scopeHash -eq 'scope-v2') { $newScopeIndex = $index }
+            if ($actions[$index].operation -eq 'route_new_scope_to_same_implementer') { $newRouteIndex = $index }
+        }
+        Assert-True ($userChangeIndex -ge 0 -and $newScopeIndex -gt $userChangeIndex -and $newRouteIndex -gt $newScopeIndex) 'changed requirements must be captured before correction dispatch'
+        Assert-True ($actions[$newScopeIndex].packetId -ne $oldScopePacketId) 'a changed scope must use a new immutable packet'
+        $blocked = @($traceDocument.scenarios | Where-Object name -eq 'blocked-unavailable-exact-review-profile')[0]
+        Assert-Equal 0 @($blocked.actions | Where-Object { $_.class -eq 'worker_request' }).Count 'unavailable exact profile must block dispatch without fallback'
+        $failedCheck = @($traceDocument.scenarios | Where-Object name -eq 'blocked-failed-check-routed-to-producing-worker')[0]
+        Assert-True (@($failedCheck.actions | Where-Object operation -eq 'route_failed_check_to_producer' | ForEach-Object workerId) -contains $failedCheck.workers.implementerThreadId) 'failed check evidence must route to its producing implementer'
     }
 
     Test-Case 'initialize and recover a Unicode state registry' {

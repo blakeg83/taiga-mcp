@@ -1,6 +1,8 @@
 # Ticket-loop improvements
 
-Status: planned; no implementation or operational changes made by this plan.
+Status: in progress; goal 01 is implemented offline, and goals 02–06 remain
+pending. No operational ticket run, personal skill installation, publication,
+or actual-host trial has been performed by this implementation.
 Prepared 2026-09-30 after auditing the first authorized ticket-loop trial.
 
 ## Objective
@@ -65,18 +67,18 @@ or account records. Build synthetic reproductions of the observed failures.
 
 Read [execution instructions](execution-instructions.md) before implementing.
 
-| Goal | Deliverable | Depends on |
-| --- | --- | --- |
-| [01: Coordinator boundaries](01-coordinator-boundaries.md) | Minimal context packet, explicit role limits, routing scenarios. | None |
-| [02: Receipt and evidence contracts](02-receipts-and-evidence.md) | Shared schema, immutable evidence references, bounded format repair. | 01 |
-| [03: Scripted coordination and quiet waits](03-coordination-and-waits.md) | High-level local operations, recovery-safe handoffs, minimal observation. | 01–02 |
-| [04: Worker-owned verification](04-worker-verification.md) | Verification handoff, evidence reuse, optional repository smoke entry point. | 01–03 |
-| [05: Measurement that distinguishes usage from cost](05-measurement.md) | Phase timing, model-aware usage, optional sourced estimates. | 02–04 |
-| [06: Regression acceptance and rollout](06-acceptance-and-rollout.md) | Offline replay, compatibility checks, deployment instructions, separately authorized trial. | 01–05 |
+| Goal | Deliverable | Depends on | Status |
+| --- | --- | --- | --- |
+| [01: Coordinator boundaries](01-coordinator-boundaries.md) | Minimal context packet, explicit role limits, routing scenarios. | None | Implemented offline; actual-host behavior pending |
+| [02: Receipt and evidence contracts](02-receipts-and-evidence.md) | Shared schema, immutable evidence references, bounded format repair. | 01 | Pending |
+| [03: Scripted coordination and quiet waits](03-coordination-and-waits.md) | High-level local operations, recovery-safe handoffs, minimal observation. | 01–02 | Pending |
+| [04: Worker-owned verification](04-worker-verification.md) | Verification handoff, evidence reuse, optional repository smoke entry point. | 01–03 | Pending |
+| [05: Measurement that distinguishes usage from cost](05-measurement.md) | Phase timing, model-aware usage, optional sourced estimates. | 02–04 | Pending |
+| [06: Regression acceptance and rollout](06-acceptance-and-rollout.md) | Offline replay, compatibility checks, deployment instructions, separately authorized trial. | 01–05 | Pending |
 
 Six goals, four ordered steps each: 24 implementation checkpoints. Every step
 requires validation, documentation updates, and a separate commit before the
-next step. All implementation checkboxes start unchecked.
+next step. Goal 01's four checkpoints are complete; 20 later checkpoints remain.
 
 ## Release acceptance
 

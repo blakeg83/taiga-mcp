@@ -123,6 +123,17 @@ These prompt and routing rules guide behavior but are not an operating-system
 sandbox. See the skill's [coordinator boundary matrix](../../.agents/skills/taiga-ticket-loop/references/coordinator-boundaries.md)
 for scenario details.
 
+```mermaid
+flowchart LR
+    User -->|scope and authorization| Coordinator
+    Coordinator -->|packet, request, bounded wait| Implementer
+    Implementer -->|implementation and verification receipt| Coordinator
+    Coordinator -->|frozen revision and packet| Reviewer
+    Reviewer -->|review receipt| Coordinator
+    Coordinator -->|same implementation chat for correction| Implementer
+    Coordinator -->|unclear requirement or unresolved dispute| User
+```
+
 Each worker handoff references an immutable, versioned assignment packet by
 absolute path and hash. It holds stable criterion IDs/text, ticket identity,
 complete-context file reference/hash, repository/worktree/base, required
