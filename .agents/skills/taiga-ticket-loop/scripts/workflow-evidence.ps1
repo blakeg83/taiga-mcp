@@ -190,7 +190,7 @@ function Read-TrustedActionContext {
     if ($headSha -notmatch '^[0-9a-fA-F]{40,64}$') { throw 'The current HEAD is not a full Git SHA.' }
     $status = Invoke-GitMetadata $repository @('status','--porcelain') 'worktree status'
     if (-not [string]::IsNullOrWhiteSpace($status)) { throw 'Verification evidence requires a clean committed worktree.' }
-    return [ordered]@{ root = $Root; packet = $packet; packetPath = $packetPath; action = $action; actionId = $actionId; actionKind = [string]$action.kind; evidenceKind = $evidenceKind; role = $role; profile = $profile; command = $command; workingDirectory = $workingDirectory; criterionIds = $criterionIds; branch = $branch; baseSha = [string]$packet.repository.baseSha; headSha = $headSha; ticketKey = [string]$packet.ticket.ticketKey; scopeHash = [string]$packet.scopeHash }
+    return [ordered]@{ root = $Root; packet = $packet; packetPath = $packetPath; action = $action; actionId = $actionId; actionKind = [string]$action.kind; evidenceKind = $evidenceKind; role = $role; profile = $profile; command = $command; workingDirectory = $workingDirectory; criterionIds = $criterionIds; coverage = if ($action.evidenceContext.Contains('coverage')) { $action.evidenceContext.coverage } else { $null }; branch = $branch; baseSha = [string]$packet.repository.baseSha; headSha = $headSha; ticketKey = [string]$packet.ticket.ticketKey; scopeHash = [string]$packet.scopeHash }
 }
 
 function Initialize-RunMetadata {
@@ -215,6 +215,7 @@ function Initialize-RunMetadata {
         evidenceKind = $context.evidenceKind
         repository = [ordered]@{ worktreePath = $context.packet.repository.worktreePath; branch = $context.branch; baseSha = $context.baseSha; headSha = $context.headSha }
         profile = [ordered]@{ role = $context.role; model = $context.profile.model; effort = $context.profile.effort }
+        coverage = $context.coverage
         command = $context.command
         workingDirectory = $context.workingDirectory
         createdAtUtc = [DateTime]::UtcNow.ToString('o')
@@ -310,6 +311,7 @@ function Capture-Evidence {
         repository = $metadata.repository
         checkedRevision = $metadata.repository.headSha
         profile = $metadata.profile
+        coverage = $metadata.coverage
         command = $metadata.command
         workingDirectory = $metadata.workingDirectory
         actualExitCode = $exitValue

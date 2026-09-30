@@ -12,8 +12,11 @@ review depends on them.
 
 Prepare verification actions through `workflow-state.ps1` with an action kind
 of `implementation_check`, `review_check`, `expected_red_fixture`, `assertion`,
-or `intentional_host_shutdown`. Its bounded `evidenceContext` stores only the
-command, working directory, and packet criterion IDs. `initialize-run` then
+or `intentional_host_shutdown`. Its bounded `evidenceContext` stores the
+command, working directory, packet criterion IDs, and optional worker-supplied
+input coverage. Coverage records revision, base SHA, covered files, environment
+hash, and dependency hash; it is provenance, not a coordinator-generated
+claim. `initialize-run` then
 checks the packet hash and full-context hash, binds the prepared action to the
 packet's run/session/ticket, and reads branch, base SHA, and current HEAD from
 the committed Git worktree. It fills criterion IDs/text from the packet,
@@ -25,9 +28,9 @@ file. It confirms the metadata, action, packet, branch, and HEAD still match,
 copies the log by content hash, and creates a new evidence ID with `CreateNew`.
 It does not rerun the command or infer results from log text. The raw exit code
 is retained. A captured record identifies its origin action, checked revision,
-command, working directory, criterion IDs, exact profile, timestamp, log path,
-log hash, and byte length. Reusing an evidence ID or changing a record/log
-causes validation to fail.
+command, working directory, criterion IDs, exact profile, timestamp, optional
+input coverage, log path, log hash, and byte length. Reusing an evidence ID or
+changing a record/log causes validation to fail.
 
 ## Outcome classification
 

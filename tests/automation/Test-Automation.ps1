@@ -10,9 +10,11 @@ $script:PacketScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticke
 $script:PreflightScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-preflight.ps1'
 $script:RoleTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-role-traces.json'
 $script:CoordinationTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-coordination-traces.json'
+$script:VerificationTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-verification-traces.json'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
+$script:VerificationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-verification.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
 $script:Passed = 0
@@ -284,6 +286,77 @@ try {
         Assert-True (-not $pause.expected.newDispatchAfterPause) 'pause reconciliation must stop new dispatch'
         Assert-True $pause.expected.uncertainPublicationDoesNotRestartImplementation 'uncertain publication must reconcile rather than restart implementation'
         Assert-True $pause.expected.operationCountIsDescriptive 'operation counts must remain descriptive measurements'
+    }
+
+    Test-Case 'delegate verification planning and preserve repository requirements' {
+        $verificationRoot = Join-Path $script:FixtureRoot 'verification-state'
+        $plan = @{ runId = 'verification-run'; actionId = 'implementation-check'; role = 'implementer'; criteria = @(@{ id = 'criterion-1'; text = 'Preserve behavior.' }); checks = @(@{ id = 'full'; command = 'dotnet test'; criterionIds = @('criterion-1'); kind = 'full_suite'; sharedOutput = $true; serialGroup = 'build-output' }, @{ id = 'ui'; command = 'browser smoke'; criterionIds = @('criterion-1'); kind = 'browser'; sharedOutput = $false }); requirements = @{ fullSuite = $true; visibleBrowser = $true }; uiInteractions = @('Open the saved result and verify the rendered state.') }
+        $created = Invoke-PsJson $script:VerificationScript @('-Operation','plan','-InputPath',(New-InputPath $plan 'verification-plan'),'-StateRoot',$verificationRoot)
+        Assert-Equal 'implementer' $created.data.ownerRole 'implementer must own verification planning'
+        Assert-Equal 2 @($created.data.checkIds).Count 'all planned checks should be durable'
+        Assert-Equal 'build-output' @($created.data.sharedOutputGroups)[0] 'shared-output checks should be marked for serialization'
+        $validated = Invoke-PsJson $script:VerificationScript @('-Operation','validate-plan','-InputPath',(New-InputPath @{ planReference = $created.data.planReference; requirements = $plan.requirements } 'verification-plan-review'))
+        Assert-True $validated.data.valid 'reviewer should be able to assess an adequate worker plan'
+        $missingUi = Copy-JsonObject $plan; $missingUi.actionId = 'implementation-check-missing-ui'; $missingUi.uiInteractions = @()
+        $missingUiResult = Invoke-PsJson $script:VerificationScript @('-Operation','plan','-InputPath',(New-InputPath $missingUi 'verification-plan-missing-ui'),'-StateRoot',$verificationRoot) $false
+        Assert-True (-not $missingUiResult.ok) 'visible-browser requirements must not be silently waived'
+        $missingFull = Copy-JsonObject $plan; $missingFull.actionId = 'implementation-check-missing-full'; $missingFull.checks = @(@{ id = 'unit'; command = 'dotnet test --filter Unit'; criterionIds = @('criterion-1') }); $missingFull.requirements = @{ fullSuite = $true }; $missingFull.uiInteractions = @()
+        $missingFullCreated = Invoke-PsJson $script:VerificationScript @('-Operation','plan','-InputPath',(New-InputPath $missingFull 'verification-plan-missing-full'),'-StateRoot',$verificationRoot)
+        $missingFullReview = Invoke-PsJson $script:VerificationScript @('-Operation','validate-plan','-InputPath',(New-InputPath @{ planReference = $missingFullCreated.data.planReference } 'verification-plan-review-missing-full')) $false
+        Assert-True (-not $missingFullReview.ok) 'reviewer adequacy checks must retain mandatory full-suite requirements'
+    }
+
+    Test-Case 'validate optional repository-owned smoke entry points' {
+        $validSmoke = @{ smoke = @{ command = 'pwsh ./smoke.ps1'; setupCommand = 'pwsh ./setup.ps1'; cleanupCommand = 'pwsh ./cleanup.ps1'; workingDirectory = $script:FixtureRoot; requiredCapabilities = @('browser'); disposable = $true }; availableCapabilities = @('browser','https') }
+        $valid = Invoke-PsJson $script:VerificationScript @('-Operation','validate-smoke','-InputPath',(New-InputPath $validSmoke 'smoke-valid'))
+        Assert-True $valid.data.valid 'existing smoke entry point should validate'
+        Assert-True (-not $valid.data.executes) 'generic validation must not start application services'
+        $missingCleanup = Copy-JsonObject $validSmoke; $null = $missingCleanup.smoke.Remove('cleanupCommand')
+        $missingCleanupResult = Invoke-PsJson $script:VerificationScript @('-Operation','validate-smoke','-InputPath',(New-InputPath $missingCleanup 'smoke-missing-cleanup')) $false
+        Assert-True (-not $missingCleanupResult.ok) 'setup without cleanup must be rejected'
+        $missingCapability = Copy-JsonObject $validSmoke; $missingCapability.availableCapabilities = @('https')
+        $missingCapabilityResult = Invoke-PsJson $script:VerificationScript @('-Operation','validate-smoke','-InputPath',(New-InputPath $missingCapability 'smoke-missing-capability')) $false
+        Assert-True (-not $missingCapabilityResult.ok) 'unavailable smoke capability must remain a worker blocker'
+        $failedSetup = Copy-JsonObject $validSmoke; $failedSetup.observedSetupExitCode = 1
+        $failedSetupResult = Invoke-PsJson $script:VerificationScript @('-Operation','validate-smoke','-InputPath',(New-InputPath $failedSetup 'smoke-failed-setup')) $false
+        Assert-True (-not $failedSetupResult.ok) 'failed setup must be reported rather than treated as smoke success'
+    }
+
+    Test-Case 'reuse verification evidence only with matching provenance' {
+        $evidencePath = Join-Path $script:FixtureRoot 'reuse-evidence.json'
+        $record = @{ schemaVersion = 1; evidenceId = 'ev-reuse'; actionId = 'check-1'; checkedRevision = 'head-1'; capturedAtUtc = '2026-09-30T00:00:00Z'; coverage = @{ revision = 'head-1'; baseSha = 'base-1'; environmentHash = 'env-1'; dependenciesHash = 'deps-1'; files = @('src/app.cs') } }
+        $recordJson = $record | ConvertTo-Json -Depth 100 -Compress
+        $recordHashBytes = [Security.Cryptography.SHA256]::Create(); try { $recordHash = ([Convert]::ToHexString($recordHashBytes.ComputeHash([Text.Encoding]::UTF8.GetBytes($recordJson)))).ToLowerInvariant() } finally { $recordHashBytes.Dispose() }
+        Write-JsonFile @{ recordJson = $recordJson; recordSha256 = $recordHash } $evidencePath
+        $reference = @{ path = $evidencePath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $evidencePath).Hash.ToLowerInvariant() }
+        $current = @{ revision = 'head-1'; baseSha = 'base-1'; environmentHash = 'env-1'; dependenciesHash = 'deps-1'; changedKind = 'code'; changedPaths = @('src/app.cs') }
+        $exact = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ evidenceReferences = @($reference); current = $current } 'reuse-exact'))
+        Assert-True $exact.data.reusable 'exact revision evidence should be reusable'
+        Assert-True ([string](@($exact.data.evidence)[0].capturedAtUtc) -match '2026') 'reused evidence must preserve its original timestamp'
+        $docs = Copy-JsonObject $current; $docs.revision = 'head-2'; $docs.changedKind = 'documentation_only'; $docs.changedPaths = @('docs/readme.md')
+        $docsResult = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ evidenceReferences = @($reference); current = $docs } 'reuse-docs'))
+        Assert-Equal 'documentation_only_inputs_unchanged' @($docsResult.data.evidence)[0].reason 'docs-only reuse should identify its justification'
+        $code = Copy-JsonObject $docs; $code.changedKind = 'code'; $code.changedPaths = @('src/app.cs')
+        $codeResult = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ evidenceReferences = @($reference); current = $code } 'reuse-code'))
+        Assert-True (-not $codeResult.data.reusable) 'changed source inputs must invalidate reuse'
+    }
+
+    Test-Case 'verify worker-owned validation handoff regressions' {
+        $traces = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $script:VerificationTracePath) -AsHashtable -Depth 100
+        Assert-Equal 1 $traces.schemaVersion 'verification trace schema version'
+        $handoff = @($traces.scenarios | Where-Object name -eq 'implementation-review-correction')[0]
+        Assert-Equal 0 $handoff.expected.coordinatorEngineeringActions 'coordinator must not execute engineering actions'
+        Assert-True $handoff.expected.sameWorkerIds 'corrections must remain in the same worker chats'
+        Assert-True $handoff.expected.technicalFindingBlocks 'technical findings must remain blocking'
+        $ui = @($traces.scenarios | Where-Object name -eq 'seeded-ui-is-not-a-click')[0]
+        Assert-True (-not $ui.expected.freshUiEvidence) 'seeded state must not be relabeled as a click'
+        Assert-True $ui.expected.requiresActualInteraction 'missing UI interaction must return to the worker'
+        $stop = @($traces.scenarios | Where-Object name -eq 'intentional-host-stop')[0]
+        Assert-True (-not $stop.expected.countsAsCheckPass) 'intentional host stop must never become a check pass'
+        Assert-True $stop.expected.rawExitPreserved 'raw host exit must remain evidence'
+        $sequencing = @($traces.scenarios | Where-Object name -eq 'shared-output-sequencing')[0]
+        Assert-True $sequencing.expected.buildsSerialized 'checks sharing outputs must serialize'
+        Assert-True $sequencing.expected.independentReadMayBatch 'independent reads may be batched'
     }
 
     Test-Case 'capture immutable verification evidence and classify outcomes' {

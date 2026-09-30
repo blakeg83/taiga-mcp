@@ -570,7 +570,7 @@ function Invoke-PrepareAction {
     $evidenceContext = $null
     if ($actionKind -in @('implementation_check','review_check','expected_red_fixture','assertion','intentional_host_shutdown')) {
         if ($payload -isnot [System.Collections.IDictionary]) { throw 'Verification action input must be an object.' }
-        Assert-AllowedKeys $payload @('command','workingDirectory','criterionIds') 'verification action input'
+        Assert-AllowedKeys $payload @('command','workingDirectory','criterionIds','coverage') 'verification action input'
         $command = Require-String $payload 'command' 'verification action input'
         $workingDirectory = [IO.Path]::GetFullPath((Require-String $payload 'workingDirectory' 'verification action input'))
         if (-not (Test-Path -LiteralPath $workingDirectory -PathType Container)) { throw 'Verification workingDirectory must be an existing directory.' }
@@ -584,7 +584,11 @@ function Invoke-PrepareAction {
             [void]$criterionIds.Add($criterionId)
         }
         if ($criterionIds.Count -eq 0) { throw 'Verification action must identify at least one criterionId.' }
-        $evidenceContext = [ordered]@{ command = $command; workingDirectory = $workingDirectory; criterionIds = $criterionIds.ToArray() }
+        $coverage = if ($payload.ContainsKey('coverage')) {
+            if ($payload.coverage -isnot [System.Collections.IDictionary]) { throw 'Verification action coverage must be an object.' }
+            $payload.coverage
+        } else { $null }
+        $evidenceContext = [ordered]@{ command = $command; workingDirectory = $workingDirectory; criterionIds = $criterionIds.ToArray(); coverage = $coverage }
     }
     $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { (Assert-TicketOwner $State $InputObject).ticketKey } else { $null }
     if ($null -ne $ticketKey) { Assert-DispatchAllowed $State $session $State.tickets[$ticketKey] }
