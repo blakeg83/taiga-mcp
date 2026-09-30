@@ -119,6 +119,7 @@ If a server locks normal outputs, use a unique external output directory for
 build/tests; do not stop that server. See the developer guide for the exact command.
 ## Implementation Planning
 
+- [Agent implementation and review automation](docs/goals/agent-review-automation/README.md): planned separate-chat Luna implementation and Sol/Astra review, concurrent tickets in isolated feature branches from a freshly fetched base, automatic authorized PR delivery, and story/epic completion gates. Nine ordered goals include step checklists, commit checkpoints, and definitions of done. No subagents or automatic merging; these plans activate no automation.
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
 - [Completed first batch](docs/goals/first-batch/README.md): delivered scope for all 15 selected functions, with links to current source and tests.

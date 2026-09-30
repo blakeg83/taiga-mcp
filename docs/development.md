@@ -33,6 +33,8 @@ limitations describe that earlier work, not the current release. This
 documentation reconciliation checked source, schemas described in the reference,
 and links; it did not rerun application tests or validate a live deployment.
 
+For the separately planned coordinator skill/helper, see [agent implementation and review automation](goals/agent-review-automation/README.md). Its nine goals cover concurrent ordinary chats, fresh-base feature branches, reviewed PR delivery, and story/epic acceptance. It consumes existing Taiga MCP tools and runs outside the .NET server; no automation has been implemented or activated by those plans.
+
 ## Verified cleanup baseline (2026-09-28)
 
 Baseline: `f760583` on `goal-00`, clean working tree. Implementation branch:
