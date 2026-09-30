@@ -240,6 +240,33 @@ try {
         Assert-True (-not $badResult.ok) 'missing result files must fail before state mutation'
     }
 
+    Test-Case 'keep unchanged waits quiet and reuse one heartbeat' {
+        $waitRoot = Join-Path $script:FixtureRoot 'wait-state'
+        $init = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$waitRoot)
+        $claim = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:801'; repositoryIdentity = 'wait-repo'; expectedRevision = $init.revision }
+        $claimed = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath $claim 'wait-claim'),'-StateRoot',$waitRoot)
+        $before = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$waitRoot)
+        $unchanged = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:801'; waitStatus = 'unchanged'; afterCursor = 'cursor-1'; threadId = 'thread-1'; timeoutMs = 30000 }
+        $quiet = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $unchanged 'wait-unchanged'),'-StateRoot',$waitRoot)
+        Assert-Equal 'continue_wait' $quiet.data.decision 'unchanged wait should continue the bounded native wait'
+        Assert-Equal 'wait_threads' $quiet.data.nativeOperation 'unchanged wait should use wait_threads'
+        Assert-Equal 0 @($quiet.data.changedFields).Count 'unchanged wait should not mutate state'
+        $after = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$waitRoot)
+        Assert-Equal $before.revision $after.revision 'unchanged wait must not advance the registry revision'
+        $completed = Copy-JsonObject $unchanged; $completed.waitStatus = 'completed'
+        $detail = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completed 'wait-completed'),'-StateRoot',$waitRoot)
+        Assert-Equal 'fetch_result' $detail.data.decision 'completion should trigger one detailed result read'
+        Assert-Equal 'read_thread' $detail.data.nativeOperation 'completion should use read_thread only after a wake'
+        $heartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-create'),'-StateRoot',$waitRoot)
+        Assert-Equal 'create_heartbeat' $heartbeat.data.decision 'first heartbeat plan should create one session heartbeat'
+        $set = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $after.revision; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' }
+        $setResult = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $set 'heartbeat-set'),'-StateRoot',$waitRoot)
+        $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-reuse'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reuse_heartbeat' $reuse.data.decision 'later plans should reuse the existing session heartbeat'
+        Assert-True $reuse.data.heartbeat.quietWhenUnchanged 'heartbeat should stay quiet when no worker state changed'
+        Assert-True (-not $reuse.data.heartbeat.nestedSchedules) 'heartbeat plan must not create nested schedules'
+    }
+
     Test-Case 'capture immutable verification evidence and classify outcomes' {
         $evidenceRoot = Join-Path $script:FixtureRoot 'evidence state'
         $worktree = Join-Path $script:FixtureRoot 'evidence worktree'

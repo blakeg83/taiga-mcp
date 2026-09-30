@@ -38,13 +38,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 3: Define observation and heartbeat behavior
 
-- [ ] Prefer native bounded wait_threads with saved cursors over repeated full read_thread. Use immediate snapshots only for a concrete reconciliation need; respect actual host time limits and interruption behavior.
-- [ ] On an unchanged timeout, continue the bounded wait or yield to the single authorized session heartbeat. Do not read source, re-open completed evidence, message workers, or mutate unchanged state.
-- [ ] Fetch detailed output only for a completed result, reported blocker, changed state, or missing receipt. Keep genuine user-input/approval needs visible.
-- [ ] Use one heartbeat for the coordinator session with quiet unchanged behavior; no nested schedules, hidden daemon, or timer per ticket. Preserve user notification preferences.
-- [ ] **Validate:** Replay repeated unchanged waits and wakeups, worker completion, missing result, new user input, paused heartbeat, and two concurrent tickets. Assert zero worker messages/source reads/state mutations for unchanged observations.
-- [ ] **Update documentation:** Document polling choices and resumable cursor behavior.
-- [ ] **Commit before the next step:** `Keep unchanged worker waits quiet`.
+- [x] Prefer native bounded wait_threads with saved cursors over repeated full read_thread. Use immediate snapshots only for a concrete reconciliation need; respect actual host time limits and interruption behavior.
+- [x] On an unchanged timeout, continue the bounded wait or yield to the single authorized session heartbeat. Do not read source, re-open completed evidence, message workers, or mutate unchanged state.
+- [x] Fetch detailed output only for a completed result, reported blocker, changed state, or missing receipt. Keep genuine user-input/approval needs visible.
+- [x] Use one heartbeat for the coordinator session with quiet unchanged behavior; no nested schedules, hidden daemon, or timer per ticket. Preserve user notification preferences.
+- [x] **Validate:** Replay repeated unchanged waits and wakeups, worker completion, missing result, new user input, paused heartbeat, and two concurrent tickets. Assert zero worker messages/source reads/state mutations for unchanged observations.
+- [x] **Update documentation:** Document polling choices and resumable cursor behavior.
+- [x] **Commit before the next step:** `Keep unchanged worker waits quiet`.
 
 ### Step 4: Verify pause and multi-ticket regressions
 
@@ -73,5 +73,5 @@ gates unchecked; record deviations and blockers below the table.
 | --- | --- | --- | --- |
 | 1 | Added `workflow-coordinate.ps1` with file/hash-bound dispatch, publication preparation, result acceptance/routing, external observation, and compact status operations. It delegates mutations to the existing CAS/fencing/journal state helper and returns native action descriptors without invoking desktop APIs. Synthetic progression, durable prompt/result references, malformed input, duplicate/partial state paths, and compact output passed; skill validation and `git diff --check` passed. | Coordination facade reference and operator guide | Recorded in final handoff |
 | 2 | The facade returns `reconcile` for an existing action ID, blocks new dispatch at an expired budget, and treats a provider `clientThreadId` without a real `threadId` as uncertain. External state is stored as a small hashed correlation summary; no blind redispatch or full chat copy is performed. Focused recovery fixtures, skill validation, and `git diff --check` passed. | State/recovery contract and operator guidance | Recorded in final handoff |
-| 3 | Pending | Pending | Pending |
+| 3 | Added quiet `observe-wait` and `heartbeat-plan` operations. Unchanged observations return a bounded `wait_threads` request with the saved cursor and no registry mutation; completions/blockers request one detailed read. Heartbeat planning reuses one session heartbeat, keeps notification policy visible, and stays quiet for unchanged state. Focused wait/heartbeat fixtures, skill validation, and `git diff --check` passed. | State/recovery contract and operator polling guidance | Recorded in final handoff |
 | 4 | Pending | Pending | Pending |

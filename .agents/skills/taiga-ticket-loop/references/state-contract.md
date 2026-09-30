@@ -43,6 +43,14 @@ completed worker. The facade blocks new dispatch/publication when the supplied
 remaining budget is exhausted, while already-running actions remain available
 for bounded observation and reconciliation.
 
+For observation, use `observe-wait` with the last native `wait_threads` cursor.
+An unchanged timeout returns a quiet continuation descriptor and does not read
+source, reopen evidence, message a worker, or mutate the registry. Completion,
+changed state, and blockers are the only ordinary reasons to request one
+detailed `read_thread`; user input remains visible as a separate decision.
+`heartbeat-plan` describes creation or reuse of one coordinator heartbeat and
+never schedules a timer per ticket or a nested heartbeat.
+
 `record-receipt-repair` is available only while the owned ticket is reviewing.
 It records format/evidence repairs in a per-ticket ledger with remaining
 minutes. The default `limits.maxReceiptRepairAttempts` is two and may be

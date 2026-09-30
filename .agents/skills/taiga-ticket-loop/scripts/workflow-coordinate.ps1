@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','status')]
+    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','status')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath,
@@ -172,6 +172,43 @@ function Invoke-Status {
     return [ordered]@{ phase = if ($tickets.Count -eq 1) { [string]$tickets[0].phase } else { $null }; decision = 'status'; reason = 'local_registry_snapshot'; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; tickets = @($tickets | ForEach-Object { [ordered]@{ ticketKey = $_.ticketKey; phase = $_.phase; controlState = $_.controlState; correctionRound = $_.correctionRound } }); actions = @($actions | ForEach-Object { [ordered]@{ actionId = $_.actionId; kind = $_.kind; status = $_.status; reconcileRequired = $_.reconcileRequired } }) }
 }
 
+function Invoke-ObserveWait {
+    param([System.Collections.IDictionary] $InputObject)
+    $status = Need $InputObject 'waitStatus'
+    if ($status -notin @('unchanged','changed','completed','blocked','user_input','paused')) { throw 'waitStatus is not supported.' }
+    $timeout = if ($InputObject.Contains('timeoutMs')) { [int]$InputObject.timeoutMs } else { 30000 }
+    if ($timeout -lt 0 -or $timeout -gt 60000) { throw 'timeoutMs must be between 0 and 60000.' }
+    $cursor = if ($InputObject.Contains('afterCursor')) { [string]$InputObject.afterCursor } else { $null }
+    $threadId = if ($InputObject.Contains('threadId')) { [string]$InputObject.threadId } else { $null }
+    $decision = switch ($status) {
+        'unchanged' { 'continue_wait' }
+        'completed' { 'fetch_result' }
+        'changed' { 'inspect_changed_state' }
+        'blocked' { 'fetch_blocker' }
+        'user_input' { 'needs_input' }
+        'paused' { 'heartbeat_quiet' }
+    }
+    $nativeOperation = switch ($status) {
+        'unchanged' { 'wait_threads' }
+        'completed' { 'read_thread' }
+        'changed' { 'read_thread' }
+        'blocked' { 'read_thread' }
+        'user_input' { 'surface_user_input' }
+        'paused' { 'wait_threads' }
+    }
+    if ($status -eq 'unchanged' -and $InputObject.Contains('resultReference')) { throw 'Unchanged waits cannot reopen result evidence.' }
+    return [ordered]@{ phase = $null; decision = $decision; reason = if ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); revision = $null; stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ threadId = $threadId; afterCursor = $cursor; timeoutMs = $timeout }; detailFetch = ($status -in @('completed','changed','blocked')) }
+}
+
+function Invoke-HeartbeatPlan {
+    param([System.Collections.IDictionary] $InputObject)
+    $inspection = Get-Inspection; $sessionId = Need $InputObject 'sessionId'; $session = $inspection.data.registry.sessions[$sessionId]
+    if ($null -eq $session) { throw "Session was not found: $sessionId" }
+    $requestedPolicy = if ($InputObject.Contains('notificationPolicy')) { [string]$InputObject.notificationPolicy } else { $null }
+    $existing = if ($session.Contains('heartbeatId')) { [string]$session.heartbeatId } else { '' }
+    return [ordered]@{ phase = [string]$session.state; decision = if ([string]::IsNullOrWhiteSpace($existing)) { 'create_heartbeat' } else { 'reuse_heartbeat' }; reason = if ([string]::IsNullOrWhiteSpace($existing)) { 'one_session_heartbeat' } else { 'existing_session_heartbeat' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'automation_update'; heartbeat = [ordered]@{ heartbeatId = if ([string]::IsNullOrWhiteSpace($existing)) { $null } else { $existing }; notificationPolicy = $requestedPolicy; nestedSchedules = $false; quietWhenUnchanged = $true } }
+}
+
 try {
     $inputObject = Read-Object
     if ([string]::IsNullOrWhiteSpace($StateRoot)) { throw 'StateRoot is required.' }
@@ -181,6 +218,8 @@ try {
         'prepare-publication' { Invoke-PrepareExternal $inputObject 'publication' 'push_or_create_pr' }
         'record-external' { Invoke-RecordExternal $inputObject }
         'reconcile-external' { Invoke-RecordExternal $inputObject }
+        'observe-wait' { Invoke-ObserveWait $inputObject }
+        'heartbeat-plan' { Invoke-HeartbeatPlan $inputObject }
         'status' { Invoke-Status $inputObject }
     }
     [ordered]@{ ok = $true; operation = $Operation; data = $data } | ConvertTo-Json -Depth 100
