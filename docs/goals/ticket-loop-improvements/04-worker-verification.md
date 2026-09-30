@@ -14,6 +14,9 @@ Implementation/reviewer prompt assets, references/roles-and-handoffs.md, review 
 Paths under scripts, references, and assets are relative to
 `.agents/skills/taiga-ticket-loop/`. Keep changes within this goal's scope.
 
+See the [worker verification contract](../../.agents/skills/taiga-ticket-loop/references/verification-contract.md)
+for the plan and optional smoke-entry shape.
+
 ## Ordered steps
 
 ### Step 1: Delegate a verification plan to the implementer
