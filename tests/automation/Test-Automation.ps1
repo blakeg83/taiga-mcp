@@ -11,6 +11,7 @@ $script:PreflightScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ti
 $script:RoleTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-role-traces.json'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
+$script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
 $script:Passed = 0
@@ -201,6 +202,32 @@ try {
         $missing.evidenceReferences[0].path = Join-Path $script:FixtureRoot 'missing-evidence.json'
         $missingResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $missing 'receipt-missing-evidence')) $false
         Assert-True (-not $missingResult.ok) 'missing evidence references must be rejected'
+    }
+
+    Test-Case 'coordinate compact file-based dispatch and result operations' {
+        $coordRoot = Join-Path $script:FixtureRoot 'coordinate-state'
+        $init = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$coordRoot)
+        $claim = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; repositoryIdentity = 'coordinate-repo'; expectedRevision = $init.revision }
+        $claimed = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath $claim 'coordinate-claim'),'-StateRoot',$coordRoot)
+        $packetPath = Join-Path $script:FixtureRoot 'coordinate-packet.json'; Write-JsonFile @{ packetId = 'packet-coordinate'; scopeHash = 'scope-coordinate'; criteria = @(@{ id = 'criterion-1'; text = 'Dispatch from a durable packet.' }) } $packetPath
+        $promptPath = Join-Path $script:FixtureRoot 'coordinate-prompt.md'; [IO.File]::WriteAllText($promptPath, 'Use packet {{packetPath}} with hash {{packetHash}} for {{workerId}}.', [Text.UTF8Encoding]::new($false))
+        $dispatch = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; actionId = 'dispatch-1'; workerId = 'worker-1'; packetReference = @{ path = $packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $packetPath).Hash.ToLowerInvariant() }; promptReference = @{ path = $promptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $promptPath).Hash.ToLowerInvariant() } }
+        $prepared = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $dispatch 'coordinate-dispatch'),'-StateRoot',$coordRoot)
+        Assert-Equal 'dispatch' $prepared.data.decision 'dispatch operation should return a compact action decision'
+        Assert-Equal 'worker-1' $prepared.data.workerId 'dispatch descriptor should preserve worker identity'
+        Assert-True ($prepared.data.action.operation -eq 'create_or_message_worker') 'helper should return a native action descriptor rather than call a desktop API'
+        Assert-True ([string]$prepared.data.action.prompt.path -ne '') 'constructed prompt should be durable'
+        $resultPath = Join-Path $script:FixtureRoot 'coordinate-result.json'; Write-JsonFile @{ resultId = 'result-1'; cursor = 'cursor-1'; actionId = 'dispatch-1'; workerId = 'worker-1'; status = 'completed'; decision = 'review'; nextPhase = 'preparing'; summary = 'Worker completed the assigned action.' } $resultPath
+        $accept = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; resultReference = @{ path = $resultPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resultPath).Hash.ToLowerInvariant() } }
+        $accepted = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $accept 'coordinate-accept'),'-StateRoot',$coordRoot)
+        Assert-Equal 'review' $accepted.data.decision 'accepted worker result should choose the next route'
+        Assert-Equal 'preparing' $accepted.data.phase 'accepted result should apply its requested local phase transition'
+        Assert-True (@($accepted.data.requiredReferences).Count -lt 6) 'result relay should remain compact'
+        $status = Invoke-PsJson $script:CoordinateScript @('-Operation','status','-InputPath',(New-InputPath @{ ticketKey = 'project:123:issue:800' } 'coordinate-status'),'-StateRoot',$coordRoot)
+        Assert-Equal 'preparing' $status.data.phase 'status should report the local phase without source inspection'
+        $bad = Copy-JsonObject $accept; $bad.resultReference.path = Join-Path $script:FixtureRoot 'missing-coordinate-result.json'
+        $badResult = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $bad 'coordinate-bad-result'),'-StateRoot',$coordRoot) $false
+        Assert-True (-not $badResult.ok) 'missing result files must fail before state mutation'
     }
 
     Test-Case 'capture immutable verification evidence and classify outcomes' {

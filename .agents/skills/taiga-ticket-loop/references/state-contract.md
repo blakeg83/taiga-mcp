@@ -28,6 +28,14 @@ result ID, unique repair ID, repair class and route; original-author routing
 must name the receipt's original action. The result ID must resolve to an
 observed action owned by the same ticket and fencing generation.
 
+The compact `workflow-coordinate.ps1` facade accepts packet, prompt, result,
+and external-state file references with SHA-256 hashes. `prepare-dispatch` and
+`prepare-publication` create local action descriptors only; the coordinator
+performs the corresponding native desktop/provider operation and later calls
+`record-external`. `accept-result` consumes a durable result through the state
+helper and can apply one requested local phase transition. Its default output
+contains references and correlation fields, not a copied receipt or transcript.
+
 `record-receipt-repair` is available only while the owned ticket is reviewing.
 It records format/evidence repairs in a per-ticket ledger with remaining
 minutes. The default `limits.maxReceiptRepairAttempts` is two and may be

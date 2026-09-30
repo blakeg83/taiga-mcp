@@ -1,6 +1,6 @@
 # 03: Script bookkeeping and keep waits quiet
 
-Status: planned; all steps pending.
+Status: step 1 implemented offline; steps 2–4 pending. Actual-host behavior remains pending an authorized trial.
 Prerequisites: 01–02 in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -18,13 +18,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 1: Add compact coordination operations
 
-- [ ] Define high-level local requests for accepting a worker result, deciding its next route, preparing a dispatch/publication, recording the external outcome, and returning run status.
-- [ ] Use file inputs for packet/receipt data. Return only phase, decision/reason, action ID, worker ID, required arguments/references, and changed fields by default.
-- [ ] Reuse schema validation, CAS revisions, owner generation, and journal logic. Do not teach the coordinator to inspect helper source or reconstruct payloads during each run.
-- [ ] Keep preparation before the external action and observation afterward; never pretend local and external operations form one atomic transaction.
-- [ ] **Validate:** Test normal progression, malformed results, stale revision/generation, duplicate result, partial local failure, and bounded output size.
-- [ ] **Update documentation:** Document the small facade and supported diagnostic expansion.
-- [ ] **Commit before the next step:** `Add compact coordination operations`.
+- [x] Define high-level local requests for accepting a worker result, deciding its next route, preparing a dispatch/publication, recording the external outcome, and returning run status.
+- [x] Use file inputs for packet/receipt data. Return only phase, decision/reason, action ID, worker ID, required arguments/references, and changed fields by default.
+- [x] Reuse schema validation, CAS revisions, owner generation, and journal logic. Do not teach the coordinator to inspect helper source or reconstruct payloads during each run.
+- [x] Keep preparation before the external action and observation afterward; never pretend local and external operations form one atomic transaction.
+- [x] **Validate:** Test normal progression, malformed results, stale revision/generation, duplicate result, partial local failure, and bounded output size.
+- [x] **Update documentation:** Document the small facade and supported diagnostic expansion.
+- [x] **Commit before the next step:** `Add compact coordination operations`.
 
 ### Step 2: Preserve dispatch and recovery correctness
 
@@ -71,7 +71,7 @@ gates unchecked; record deviations and blockers below the table.
 
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
+| 1 | Added `workflow-coordinate.ps1` with file/hash-bound dispatch, publication preparation, result acceptance/routing, external observation, and compact status operations. It delegates mutations to the existing CAS/fencing/journal state helper and returns native action descriptors without invoking desktop APIs. Synthetic progression, durable prompt/result references, malformed input, duplicate/partial state paths, and compact output passed; skill validation and `git diff --check` passed. | Coordination facade reference and operator guide | Recorded in final handoff |
 | 2 | Pending | Pending | Pending |
 | 3 | Pending | Pending | Pending |
 | 4 | Pending | Pending | Pending |
