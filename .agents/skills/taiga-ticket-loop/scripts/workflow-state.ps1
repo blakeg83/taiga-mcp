@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('initialize-session', 'inspect', 'claim-ticket', 'release-ticket', 'reserve-slot', 'release-slot', 'prepare-action', 'record-observation', 'consume-result', 'transition', 'pause-intent', 'cancel-intent', 'resume-session', 'set-heartbeat', 'validate-receipt')]
+    [ValidateSet('initialize-session', 'inspect', 'claim-ticket', 'release-ticket', 'reserve-slot', 'release-slot', 'prepare-action', 'record-observation', 'consume-result', 'transition', 'pause-intent', 'cancel-intent', 'reconcile-intent', 'resume-session', 'set-heartbeat', 'validate-receipt')]
     [string] $Operation,
     [string] $InputPath,
     [string] $Json,
@@ -131,10 +131,25 @@ function Get-TicketKey {
 
 function Get-Hash {
     param([object] $Value)
-    $canonical = $Value | ConvertTo-Json -Depth 100 -Compress
+    $canonical = Convert-ToCanonicalValue $Value | ConvertTo-Json -Depth 100 -Compress
     $bytes = [Text.Encoding]::UTF8.GetBytes($canonical)
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+function Convert-ToCanonicalValue {
+    param([object] $Value)
+    if ($Value -is [System.Collections.IDictionary]) {
+        $canonical = [ordered]@{}
+        foreach ($key in @($Value.Keys | ForEach-Object { [string]$_ } | Sort-Object)) {
+            $canonical[$key] = Convert-ToCanonicalValue $Value[$key]
+        }
+        return $canonical
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Convert-ToCanonicalValue $_ })
+    }
+    return $Value
 }
 
 function New-Registry {
@@ -147,6 +162,7 @@ function New-Registry {
         tickets = @{}
         repositories = @{}
         actions = @{}
+        ticketAliases = @{}
         events = @()
     }
 }
@@ -155,8 +171,12 @@ function Assert-Registry {
     param([hashtable] $State)
     if (-not $State.ContainsKey('schemaVersion') -or [int]$State.schemaVersion -ne $script:SchemaVersion) { throw 'Unsupported registry schema version.' }
     if (-not $State.ContainsKey('revision') -or [long]$State.revision -lt 0) { throw 'Registry revision is invalid.' }
-    foreach ($field in @('sessions', 'tickets', 'repositories', 'actions')) {
+    foreach ($field in @('sessions', 'tickets', 'repositories', 'actions', 'ticketAliases')) {
         if (-not $State.ContainsKey($field) -or $State[$field] -isnot [System.Collections.IDictionary]) { throw "Registry field '$field' is invalid." }
+    }
+    foreach ($alias in $State.ticketAliases.Keys) {
+        $canonical = [string]$State.ticketAliases[$alias]
+        if (-not $State.tickets.ContainsKey($canonical)) { throw "Ticket alias '$alias' points to a missing canonical ticket." }
     }
     if (-not $State.ContainsKey('events')) { $State.events = @() }
 }
@@ -227,7 +247,10 @@ function Add-Event {
 
 function Assert-Revision {
     param([hashtable] $State, [hashtable] $InputObject)
-    if ($InputObject.ContainsKey('expectedRevision') -and [long]$InputObject.expectedRevision -ne [long]$State.revision) { throw "Revision conflict: expected $($InputObject.expectedRevision), actual $($State.revision)." }
+    if (-not $InputObject.ContainsKey('expectedRevision')) { throw 'expectedRevision is required for every state mutation.' }
+    $expected = 0L
+    if (-not [long]::TryParse([string]$InputObject.expectedRevision, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$expected) -or $expected -lt 0) { throw 'expectedRevision must be a nonnegative integer.' }
+    if ($expected -ne [long]$State.revision) { throw "Revision conflict: expected $expected, actual $($State.revision)." }
 }
 
 function Get-Session {
@@ -240,7 +263,10 @@ function Get-Session {
 
 function Assert-SessionOwner {
     param([hashtable] $Session, [hashtable] $InputObject)
-    if ($InputObject.ContainsKey('ownerGeneration') -and [long]$InputObject.ownerGeneration -ne [long]$Session.ownerGeneration) { throw 'Session ownership generation is stale.' }
+    if (-not $InputObject.ContainsKey('ownerGeneration')) { throw 'ownerGeneration is required for every state mutation.' }
+    $generation = 0L
+    if (-not [long]::TryParse([string]$InputObject.ownerGeneration, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$generation) -or $generation -lt 1) { throw 'ownerGeneration must be a positive integer.' }
+    if ($generation -ne [long]$Session.ownerGeneration) { throw 'Session ownership generation is stale.' }
 }
 
 function Get-ConfigValue {
@@ -255,13 +281,37 @@ function Get-ConfigValue {
 
 function Assert-TicketOwner {
     param([hashtable] $State, [hashtable] $InputObject)
-    $key = Get-TicketKey $InputObject
+    $requestedKey = Get-TicketKey $InputObject
+    $key = Resolve-TicketKey $State $requestedKey
     if (-not $State.tickets.ContainsKey($key)) { throw "Ticket was not claimed: $key" }
     $ticket = $State.tickets[$key]
     $session = Get-Session $State $InputObject
     Assert-SessionOwner $session $InputObject
-    if ($ticket.ownerSessionId -ne $session.sessionId -or [long]$ticket.ownerGeneration -ne [long]$session.ownerGeneration) { throw "Ticket is owned by another session: $key" }
+    if ($ticket.ownerSessionId -ne $session.sessionId -or [long]$ticket.ownerGeneration -ne [long]$session.ownerGeneration) { throw "Ticket is owned by another session: $requestedKey" }
     return $ticket
+}
+
+function Resolve-TicketKey {
+    param([hashtable] $State, [string] $RequestedKey)
+    $current = $RequestedKey
+    for ($i = 0; $i -lt 8 -and $State.ticketAliases.ContainsKey($current); $i++) {
+        $next = [string]$State.ticketAliases[$current]
+        if ($next -eq $current) { break }
+        $current = $next
+    }
+    return $current
+}
+
+function Assert-DispatchAllowed {
+    param([hashtable] $State, [hashtable] $Session, [hashtable] $Ticket)
+    if ($Session.state -in @('pausing','cancelling','paused','cancelled','completed')) { throw "Session is not accepting new dispatch: $($Session.state)." }
+    if ($Ticket.controlState -in @('pausing','cancelling') -or $Ticket.phase -in @('paused','cancelled','complete')) { throw "Ticket is not accepting new dispatch: $($Ticket.phase)." }
+}
+
+function Assert-NoUnresolvedActions {
+    param([hashtable] $State, [string] $TicketKey)
+    $pending = @($State.actions.Values | Where-Object { $_.ticketKey -eq $TicketKey -and $_.status -in @('pending','uncertain') })
+    if ($pending.Count -gt 0) { throw "Ticket has unresolved external actions: $($pending.actionId -join ', ')." }
 }
 
 function New-Result {
@@ -307,7 +357,7 @@ function Invoke-Initialize {
     $scope = if ($InputObject.ContainsKey('scope')) { @($InputObject.scope) } else { @() }
     $deps = if ($InputObject.ContainsKey('dependencies')) { @($InputObject.dependencies) } else { @() }
     $session = [ordered]@{
-        sessionId = $sessionId; coordinatorThreadId = $threadId; coordinatorHostId = $hostId; ownerGeneration = 1; state = 'running'; createdAt = New-UtcStamp; updatedAt = New-UtcStamp; config = $config; authorization = if ($InputObject.ContainsKey('authorization')) { $InputObject.authorization } else { [ordered]@{} }; scope = $scope; dependencies = $deps; statusMappings = if ($InputObject.ContainsKey('statusMappings')) { $InputObject.statusMappings } else { [ordered]@{} }; heartbeatId = $null; pauseIntent = $null; cancelIntent = $null
+        sessionId = $sessionId; coordinatorThreadId = $threadId; coordinatorHostId = $hostId; ownerGeneration = 1; state = 'running'; controlState = $null; createdAt = New-UtcStamp; updatedAt = New-UtcStamp; config = $config; authorization = if ($InputObject.ContainsKey('authorization')) { $InputObject.authorization } else { [ordered]@{} }; scope = $scope; dependencies = $deps; statusMappings = if ($InputObject.ContainsKey('statusMappings')) { $InputObject.statusMappings } else { [ordered]@{} }; heartbeatId = $null; pauseIntent = $null; cancelIntent = $null
     }
     $state.sessions[$sessionId] = $session
     Add-Event $state 'session_initialized' @{ sessionId = $sessionId }
@@ -319,19 +369,34 @@ function Invoke-Claim {
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','ref','repository','repositoryIdentity','repositoryPath','parentTicketKey','childTicketKeys','scopeHash','workType') 'claim-ticket'
     Assert-Revision $State $InputObject
     $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
-    $key = Get-TicketKey $InputObject
-    $children = if ($InputObject.ContainsKey('childTicketKeys')) { @($InputObject.childTicketKeys | ForEach-Object { [string]$_ }) } else { @() }
-    $allKeys = @($key) + $children
+    $requestedKey = Get-TicketKey $InputObject
+    if ($State.ticketAliases.ContainsKey($requestedKey)) {
+        $existingKey = Resolve-TicketKey $State $requestedKey
+        $existing = $State.tickets[$existingKey]
+        if ($existing.ownerSessionId -ne $session.sessionId -or [long]$existing.ownerGeneration -ne [long]$session.ownerGeneration) { throw "Ticket identity is already owned: $requestedKey" }
+        return @{ Data = @{ ticket = $existing; ticketKey = $requestedKey; canonicalTicketKey = $existingKey; idempotent = $true } }
+    }
+    $key = $requestedKey
+    $children = if ($InputObject.ContainsKey('childTicketKeys')) { @($InputObject.childTicketKeys | ForEach-Object { Get-TicketKey @{ ticketKey = [string]$_ } }) } else { @() }
+    $allKeys = @(@($key) + $children | Select-Object -Unique)
     foreach ($candidate in $allKeys) {
-        if ($State.tickets.ContainsKey($candidate)) {
-            $existing = $State.tickets[$candidate]
+        if ($candidate -eq $key -and $State.tickets.ContainsKey($key)) { throw "Ticket identity is already owned: $candidate" }
+        if ($State.ticketAliases.ContainsKey($candidate)) {
+            $existingKey = Resolve-TicketKey $State $candidate
+            if ($existingKey -ne $key) { throw "Ticket identity is already claimed by canonical ticket ${existingKey}: $candidate" }
+        }
+        $candidateKey = Resolve-TicketKey $State $candidate
+        if ($State.tickets.ContainsKey($candidateKey)) {
+            $existing = $State.tickets[$candidateKey]
             if ($existing.ownerSessionId -ne $session.sessionId -or [long]$existing.ownerGeneration -ne [long]$session.ownerGeneration) { throw "Ticket identity is already owned: $candidate" }
         }
     }
     $repository = if ($InputObject.ContainsKey('repositoryIdentity')) { Require-String $InputObject 'repositoryIdentity' } elseif ($InputObject.ContainsKey('repository')) { Require-String $InputObject 'repository' } else { 'unmapped' }
     $workType = if ($InputObject.ContainsKey('workType')) { [string]$InputObject.workType } else { ($key.Split(':')[2]) }
-    $ticket = [ordered]@{ ticketKey = $key; ownerSessionId = $session.sessionId; ownerGeneration = $session.ownerGeneration; workType = $workType; repositoryIdentity = $repository; repositoryPath = if ($InputObject.ContainsKey('repositoryPath')) { [IO.Path]::GetFullPath([string]$InputObject.repositoryPath) } else { $null }; parentTicketKey = if ($InputObject.ContainsKey('parentTicketKey')) { [string]$InputObject.parentTicketKey } else { $null }; ownedChildTicketKeys = $children; phase = 'queued'; resumePhase = $null; slotReserved = $false; hostTurnsReserved = 0; correctionRound = 0; implementation = $null; review = $null; evidence = @(); lastResultCursor = $null; claimedAt = New-UtcStamp; updatedAt = New-UtcStamp }
-    foreach ($candidate in $allKeys) { if (-not $State.tickets.ContainsKey($candidate)) { $State.tickets[$candidate] = $ticket } }
+    $parentKey = if ($InputObject.ContainsKey('parentTicketKey')) { $parentRequested = Get-TicketKey @{ ticketKey = [string]$InputObject.parentTicketKey }; Resolve-TicketKey $State $parentRequested } else { $null }
+    $ticket = [ordered]@{ ticketKey = $key; ownerSessionId = $session.sessionId; ownerGeneration = $session.ownerGeneration; workType = $workType; repositoryIdentity = $repository; repositoryPath = if ($InputObject.ContainsKey('repositoryPath')) { [IO.Path]::GetFullPath([string]$InputObject.repositoryPath) } else { $null }; parentTicketKey = $parentKey; ownedChildTicketKeys = $children; phase = 'queued'; resumePhase = $null; controlState = $null; slotReserved = $false; hostTurnsReserved = 0; correctionRound = 0; implementation = $null; review = $null; evidence = @(); lastResultCursor = $null; claimedAt = New-UtcStamp; updatedAt = New-UtcStamp }
+    $State.tickets[$key] = $ticket
+    foreach ($candidate in $allKeys) { $State.ticketAliases[$candidate] = $key }
     Add-Event $State 'ticket_claimed' @{ sessionId = $session.sessionId; ticketKey = $key; childTicketKeys = $children }
     return @{ Data = @{ ticket = $ticket; ticketKey = $key } }
 }
@@ -339,10 +404,11 @@ function Invoke-Claim {
 function Invoke-Release {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','force') 'release-ticket'
-    Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject
+    Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject; Assert-NoUnresolvedActions $State $ticket.ticketKey
     if ($ticket.slotReserved -and -not ($InputObject.force -eq $true)) { throw 'Release the execution slot before releasing the ticket claim.' }
     $key = $ticket.ticketKey; $children = @($ticket.ownedChildTicketKeys)
-    foreach ($candidate in @($key) + $children) { if ($State.tickets.ContainsKey($candidate) -and $State.tickets[$candidate].ownerSessionId -eq $ticket.ownerSessionId) { $State.tickets.Remove($candidate) } }
+    if ($State.tickets.ContainsKey($key)) { $State.tickets.Remove($key) }
+    foreach ($candidate in @($State.ticketAliases.Keys | Where-Object { (Resolve-TicketKey $State ([string]$_)) -eq $key })) { $State.ticketAliases.Remove($candidate) }
     Add-Event $State 'ticket_released' @{ sessionId = $ticket.ownerSessionId; ticketKey = $key }
     return @{ Data = @{ released = $key } }
 }
@@ -350,7 +416,7 @@ function Invoke-Release {
 function Invoke-ReserveSlot {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','repositoryIdentity','capacity','hostWorkerLimit','workerTurns') 'reserve-slot'
-    Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject; $session = Get-Session $State $InputObject
+    Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject; $session = Get-Session $State $InputObject; Assert-DispatchAllowed $State $session $ticket
     if ($ticket.slotReserved) { return @{ Data = @{ reserved = $true; ticketKey = $ticket.ticketKey; idempotent = $true } } }
     $repo = if ($InputObject.ContainsKey('repositoryIdentity')) { [string]$InputObject.repositoryIdentity } else { [string]$ticket.repositoryIdentity }
     if ([string]::IsNullOrWhiteSpace($repo) -or $repo -eq 'unmapped') { throw 'A mapped repository is required before reserving a slot.' }
@@ -372,7 +438,7 @@ function Invoke-ReserveSlot {
 function Invoke-ReleaseSlot {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id') 'release-slot'
-    Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject
+    Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject; Assert-NoUnresolvedActions $State $ticket.ticketKey
     if (-not $ticket.slotReserved) { return @{ Data = @{ released = $false; idempotent = $true } } }
     $repo = [string]$ticket.repositoryIdentity
     if ($State.repositories.ContainsKey($repo)) { $State.repositories[$repo].slotOwners = @($State.repositories[$repo].slotOwners | Where-Object { $_ -ne $ticket.ticketKey }) }
@@ -385,12 +451,14 @@ function Invoke-PrepareAction {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','actionId','ticketKey','projectId','kind','id','actionKind','target','input','inputDigest','leaseSeconds') 'prepare-action'
     Assert-Revision $State $InputObject; $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
+    if ($session.state -in @('pausing','cancelling','paused','cancelled','completed')) { throw "Session is not accepting new actions: $($session.state)." }
     $actionId = Require-String $InputObject 'actionId'; Assert-Id $actionId 'actionId'
     if ($State.actions.ContainsKey($actionId)) { throw "Action already exists; reconcile it instead of preparing again: $actionId" }
     $actionKind = Require-String $InputObject 'actionKind'; $target = if ($InputObject.ContainsKey('target')) { $InputObject.target } else { [ordered]@{} }
     $payload = if ($InputObject.ContainsKey('input')) { $InputObject.input } else { [ordered]@{} }
     $digest = if ($InputObject.ContainsKey('inputDigest')) { Require-String $InputObject 'inputDigest' } else { Get-Hash $payload }
-    $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { Get-TicketKey $InputObject } else { $null }
+    $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { (Assert-TicketOwner $State $InputObject).ticketKey } else { $null }
+    if ($null -ne $ticketKey) { Assert-DispatchAllowed $State $session $State.tickets[$ticketKey] }
     $leaseSeconds = if ($InputObject.ContainsKey('leaseSeconds')) { [double]$InputObject.leaseSeconds } else { 900.0 }
     $action = [ordered]@{ actionId = $actionId; sessionId = $session.sessionId; ownerGeneration = $session.ownerGeneration; ticketKey = $ticketKey; kind = $actionKind; target = $target; inputDigest = $digest; status = 'pending'; preparedAt = New-UtcStamp; leaseUntil = [DateTime]::UtcNow.AddSeconds($leaseSeconds).ToString('o'); receipt = $null }
     $State.actions[$actionId] = $action; Add-Event $State 'action_prepared' @{ actionId = $actionId; kind = $actionKind; ticketKey = $ticketKey }
@@ -402,7 +470,10 @@ function Invoke-RecordObservation {
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','actionId','observationStatus','receipt','externalState','reconcileRequired') 'record-observation'
     Assert-Revision $State $InputObject; $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
     $actionId = Require-String $InputObject 'actionId'; if (-not $State.actions.ContainsKey($actionId)) { throw "Action was not found: $actionId" }
-    $action = $State.actions[$actionId]; $status = Require-String $InputObject 'observationStatus'
+    $action = $State.actions[$actionId]
+    if ($action.sessionId -ne $session.sessionId -or [long]$action.ownerGeneration -ne [long]$session.ownerGeneration) { throw 'Action is owned by another session or fencing generation.' }
+    if ($null -ne $action.ticketKey -and (-not $State.tickets.ContainsKey([string]$action.ticketKey) -or $State.tickets[[string]$action.ticketKey].ownerSessionId -ne $session.sessionId -or [long]$State.tickets[[string]$action.ticketKey].ownerGeneration -ne [long]$session.ownerGeneration)) { throw 'Action ticket ownership no longer matches its session.' }
+    $status = Require-String $InputObject 'observationStatus'
     if ($status -notin @('observed','uncertain','failed')) { throw 'observationStatus must be observed, uncertain, or failed.' }
     if ($action.status -eq 'observed' -and $status -ne 'observed') { throw 'An observed action cannot be downgraded.' }
     $action.status = $status; $action.receipt = if ($InputObject.ContainsKey('receipt')) { $InputObject.receipt } else { $null }; $action.externalState = if ($InputObject.ContainsKey('externalState')) { $InputObject.externalState } else { $null }; $action.reconcileRequired = ($status -eq 'uncertain') -or ($InputObject.reconcileRequired -eq $true); $action.observedAt = New-UtcStamp
@@ -432,6 +503,8 @@ function Invoke-Transition {
     Assert-Revision $State $InputObject; $ticket = Assert-TicketOwner $State $InputObject; $to = Require-String $InputObject 'toPhase'; $from = [string]$ticket.phase
     $map = if ($ticket.workType -eq 'epic') { $script:ParentTransitions } else { $script:LeafTransitions }
     if (-not $map.ContainsKey($from) -or $map[$from] -notcontains $to) { throw "Invalid transition $from -> $to for $($ticket.ticketKey)." }
+    if ($to -in @('paused','cancelled')) { throw "Use reconcile-intent after quiescence to enter $to." }
+    Assert-DispatchAllowed $State (Get-Session $State $InputObject) $ticket
     if ($to -in @('implementing','correcting','reviewing','publishing') -and -not $ticket.slotReserved) { throw 'An execution slot must be reserved before an active worker phase.' }
     $ticket.phase = $to; $ticket.updatedAt = New-UtcStamp; if ($InputObject.ContainsKey('resumePhase')) { $ticket.resumePhase = $InputObject.resumePhase }
     if ($InputObject.ContainsKey('reason')) { $ticket.lastTransitionReason = $InputObject.reason }
@@ -446,9 +519,9 @@ function Invoke-PauseIntent {
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','reason') 'pause-intent'; Assert-Revision $State $InputObject
     $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $now = New-UtcStamp
     $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { (Assert-TicketOwner $State $InputObject).ticketKey } else { $null }
-    if ($null -eq $ticketKey) { $session.pauseIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; quiescent = $false }; $session.state = 'pausing' } else { $ticket = $State.tickets[$ticketKey]; $ticket.pauseIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; quiescent = $false }; if ($ticket.phase -notin @('complete','cancelled')) { $ticket.resumePhase = $ticket.phase; $ticket.phase = 'paused' } }
+    if ($null -eq $ticketKey) { $session.pauseIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; quiescent = $false; reconciled = $false }; $session.controlState = 'pausing'; $session.state = 'pausing' } else { $ticket = $State.tickets[$ticketKey]; $ticket.pauseIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; quiescent = $false; reconciled = $false }; if ($ticket.phase -notin @('complete','cancelled')) { $ticket.resumePhase = $ticket.phase; $ticket.controlState = 'pausing' } }
     Add-Event $State 'pause_requested' @{ sessionId = $session.sessionId; ticketKey = $ticketKey }
-    return @{ Data = @{ requested = $true; ticketKey = $ticketKey; state = if ($null -eq $ticketKey) { $session.state } else { $State.tickets[$ticketKey].phase } } }
+    return @{ Data = @{ requested = $true; ticketKey = $ticketKey; state = if ($null -eq $ticketKey) { $session.state } else { $State.tickets[$ticketKey].controlState } } }
 }
 
 function Invoke-CancelIntent {
@@ -456,16 +529,39 @@ function Invoke-CancelIntent {
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','reason') 'cancel-intent'; Assert-Revision $State $InputObject
     $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $now = New-UtcStamp
     $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { (Assert-TicketOwner $State $InputObject).ticketKey } else { $null }
-    if ($null -eq $ticketKey) { $session.cancelIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; reconciled = $false }; $session.state = 'cancelling' } else { $ticket = $State.tickets[$ticketKey]; $ticket.cancelIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; reconciled = $false }; if ($ticket.phase -notin @('complete','cancelled')) { $ticket.resumePhase = $ticket.phase; $ticket.phase = 'cancelled' } }
+    if ($null -eq $ticketKey) { $session.cancelIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; reconciled = $false }; $session.controlState = 'cancelling'; $session.state = 'cancelling' } else { $ticket = $State.tickets[$ticketKey]; $ticket.cancelIntent = [ordered]@{ requestedAt = $now; reason = if ($InputObject.ContainsKey('reason')) { $InputObject.reason } else { $null }; reconciled = $false }; if ($ticket.phase -notin @('complete','cancelled')) { $ticket.resumePhase = $ticket.phase; $ticket.controlState = 'cancelling' } }
     Add-Event $State 'cancel_requested' @{ sessionId = $session.sessionId; ticketKey = $ticketKey }
-    return @{ Data = @{ requested = $true; ticketKey = $ticketKey; state = if ($null -eq $ticketKey) { $session.state } else { $State.tickets[$ticketKey].phase } } }
+    return @{ Data = @{ requested = $true; ticketKey = $ticketKey; state = if ($null -eq $ticketKey) { $session.state } else { $State.tickets[$ticketKey].controlState } } }
+}
+
+function Invoke-ReconcileIntent {
+    param([hashtable] $State, [hashtable] $InputObject)
+    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','intent','quiescent','reason') 'reconcile-intent'; Assert-Revision $State $InputObject
+    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
+    if ($InputObject.quiescent -ne $true) { throw 'quiescent=true is required after the coordinator observes workers and actions are idle.' }
+    $intent = Require-String $InputObject 'intent'; if ($intent -notin @('pause','cancel')) { throw 'intent must be pause or cancel.' }
+    $ticketKey = if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { (Assert-TicketOwner $State $InputObject).ticketKey } else { $null }
+    if ($null -eq $ticketKey) {
+        $expectedControl = if ($intent -eq 'pause') { 'pausing' } else { 'cancelling' }
+        if ($session.controlState -ne $expectedControl) { throw "No active $intent intent exists for the session." }
+        $owned = @($State.tickets.Values | Where-Object { $_.ownerSessionId -eq $session.sessionId })
+        foreach ($ticket in $owned) { Assert-NoUnresolvedActions $State $ticket.ticketKey; if ($ticket.phase -notin @('complete','cancelled')) { $ticket.resumePhase = $ticket.phase; $ticket.phase = if ($intent -eq 'pause') { 'paused' } else { 'cancelled' }; if ($ticket.slotReserved) { $ticket.slotReserved = $false; $ticket.hostTurnsReserved = 0; if ($State.repositories.ContainsKey($ticket.repositoryIdentity)) { $State.repositories[$ticket.repositoryIdentity].slotOwners = @($State.repositories[$ticket.repositoryIdentity].slotOwners | Where-Object { $_ -ne $ticket.ticketKey }) } } }; $ticket.controlState = $null }
+        if ($intent -eq 'pause') { $session.state = 'paused'; $session.controlState = $null; $session.pauseIntent.quiescent = $true; $session.pauseIntent.reconciled = $true } else { $session.state = 'cancelled'; $session.controlState = $null; $session.cancelIntent.reconciled = $true }
+    } else {
+        $ticket = $State.tickets[$ticketKey]; Assert-NoUnresolvedActions $State $ticket.ticketKey
+        $expectedControl = if ($intent -eq 'pause') { 'pausing' } else { 'cancelling' }; if ($ticket.controlState -ne $expectedControl) { throw "No active $intent intent exists for $ticketKey." }
+        if ($ticket.phase -notin @('complete','cancelled')) { $ticket.resumePhase = $ticket.phase; $ticket.phase = if ($intent -eq 'pause') { 'paused' } else { 'cancelled' }; $ticket.controlState = $null; if ($ticket.slotReserved) { $ticket.slotReserved = $false; $ticket.hostTurnsReserved = 0; if ($State.repositories.ContainsKey($ticket.repositoryIdentity)) { $State.repositories[$ticket.repositoryIdentity].slotOwners = @($State.repositories[$ticket.repositoryIdentity].slotOwners | Where-Object { $_ -ne $ticket.ticketKey }) } } }
+        if ($intent -eq 'pause') { $ticket.pauseIntent.quiescent = $true; $ticket.pauseIntent.reconciled = $true } else { $ticket.cancelIntent.reconciled = $true }
+    }
+    Add-Event $State 'control_reconciled' @{ sessionId = $session.sessionId; ticketKey = $ticketKey; intent = $intent }
+    return @{ Data = @{ reconciled = $true; ticketKey = $ticketKey; intent = $intent } }
 }
 
 function Invoke-Resume {
     param([hashtable] $State, [hashtable] $InputObject)
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','ticketKey','projectId','kind','id','reason') 'resume-session'; Assert-Revision $State $InputObject
-    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $session.state = 'running'; $session.pauseIntent = $null; $session.cancelIntent = $null
-    $changed = @(); if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { $ticket = Assert-TicketOwner $State $InputObject; if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $changed += $ticket.ticketKey } } else { foreach ($ticket in @($State.tickets.Values | Where-Object { $_.ownerSessionId -eq $session.sessionId -and $_.phase -eq 'paused' })) { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $changed += $ticket.ticketKey } }
+    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; if ($session.state -in @('cancelled','completed')) { throw "Session cannot be resumed from $($session.state)." }; $session.state = 'running'; $session.controlState = $null; $session.pauseIntent = $null; $session.cancelIntent = $null
+    $changed = @(); if ($InputObject.ContainsKey('ticketKey') -or $InputObject.ContainsKey('projectId')) { $ticket = Assert-TicketOwner $State $InputObject; if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $ticket.controlState = $null; $ticket.pauseIntent = $null; $changed += $ticket.ticketKey } elseif ($ticket.controlState -eq 'pausing') { $ticket.controlState = $null; $ticket.pauseIntent = $null } } else { foreach ($ticket in @($State.tickets.Values | Where-Object { $_.ownerSessionId -eq $session.sessionId -and ($_.phase -eq 'paused' -or $_.controlState -eq 'pausing') })) { if ($ticket.phase -eq 'paused') { $ticket.phase = if ($ticket.resumePhase) { $ticket.resumePhase } else { 'queued' }; $ticket.resumePhase = $null; $changed += $ticket.ticketKey }; $ticket.controlState = $null; $ticket.pauseIntent = $null } }
     Add-Event $State 'session_resumed' @{ sessionId = $session.sessionId; tickets = $changed }
     return @{ Data = @{ state = $session.state; resumedTickets = $changed } }
 }
@@ -493,7 +589,32 @@ function Validate-ReviewReceipt {
     Assert-AllowedKeys $Receipt @('runId','actionId','ticketKey','scopeHash','baseSha','reviewedSha','verdict','findings','criteria','checks','reviewerModel','reviewerEffort') 'review receipt'
     foreach ($name in @('runId','actionId','ticketKey','scopeHash','baseSha','reviewedSha','verdict')) { Require-String $Receipt $name 'review receipt' | Out-Null }
     if ($Receipt.verdict -notin @('pass','changes_requested','blocked')) { throw 'Review verdict must be pass, changes_requested, or blocked.' }
-    if (-not $Receipt.ContainsKey('criteria') -or -not $Receipt.ContainsKey('checks')) { throw 'Review receipt must include criteria and checks.' }
+    Require-String $Receipt 'reviewerModel' 'review receipt' | Out-Null; Require-String $Receipt 'reviewerEffort' 'review receipt' | Out-Null
+    if ($Receipt.reviewerModel -ne 'gpt-6.1-sol' -or $Receipt.reviewerEffort -ne 'high') { throw 'Review receipt used an unexpected model or effort.' }
+    if (-not $Receipt.ContainsKey('criteria') -or @($Receipt.criteria).Count -eq 0) { throw 'Review receipt must include at least one criterion result.' }
+    if (-not $Receipt.ContainsKey('checks') -or @($Receipt.checks).Count -eq 0) { throw 'Review receipt must include at least one check result.' }
+    $criterionIds = @{}
+    foreach ($criterion in @($Receipt.criteria)) {
+        if ($criterion -isnot [System.Collections.IDictionary]) { throw 'Each criterion result must be an object.' }
+        $criterionId = Require-String $criterion 'id' 'criterion result'; Require-String $criterion 'evidence' 'criterion result' | Out-Null
+        if ($criterion.passed -ne $true) { throw "Criterion did not pass: $criterionId." }
+        if ($criterionIds.ContainsKey($criterionId)) { throw "Duplicate criterion result: $criterionId." }
+        $criterionIds[$criterionId] = $true
+    }
+    foreach ($check in @($Receipt.checks)) {
+        if ($check -isnot [System.Collections.IDictionary]) { throw 'Each check result must be an object.' }
+        $command = Require-String $check 'command' 'check result'; Require-String $check 'evidence' 'check result' | Out-Null
+        $exitCode = Require-NonNegativeInt $check 'exitCode' 'check result'
+        if ($exitCode -ne 0 -or ($check.ContainsKey('passed') -and $check.passed -ne $true)) { throw "Required check did not pass: $command." }
+    }
+    if (-not $Receipt.ContainsKey('findings')) { throw 'Review receipt must include findings.' }
+    $findingIds = @{}
+    foreach ($finding in @($Receipt.findings)) {
+        if ($finding -isnot [System.Collections.IDictionary]) { throw 'Each finding must be an object.' }
+        $findingId = Require-String $finding 'id' 'finding'; Require-String $finding 'severity' 'finding' | Out-Null; Require-String $finding 'evidence' 'finding' | Out-Null; Require-String $finding 'requestedChange' 'finding' | Out-Null
+        if ($findingIds.ContainsKey($findingId)) { throw "Duplicate finding ID: $findingId." }
+        $findingIds[$findingId] = $true
+    }
     $blocking = @($Receipt.findings | Where-Object { $_.severity -in @('blocker','critical','high') -and $_.disposition -notin @('fixed','rejected_accepted') })
     if ($Receipt.verdict -eq 'pass' -and $blocking.Count -gt 0) { throw 'A passing review cannot retain unresolved blocking findings.' }
     return [ordered]@{ valid = $true; kind = 'review'; verdict = $Receipt.verdict; reviewedSha = $Receipt.reviewedSha; blockingFindings = $blocking.Count }
@@ -521,6 +642,7 @@ function Invoke-Mutation {
         'transition' { return Invoke-Transition $State $InputObject }
         'pause-intent' { return Invoke-PauseIntent $State $InputObject }
         'cancel-intent' { return Invoke-CancelIntent $State $InputObject }
+        'reconcile-intent' { return Invoke-ReconcileIntent $State $InputObject }
         'resume-session' { return Invoke-Resume $State $InputObject }
         'set-heartbeat' { return Invoke-Heartbeat $State $InputObject }
         default { throw "Operation is not a mutation: $Operation" }

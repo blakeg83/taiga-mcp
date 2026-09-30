@@ -11,17 +11,41 @@ $ErrorActionPreference = 'Stop'
 
 function Read-Object { if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) { throw "Input file was not found: $InputPath" }; try { return ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $InputPath) -AsHashtable -Depth 100 } catch { throw "Input is not valid JSON: $($_.Exception.Message)" } }
 function Need { param([hashtable]$Object,[string]$Name); if (-not $Object.Contains($Name) -or $null -eq $Object[$Name] -or [string]::IsNullOrWhiteSpace([string]$Object[$Name])) { throw "$Name is required." }; return $Object[$Name] }
-function Hash-Object { param([object]$Value); $bytes = [Text.Encoding]::UTF8.GetBytes(($Value | ConvertTo-Json -Depth 100 -Compress)); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
-function Complete-Pages { param([object[]]$Pages,[string]$Name); if ($Pages.Count -eq 0) { throw "$Name has no captured pages." }; foreach ($page in $Pages) { if (-not $page.Contains('page')) { throw "$Name pagination is incomplete: page number missing." }; if (-not $page.Contains('hasMore') -and -not $page.Contains('nextPage')) { throw "$Name pagination is incomplete: exhaustion is unknown." }; if ($page.Contains('hasMore') -and $page.hasMore -eq $true -and (-not $page.Contains('nextPage') -or $null -eq $page.nextPage)) { throw "$Name pagination is incomplete: more pages are expected." } }; return $true }
+function Convert-ToCanonicalValue {
+    param([object] $Value)
+    if ($Value -is [System.Collections.IDictionary]) {
+        $canonical = [ordered]@{}
+        foreach ($key in @($Value.Keys | ForEach-Object { [string]$_ } | Sort-Object)) { $canonical[$key] = Convert-ToCanonicalValue $Value[$key] }
+        return $canonical
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) { return @($Value | ForEach-Object { Convert-ToCanonicalValue $_ }) }
+    return $Value
+}
+function Hash-Object { param([object]$Value); $bytes = [Text.Encoding]::UTF8.GetBytes((Convert-ToCanonicalValue $Value | ConvertTo-Json -Depth 100 -Compress)); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
+function Complete-Pages {
+    param([object[]]$Pages,[string]$Name)
+    if ($Pages.Count -eq 0) { throw "$Name has no captured pages." }
+    $orderedPages = @($Pages | Sort-Object { [int]$_.page })
+    for ($index = 0; $index -lt $orderedPages.Count; $index++) {
+        $page = $orderedPages[$index]; if (-not $page.Contains('page')) { throw "$Name pagination is incomplete: page number missing." }
+        $number = 0; if (-not [int]::TryParse([string]$page.page, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or $number -lt 1 -or $number -ne ($index + 1)) { throw "$Name pagination is incomplete: pages must be contiguous from page 1." }
+        if (-not $page.Contains('hasMore') -or $null -eq $page.hasMore -or $page.hasMore -isnot [bool]) { throw "$Name pagination is incomplete: authoritative hasMore is required." }
+        if (-not $page.Contains('nextPage')) { throw "$Name pagination is incomplete: authoritative nextPage is required." }
+        $hasMore = [bool]$page.hasMore; $nextPage = $page.nextPage
+        if ($hasMore) { if ($null -eq $nextPage -or [int]$nextPage -ne ($number + 1)) { throw "$Name pagination is incomplete: nextPage must identify the next page." }; if ($index -eq $orderedPages.Count - 1) { throw "$Name pagination is incomplete: page $($number + 1) was not fetched." } }
+        else { if ($null -ne $nextPage) { throw "$Name pagination is contradictory: a terminal page cannot have nextPage." }; if ($index -ne $orderedPages.Count - 1) { throw "$Name pagination contains pages after its authoritative terminal page." } }
+    }
+    return $true
+}
 
 try {
     $input = Read-Object
     $data = switch ($Operation) {
         'capture-context' {
             $kind = [string](Need $input 'kind'); $projectId = [int](Need $input 'projectId'); $ref = [int](Need $input 'ref'); if ($projectId -lt 1 -or $ref -lt 1) { throw 'Project and ref must be positive.' }
-            Complete-Pages @($input.detailPages) 'detail'; Complete-Pages @($input.commentPages) 'comments'
-            if ($kind -eq 'story') { Complete-Pages @($input.taskPages) 'tasks' }
-            if ($kind -eq 'epic') { Complete-Pages @($input.storyPages) 'epic membership'; if (@($input.storyPages).Count -eq 0) { throw 'Epic membership is incomplete.' } }
+            $null = Complete-Pages @($input.detailPages) 'detail'; $null = Complete-Pages @($input.commentPages) 'comments'
+            if ($kind -eq 'story') { $null = Complete-Pages @($input.taskPages) 'tasks' }
+            if ($kind -eq 'epic') { $null = Complete-Pages @($input.storyPages) 'epic membership'; if (@($input.storyPages).Count -eq 0) { throw 'Epic membership is incomplete.' } }
             [ordered]@{ complete = $true; projectId = $projectId; kind = $kind; ref = $ref; requirementsHash = Hash-Object @{ kind = $kind; projectId = $projectId; ref = $ref; detail = $input.detailPages; comments = $input.commentPages; tasks = $input.taskPages; stories = $input.storyPages }; selectedTaskIds = @($input.selectedTaskIds); linkedStoryKeys = @($input.linkedStoryKeys) }
         }
         'validate-status-mappings' {

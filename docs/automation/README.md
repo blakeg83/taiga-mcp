@@ -60,20 +60,29 @@ lock, a flushed same-directory temporary file, atomic replacement, and a valid
 reconciled against its target before another call. Do not free an uncertain
 slot merely because its lease expired.
 
-Ticket controls are scoped. Pause/cancel requests stop future dispatch and
-record whether workers are actually quiescent; resume revalidates chat,
-checkout, source, scope, and pending actions. Waiting for a dependency or merge
-releases execution capacity but retains ownership. Duplicate ticks and stale
-revisions are rejected.
+Ticket controls are scoped. Pause/cancel first record a `pausing` or
+`cancelling` intent and block new dispatch, actions, slots, and transitions.
+After workers are observed idle, `reconcile-intent` requires `quiescent=true`
+and no pending/uncertain actions before changing the phase and releasing a
+slot; unresolved actions retain their reservations. Parent tickets are stored
+once, with child/story aliases resolving through the canonical ticket record.
+Every mutation requires the current registry revision and owner generation.
+Resume revalidates chat, checkout, source, scope, and pending actions. Waiting
+for a dependency or merge releases execution capacity but retains ownership.
+Duplicate ticks and stale revisions are rejected.
 
 ## Branch, review, and PR evidence
 
 Each executable ticket fetches its configured remote and records a fresh base
 SHA before creating a unique `codex/<kind>-<ref>-<slug>-<run-suffix>` branch and
 managed worktree. The reviewed `base..HEAD` revision must equal the pushed PR
-head. Target movement, source edits, changed requirements, or new material PR
-feedback invalidate approval and return through the same implementation/review
-chats. The default review budget is initial round 0 plus three corrections.
+head. A review receipt is accepted only when it is bound to the expected
+run/action/ticket, exact `gpt-6.1-sol`/`high` settings, passing criteria with
+evidence, and zero-exit checks with evidence. Target movement is compared with
+the recorded target/base SHA rather than feature HEAD; movement, source edits,
+changed requirements, or new material PR feedback invalidate approval and
+return through the same implementation/review chats. The default review budget
+is initial round 0 plus three corrections.
 
 One PR is created or reused per executable leaf/story ticket. PR delivery,
 checks, merge provenance, and Taiga Done are separate facts. Default leaf Done

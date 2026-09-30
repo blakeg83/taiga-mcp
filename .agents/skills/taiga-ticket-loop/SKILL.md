@@ -74,8 +74,10 @@ the relevant reference before each operation:
    requires all required stories merged and combined acceptance at the actual
    integrated revision.
 11. On every wake, inspect state and reconcile pending actions before dispatch.
-    Keep unchanged waits quiet. Pause, cancel, resume, and uncertain outcomes
-    are explicit states; never resolve them by blind replay.
+    Keep unchanged waits quiet. Pause and cancel are intent-then-reconcile
+    controls: quiesce workers, prove no pending/uncertain actions, then record
+    the terminal phase and release the slot. Resume and uncertain outcomes are
+    explicit states; never resolve them by blind replay.
 
 ## Standard authorized-run profile
 

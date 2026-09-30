@@ -95,20 +95,24 @@ try {
         'refresh' {
             $worktree = Assert-Path (Require-Value $request 'worktreePath') 'worktreePath'
             $targetRef = if ($request.Contains('targetRef')) { Require-Value $request 'targetRef' } else { "$remote/$baseBranch" }
+            $recordedTarget = if ($request.Contains('recordedTargetSha')) { Require-Value $request 'recordedTargetSha' } elseif ($request.Contains('baseSha')) { Require-Value $request 'baseSha' } else { throw 'recordedTargetSha or baseSha is required for refresh approval comparison.' }
             $before = Get-Head $worktree
             Invoke-Git $worktree @('fetch', '--prune', $remote) | Out-Null
             $target = Get-Head $worktree $targetRef
-            if ($target -eq $before) { [ordered]@{ changed = $false; beforeSha = $before; targetSha = $target; headSha = $before; approvalInvalidated = $false } } else {
+            if ($target -eq $recordedTarget) { [ordered]@{ changed = $false; beforeSha = $before; recordedTargetSha = $recordedTarget; targetSha = $target; headSha = $before; approvalInvalidated = $false } } else {
                 $merge = & git -C $worktree merge --no-edit $targetRef 2>&1; $mergeExit = $LASTEXITCODE
-                if ($mergeExit -ne 0) { [ordered]@{ changed = $true; conflict = $true; beforeSha = $before; targetSha = $target; output = @($merge | ForEach-Object { [string]$_ }); approvalInvalidated = $true } }
-                else { [ordered]@{ changed = $true; conflict = $false; beforeSha = $before; targetSha = $target; headSha = Get-Head $worktree; approvalInvalidated = $true } }
+                if ($mergeExit -ne 0) { [ordered]@{ changed = $true; conflict = $true; beforeSha = $before; recordedTargetSha = $recordedTarget; targetSha = $target; output = @($merge | ForEach-Object { [string]$_ }); approvalInvalidated = $true } }
+                else { [ordered]@{ changed = $true; conflict = $false; beforeSha = $before; recordedTargetSha = $recordedTarget; targetSha = $target; headSha = Get-Head $worktree; approvalInvalidated = $true } }
             }
         }
         'push' {
             $worktree = Assert-Path (Require-Value $request 'worktreePath') 'worktreePath'; $branch = Require-Value $request 'branch'; $expectedHead = Require-Value $request 'expectedHeadSha'
+            if ($branch -notmatch '^codex/[A-Za-z0-9._/-]+$' -or $branch -match '(?:^|/)[.]{1,2}(?:/|$)') { throw 'Push branch must be a safe codex/ feature branch.' }
             if ($request.allowForcePush -eq $true) { throw 'Force-push is disabled by contract.' }
+            $actualBranch = Get-Branch $worktree; if ($actualBranch -ne $branch) { throw "Push checkout branch does not match owned branch: expected $branch, actual $actualBranch." }
             $actualHead = Get-Head $worktree; if ($actualHead -ne $expectedHead) { throw "Push source does not match reviewed head: expected $expectedHead, actual $actualHead." }
-            Invoke-Git $worktree @('push', $remote, "$branch`:$branch") | Out-Null
+            $localBranchHead = Get-Head $worktree "refs/heads/$branch"; if ($localBranchHead -ne $expectedHead) { throw "Owned local branch ref does not match reviewed head: expected $expectedHead, actual $localBranchHead." }
+            Invoke-Git $worktree @('push', $remote, "refs/heads/$branch`:refs/heads/$branch") | Out-Null
             $remoteHeadResult = Invoke-Git $worktree @('ls-remote', $remote, "refs/heads/$branch")
             $line = @($remoteHeadResult.output | Where-Object { [string]$_ -match '^[0-9a-f]{40}\s' }) | Select-Object -First 1
             if (-not $line) { throw 'Remote branch was not observable after push.' }
