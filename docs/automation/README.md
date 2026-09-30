@@ -18,13 +18,25 @@ provider smoke evidence remains separate from fixture success.
 
 ## Explicit operational start
 
-Invoke the skill only after selecting the exact issue, task, story, or epic and
-authorizing the required scope. A real run must name the repository mapping,
-Taiga project/kind/ref, discovered status IDs, approved dependencies and
-priority, validation commands, elapsed/review limits, and these permissions as
-needed: create/reuse and message selected worker chats, create worktrees and
-branches, write Taiga milestones/statuses, push/create/update PRs, and create
-or reuse one coordinator heartbeat. Automatic merge and force-push remain off.
+Invoke the skill after selecting the exact issue, task, story, or epic and
+authorizing the required actions. The coordinator discovers the current
+workspace repository, Git common directory, repository instructions, Taiga
+context, status mappings, and validation commands when they are available. For
+TaigaMCP it verifies and uses freshly fetched `origin/master` automatically;
+you do not need to repeat the repository path, remote, or base branch.
+
+The shortest useful invocation is:
+
+```text
+Use $taiga-ticket-loop for Taiga issue project 123, ref 42, internal ID 456.
+Authorize creating/reusing the worker chats and worktree, messaging those
+chats, Taiga progress updates, pushing the reviewed branch, and creating or
+updating its PR. Do not merge automatically.
+```
+
+Add dependencies, validation commands, status choices, or a different
+repository mapping only when they are not discoverable or differ from the
+defaults. Automatic merge and force-push remain off.
 
 The implementer is exactly `gpt-5.6-luna` with `xhigh`. The reviewer is exactly
 `gpt-6.1-sol` with `high`. The current planning host advertised
