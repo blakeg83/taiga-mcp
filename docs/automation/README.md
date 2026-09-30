@@ -122,6 +122,17 @@ These prompt and routing rules guide behavior but are not an operating-system
 sandbox. See the skill's [coordinator boundary matrix](../../.agents/skills/taiga-ticket-loop/references/coordinator-boundaries.md)
 for scenario details.
 
+Each worker handoff references an immutable, versioned assignment packet by
+absolute path and hash. It holds stable criterion IDs/text, ticket identity,
+complete-context file reference/hash, repository/worktree/base, required
+commands, explicit authority, deadlines, and exact profiles. The packet and
+copied full-context artifact live under the persistent local state root, outside
+the registry and source worktree. A scope change gets a new packet ID and scope
+hash; unresolved product requirements block dispatch until the user clarifies
+them. The prompt stays short because the worker reads the complete packet and
+its repository instructions directly. See the skill's
+[assignment packet contract](../../.agents/skills/taiga-ticket-loop/references/assignment-packets.md).
+
 ## Recovery commands
 
 Inspect a run:

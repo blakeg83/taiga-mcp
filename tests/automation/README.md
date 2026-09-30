@@ -13,4 +13,5 @@ ownership/capacity rules, canonical ticket aliases, v1 registry migration,
 uncertain actions, cursor consumption, quiescent pause/cancel reconciliation,
 session-control fencing, review correction receipts with failed evidence,
 dependency cycles, epic evidence, fresh-base branch creation, refresh approval
-binding, and a verified local push. A nonzero exit code means a fixture failed.
+binding, immutable hash-bound assignment packets and full-context artifacts,
+and a verified local push. A nonzero exit code means a fixture failed.

@@ -6,6 +6,7 @@ $script:Root = Join-Path ([IO.Path]::GetTempPath()) ("TaigaMCP automation {0}" -
 $script:StateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-state.ps1'
 $script:GitScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-git.ps1'
 $script:PlanScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-plan.ps1'
+$script:PacketScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-packet.ps1'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
@@ -73,6 +74,69 @@ try {
         $badPath = New-InputPath $badConfig 'bad-profile'
         $bad = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$badPath,'-StateRoot',(Join-Path $script:FixtureRoot 'bad-profile')) $false
         Assert-True (-not $bad.ok) 'unsupported reviewer profile must be rejected'
+    }
+
+    Test-Case 'create immutable scope packets bound to context and checkout' {
+        $packetStateRoot = Join-Path $script:FixtureRoot 'packet-state'
+        $packetWorktree = Join-Path $script:FixtureRoot 'packet worktree'
+        New-Item -ItemType Directory -Path $packetWorktree -Force | Out-Null
+        $contextPath = Join-Path $script:FixtureRoot 'long ticket context.md'
+        $contextText = 'Synthetic full ticket context. ' + ('long-description ' * 12000)
+        [IO.File]::WriteAllText($contextPath, $contextText, [Text.UTF8Encoding]::new($false))
+        $request = @{
+            packetId = 'packet-01'; sessionId = 'session-packet-01'; runId = 'run-packet-01'
+            ticket = @{ ticketKey = 'project:123:issue:456'; projectId = 123; kind = 'issue'; id = 456; ref = 7; title = 'Synthetic scoped work' }
+            contextPath = $contextPath
+            criteria = @(@{ id = 'criterion-02'; text = 'Preserve an explicit null distinction.' }, @{ id = 'criterion-01'; text = 'Keep the selected ticket identity.' })
+            repository = @{ identity = 'synthetic-repo'; repositoryPath = $packetWorktree; worktreePath = $packetWorktree; branch = 'codex/issue-7-fixture'; baseSha = ('a' * 40) }
+            requiredCommands = @('dotnet test -c Debug')
+            unresolvedRequirements = @()
+            authority = @{ authorizedActions = @('create worker chats'); excludedActions = @('automatic merge') }
+            deadline = @{ startedAtUtc = '2026-09-30T12:00:00Z'; deadlineUtc = '2026-09-30T14:00:00Z'; elapsedBudgetMinutes = 120 }
+            profiles = @{ coordinator = @{ model = 'gpt-6.1-sol'; effort = 'high' }; implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } }
+        }
+        $requestPath = New-InputPath $request 'packet-create'
+        $created = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',$requestPath,'-StateRoot',$packetStateRoot)
+        $packet = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $created.data.packetPath) -AsHashtable -Depth 100
+        Assert-Equal 1 $packet.schemaVersion 'packet schema version'
+        Assert-Equal 'criterion-01' $packet.criteria[0].id 'criteria must be sorted by stable ordinal ID'
+        Assert-Equal 'criterion-02' $packet.criteria[1].id 'all criteria must be retained'
+        Assert-True (Test-Path -LiteralPath $created.data.fullContextPath -PathType Leaf) 'full context must be copied to the durable state root'
+        Assert-Equal $packet.fullContext.sha256 (Get-FileHash -LiteralPath $created.data.fullContextPath -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLowerInvariant() }) 'context artifact hash'
+        $packetText = Get-Content -Raw -LiteralPath $created.data.packetPath
+        Assert-True (-not $packetText.Contains('long-description long-description')) 'packet must reference rather than embed the full context'
+        Assert-True (-not ([IO.Path]::GetFullPath($created.data.packetPath).StartsWith([IO.Path]::GetFullPath($packetWorktree), [StringComparison]::OrdinalIgnoreCase))) 'packet must remain outside source changes'
+        $verified = Invoke-PsJson $script:PacketScript @('-Operation','validate','-PacketPath',$created.data.packetPath,'-ExpectedRunId','run-packet-01','-ExpectedTicketKey','project:123:issue:456','-ExpectedWorktreePath',$packetWorktree)
+        Assert-True $verified.data.valid 'packet should validate against its exact checkout'
+        $wrongCheckout = Invoke-PsJson $script:PacketScript @('-Operation','validate','-PacketPath',$created.data.packetPath,'-ExpectedWorktreePath',$script:FixtureRoot) $false
+        Assert-True (-not $wrongCheckout.ok) 'packet must reject a different checkout binding'
+        $unresolvedRequest = Copy-JsonObject $request; $unresolvedRequest.packetId = 'packet-unresolved'; $unresolvedRequest.unresolvedRequirements = @('Confirm whether the legacy status remains selectable.')
+        $unresolved = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $unresolvedRequest 'packet-unresolved'),'-StateRoot',$packetStateRoot)
+        $unresolvedPacket = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $unresolved.data.packetPath) -AsHashtable -Depth 100
+        Assert-Equal 'Confirm whether the legacy status remains selectable.' $unresolvedPacket.unresolvedRequirements[0] 'unresolved product requirements must be preserved for clarification'
+        $duplicate = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',$requestPath,'-StateRoot',$packetStateRoot) $false
+        Assert-True (-not $duplicate.ok) 'packet IDs must be immutable and not overwritten'
+        $missingCriteria = Copy-JsonObject $request; $missingCriteria.packetId = 'packet-no-criteria'; $missingCriteria.criteria = @()
+        $missing = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $missingCriteria 'packet-missing-criteria'),'-StateRoot',$packetStateRoot) $false
+        Assert-True (-not $missing.ok) 'packet creation must reject missing criteria'
+        $missingTicket = Copy-JsonObject $request; $missingTicket.packetId = 'packet-no-ticket-id'; $null = $missingTicket.ticket.Remove('id')
+        $missingTicketResult = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $missingTicket 'packet-missing-ticket-id'),'-StateRoot',$packetStateRoot) $false
+        Assert-True (-not $missingTicketResult.ok) 'packet creation must reject incomplete ticket scope'
+        $wrongProfile = Copy-JsonObject $request; $wrongProfile.packetId = 'packet-wrong-profile'; $wrongProfile.profiles.reviewer.model = 'gpt-6-sol'
+        $profileResult = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $wrongProfile 'packet-wrong-profile'),'-StateRoot',$packetStateRoot) $false
+        Assert-True (-not $profileResult.ok) 'packet creation must reject a substituted reviewer profile'
+        $missingContext = Copy-JsonObject $request; $missingContext.packetId = 'packet-missing-context'; $missingContext.contextPath = Join-Path $script:FixtureRoot 'inaccessible-context.md'
+        $contextResult = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $missingContext 'packet-missing-context'),'-StateRoot',$packetStateRoot) $false
+        Assert-True (-not $contextResult.ok) 'packet creation must reject inaccessible context'
+        $blockedRoot = Join-Path $script:FixtureRoot 'packet-root-is-a-file'; [IO.File]::WriteAllText($blockedRoot, 'fixture')
+        $inaccessible = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',$requestPath,'-StateRoot',$blockedRoot) $false
+        Assert-True (-not $inaccessible.ok) 'packet creation must reject an inaccessible durable output root'
+        $inaccessiblePacket = Invoke-PsJson $script:PacketScript @('-Operation','validate','-PacketPath',(Join-Path $packetStateRoot 'missing-packet.json')) $false
+        Assert-True (-not $inaccessiblePacket.ok) 'packet validation must reject an inaccessible packet path'
+        $tampered = Copy-JsonObject $packet; $tampered.ticket.title = 'Changed after creation'
+        Write-JsonFile $tampered $created.data.packetPath
+        $tamperedResult = Invoke-PsJson $script:PacketScript @('-Operation','validate','-PacketPath',$created.data.packetPath) $false
+        Assert-True (-not $tamperedResult.ok) 'packet validation must reject edited contents'
     }
 
     Test-Case 'initialize and recover a Unicode state registry' {

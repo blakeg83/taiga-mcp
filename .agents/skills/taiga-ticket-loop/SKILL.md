@@ -23,6 +23,8 @@ the relevant reference before each operation:
   prompts and checkout receipts;
 - [coordinator boundaries](references/coordinator-boundaries.md) for allowed
   inputs, prohibited engineering work, and result routing;
+- [assignment packets](references/assignment-packets.md) for immutable scope
+  files and concise worker handoffs;
 - [review loop](references/review-loop.md) for revision-bound findings and
   correction rounds;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,
@@ -59,6 +61,11 @@ the relevant reference before each operation:
 5. Resolve complete Taiga context and capture a scope hash. For a story, route
    selected child tasks into the story run. For an epic, enumerate every linked
    story and resolve every repository before dispatch.
+   Create the immutable assignment packet after the worktree/base and criteria
+   are known. Resolve every nonempty `unresolvedRequirements` list before
+   dispatch; validate its run/ticket/worktree bindings with
+   `workflow-packet.ps1`, then send workers the absolute packet path/hash, not a
+   copied ticket transcript.
 6. Before each executable ticket, fetch the configured remote under a short
    ref lock, capture the immutable base SHA, create a unique
    `codex/<kind>-<ref>-<slug>-<run-suffix>` branch/worktree, and verify the

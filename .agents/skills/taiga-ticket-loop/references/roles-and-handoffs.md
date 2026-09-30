@@ -7,13 +7,21 @@ absolute checkout, branch, captured base SHA, current HEAD, validation commands,
 and explicit no-subagent/no-independent-write rules.
 
 The coordinator reads ticket scope, repository instructions/configuration,
-Git/provider metadata, worker status, and receipts to route work. It does not
+Git/provider metadata, worker status, receipts, and the immutable assignment
+packet to route work. It does not
 read production source, interpret the diff, run tests/smoke checks, diagnose
 failures, or create technical findings during routine execution. Route failed
 or missing implementation evidence to its producing implementer, changed
 revisions to review, unclear product requirements to the user, and technical
 disagreements to the reviewer before escalating unresolved decisions. The
 [coordinator boundary matrix](coordinator-boundaries.md) defines these cases.
+
+Pass workers the packet's absolute path and hash. The packet carries stable
+criteria, complete-context reference/hash, checkout/base, required commands,
+authority, deadline, and exact profiles. This short prompt is only a file
+reference; it does not remove any requirement. See
+[assignment-packets.md](assignment-packets.md) for packet creation and
+validation.
 
 The Luna implementer loads repository instructions, implements only the
 approved scope, runs the configured checks, updates documentation, and commits

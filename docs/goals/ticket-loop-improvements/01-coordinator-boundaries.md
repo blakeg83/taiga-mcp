@@ -1,6 +1,6 @@
 # 01: Constrain the coordinator to orchestration
 
-Status: in progress; step 1 complete.
+Status: in progress; steps 1–2 complete.
 Prerequisites: None in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -28,13 +28,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 2: Create a minimal assignment packet
 
-- [ ] Build one immutable, versioned scope packet with stable criterion IDs/text, ticket identity, full-context file reference/hash, repository/worktree/base, required repository commands, authority, and deadlines.
-- [ ] Keep the handoff prompt concise; workers can read the packet and relevant repository instructions. Exclude unrelated history and repeated policy text while preserving all material requirements.
-- [ ] Record unresolved product requirements for focused clarification; let the implementer investigate code rather than requiring coordinator confirmation of the defect.
-- [ ] Make the packet file available in the worker's actual checkout/host context; never rely on the initial chat cwd or a disappearing temporary path.
-- [ ] **Validate:** Test complete versus missing scope, stable criterion ordering, long descriptions, exact model/checkout bindings, and inaccessible packet paths.
-- [ ] **Update documentation:** Document packet fields, ownership, and the difference between a concise prompt and omitted requirements.
-- [ ] **Commit before the next step:** `Build compact ticket assignment packets`.
+- [x] Build one immutable, versioned scope packet with stable criterion IDs/text, ticket identity, full-context file reference/hash, repository/worktree/base, required repository commands, authority, and deadlines.
+- [x] Keep the handoff prompt concise; workers can read the packet and relevant repository instructions. Exclude unrelated history and repeated policy text while preserving all material requirements.
+- [x] Record unresolved product requirements for focused clarification; let the implementer investigate code rather than requiring coordinator confirmation of the defect.
+- [x] Make the packet file available in the worker's actual checkout/host context; never rely on the initial chat cwd or a disappearing temporary path.
+- [x] **Validate:** The packet fixture covers complete/missing scope, stable criterion ordering, long context, exact profiles/checkout, immutable contents, and inaccessible context/output paths. The full harness passed 14 fixtures.
+- [x] **Update documentation:** Added the packet contract, linked it from the skill, updated both worker prompts and the operator guide.
+- [x] **Commit before the next step:** `Build compact ticket assignment packets`.
 
 ### Step 3: Align entry preflight with actual integrations
 
@@ -74,7 +74,7 @@ worktree; no unrelated changes).
 
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Exercised all seven documented routing scenarios. `pwsh -NoProfile -File tests/automation/Test-Automation.ps1` passed 13 fixtures; skill `quick_validate.py` passed; `git diff --check` passed. Existing offline review fixtures cover stale SHA and failed checks. | Skill entrypoint, boundary reference, roles/handoffs, worker prompts, operator guide | Recorded in step 2 |
-| 2 | Pending | Pending | Pending |
+| 1 | Exercised all seven documented routing scenarios. `pwsh -NoProfile -File tests/automation/Test-Automation.ps1` passed 13 fixtures; skill `quick_validate.py` passed; `git diff --check` passed. Existing offline review fixtures cover stale SHA and failed checks. | Skill entrypoint, boundary reference, roles/handoffs, worker prompts, operator guide | `f9f3c69a9857b9a24cbd0c690d8b902fecff1ff0` |
+| 2 | Packet fixture covers complete/missing criteria, stable order, long context, exact profiles and checkout, immutable/tamper detection, unresolved requirements, and inaccessible inputs. Full harness passed 14 fixtures; skill validation and `git diff --check` passed. | Skill entrypoint, packet contract, worker prompts, roles/handoffs, operator guide, fixture guide | Recorded in step 3 |
 | 3 | Pending | Pending | Pending |
 | 4 | Pending | Pending | Pending |
