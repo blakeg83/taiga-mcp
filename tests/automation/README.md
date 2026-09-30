@@ -12,6 +12,9 @@ hashing and JSON shape preservation, mandatory CAS/fencing and
 ownership/capacity rules, canonical ticket aliases, v1 registry migration,
 uncertain actions, cursor consumption, quiescent pause/cancel reconciliation,
 session-control fencing, review correction receipts with failed evidence,
+shared versioned review receipt validation, legacy disposition normalization,
+exact packet criterion ordering/text, stale review binding, and field-level
+format errors,
 dependency cycles, epic evidence, fresh-base branch creation, refresh approval
 binding, immutable hash-bound assignment packets and full-context artifacts,
 exact-profile/browser/authority preflight, null-hasMore pagination with

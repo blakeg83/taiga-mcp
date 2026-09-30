@@ -30,11 +30,12 @@ SHA, criteria and task coverage, check exit codes, docs, commits, blockers, and
 scope hash. A no-change result is explicit and cannot fabricate a PR.
 
 The `gpt-6.1-sol`/`high` reviewer inspects the exact implementation checkout and
-`base..HEAD` diff. The prompt requests no source edits and a structured receipt:
+`base..HEAD` diff. The prompt requests no source edits and a structured receipt
+following the shared [review receipt contract](review-receipts.md):
 `pass`, `changes_requested`, or `blocked`, with reviewed SHA, scope/base, all
-criteria/check coverage, stable finding IDs, evidence, severity, and requested
-changes. Prompt text is not an OS read-only guarantee; the coordinator verifies
-the source state before and after review.
+criteria/check coverage, stable finding IDs, evidence, canonical severity and
+disposition, and requested changes. Prompt text is not an OS read-only
+guarantee; the coordinator verifies the source state before and after review.
 
 All corrections are follow-up messages to the same implementation thread. Never
 route a result by title or by a ticket reference in free text alone. Correlate

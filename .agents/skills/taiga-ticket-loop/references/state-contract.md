@@ -43,3 +43,15 @@ rejected for manual recovery rather than silently discarded or replaced by an
 older backup. JSON parse corruption may recover from `.bak`, but migration and
 unsupported-schema errors fail closed. A successful migration is persisted
 during inspection or the next mutation.
+
+## Receipt validation
+
+Review receipts are validated against the shared
+[versioned receipt contract](review-receipts.md), not the registry version.
+For `validate-receipt`, pass `receiptKind: "review"`, the receipt, and
+`expectedCriteria` copied from the validated assignment packet as ordered
+`{ "id", "text" }` objects. Omitting that trusted expected set is an error.
+The helper preserves a source receipt and returns a separately normalized v1
+view plus explicit normalization records for legacy input. Validation errors
+name the failing field so routine formatting repairs do not require source
+inspection.

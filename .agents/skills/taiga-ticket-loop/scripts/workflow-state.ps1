@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:SchemaVersion = 2
 $script:MaxEvents = 200
+. (Join-Path $PSScriptRoot 'receipt-contract.ps1')
 
 function New-UtcStamp { return [DateTime]::UtcNow.ToString('o') }
 
@@ -705,53 +706,17 @@ function Validate-ImplementationReceipt {
     return [ordered]@{ valid = $true; kind = 'implementation'; currentSha = $Receipt.currentSha }
 }
 
-function Validate-ReviewReceipt {
-    param([hashtable] $Receipt)
-    Assert-AllowedKeys $Receipt @('runId','actionId','ticketKey','scopeHash','baseSha','reviewedSha','verdict','findings','criteria','checks','reviewerModel','reviewerEffort') 'review receipt'
-    foreach ($name in @('runId','actionId','ticketKey','scopeHash','baseSha','reviewedSha','verdict')) { Require-String $Receipt $name 'review receipt' | Out-Null }
-    if ($Receipt.verdict -notin @('pass','changes_requested','blocked')) { throw 'Review verdict must be pass, changes_requested, or blocked.' }
-    Require-String $Receipt 'reviewerModel' 'review receipt' | Out-Null; Require-String $Receipt 'reviewerEffort' 'review receipt' | Out-Null
-    if ($Receipt.reviewerModel -ne 'gpt-6.1-sol' -or $Receipt.reviewerEffort -ne 'high') { throw 'Review receipt used an unexpected model or effort.' }
-    if (-not $Receipt.ContainsKey('criteria') -or @($Receipt.criteria).Count -eq 0) { throw 'Review receipt must include at least one criterion result.' }
-    if (-not $Receipt.ContainsKey('checks') -or @($Receipt.checks).Count -eq 0) { throw 'Review receipt must include at least one check result.' }
-    $criterionIds = @{}
-    $criterionFailures = [System.Collections.Generic.List[string]]::new()
-    foreach ($criterion in @($Receipt.criteria)) {
-        if ($criterion -isnot [System.Collections.IDictionary]) { throw 'Each criterion result must be an object.' }
-        $criterionId = Require-String $criterion 'id' 'criterion result'; Require-String $criterion 'evidence' 'criterion result' | Out-Null
-        if (-not $criterion.ContainsKey('passed') -or $criterion.passed -isnot [bool]) { throw "Criterion result has an invalid passed value: $criterionId." }
-        if ($criterion.passed -ne $true) { [void]$criterionFailures.Add($criterionId) }
-        if ($criterionIds.ContainsKey($criterionId)) { throw "Duplicate criterion result: $criterionId." }
-        $criterionIds[$criterionId] = $true
-    }
-    $checkFailures = [System.Collections.Generic.List[string]]::new()
-    foreach ($check in @($Receipt.checks)) {
-        if ($check -isnot [System.Collections.IDictionary]) { throw 'Each check result must be an object.' }
-        $command = Require-String $check 'command' 'check result'; Require-String $check 'evidence' 'check result' | Out-Null
-        $exitCode = Require-NonNegativeInt $check 'exitCode' 'check result'
-        if ($check.ContainsKey('passed') -and $check.passed -isnot [bool]) { throw "Check result has an invalid passed value: $command." }
-        if ($exitCode -ne 0 -or ($check.ContainsKey('passed') -and $check.passed -ne $true)) { [void]$checkFailures.Add($command) }
-    }
-    if (-not $Receipt.ContainsKey('findings')) { throw 'Review receipt must include findings.' }
-    $findingIds = @{}
-    foreach ($finding in @($Receipt.findings)) {
-        if ($finding -isnot [System.Collections.IDictionary]) { throw 'Each finding must be an object.' }
-        $findingId = Require-String $finding 'id' 'finding'; Require-String $finding 'severity' 'finding' | Out-Null; Require-String $finding 'evidence' 'finding' | Out-Null; Require-String $finding 'requestedChange' 'finding' | Out-Null
-        if ($findingIds.ContainsKey($findingId)) { throw "Duplicate finding ID: $findingId." }
-        $findingIds[$findingId] = $true
-    }
-    $blocking = @($Receipt.findings | Where-Object { $_.severity -in @('blocker','critical','high') -and $_.disposition -notin @('fixed','rejected_accepted') })
-    if ($Receipt.verdict -eq 'pass' -and ($criterionFailures.Count -gt 0 -or $checkFailures.Count -gt 0)) { throw 'A passing review must contain only passing criteria and zero-exit checks.' }
-    if ($Receipt.verdict -eq 'pass' -and $blocking.Count -gt 0) { throw 'A passing review cannot retain unresolved blocking findings.' }
-    return [ordered]@{ valid = $true; kind = 'review'; verdict = $Receipt.verdict; reviewedSha = $Receipt.reviewedSha; blockingFindings = $blocking.Count; criterionFailures = $criterionFailures.Count; checkFailures = $checkFailures.Count }
-}
-
 function Invoke-ValidateReceipt {
     param([hashtable] $InputObject)
-    Assert-AllowedKeys $InputObject @('receipt','receiptKind') 'validate-receipt'
+    Assert-AllowedKeys $InputObject @('receipt','receiptKind','expectedCriteria') 'validate-receipt'
     if (-not $InputObject.ContainsKey('receipt') -or $InputObject.receipt -isnot [System.Collections.IDictionary]) { throw 'receipt is required.' }
     $kind = if ($InputObject.ContainsKey('receiptKind')) { [string]$InputObject.receiptKind } elseif ($InputObject.receipt.ContainsKey('verdict')) { 'review' } else { 'implementation' }
-    $result = if ($kind -eq 'review') { Validate-ReviewReceipt $InputObject.receipt } elseif ($kind -eq 'implementation') { Validate-ImplementationReceipt $InputObject.receipt } else { throw 'receiptKind must be implementation or review.' }
+    if ($kind -eq 'review') {
+        $expectedCriteria = if ($InputObject.ContainsKey('expectedCriteria')) { @($InputObject.expectedCriteria) } else { @() }
+        $validation = Get-ReviewReceiptValidation $InputObject.receipt $expectedCriteria
+        if (-not $validation.valid) { throw "Review receipt invalid: $($validation.errors -join '; ')" }
+        $result = $validation
+    } elseif ($kind -eq 'implementation') { $result = Validate-ImplementationReceipt $InputObject.receipt } else { throw 'receiptKind must be implementation or review.' }
     return @{ Data = $result; ReadOnly = $true }
 }
 

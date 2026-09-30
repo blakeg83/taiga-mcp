@@ -96,6 +96,13 @@ changed requirements, or new material PR feedback invalidate approval and
 return through the same implementation/review chats. The default review budget
 is initial round 0 plus three corrections.
 
+Both review helpers use the shared versioned contract in
+`.agents/skills/taiga-ticket-loop/references/review-receipt-v1.schema.json`.
+Expected criteria are compared by packet order, ID, and exact text. Legacy
+`resolved` is normalized to `fixed` only when no unresolved evidence
+contradicts it; the original receipt is preserved and every normalization is
+reported. See the [receipt compatibility reference](../../.agents/skills/taiga-ticket-loop/references/review-receipts.md).
+
 One PR is created or reused per executable leaf/story ticket. PR delivery,
 checks, merge provenance, and Taiga Done are separate facts. Default leaf Done
 requires an observed merge; an epic additionally requires every required story

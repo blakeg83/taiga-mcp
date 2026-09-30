@@ -54,6 +54,20 @@ function New-InputPath {
     return $path
 }
 
+$script:ReviewCriteria = @(@{ id = 'criterion-1'; text = 'Preserve the selected ticket behavior.' })
+
+function New-ReviewReceipt {
+    param([string] $Verdict = 'pass')
+    return @{
+        schemaVersion = 1; kind = 'review'; runId = 'run'; actionId = 'review-0'; ticketKey = 'project:1:issue:1'
+        scopeHash = 'scope'; baseSha = 'base'; reviewedSha = 'head'; verdict = $Verdict
+        reviewerModel = 'gpt-6.1-sol'; reviewerEffort = 'high'
+        criteria = @(@{ id = 'criterion-1'; text = 'Preserve the selected ticket behavior.'; passed = $true; evidence = 'criterion evidence' })
+        checks = @(@{ command = 'test'; exitCode = 0; passed = $true; evidence = 'check evidence' })
+        findings = @()
+    }
+}
+
 function Test-Case {
     param([string] $Name, [scriptblock] $Body)
     try { & $Body; $script:Passed++; Write-Output "PASS $Name" } catch { $script:Failed++; Write-Output "FAIL $Name :: $($_.Exception.Message)" }
@@ -64,18 +78,106 @@ try {
     $stateRoot = Join-Path $script:FixtureRoot 'state with spaces'
     $syntheticPath = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\assets\synthetic-run.json'
 
-    Test-Case 'validate exact reviewer profile' {
-        $result = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-Json','{"receipt":{"runId":"r","actionId":"a","ticketKey":"t","scopeHash":"s","baseSha":"b","reviewedSha":"c","verdict":"pass","reviewerModel":"gpt-6.1-sol","reviewerEffort":"high","findings":[],"criteria":[{"id":"criterion-1","passed":true,"evidence":"fixture"}],"checks":[{"command":"test","exitCode":0,"evidence":"fixture","passed":true}]}}')
-        Assert-True $result.ok 'review receipt should validate'
-        $correction = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-Json','{"receipt":{"runId":"r","actionId":"a","ticketKey":"t","scopeHash":"s","baseSha":"b","reviewedSha":"c","verdict":"changes_requested","reviewerModel":"gpt-6.1-sol","reviewerEffort":"high","findings":[{"id":"F1","severity":"high","evidence":"fixture","requestedChange":"fix"}],"criteria":[{"id":"criterion-1","passed":false,"evidence":"failed fixture"}],"checks":[{"command":"test","exitCode":1,"evidence":"failed fixture","passed":false}]}}')
-        Assert-Equal 1 $correction.data.criterionFailures 'failed criteria should remain review evidence'
-        Assert-Equal 1 $correction.data.checkFailures 'failed checks should remain review evidence'
-        $passingFailure = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-Json','{"receipt":{"runId":"r","actionId":"a","ticketKey":"t","scopeHash":"s","baseSha":"b","reviewedSha":"c","verdict":"pass","reviewerModel":"gpt-6.1-sol","reviewerEffort":"high","findings":[],"criteria":[{"id":"criterion-1","passed":true,"evidence":"fixture"}],"checks":[{"command":"test","exitCode":1,"evidence":"failed fixture","passed":false}]}}') $false
-        Assert-True (-not $passingFailure.ok) 'passing review must reject failed checks'
+    Test-Case 'share versioned receipt schema and legacy compatibility' {
+        $receipt = New-ReviewReceipt
+        $request = @{ receipt = $receipt; expectedCriteria = $script:ReviewCriteria }
+        $stateResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $request 'receipt-v1-state'))
+        Assert-True $stateResult.ok 'state helper should accept canonical v1 receipt'
+        Assert-Equal 1 $stateResult.data.schemaVersion 'state helper should report the shared schema version'
+        $reviewResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $request 'receipt-v1-review'))
+        Assert-True $reviewResult.data.valid 'review helper should accept the same canonical receipt'
+        Assert-Equal 'head' $reviewResult.data.normalizedReceipt.reviewedSha 'review helper should use the shared normalized result'
+
+        $legacy = New-ReviewReceipt
+        $legacy.Remove('schemaVersion'); $legacy.Remove('kind')
+        $legacy.criteria[0].Remove('text')
+        $legacy.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'verified repair'; requestedChange = 'fix'; disposition = 'resolved' })
+        $legacyExpected = @{ receipt = $legacy; expectedCriteria = $script:ReviewCriteria }
+        $legacyResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $legacyExpected 'receipt-legacy-resolved'))
+        Assert-True $legacyResult.ok 'legacy resolved should map to fixed when no conflicting evidence exists'
+        Assert-Equal 'fixed' $legacyResult.data.normalizedReceipt.findings[0].disposition 'legacy alias should be normalized to fixed'
+        Assert-Equal 'resolved' $legacyResult.data.sourceReceipt.findings[0].disposition 'source receipt should remain preserved'
+        Assert-True (@($legacyResult.data.normalizations | Where-Object { $_.from -eq 'resolved' -and $_.to -eq 'fixed' }).Count -eq 1) 'alias normalization should be recorded'
+
+        $contradiction = Copy-JsonObject $legacyExpected
+        $contradiction.receipt.findings[0].status = 'open'
+        $contradictionResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $contradiction 'receipt-resolved-open')) $false
+        Assert-True (-not $contradictionResult.ok) 'resolved alias with open status must be rejected'
+        Assert-True ($contradictionResult.error.message.Contains('findings[0].disposition')) 'contradiction should identify its field'
+
+        $unknownAlias = Copy-JsonObject $request
+        $unknownAlias.receipt.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'fixture'; requestedChange = 'fix'; disposition = 'completed' })
+        $unknownResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $unknownAlias 'receipt-unknown-disposition')) $false
+        Assert-True (-not $unknownResult.ok) 'unknown disposition alias must be rejected'
+        Assert-True ($unknownResult.error.message.Contains('receipt.findings[0].disposition')) 'unknown alias error should identify the field'
+
+        $missing = Copy-JsonObject $request
+        $missing.receipt.criteria = @()
+        $missingResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $missing 'receipt-missing-criterion')) $false
+        Assert-True (-not $missingResult.ok) 'missing expected criterion must not pass'
+        Assert-True ($missingResult.error.message.Contains('criteria')) 'missing criterion error should identify criteria'
+
+        $wrongModel = Copy-JsonObject $request
+        $wrongModel.receipt.reviewerModel = 'gpt-6-sol'
+        $wrongModelResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $wrongModel 'receipt-wrong-model')) $false
+        Assert-True (-not $wrongModelResult.ok) 'wrong exact reviewer model must be rejected'
+
+        $changedMeaning = Copy-JsonObject $request
+        $changedMeaning.receipt.criteria[0].text = 'A different criterion with the same identifier.'
+        $meaningResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $changedMeaning 'receipt-changed-criterion')) $false
+        Assert-True (-not $meaningResult.ok) 'criterion meaning changes must be rejected'
+        Assert-True ($meaningResult.error.message.Contains('criteria[0].text')) 'criterion mismatch should identify its field'
+
+        $orderedExpected = @(
+            @{ id = 'criterion-1'; text = 'Preserve the selected ticket behavior.' }
+            @{ id = 'criterion-2'; text = 'Keep the result bound to the reviewed revision.' }
+        )
+        $orderedReceipt = New-ReviewReceipt
+        $orderedReceipt.criteria += @{ id = 'criterion-2'; text = 'Keep the result bound to the reviewed revision.'; passed = $true; evidence = 'sha-bound evidence' }
+        $orderedRequest = @{ receipt = $orderedReceipt; expectedCriteria = $orderedExpected }
+        $orderedValid = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $orderedRequest 'receipt-ordered-criteria'))
+        Assert-True $orderedValid.data.valid 'the full packet criterion sequence should validate'
+        $reordered = Copy-JsonObject $orderedRequest
+        $reordered.receipt.criteria = @($reordered.receipt.criteria[1], $reordered.receipt.criteria[0])
+        $reorderedResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $reordered 'receipt-reordered-criteria')) $false
+        Assert-True (-not $reorderedResult.ok) 'criterion order changes must be rejected'
+        Assert-True ($reorderedResult.error.message.Contains('criteria[0].id')) 'order mismatch should identify the criterion position'
+
+        $unbound = @{ receipt = $receipt }
+        $unboundResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $unbound 'receipt-unbound-criteria')) $false
+        Assert-True (-not $unboundResult.ok) 'review receipt without a trusted expected criterion set must be rejected'
+
+        $v1Resolved = Copy-JsonObject $request
+        $v1Resolved.receipt.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'fixture'; requestedChange = 'fix'; disposition = 'resolved' })
+        $v1ResolvedResult = Invoke-PsJson $script:ReviewScript @('-Operation','validate','-InputPath',(New-InputPath $v1Resolved 'receipt-v1-resolved')) $false
+        Assert-True (-not $v1ResolvedResult.ok) 'canonical v1 receipts cannot use the legacy resolved alias'
+
+        $passingOpenFinding = Copy-JsonObject $request
+        $passingOpenFinding.receipt.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'fixture'; requestedChange = 'fix'; disposition = 'open' })
+        $openResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $passingOpenFinding 'receipt-pass-open-high')) $false
+        Assert-True (-not $openResult.ok) 'passing receipt with a genuinely open high finding must fail'
+
         $badConfig = @{ sessionId = 'wrong-profile'; coordinator = @{ threadId = 't'; hostId = 'local' }; config = @{ reviewerProfile = @{ model = 'gpt-6-sol'; effort = 'high' } } }
         $badPath = New-InputPath $badConfig 'bad-profile'
         $bad = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$badPath,'-StateRoot',(Join-Path $script:FixtureRoot 'bad-profile')) $false
         Assert-True (-not $bad.ok) 'unsupported reviewer profile must be rejected'
+    }
+
+    Test-Case 'preserve failed review criteria and checks as correction evidence' {
+        $correction = New-ReviewReceipt 'changes_requested'
+        $correction.schemaVersion = 1
+        $correction.criteria[0].passed = $false
+        $correction.checks[0].exitCode = 1
+        $correction.checks[0].passed = $false
+        $correction.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'fixture'; requestedChange = 'fix'; disposition = 'open' })
+        $request = @{ receipt = $correction; expectedCriteria = $script:ReviewCriteria }
+        $result = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $request 'receipt-correction-evidence'))
+        Assert-Equal 1 $result.data.criterionFailureCount 'failed criteria should remain review evidence'
+        Assert-Equal 1 $result.data.checkFailureCount 'failed checks should remain review evidence'
+        $passingFailure = Copy-JsonObject $request
+        $passingFailure.receipt.verdict = 'pass'
+        $passingResult = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath $passingFailure 'receipt-pass-failed-check')) $false
+        Assert-True (-not $passingResult.ok) 'passing review must reject failed checks'
     }
 
     Test-Case 'create immutable scope packets bound to context and checkout' {
@@ -379,8 +481,9 @@ try {
     }
 
     Test-Case 'bound review corrections and reject stale approvals' {
-        $receipt = @{ runId = 'run'; actionId = 'review-0'; ticketKey = 'project:1:issue:1'; scopeHash = 'scope'; baseSha = 'base'; reviewedSha = 'head'; verdict = 'changes_requested'; reviewerModel = 'gpt-6.1-sol'; reviewerEffort = 'high'; findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'fixture'; requestedChange = 'fix' }); criteria = @(@{ id = 'criterion-1'; passed = $true; evidence = 'criterion evidence' }); checks = @(@{ command = 'test'; exitCode = 0; passed = $true; evidence = 'check evidence' }) }
-        $request = @{ receipt = $receipt; currentSha = 'head'; currentScopeHash = 'scope'; currentBaseSha = 'base'; expectedRunId = 'run'; expectedActionId = 'review-0'; expectedTicketKey = 'project:1:issue:1'; expectedCriteriaIds = @('criterion-1'); correctionRound = 0; maxCorrectionRounds = 3; remainingMinutes = 10 }
+        $receipt = New-ReviewReceipt 'changes_requested'
+        $receipt.findings = @(@{ id = 'F1'; severity = 'high'; evidence = 'fixture'; requestedChange = 'fix'; disposition = 'open' })
+        $request = @{ receipt = $receipt; expectedCriteria = $script:ReviewCriteria; currentSha = 'head'; currentScopeHash = 'scope'; currentBaseSha = 'base'; expectedRunId = 'run'; expectedActionId = 'review-0'; expectedTicketKey = 'project:1:issue:1'; correctionRound = 0; maxCorrectionRounds = 3; remainingMinutes = 10 }
         $correct = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $request 'review-correct'))
         Assert-Equal 'correct' $correct.data.decision 'changes requested should route to same worker'
         $exhausted = $request.Clone(); $exhausted.correctionRound = 3
@@ -392,13 +495,13 @@ try {
         $mismatched = $request.Clone(); $mismatched.expectedRunId = 'other-run'
         $mismatchedResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $mismatched 'review-mismatched'))
         Assert-Equal 'stale_or_mismatched_review_input' $mismatchedResult.data.reason 'receipt identity must bind to the expected run'
-        $failedCriteria = $request.Clone(); $failedCriteria.receipt = $receipt.Clone(); $failedCriteria.receipt.criteria = @(@{ id = 'criterion-1'; passed = $false; evidence = 'failed fixture' })
+        $failedCriteria = Copy-JsonObject $request; $failedCriteria.receipt.criteria[0].passed = $false; $failedCriteria.receipt.criteria[0].evidence = 'failed fixture'
         $failedCriteriaResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $failedCriteria 'review-failed-criteria'))
         Assert-Equal 'correct' $failedCriteriaResult.data.decision 'failed criteria should route a correction'
-        $failedCheck = $request.Clone(); $failedCheck.receipt = $receipt.Clone(); $failedCheck.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
+        $failedCheck = Copy-JsonObject $request; $failedCheck.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
         $failedCheckResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $failedCheck 'review-failed-check'))
         Assert-Equal 'correct' $failedCheckResult.data.decision 'failed checks should route a correction'
-        $passingFailure = $request.Clone(); $passingFailure.receipt = $receipt.Clone(); $passingFailure.receipt.verdict = 'pass'; $passingFailure.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
+        $passingFailure = Copy-JsonObject $request; $passingFailure.receipt.verdict = 'pass'; $passingFailure.receipt.checks = @(@{ command = 'test'; exitCode = 1; evidence = 'failed fixture'; passed = $false })
         $passingFailureResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $passingFailure 'review-passing-failure')) $false
         Assert-True (-not $passingFailureResult.ok) 'a pass with failed checks must remain blocked'
     }

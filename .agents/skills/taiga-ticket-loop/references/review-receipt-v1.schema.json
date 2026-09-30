@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://taigamcp.local/schemas/review-receipt-v1.schema.json",
+  "title": "Taiga ticket loop review receipt v1",
+  "type": "object",
+  "$defs": {
+    "verdict": { "type": "string", "enum": ["pass", "changes_requested", "blocked"] },
+    "severity": { "type": "string", "enum": ["blocker", "critical", "high", "medium", "low", "info"] },
+    "disposition": { "type": "string", "enum": ["open", "fixed", "rejected_accepted", "escalated"] },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "runId", "actionId", "ticketKey", "scopeHash", "baseSha", "reviewedSha", "verdict", "reviewerModel", "reviewerEffort", "criteria", "checks", "findings"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "const": 1 },
+        "kind": { "type": "string", "const": "review" },
+        "runId": { "type": "string", "minLength": 1 },
+        "actionId": { "type": "string", "minLength": 1 },
+        "ticketKey": { "type": "string", "minLength": 1 },
+        "scopeHash": { "type": "string", "minLength": 1 },
+        "baseSha": { "type": "string", "minLength": 1 },
+        "reviewedSha": { "type": "string", "minLength": 1 },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "reviewerModel": { "type": "string", "const": "gpt-6.1-sol" },
+        "reviewerEffort": { "type": "string", "const": "high" },
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "text", "passed", "evidence"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "text": { "type": "string", "minLength": 1 },
+              "passed": { "type": "boolean" },
+              "evidence": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command", "exitCode", "evidence"],
+            "properties": {
+              "command": { "type": "string", "minLength": 1 },
+              "exitCode": { "type": "integer", "minimum": 0 },
+              "evidence": { "type": "string", "minLength": 1 },
+              "passed": { "type": "boolean" }
+            }
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "severity", "evidence", "requestedChange", "disposition"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "severity": { "$ref": "#/$defs/severity" },
+              "evidence": { "type": "string", "minLength": 1 },
+              "requestedChange": { "type": "string", "minLength": 1 },
+              "disposition": { "$ref": "#/$defs/disposition" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [{ "$ref": "#/$defs/review" }]
+}

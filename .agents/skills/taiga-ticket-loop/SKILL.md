@@ -29,6 +29,8 @@ the relevant reference before each operation:
   capability, exact profile, browser, and authorization blockers;
 - [review loop](references/review-loop.md) for revision-bound findings and
   correction rounds;
+- [review receipt contract](references/review-receipts.md) for the shared
+  versioned schema and legacy compatibility adapter;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,
   status mapping, branch, provider, and merge evidence;
 - [scheduling and epics](references/scheduling-and-epics.md) for concurrency,

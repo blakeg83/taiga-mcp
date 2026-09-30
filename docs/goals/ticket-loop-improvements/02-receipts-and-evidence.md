@@ -1,6 +1,6 @@
 # 02: Make receipts deterministic and evidence durable
 
-Status: planned; all steps pending.
+Status: step 1 implemented offline; steps 2–4 pending.
 Prerequisites: 01 in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -18,13 +18,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 1: Unify the receipt contract
 
-- [ ] Replace duplicated receipt validation with one versioned contract used by both helpers and generated worker templates. Include exact verdict, severity, disposition, criterion, run/action, SHA, and profile fields.
-- [ ] Choose canonical disposition values; support legacy resolved as an explicitly documented alias for fixed only when no contradictory unresolved evidence exists. Preserve the original receipt and record normalization.
-- [ ] Validate the entire expected criterion set and stable meaning/order. A structurally valid but incomplete receipt must not become a pass.
-- [ ] Return compact field-level errors. Require no source inspection from the coordinator to diagnose a format problem.
-- [ ] **Validate:** Reproduce the audited resolved/fixed failure synthetically; test unknown aliases, missing criteria, wrong model, stale SHA, contradiction, and both helper entry points.
-- [ ] **Update documentation:** Publish one schema reference and compatibility examples.
-- [ ] **Commit before the next step:** `Unify ticket-loop receipt validation`.
+- [x] Replace duplicated review receipt validation with one versioned contract used by both helpers and the reviewer handoff template. Include exact verdict, severity, disposition, criterion, run/action, SHA, and profile fields.
+- [x] Choose canonical disposition values; support legacy resolved as an explicitly documented alias for fixed only when no contradictory unresolved evidence exists. Preserve the original receipt and record normalization.
+- [x] Validate the entire expected criterion set and stable meaning/order. A structurally valid but incomplete receipt must not become a pass.
+- [x] Return compact field-level errors. Require no source inspection from the coordinator to diagnose a format problem.
+- [x] **Validate:** Reproduced the resolved/fixed mismatch; tested unknown aliases, missing/unbound/reordered criteria, wrong model, stale SHA, contradictory status, and both helper entry points. The full harness passed 17 fixtures.
+- [x] **Update documentation:** Published the v1 JSON Schema, shared compatibility reference, prompt and operator updates.
+- [x] **Commit before the next step:** `Unify ticket-loop receipt validation`.
 
 ### Step 2: Capture evidence once and generate metadata
 
@@ -71,7 +71,7 @@ gates unchecked; record deviations and blockers below the table.
 
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
-| 1 | Pending | Pending | Pending |
+| 1 | The shared v1 validator reproduced the legacy enum mismatch and covers alias normalization, contradiction rejection, exact profile, complete ordered criteria, failed evidence, and stale SHA. `Test-Automation.ps1` passed 17 fixtures; skill validator and `git diff --check` passed. | Review receipt schema/reference, both helper entry points, reviewer prompt, review loop, skill entry, operator guide | Recorded in step 2 |
 | 2 | Pending | Pending | Pending |
 | 3 | Pending | Pending | Pending |
 | 4 | Pending | Pending | Pending |

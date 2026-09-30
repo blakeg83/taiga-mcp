@@ -70,7 +70,7 @@ Read [execution instructions](execution-instructions.md) before implementing.
 | Goal | Deliverable | Depends on | Status |
 | --- | --- | --- | --- |
 | [01: Coordinator boundaries](01-coordinator-boundaries.md) | Minimal context packet, explicit role limits, routing scenarios. | None | Implemented offline; actual-host behavior pending |
-| [02: Receipt and evidence contracts](02-receipts-and-evidence.md) | Shared schema, immutable evidence references, bounded format repair. | 01 | Pending |
+| [02: Receipt and evidence contracts](02-receipts-and-evidence.md) | Shared schema, immutable evidence references, bounded format repair. | 01 | In progress; step 1 complete offline |
 | [03: Scripted coordination and quiet waits](03-coordination-and-waits.md) | High-level local operations, recovery-safe handoffs, minimal observation. | 01–02 | Pending |
 | [04: Worker-owned verification](04-worker-verification.md) | Verification handoff, evidence reuse, optional repository smoke entry point. | 01–03 | Pending |
 | [05: Measurement that distinguishes usage from cost](05-measurement.md) | Phase timing, model-aware usage, optional sourced estimates. | 02–04 | Pending |
@@ -78,7 +78,8 @@ Read [execution instructions](execution-instructions.md) before implementing.
 
 Six goals, four ordered steps each: 24 implementation checkpoints. Every step
 requires validation, documentation updates, and a separate commit before the
-next step. Goal 01's four checkpoints are complete; 20 later checkpoints remain.
+next step. Goal 01's four checkpoints and Goal 02 step 1 are complete offline;
+19 later checkpoints remain.
 
 ## Release acceptance
 
