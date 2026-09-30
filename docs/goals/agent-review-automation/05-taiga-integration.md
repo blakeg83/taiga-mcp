@@ -1,6 +1,6 @@
 # Goal 05: Connect the loop to existing Taiga tools
 
-Status: not started.
+Status: implemented offline; Taiga context/status/write-reconciliation fixtures pass and the 35-tool MCP surface is unchanged.
 
 ## Objective
 
