@@ -33,7 +33,7 @@ limitations describe that earlier work, not the current release. This
 documentation reconciliation checked source, schemas described in the reference,
 and links; it did not rerun application tests or validate a live deployment.
 
-For the separately planned coordinator skill/helper, see [agent implementation and review automation](goals/agent-review-automation/README.md). Its nine goals cover concurrent ordinary chats, fresh-base feature branches, reviewed PR delivery, and story/epic acceptance. It consumes existing Taiga MCP tools and runs outside the .NET server; no automation has been implemented or activated by those plans.
+For the repo-local coordinator skill/helper, see [agent implementation and review automation](goals/agent-review-automation/README.md) and the [automation operator guide](automation/README.md). Its nine goals cover concurrent ordinary chats, fresh-base feature branches, reviewed PR delivery, and story/epic acceptance. The offline helper/fixtures are implemented outside the .NET server; no operational chats, schedules, live Taiga writes, pushes, PRs, or merges were activated.
 
 ## Verified cleanup baseline (2026-09-28)
 

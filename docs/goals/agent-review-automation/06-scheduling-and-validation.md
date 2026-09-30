@@ -1,6 +1,6 @@
 # Goal 06: Add scheduled recovery and validate the core workflow
 
-Status: not started.
+Status: implemented offline; actual host heartbeat/chat smoke is pending and was not authorized by this implementation request.
 
 ## Objective
 
@@ -83,4 +83,4 @@ Record deviations, blockers, and unverified behavior below; do not replace missi
 
 The following is a future user instruction, not authorization granted by this document:
 
-> Run goal 06's local smoke exercise. Create ordinary implementation and reviewer chats using the configured Luna 5.6 xhigh and selected Sol 6 high or Astra medium profiles, in the disposable fixture project. You may coordinate messages between those chats and create a temporary heartbeat in this coordinator chat. Use only synthetic ticket data and the fake Taiga adapter. Exercise one correction/re-review cycle, then disable the heartbeat and report evidence. Do not use subagents or modify live Taiga data.
+> Run goal 06's local smoke exercise. Create ordinary implementation and reviewer chats using the configured gpt-5.6-luna/xhigh and exact gpt-6.1-sol/high profiles, in the disposable fixture project. You may coordinate messages between those chats and create a temporary heartbeat in this coordinator chat. Use only synthetic ticket data and the fake Taiga adapter. Exercise one correction/re-review cycle, then disable the heartbeat and report evidence. Do not use subagents or modify live Taiga data.

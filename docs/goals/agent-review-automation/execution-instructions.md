@@ -1,6 +1,6 @@
 # Execution instructions
 
-Status: instructions for future implementation. This documentation task does not implement or activate the workflow.
+Status: implementation guidance and evidence policy. The repo-local workflow is implemented offline; this document still does not authorize operational chats, schedules, live Taiga writes, pushes, PRs, or merges.
 
 ## Prerequisites
 
