@@ -1,6 +1,6 @@
 # 01: Constrain the coordinator to orchestration
 
-Status: in progress; steps 1–2 complete.
+Status: in progress; steps 1–3 complete.
 Prerequisites: None in this batch and [execution instructions](execution-instructions.md).
 
 ## Objective
@@ -38,13 +38,13 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 3: Align entry preflight with actual integrations
 
-- [ ] Separate capability/configuration checks from code investigation. Verify named profiles and supported browser capability without requiring the coordinator to perform a browser smoke test.
-- [ ] Normalize supported Taiga pagination using documented authoritative evidence, including trustworthy totals where sufficient. Unknown or contradictory evidence remains incomplete; do not coerce null into false.
-- [ ] Preserve explicit scope authorization and ask only for genuinely missing scope, authority, or requirements. Avoid recurring compatibility exceptions when the adapter can decide safely.
-- [ ] Replace stale hard-coded host availability claims with dated historical evidence and per-run capability discovery.
-- [ ] **Validate:** Cover null has_more with complete/incomplete totals, duplicate pages, contradictory metadata, unavailable exact profile, available equivalent browser capability, and missing operational authority.
-- [ ] **Update documentation:** Update preflight troubleshooting and resource-specific pagination rules without changing MCP response contracts.
-- [ ] **Commit before the next step:** `Resolve routine preflight compatibility locally`.
+- [x] Separate capability/configuration checks from code investigation. Verify named profiles and supported browser capability without requiring the coordinator to perform a browser smoke test.
+- [x] Normalize supported Taiga pagination using documented authoritative evidence, including trustworthy totals where sufficient. Unknown or contradictory evidence remains incomplete; do not coerce null into false.
+- [x] Preserve explicit scope authorization and ask only for genuinely missing scope, authority, or requirements. Avoid recurring compatibility exceptions when the adapter can decide safely.
+- [x] Replace stale hard-coded host availability claims with dated historical evidence and per-run capability discovery.
+- [x] **Validate:** `Test-Automation.ps1` passed 15 fixtures covering null has_more with complete/incomplete totals, duplicate pages, contradictory metadata, unavailable exact profile, an equivalent available browser, and missing operational authority. Skill validation and `git diff --check` passed.
+- [x] **Update documentation:** Updated host preflight, troubleshooting, and resource pagination guidance. MCP response contracts were not changed.
+- [x] **Commit before the next step:** `Resolve routine preflight compatibility locally`.
 
 ### Step 4: Verify coordinator-only scenarios
 
@@ -75,6 +75,6 @@ worktree; no unrelated changes).
 | Step | Result and validation evidence | Documentation updated | Commit |
 | --- | --- | --- | --- |
 | 1 | Exercised all seven documented routing scenarios. `pwsh -NoProfile -File tests/automation/Test-Automation.ps1` passed 13 fixtures; skill `quick_validate.py` passed; `git diff --check` passed. Existing offline review fixtures cover stale SHA and failed checks. | Skill entrypoint, boundary reference, roles/handoffs, worker prompts, operator guide | `f9f3c69a9857b9a24cbd0c690d8b902fecff1ff0` |
-| 2 | Packet fixture covers complete/missing criteria, stable order, long context, exact profiles and checkout, immutable/tamper detection, unresolved requirements, and inaccessible inputs. Full harness passed 14 fixtures; skill validation and `git diff --check` passed. | Skill entrypoint, packet contract, worker prompts, roles/handoffs, operator guide, fixture guide | Recorded in step 3 |
-| 3 | Pending | Pending | Pending |
+| 2 | Packet fixture covers complete/missing criteria, stable order, long context, exact profiles and checkout, immutable/tamper detection, unresolved requirements, and inaccessible inputs. Full harness passed 14 fixtures; skill validation and `git diff --check` passed. | Skill entrypoint, packet contract, worker prompts, roles/handoffs, operator guide, fixture guide | `87a8acc9b337346ccc0d474a9f7f7322c91558a8` |
+| 3 | Full harness passed 15 fixtures, including complete/incomplete totals with null flags, ambiguous null headers, duplicate/contradictory pages, exact profile, equivalent browser capability, and missing authority. Official Taiga pagination headers checked; skill validation and `git diff --check` passed. | Preflight helper, host/troubleshooting references, Taiga Git/PR guidance, operator guide, historical host record, fixture guide | Recorded in step 4 |
 | 4 | Pending | Pending | Pending |

@@ -25,6 +25,8 @@ the relevant reference before each operation:
   inputs, prohibited engineering work, and result routing;
 - [assignment packets](references/assignment-packets.md) for immutable scope
   files and concise worker handoffs;
+- [preflight troubleshooting](references/preflight-troubleshooting.md) for
+  capability, exact profile, browser, and authorization blockers;
 - [review loop](references/review-loop.md) for revision-bound findings and
   correction rounds;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,

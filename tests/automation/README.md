@@ -14,4 +14,6 @@ uncertain actions, cursor consumption, quiescent pause/cancel reconciliation,
 session-control fencing, review correction receipts with failed evidence,
 dependency cycles, epic evidence, fresh-base branch creation, refresh approval
 binding, immutable hash-bound assignment packets and full-context artifacts,
-and a verified local push. A nonzero exit code means a fixture failed.
+exact-profile/browser/authority preflight, null-hasMore pagination with
+authoritative totals, duplicate/contradictory page rejection, and a verified
+local push. A nonzero exit code means a fixture failed.

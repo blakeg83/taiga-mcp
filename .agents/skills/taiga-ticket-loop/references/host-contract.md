@@ -1,35 +1,49 @@
 # Host contract
 
-The coordinator must inspect the current host tools before an operational run.
-The planning host exposes ordinary local/project chat creation, explicit model
-and effort fields, follow-up messaging, bounded result waits, managed
-worktrees, heartbeat updates, project lookup, and PR artifact attachment.
-Those schemas establish availability, not successful execution.
+Inspect current host tool schemas and configuration before an operational run.
+Record the requested and observed coordinator profile, exact worker profiles,
+ordinary chat creation/messaging, bounded waits, managed worktrees, any required
+browser capability, heartbeat support, Git, and the selected Taiga/GitHub
+providers. Tool schemas establish capability availability, not successful
+execution. This preflight is metadata/configuration work; it does not include
+source investigation or a browser smoke test by the coordinator.
 
-The required profiles are exact:
+The required worker profiles are exact:
 
 | Role | Model | Effort |
 | --- | --- | --- |
 | implementer | `gpt-5.6-luna` | `xhigh` |
 | reviewer | `gpt-6.1-sol` | `high` |
 
-Record requested and observed settings separately. Do not substitute another
-profile when one is missing. The current planning host exposes
-`gpt-6-sol/high` and `gpt-6-astra/medium`, but not the requested
-`gpt-6.1-sol/high`; until the host advertises the requested identifier, an
-operational run must stop with an unavailable-profile report. `create_thread`
-may return a pending
-`clientThreadId`; only a resolved real `threadId` may be messaged or used as a
-worker receipt. Use `wait_threads` cursors; timeout, commentary, and idle are
-not completion.
+Preserve the user's selected coordinator profile. Verify both worker
+combinations from the current host's advertised model/effort options. If an
+exact profile is unavailable, report that blocker and stop the dependent worker
+dispatch; do not substitute a similar model or effort. `create_thread` may
+return a pending `clientThreadId`; only a resolved `threadId` can be messaged or
+used as a worker receipt. Use `wait_threads` cursors; timeout, commentary, and
+idle are not completion.
 
-Host preflight also records PowerShell, Git, the configured remote/base, and
-GitHub CLI or connector access without printing credentials. A missing desktop,
-schedule, worktree, or provider capability produces a capability report and
-blocks only the dependent operation. No subagent or private app API is a
-compatible fallback.
+Earlier records are dated snapshots, not current capabilities: the planning
+host did not advertise the requested reviewer on 2026-09-29, while the
+2026-09-30 trial record reports it on a different host. Re-check the actual
+host for every run. See [preflight troubleshooting](preflight-troubleshooting.md)
+for capability, profile, and authorization routes.
 
-Authorization is scoped and durable for the run: selected chat creation/reuse
-and messaging, worktree/branch creation, Taiga writes, push/PR creation or
-updates, and optional heartbeat/merge observation. It never includes automatic
-merge, force-push, deployment, or unrelated conversations.
+For a browser-dependent repository check, require a supported visible browser
+provider from the actual host. Any equivalent supported provider such as the
+in-app browser, Chrome, or Edge satisfies the capability check; the worker then
+performs the required interaction and returns evidence. The coordinator does
+not open pages or claim a smoke test merely because the provider is available.
+
+The local `workflow-preflight.ps1` helper evaluates a coordinator-supplied
+snapshot of observed profiles/capabilities, repository requirements, selected
+ticket, and explicit user authorization. It does not query private desktop
+APIs, call providers, or authorize actions. Missing optional capabilities block
+only operations that require them. Missing ticket scope, user authority, or
+material product requirements remain focused user questions.
+
+Authorization is scoped to the selected run and ticket/epic. The standard
+profile may authorize selected worker chats, worktree/branch creation, Taiga
+writes, reviewed push/PR delivery, PR attachment, and one coordinator
+heartbeat. It never authorizes automatic merge, force-push, deployment, or
+unrelated conversations.

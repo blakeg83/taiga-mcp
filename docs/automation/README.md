@@ -49,10 +49,11 @@ remain off. The full copyable template is in
 `.agents/skills/taiga-ticket-loop/assets/operational-invocation-template.md`.
 
 The implementer is exactly `gpt-5.6-luna` with `xhigh`. The reviewer is exactly
-`gpt-6.1-sol` with `high`. The original planning host did not advertise the
-requested reviewer; the supplied 2026-09-30 trial records show that profile
-running on the trial host. Check actual availability for each run and stop if
-the requested profile is unavailable. No silent fallback is allowed.
+`gpt-6.1-sol` with `high`. Historical records differ by host: the planning host
+did not advertise the reviewer on 2026-09-29, while the 2026-09-30 trial record
+reports it on another host. Check exact model/effort availability on the
+current host for each run and stop if a requested profile is unavailable. Do
+not silently fall back. The coordinator preserves the user's selected profile.
 
 ## State and recovery
 
@@ -132,6 +133,12 @@ hash; unresolved product requirements block dispatch until the user clarifies
 them. The prompt stays short because the worker reads the complete packet and
 its repository instructions directly. See the skill's
 [assignment packet contract](../../.agents/skills/taiga-ticket-loop/references/assignment-packets.md).
+
+Preflight checks only current host capability metadata, configured repository
+requirements, and explicit authority. It accepts any supported visible-browser
+provider when a repository requires browser work; the implementer runs the
+required interaction. See the skill's
+[preflight troubleshooting](../../.agents/skills/taiga-ticket-loop/references/preflight-troubleshooting.md).
 
 ## Recovery commands
 

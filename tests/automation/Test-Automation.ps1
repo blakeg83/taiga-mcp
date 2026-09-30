@@ -7,6 +7,7 @@ $script:StateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket
 $script:GitScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-git.ps1'
 $script:PlanScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-plan.ps1'
 $script:PacketScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-packet.ps1'
+$script:PreflightScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-preflight.ps1'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
@@ -137,6 +138,32 @@ try {
         Write-JsonFile $tampered $created.data.packetPath
         $tamperedResult = Invoke-PsJson $script:PacketScript @('-Operation','validate','-PacketPath',$created.data.packetPath) $false
         Assert-True (-not $tamperedResult.ok) 'packet validation must reject edited contents'
+    }
+
+    Test-Case 'preflight exact profiles, equivalent browser capability, and authority' {
+        $ticketKey = 'project:123:issue:456'
+        $preflight = @{
+            schemaVersion = 1; selectedTicketKey = $ticketKey
+            profiles = @{ coordinator = @{ model = 'gpt-6.1-sol'; effort = 'high' }; implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } }
+            observedCoordinatorProfile = @{ model = 'gpt-6.1-sol'; effort = 'high' }
+            availableProfiles = @(@{ model = 'gpt-5.6-luna'; efforts = @('xhigh') }, @{ model = 'gpt-6.1-sol'; efforts = @('high') })
+            capabilities = @{ ordinaryChats = $true; workerMessaging = $true; boundedWait = $true; managedWorktrees = $true; browserProviders = @('edge') }
+            requiredCapabilities = @('ordinaryChats','workerMessaging','boundedWait','managedWorktrees','browser')
+            authorization = @{ granted = $true; ticketKey = $ticketKey; authorizedActions = @('createOrReuseChats','messageWorkers','createWorktrees','writeTaiga','pushAndCreatePr') }
+            requiredActions = @('createOrReuseChats','messageWorkers','createWorktrees','writeTaiga','pushAndCreatePr')
+        }
+        $ready = Invoke-PsJson $script:PreflightScript @('-Operation','validate','-InputPath',(New-InputPath $preflight 'preflight-ready'))
+        Assert-True $ready.data.ready 'available exact profiles and required capabilities should pass preflight'
+        Assert-Equal 'edge' $ready.data.browserCapability.providers[0] 'an equivalent available browser should satisfy the generic browser requirement'
+        Assert-True (-not $ready.data.browserCapability.smokeTestPerformed) 'coordinator preflight must not run a browser smoke test'
+        $unavailableProfile = Copy-JsonObject $preflight; $unavailableProfile.availableProfiles = @(@{ model = 'gpt-5.6-luna'; efforts = @('xhigh') })
+        $unavailable = Invoke-PsJson $script:PreflightScript @('-Operation','validate','-InputPath',(New-InputPath $unavailableProfile 'preflight-profile-unavailable'))
+        Assert-True (-not $unavailable.data.ready) 'an unavailable exact reviewer profile must block without fallback'
+        Assert-Equal 'exact_profile_unavailable' $unavailable.data.blockers[0].category 'missing exact profile reason'
+        $missingAuthority = Copy-JsonObject $preflight; $null = $missingAuthority.Remove('authorization')
+        $authorityResult = Invoke-PsJson $script:PreflightScript @('-Operation','validate','-InputPath',(New-InputPath $missingAuthority 'preflight-authority'))
+        Assert-True (-not $authorityResult.data.ready) 'missing operational authority must block the requested actions'
+        Assert-Equal 5 $authorityResult.data.missingAuthorizedActions.Count 'all missing external actions should be reported'
     }
 
     Test-Case 'initialize and recover a Unicode state registry' {
@@ -341,9 +368,32 @@ try {
         $unknown = $context.Clone(); $unknown.commentPages = @(@{ page = 1 })
         $unknownResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $unknown 'taiga-unknown')) $false
         Assert-True (-not $unknownResult.ok) 'unknown pagination must be incomplete'
+        $unknownNull = $context.Clone(); $unknownNull.commentPages = @(@{ page = 1; has_more = $null; next_page = $null; total = $null; items = @() })
+        $unknownNullResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $unknownNull 'taiga-unknown-null')) $false
+        Assert-True (-not $unknownNullResult.ok) 'null has_more and next_page without totals must remain unknown'
+        $observedTerminal = $context.Clone(); $observedTerminal.commentPages = @(@{ page = 1; has_more = $null; next_page = $null; next_page_known = $true })
+        $observedTerminalResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $observedTerminal 'taiga-observed-terminal'))
+        Assert-Equal 'next_page' $observedTerminalResult.data.pagination.comments.basis 'only an observed null next-page source can prove terminal state'
         $incomplete = $context.Clone(); $incomplete.commentPages = @(@{ page = 1; hasMore = $true; nextPage = 2 })
         $incompleteResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $incomplete 'taiga-incomplete')) $false
         Assert-True (-not $incompleteResult.ok) 'hasMore=true without a captured next page must be incomplete'
+        $totalsComplete = $context.Clone(); $totalsComplete.commentPages = @(@{ page = 1; hasMore = $null; nextPage = 2; totalCount = 12; pageSize = 10; itemCount = 10 }, @{ page = 2; hasMore = $null; nextPage = $null; totalCount = 12; pageSize = 10; itemCount = 2 })
+        $totalsResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $totalsComplete 'taiga-total-complete'))
+        Assert-Equal 'authoritative_total_count' $totalsResult.data.pagination.comments.basis 'complete totals should resolve null hasMore'
+        Assert-Equal 12 $totalsResult.data.pagination.comments.totalCount 'captured trustworthy total'
+        $envelopeTotals = $context.Clone(); $envelopeTotals.commentPages = @(@{ page = 1; has_more = $null; next_page = 2; total = 3; items = @(@{ id = 31 }, @{ id = 32 }) }, @{ page = 2; has_more = $null; next_page = $null; total = 3; items = @(@{ id = 33 }) })
+        $envelopeResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $envelopeTotals 'taiga-envelope-totals'))
+        Assert-Equal 'authoritative_total_count' $envelopeResult.data.pagination.comments.basis 'MCP page-envelope names should normalize to authoritative total evidence'
+        Assert-Equal 3 $envelopeResult.data.pagination.comments.totalCount 'page-envelope total'
+        $totalsIncomplete = $context.Clone(); $totalsIncomplete.commentPages = @(@{ page = 1; hasMore = $null; nextPage = $null; totalCount = 12; pageSize = 10; itemCount = 10 })
+        $totalsIncompleteResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $totalsIncomplete 'taiga-total-incomplete')) $false
+        Assert-True (-not $totalsIncompleteResult.ok) 'null hasMore with an incomplete total-page set must stay incomplete'
+        $duplicatePages = $context.Clone(); $duplicatePages.commentPages = @(@{ page = 1; hasMore = $true; nextPage = 2 }, @{ page = 1; hasMore = $false; nextPage = $null })
+        $duplicateResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $duplicatePages 'taiga-duplicate-pages')) $false
+        Assert-True (-not $duplicateResult.ok) 'duplicate page observations must be rejected'
+        $contradictory = $context.Clone(); $contradictory.commentPages = @(@{ page = 1; hasMore = $false; nextPage = $null; totalCount = 12; pageSize = 10; itemCount = 10 }, @{ page = 2; hasMore = $false; nextPage = $null; totalCount = 12; pageSize = 10; itemCount = 2 })
+        $contradictoryResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $contradictory 'taiga-contradictory-pagination')) $false
+        Assert-True (-not $contradictoryResult.ok) 'contradictory hasMore and total evidence must be rejected'
         $orderedA = [ordered]@{ kind = 'story'; projectId = 1; ref = 2; detailPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null; extra = [ordered]@{ b = 2; a = 1 } }); commentPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null }); taskPages = @([ordered]@{ page = 1; hasMore = $false; nextPage = $null }) }
         $orderedB = [ordered]@{ taskPages = @([ordered]@{ nextPage = $null; hasMore = $false; page = 1 }); commentPages = @([ordered]@{ nextPage = $null; hasMore = $false; page = 1 }); detailPages = @([ordered]@{ extra = [ordered]@{ a = 1; b = 2 }; nextPage = $null; hasMore = $false; page = 1 }); ref = 2; projectId = 1; kind = 'story' }
         $orderedResultA = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $orderedA 'taiga-order-a'))
