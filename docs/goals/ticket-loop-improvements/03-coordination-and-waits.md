@@ -48,21 +48,21 @@ Paths under scripts, references, and assets are relative to
 
 ### Step 4: Verify pause and multi-ticket regressions
 
-- [ ] Run traces for two independent tickets, a dependent ticket, and an epic observer; preserve capacity and ownership rules.
-- [ ] Prove pause/cancel intent stops new dispatch and requires observed quiescence before releasing reservations.
-- [ ] Confirm result/publication recovery never restarts completed implementation solely because a final Taiga write failed.
-- [ ] Record operation counts for the synthetic workflow without treating fewer operations as sufficient proof of correctness.
-- [ ] **Validate:** Run the full helper harness, local Git/provider fixtures, and diff checks.
-- [ ] **Update documentation:** Update recovery examples and execution evidence.
-- [ ] **Commit before the next step:** `Verify efficient coordination and recovery`.
+- [x] Run traces for two independent tickets, a dependent ticket, and an epic observer; preserve capacity and ownership rules.
+- [x] Prove pause/cancel intent stops new dispatch and requires observed quiescence before releasing reservations.
+- [x] Confirm result/publication recovery never restarts completed implementation solely because a final Taiga write failed.
+- [x] Record operation counts for the synthetic workflow without treating fewer operations as sufficient proof of correctness.
+- [x] **Validate:** Run the full helper harness, local Git/provider fixtures, and diff checks.
+- [x] **Update documentation:** Update recovery examples and execution evidence.
+- [x] **Commit before the next step:** `Verify efficient coordination and recovery`.
 
 ## Definition of done
 
-- [ ] Routine coordination no longer needs hand-written repeated state payloads.
-- [ ] Unchanged observations cause no engineering work or needless redispatch.
-- [ ] External action uncertainty, capacity, pause, and ownership guarantees remain intact.
-- [ ] Helpers remain local logic; native desktop tools own chats and schedules.
-- [ ] Each completed step has validation evidence, documentation updates, and its own commit.
+- [x] Routine coordination no longer needs hand-written repeated state payloads.
+- [x] Unchanged observations cause no engineering work or needless redispatch.
+- [x] External action uncertainty, capacity, pause, and ownership guarantees remain intact.
+- [x] Helpers remain local logic; native desktop tools own chats and schedules.
+- [x] Each completed step has validation evidence, documentation updates, and its own commit.
 
 ## Execution record
 
@@ -74,4 +74,4 @@ gates unchecked; record deviations and blockers below the table.
 | 1 | Added `workflow-coordinate.ps1` with file/hash-bound dispatch, publication preparation, result acceptance/routing, external observation, and compact status operations. It delegates mutations to the existing CAS/fencing/journal state helper and returns native action descriptors without invoking desktop APIs. Synthetic progression, durable prompt/result references, malformed input, duplicate/partial state paths, and compact output passed; skill validation and `git diff --check` passed. | Coordination facade reference and operator guide | Recorded in final handoff |
 | 2 | The facade returns `reconcile` for an existing action ID, blocks new dispatch at an expired budget, and treats a provider `clientThreadId` without a real `threadId` as uncertain. External state is stored as a small hashed correlation summary; no blind redispatch or full chat copy is performed. Focused recovery fixtures, skill validation, and `git diff --check` passed. | State/recovery contract and operator guidance | Recorded in final handoff |
 | 3 | Added quiet `observe-wait` and `heartbeat-plan` operations. Unchanged observations return a bounded `wait_threads` request with the saved cursor and no registry mutation; completions/blockers request one detailed read. Heartbeat planning reuses one session heartbeat, keeps notification policy visible, and stays quiet for unchanged state. Focused wait/heartbeat fixtures, skill validation, and `git diff --check` passed. | State/recovery contract and operator polling guidance | Recorded in final handoff |
-| 4 | Pending | Pending | Pending |
+| 4 | Synthetic traces cover independent siblings, dependency gating, epic integration observation, pause/quiescence, uncertain publication, and descriptive operation counts. Existing state pause/cancel/capacity/Git/provider fixtures plus the full 23-fixture harness passed; skill validation and `git diff --check` passed. Actual native host behavior remains unverified. | Recovery examples, coordination trace fixture, operator guide | Recorded in final handoff |

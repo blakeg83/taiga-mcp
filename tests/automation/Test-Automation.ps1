@@ -9,6 +9,7 @@ $script:PlanScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-
 $script:PacketScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-packet.ps1'
 $script:PreflightScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-preflight.ps1'
 $script:RoleTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-role-traces.json'
+$script:CoordinationTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-coordination-traces.json'
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
@@ -265,6 +266,24 @@ try {
         Assert-Equal 'reuse_heartbeat' $reuse.data.decision 'later plans should reuse the existing session heartbeat'
         Assert-True $reuse.data.heartbeat.quietWhenUnchanged 'heartbeat should stay quiet when no worker state changed'
         Assert-True (-not $reuse.data.heartbeat.nestedSchedules) 'heartbeat plan must not create nested schedules'
+    }
+
+    Test-Case 'preserve sibling dependency epic and pause coordination traces' {
+        $traces = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $script:CoordinationTracePath) -AsHashtable -Depth 100
+        Assert-Equal 1 $traces.schemaVersion 'coordination trace schema version'
+        Assert-Equal 4 @($traces.scenarios).Count 'all coordination regressions should be represented'
+        $siblings = @($traces.scenarios | Where-Object name -eq 'two-independent-tickets')[0]
+        Assert-True $siblings.expected.siblingsContinue 'one blocked ticket must not stop an independent sibling'
+        Assert-Equal 2 $siblings.expected.maxRepositorySlots 'repository capacity must remain bounded'
+        $dependency = @($traces.scenarios | Where-Object name -eq 'dependent-ticket')[0]
+        Assert-True $dependency.expected.dependencyBlocksChild 'dependent work must wait for its prerequisite'
+        Assert-True $dependency.expected.childDispatchAfterParent 'dependent work may dispatch after verified parent acceptance'
+        $epic = @($traces.scenarios | Where-Object name -eq 'epic-observer')[0]
+        Assert-True $epic.expected.combinedAcceptanceRequired 'epic observation must retain integrated acceptance'
+        $pause = @($traces.scenarios | Where-Object name -eq 'pause-and-publication-recovery')[0]
+        Assert-True (-not $pause.expected.newDispatchAfterPause) 'pause reconciliation must stop new dispatch'
+        Assert-True $pause.expected.uncertainPublicationDoesNotRestartImplementation 'uncertain publication must reconcile rather than restart implementation'
+        Assert-True $pause.expected.operationCountIsDescriptive 'operation counts must remain descriptive measurements'
     }
 
     Test-Case 'capture immutable verification evidence and classify outcomes' {
