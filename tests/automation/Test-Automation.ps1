@@ -1259,7 +1259,7 @@ try {
         $started = $baseEvent.Clone(); $started.sequence = 1; $started.eventType = 'started'; $startedResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $started 'relay-started'),'-StateRoot',$progressRoot)
         $review = $baseEvent.Clone(); $review.sequence = 2; $review.currentSha = 'abcdef2'; $review.eventType = 'ready_for_review'; $review.evidence = @{ source = 'implementation receipt' }; $reviewResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $review 'relay-ready'),'-StateRoot',$progressRoot); $review.eventId = $reviewResult.data.event.eventId
         $second = $baseEvent.Clone(); $second.sequence = 3; $second.taskId = 541; $second.currentSha = 'abcdef2'; $second.eventType = 'started'; $second.criterionIds = @('AC11'); $second.evidence = @{ source = 'overlapping task milestone' }; $secondResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $second 'relay-second'),'-StateRoot',$progressRoot)
-        $blocked = $second.Clone(); $blocked.sequence = 4; $blocked.eventType = 'blocked'; $blocked.blockedReason = 'synthetic dependency'; $blocked.evidence = @{ source = 'blocked milestone' }; $blockedResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $blocked 'relay-blocked'),'-StateRoot',$progressRoot)
+        $blocked = $second.Clone(); $blocked.sequence = 4; $blocked.eventType = 'blocked'; $blocked.blockedReason = 'synthetic dependency'; $blocked.occurredAtUtc = '2026-10-01T20:00:00.0000000Z'; $blocked.evidence = @{ source = 'blocked milestone' }; $blockedResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $blocked 'relay-blocked'),'-StateRoot',$progressRoot)
         $relayInput = @{ progressRoot = $progressRoot; consumerId = 'coordinator-story-642'; runId = 'run-relay'; cursor = 0; packetBinding = $relayPacket; statusMapping = $statusResult.data }
         $cursorDrift = $relayInput.Clone(); $cursorDrift.cursor = 4
         $cursorDriftResult = Invoke-PsJson $script:CoordinateScript @('-Operation','relay-task-progress','-InputPath',(New-InputPath $cursorDrift 'relay-cursor-drift'),'-StateRoot',$relayRoot) $false
@@ -1271,6 +1271,9 @@ try {
         Assert-Equal 541 $firstRelay.data.taskTransitions[2].taskId 'overlapping progress must preserve task identity'
         Assert-Equal $relayPacket.bindingDigest $firstRelay.data.taskTransitions[0].bindingDigest 'relay transitions must preserve the packet binding digest'
         Assert-Equal $relayPacket.bindingDigest $firstRelay.data.taskTransitions[0].progressBinding.bindingDigest 'relay transitions must preserve the full progress binding'
+        $blockedTransition = @($firstRelay.data.taskTransitions | Where-Object { $_.eventId -eq $blockedResult.data.event.eventId })[0]
+        Assert-Equal 'synthetic dependency' $blockedTransition.progressBinding.blockedReason 'relay must preserve optional event fields'
+        Assert-Equal ([string]$blockedResult.data.event.occurredAtUtc) ([string]$blockedTransition.progressBinding.occurredAtUtc) 'relay must preserve the complete event timestamp'
         $retryInput = $relayInput.Clone(); $retryInput.Remove('cursor')
         $retry = Invoke-PsJson $script:CoordinateScript @('-Operation','relay-task-progress','-InputPath',(New-InputPath $retryInput 'relay-retry-before-ack'),'-StateRoot',$relayRoot)
         Assert-True (-not $retry.data.unchanged -and @($retry.data.pending).Count -eq 4) 'failed or interrupted writes must leave durable pending transitions for retry'
@@ -1330,6 +1333,9 @@ try {
         $logicalBypass = Copy-JsonObject $accepted; $logicalBypass.logicalState = 'in_progress'; $logicalBypass.targetStatusId = 59
         $logicalBypassResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $logicalBypass 'task-write-logical-bypass')) $false
         Assert-True (-not $logicalBypassResult.ok) 'a caller must not reach Done by combining an in-progress logical state with an accepted target ID'
+        $milestoneMismatch = Copy-JsonObject $accepted; $milestoneMismatch.logicalState = 'in_progress'; $milestoneMismatch.targetStatusId = 58; $milestoneMismatch.Remove('reviewAcceptance')
+        $milestoneMismatchResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $milestoneMismatch 'task-write-milestone-mismatch')) $false
+        Assert-True (-not $milestoneMismatchResult.ok) 'requested task status must match the worker progress milestone'
         $unrelatedReview = Copy-JsonObject $accepted; $unrelatedReview.requiredCriterionIds = @('AC10'); $unrelatedReview.reviewAcceptance.criterionIds = @('AC99')
         $unrelatedReviewResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $unrelatedReview 'task-write-unrelated-review')) $false
         Assert-True (-not $unrelatedReviewResult.ok) 'review acceptance must exactly cover the selected task criteria'

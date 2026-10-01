@@ -309,7 +309,7 @@ function Get-Transitions {
     $items = @()
     foreach ($event in $Events) {
         $logicalState = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'ready_for_review' { 'awaiting_review' }; 'blocked' { 'blocked' }; 'accepted' { 'accepted' }; 'reopen' { 'in_progress' } }
-        $items += [ordered]@{ eventId = [string]$event.eventId; actionId = [string]$event.actionId; sequence = [long]$event.sequence; ticketKey = [string]$event.ticketKey; projectId = [long]$event.projectId; parentStoryId = [long]$event.parentStoryId; taskId = [long]$event.taskId; eventType = [string]$event.eventType; logicalState = $logicalState; currentSha = [string]$event.currentSha; packetHash = [string]$event.packetHash; scopeHash = [string]$event.scopeHash; bindingDigest = [string]$event.bindingDigest; criterionIds = @($event.criterionIds); evidence = $event.evidence }
+        $items += [ordered]@{ event = $event; eventId = [string]$event.eventId; actionId = [string]$event.actionId; sequence = [long]$event.sequence; ticketKey = [string]$event.ticketKey; projectId = [long]$event.projectId; parentStoryId = [long]$event.parentStoryId; taskId = [long]$event.taskId; eventType = [string]$event.eventType; logicalState = $logicalState; currentSha = [string]$event.currentSha; packetHash = [string]$event.packetHash; scopeHash = [string]$event.scopeHash; bindingDigest = [string]$event.bindingDigest; criterionIds = @($event.criterionIds); evidence = $event.evidence }
     }
     return $items
 }

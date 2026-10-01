@@ -290,7 +290,7 @@ function Assert-SelectedTaskCriteria {
 }
 
 function Get-ValidatedProgressBinding {
-    param([System.Collections.IDictionary] $InputObject, [System.Collections.IDictionary] $Packet, [long] $TaskId, [string] $CurrentSha, [string[]] $RequiredCriteria)
+    param([System.Collections.IDictionary] $InputObject, [System.Collections.IDictionary] $Packet, [long] $TaskId, [string] $CurrentSha, [string[]] $RequiredCriteria, [string] $RequestedLogicalState)
     if (-not $InputObject.Contains('progressBinding') -or $InputObject.progressBinding -isnot [System.Collections.IDictionary]) { throw "Task $TaskId requires a validated progressBinding." }
     $progress = $InputObject.progressBinding
     foreach ($name in @('runId','actionId','packetHash','scopeHash','bindingDigest','taskId','sequence','eventId','eventType','currentSha','criterionIds','ticketKey','projectId','parentStoryId','evidence')) { if (-not $progress.Contains($name)) { throw "progressBinding.$name is required for task $TaskId." } }
@@ -310,6 +310,9 @@ function Get-ValidatedProgressBinding {
     $event = [ordered]@{ runId = [string]$progress.runId; actionId = [string]$progress.actionId; ticketKey = $ticketKey; projectId = $projectId; parentStoryId = $parentStoryId; taskId = $TaskId; packetHash = [string]$progress.packetHash; scopeHash = [string]$progress.scopeHash; bindingDigest = [string]$progress.bindingDigest; sequence = $sequence; currentSha = ([string]$progress.currentSha).ToLowerInvariant(); eventType = [string]$progress.eventType; criterionIds = @($criteria); evidence = $progress.evidence; blockedReason = if ($progress.Contains('blockedReason')) { [string]$progress.blockedReason } else { $null }; shaDigest = if ($progress.Contains('shaDigest')) { [string]$progress.shaDigest } else { $null }; continuationOfActionId = if ($progress.Contains('continuationOfActionId')) { [string]$progress.continuationOfActionId } else { $null }; occurredAtUtc = if ($progress.Contains('occurredAtUtc')) { [string]$progress.occurredAtUtc } else { $null } }
     if ([string]$progress.eventId -cne (Hash-Text (Get-ProgressEventIdentityKey $event))) { throw "progressBinding.eventId is not the deterministic identity of the captured event for task $TaskId." }
     if (-not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ProgressShaProofDigest $event)) { throw "progressBinding.shaDigest does not match the captured event for task $TaskId." }
+    $milestoneState = switch ($event.eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' } }
+    $allowedRequestedStates = if ($RequestedLogicalState -in @('accepted','done')) { @('awaiting_review') } else { @($RequestedLogicalState) }
+    if ($allowedRequestedStates -notcontains $milestoneState) { throw "Task $TaskId requested logical state '$RequestedLogicalState' does not match progress milestone '$($event.eventType)' ($milestoneState)." }
     return $event
 }
 
@@ -503,7 +506,7 @@ function Get-TaskWriteJournal {
     $targetStatusId = switch ($logicalState) { 'not_started' { [long]$mapping.not_started }; 'in_progress' { [long]$mapping.in_progress }; 'awaiting_review' { [long]$mapping.awaiting_review }; 'blocked' { if ($null -eq $mapping.blocked) { throw 'Blocked status is not configured.' }; [long]$mapping.blocked }; 'accepted' { [long]$mapping.accepted }; 'done' { [long]$mapping.accepted } }
     if ($InputObject.Contains('targetStatusId') -and [long]$InputObject.targetStatusId -ne $targetStatusId) { throw 'Caller targetStatusId does not match the validated logical mapping.' }
     $currentSha = [string](Need $InputObject 'currentSha'); if ($currentSha -notmatch '^[0-9a-fA-F]{7,64}$') { throw 'currentSha must be a Git revision.' }
-    $progress = Get-ValidatedProgressBinding $InputObject $packet $identity.taskId $currentSha $requiredCriteria
+    $progress = Get-ValidatedProgressBinding $InputObject $packet $identity.taskId $currentSha $requiredCriteria $logicalState
     $review = $null
     if ($targetStatusId -eq [long]$mapping.accepted -or $logicalState -in @('accepted','done') -or $InputObject.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $InputObject $identity.taskId $currentSha $packet $requiredCriteria }
     $runMarker = [string](Need $InputObject 'runMarker')
@@ -572,8 +575,9 @@ try {
             foreach ($taskInput in @($input.tasks)) {
                 if ($taskInput -isnot [System.Collections.IDictionary]) { $unresolved += [ordered]@{ taskId = $null; outcome = 'failed'; reason = 'task_not_object' }; continue }
                 try {
-                    $identity = Require-TaskIdentity $taskInput $projectId $parentStoryId; if (-not $seen.Add($identity.taskId)) { throw "Reviewed task is duplicated: $($identity.taskId)." }; if ($selected -notcontains $identity.taskId) { throw "Reviewed task $($identity.taskId) is outside the selected task scope." }; $requiredCriteria = Assert-SelectedTaskCriteria $taskInput $packet $identity.taskId; $progress = Get-ValidatedProgressBinding $taskInput $packet $identity.taskId $currentSha $requiredCriteria
+                    $identity = Require-TaskIdentity $taskInput $projectId $parentStoryId; if (-not $seen.Add($identity.taskId)) { throw "Reviewed task is duplicated: $($identity.taskId)." }; if ($selected -notcontains $identity.taskId) { throw "Reviewed task $($identity.taskId) is outside the selected task scope." }; $requiredCriteria = Assert-SelectedTaskCriteria $taskInput $packet $identity.taskId
                     $logical = if ($taskInput.Contains('logicalState')) { [string]$taskInput.logicalState } else { throw "Task $($identity.taskId) logicalState is required." }
+                    $progress = Get-ValidatedProgressBinding $taskInput $packet $identity.taskId $currentSha $requiredCriteria $logical
                     $target = switch ($logical) { 'not_started' { [long]$mapping.not_started }; 'in_progress' { [long]$mapping.in_progress }; 'awaiting_review' { [long]$mapping.awaiting_review }; 'blocked' { if ($null -eq $mapping.blocked) { throw 'Blocked status is not configured.' }; [long]$mapping.blocked }; 'accepted' { [long]$mapping.accepted }; 'done' { [long]$mapping.accepted }; default { throw "Task $($identity.taskId) logicalState is unsupported." } }
                     if ($taskInput.Contains('targetStatusId') -and [long]$taskInput.targetStatusId -ne $target) { throw "Task $($identity.taskId) target status does not match mapping." }
                     if ($target -eq [long]$mapping.accepted -or $logical -in @('accepted','done') -or $taskInput.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $taskInput $identity.taskId $currentSha $packet $requiredCriteria } else { $review = $null }
