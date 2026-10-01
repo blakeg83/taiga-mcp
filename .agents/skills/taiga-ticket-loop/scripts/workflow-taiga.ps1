@@ -305,12 +305,12 @@ function Get-ValidatedTaskMapping {
     param([System.Collections.IDictionary] $InputObject)
     if (-not $InputObject.Contains('statusMapping') -or $InputObject.statusMapping -isnot [System.Collections.IDictionary]) { throw 'A validated statusMapping is required.' }
     $mapping = $InputObject.statusMapping
-    foreach ($name in @('projectId','resource','metadataProjectId','metadataResource','not_started','in_progress','awaiting_review','accepted','validated','metadataIds')) { if (-not $mapping.Contains($name)) { throw "statusMapping.$name is required." } }
+    foreach ($name in @('projectId','resource','metadataProjectId','metadataResource','not_started','in_progress','awaiting_review','accepted','validated','metadataIds','mappingDigest')) { if (-not $mapping.Contains($name)) { throw "statusMapping.$name is required." } }
     if ($mapping.validated -ne $true -or [string]$mapping.resource -cne 'task') { throw 'statusMapping must be a validated task mapping.' }
     $projectId = Get-TaskInteger $InputObject @('projectId') 'projectId' $true
     if ([long]$mapping.projectId -ne $projectId -or [long]$mapping.metadataProjectId -ne $projectId -or [string]$mapping.metadataResource -cne 'task') { throw 'statusMapping metadata does not match the task write project/resource.' }
     $metadataIds = @($mapping.metadataIds | ForEach-Object { [long]$_ })
-    if ($metadataIds.Count -eq 0) { throw 'statusMapping.metadataIds cannot be empty.' }
+    if ($metadataIds.Count -eq 0 -or @($metadataIds | Select-Object -Unique).Count -ne $metadataIds.Count -or [string]$mapping.mappingDigest -notmatch '^[0-9a-fA-F]{64}$') { throw 'statusMapping metadata identity is incomplete.' }
     $ids = @($mapping.not_started,$mapping.in_progress,$mapping.awaiting_review,$mapping.accepted) + @($mapping.blocked)
     foreach ($id in $ids | Where-Object { $null -ne $_ }) { if ($metadataIds -notcontains [long]$id) { throw "statusMapping contains an undiscovered status ID: $id." } }
     $duplicates = @($ids | Where-Object { $null -ne $_ } | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
