@@ -67,7 +67,19 @@ function Hash-String {
 function Get-EventIdentityKey {
     param([System.Collections.IDictionary] $Record)
     $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest)
+}
+
+function Get-InterimEventIdentityKey {
+    param([System.Collections.IDictionary] $Record)
+    $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
     return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}|{15}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest,$Record.continuationOfActionId)
+}
+
+function Test-EventIdentity {
+    param([System.Collections.IDictionary] $Record)
+    $eventId = [string]$Record.eventId
+    return $eventId -ceq (Hash-String (Get-EventIdentityKey $Record)) -or $eventId -ceq (Hash-String (Get-InterimEventIdentityKey $Record))
 }
 
 function Get-TrustedRevisions {
@@ -217,9 +229,7 @@ function Get-Event {
     if ($runId -cne [string]$packet.runId -or $projectId -ne [long]$packet.projectId -or $parentStoryId -ne [long]$packet.parentStoryId -or $packet.selectedTaskIds -notcontains $taskId) { throw 'Progress event is outside the validated packet scope.' }
     $expectedCriteria = @($packet.criteriaByTask[[string]$taskId] | ForEach-Object { [string]$_ })
     if (($criterionIds -join '|') -cne ($expectedCriteria -join '|')) { throw "Progress event criteria do not match the selected task $taskId packet criteria." }
-    if ($actionId -cne [string]$packet.actionId) {
-        if (-not $InputObject.Contains('continuationOfActionId') -or [string]::IsNullOrWhiteSpace([string]$InputObject.continuationOfActionId)) { throw 'A progress action outside the packet action requires a nonblank continuationOfActionId.' }
-    } elseif ($InputObject.Contains('continuationOfActionId') -and -not [string]::IsNullOrWhiteSpace([string]$InputObject.continuationOfActionId)) {
+    if ($actionId -ceq [string]$packet.actionId -and $InputObject.Contains('continuationOfActionId') -and -not [string]::IsNullOrWhiteSpace([string]$InputObject.continuationOfActionId)) {
         throw 'The packet action cannot declare a continuation.'
     }
     if ($null -ne $packet.trustedRevisions -and @($packet.trustedRevisions | ForEach-Object { [string]$_ }) -notcontains $currentSha) { throw "Progress revision $currentSha is outside the trusted assignment." }
@@ -247,7 +257,12 @@ function Get-Event {
         occurredAtUtc = if ($InputObject.Contains('occurredAtUtc')) { [string]$InputObject.occurredAtUtc } else { [DateTime]::UtcNow.ToString('o') }
     }
     $event.eventId = Hash-String (Get-EventIdentityKey $event)
-    if ($InputObject.Contains('eventId') -and [string]$InputObject.eventId -cne $event.eventId) { throw 'eventId does not match the idempotent event identity.' }
+    if ($InputObject.Contains('eventId')) {
+        $providedEventId = [string]$InputObject.eventId
+        $interimEventId = Hash-String (Get-InterimEventIdentityKey $event)
+        if ($providedEventId -cne $event.eventId -and $providedEventId -cne $interimEventId) { throw 'eventId does not match the idempotent event identity.' }
+        $event.eventId = $providedEventId
+    }
     return $event
 }
 
@@ -258,8 +273,7 @@ function Migrate-LegacyProgressState {
     foreach ($event in @($State.events)) {
         $action = [string]$event.actionId
         if (-not [string]::IsNullOrWhiteSpace($action) -and -not $allActions.Contains($action)) { [void]$allActions.Add($action) }
-        $expected = Hash-String (Get-EventIdentityKey $event)
-        if ([string]$event.eventId -cne $expected -and (-not $event.Contains('legacyContentDigest') -or [string]$event.legacyContentDigest -cne $expected)) { $event.legacyContentDigest = $expected; $changed = $true }
+        if (-not (Test-EventIdentity $event)) { throw "Progress event identity is invalid during checkpoint upgrade: $($event.sequence)." }
     }
     if (-not [string]::IsNullOrWhiteSpace([string]$State.actionId) -and -not $allActions.Contains([string]$State.actionId)) { [void]$allActions.Add([string]$State.actionId) }
     $State.actionIds = @($allActions); $State.legacyIdentityVersion = 1
@@ -291,8 +305,7 @@ function Assert-ProgressState {
             if ($continuation -cne $previousAction) { throw "Progress event $($event.sequence) must continue the previous action." }
         }
         [void]$seenActions.Add($eventAction)
-        $expected = Hash-String (Get-EventIdentityKey $event)
-        if ([string]$event.eventId -cne $expected -and (-not $event.Contains('legacyContentDigest') -or [string]$event.legacyContentDigest -cne $expected)) { throw "Progress event identity is invalid: $($event.sequence)." }
+        if (-not (Test-EventIdentity $event)) { throw "Progress event identity is invalid: $($event.sequence)." }
         if ($event.Contains('shaDigest') -and -not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ShaProofDigest $event @($event.criterionIds) $event.evidence ([string]$event.currentSha))) { throw "Progress event SHA proof is invalid: $($event.sequence)." }
         if ([string]$event.packetHash -cne [string]$statePacket.packetHash -or [string]$event.scopeHash -cne [string]$statePacket.scopeHash -or [string]$event.bindingDigest -cne [string]$statePacket.bindingDigest -or [long]$event.projectId -ne [long]$statePacket.projectId -or [long]$event.parentStoryId -ne [long]$statePacket.parentStoryId -or $statePacket.selectedTaskIds -notcontains [long]$event.taskId) { throw "Progress event $($event.sequence) is outside the immutable packet binding." }
         $expectedCriteria = @($statePacket.criteriaByTask[[string]$event.taskId] | ForEach-Object { [string]$_ }); $actualCriteria = @($event.criterionIds | ForEach-Object { [string]$_ }); if (($expectedCriteria -join '|') -cne ($actualCriteria -join '|')) { throw "Progress event $($event.sequence) criteria are not bound to its selected task." }

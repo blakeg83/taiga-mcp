@@ -33,6 +33,11 @@ function Hash-Text { param([string]$Value); $sha = [Security.Cryptography.SHA256
 function Get-ProgressEventIdentityKey {
     param([System.Collections.IDictionary] $Record)
     $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest)
+}
+function Get-InterimProgressEventIdentityKey {
+    param([System.Collections.IDictionary] $Record)
+    $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
     return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}|{15}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest,$Record.continuationOfActionId)
 }
 function Get-ProgressShaProofDigest {
@@ -322,15 +327,14 @@ function Get-ValidatedProgressBinding {
     if ([string]$progress.eventType -notin @('started','blocked','ready_for_review','reopen')) { throw "progressBinding.eventType is not a worker milestone for task $TaskId." }
     $criteria = @($progress.criterionIds | ForEach-Object { [string]$_ })
     if ($criteria.Count -eq 0 -or @($criteria | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0 -or @($criteria | Select-Object -Unique).Count -ne $criteria.Count -or ($criteria -join '|') -cne ($RequiredCriteria -join '|')) { throw "progressBinding criteria do not match required criteria for task $TaskId." }
-    if ([string]$progress.actionId -cne [string]$Packet.actionId) {
-        if (-not $progress.Contains('continuationOfActionId') -or [string]::IsNullOrWhiteSpace([string]$progress.continuationOfActionId)) { throw "progressBinding action is outside the assigned action for task $TaskId." }
-    } elseif ($progress.Contains('continuationOfActionId') -and -not [string]::IsNullOrWhiteSpace([string]$progress.continuationOfActionId)) {
+    if ([string]$progress.actionId -ceq [string]$Packet.actionId -and $progress.Contains('continuationOfActionId') -and -not [string]::IsNullOrWhiteSpace([string]$progress.continuationOfActionId)) {
         throw "progressBinding packet action cannot declare a continuation for task $TaskId."
     }
     if ($Packet.Contains('trustedRevisions') -and @($Packet.trustedRevisions | ForEach-Object { [string]$_ }) -notcontains ([string]$progress.currentSha).ToLowerInvariant()) { throw "progressBinding revision is outside the trusted assignment for task $TaskId." }
     if ([string]$progress.evidence -match '(?i)(password|token|secret|raw.?log)') { throw "progressBinding evidence is unsafe for task $TaskId." }
     $event = [ordered]@{ runId = [string]$progress.runId; actionId = [string]$progress.actionId; ticketKey = $ticketKey; projectId = $projectId; parentStoryId = $parentStoryId; taskId = $TaskId; packetHash = [string]$progress.packetHash; scopeHash = [string]$progress.scopeHash; bindingDigest = [string]$progress.bindingDigest; sequence = $sequence; currentSha = ([string]$progress.currentSha).ToLowerInvariant(); eventType = [string]$progress.eventType; criterionIds = @($criteria); evidence = $progress.evidence; blockedReason = if ($progress.Contains('blockedReason')) { [string]$progress.blockedReason } else { $null }; shaDigest = if ($progress.Contains('shaDigest')) { [string]$progress.shaDigest } else { $null }; continuationOfActionId = if ($progress.Contains('continuationOfActionId')) { [string]$progress.continuationOfActionId } else { $null }; occurredAtUtc = if ($progress.Contains('occurredAtUtc')) { [string]$progress.occurredAtUtc } else { $null } }
-    if ([string]$progress.eventId -cne (Hash-Text (Get-ProgressEventIdentityKey $event))) { throw "progressBinding.eventId is not the deterministic identity of the captured event for task $TaskId." }
+    $stableEventId = Hash-Text (Get-ProgressEventIdentityKey $event); $interimEventId = Hash-Text (Get-InterimProgressEventIdentityKey $event)
+    if ([string]$progress.eventId -cne $stableEventId -and [string]$progress.eventId -cne $interimEventId) { throw "progressBinding.eventId is not the deterministic identity of the captured event for task $TaskId." }
     if (-not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ProgressShaProofDigest $event)) { throw "progressBinding.shaDigest does not match the captured event for task $TaskId." }
     $milestoneState = switch ($event.eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' } }
     $allowedRequestedStates = if ($RequestedLogicalState -in @('accepted','done')) { @('awaiting_review') } else { @($RequestedLogicalState) }

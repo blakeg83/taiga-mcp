@@ -24,7 +24,9 @@ Worker progress is an append-only event stream in `task-progress.json`.
 `started`, `blocked`, and `ready_for_review` events carry the immutable packet
 binding, run/action ID, trusted ticket/project/parent identity, task ID, global
 sequence, current revision, exact packet criterion IDs, evidence, and a
-deterministic event ID. When the assignment supplies `trustedRevisions`, the
+deterministic event ID. Event identity remains compatible with existing
+checkpoints; continuation metadata is validated separately as an action chain.
+When the assignment supplies `trustedRevisions`, the
 revision must be one of those captured values. The first event uses the packet
 action; a correction uses one new continuation action ID, which must point to
 the immediately prior action and cannot be reused. Replaying the same event is
