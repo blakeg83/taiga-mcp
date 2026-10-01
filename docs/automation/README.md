@@ -45,6 +45,25 @@ receipts can include one `taskAcceptances` entry per claimed completed task;
 Done is rejected without a matching accepted task ID, criterion evidence, and
 reviewed SHA.
 
+## Story operator guidance
+
+Configure mappings per project and resource from discovered Taiga status
+metadata, for example `not_started`, `in_progress`, `awaiting_review`,
+`accepted`, and optional `blocked` task status IDs. If a task resource has no
+review status, `awaiting_review` deliberately falls back to `in_progress` and
+the task remains not-Done until reviewer acceptance. Workers report
+`started`, `blocked`, and `ready_for_review`; the coordinator is the only
+writer of task status.
+
+Operators should read child tasks for milestone and review detail while the
+parent story remains the single branch/chat/PR and keeps its existing merge
+completion policy. A blocked or rejected child reopens only that child after
+new revision-bound evidence; unrelated tasks and human edits are preserved.
+New, removed, or reparented children require scope reconciliation before any
+status write. The lifecycle verifier covers restart midway through
+synchronization and refuses parent completion when selected-task acceptance
+evidence is missing. No real-host trial is implied by offline fixture success.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the

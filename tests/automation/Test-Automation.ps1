@@ -1276,6 +1276,25 @@ try {
         Assert-Equal 'reconcile_scope_before_writes' $scopeResult.data.decision 'scope changes must precede writes'
     }
 
+    Test-Case 'verify synthetic story lifecycle recovery and parent gating' {
+        $scenario = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'fixtures\child-task-story-lifecycle.json')) -AsHashtable -Depth 100
+        $lifecycle = Invoke-PsJson $script:AcceptanceScript @('-Operation','story-lifecycle','-InputPath',(New-InputPath $scenario 'child-story-lifecycle'))
+        Assert-True $lifecycle.data.accepted 'end-to-end story lifecycle should be accepted offline'
+        Assert-True $lifecycle.data.restartRecovered 'restart cursor should be reconciled without replay'
+        Assert-Equal 2 @($lifecycle.data.selectedTaskIds).Count 'story completion must retain every selected child'
+        Assert-Equal 0 $lifecycle.data.independentChildBranches 'child tasks must not create extra branches'
+        Assert-Equal 'merged' $lifecycle.data.parentCompletionPolicy 'parent completion policy remains separate'
+        $missing = Copy-JsonObject $scenario; $missing.parent.acceptedTaskIds = @(540)
+        $missingResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','story-lifecycle','-InputPath',(New-InputPath $missing 'child-story-missing-acceptance')) $false
+        Assert-True (-not $missingResult.ok) 'parent completion must not hide missing selected-task evidence'
+        $workerWrite = Copy-JsonObject $scenario; $workerWrite.operations += @{ actor = 'implementer'; kind = 'taiga_task_write'; taskId = 540; statusId = 60 }
+        $workerWriteResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','story-lifecycle','-InputPath',(New-InputPath $workerWrite 'child-story-worker-write')) $false
+        Assert-True (-not $workerWriteResult.ok) 'implementer and reviewer must never write Taiga'
+        $duplicate = Copy-JsonObject $scenario; $duplicate.events += $duplicate.events[0]; $duplicate.restart.persistedCursor = 8; $duplicate.restart.resumeCursor = 8
+        $duplicateResult = Invoke-PsJson $script:AcceptanceScript @('-Operation','story-lifecycle','-InputPath',(New-InputPath $duplicate 'child-story-duplicate-event')) $false
+        Assert-True (-not $duplicateResult.ok) 'repeated lifecycle events must be rejected'
+    }
+
     Test-Case 'create and push a fresh branch using a local bare remote' {
         $repo = Join-Path $script:FixtureRoot 'repo'; $remote = Join-Path $script:FixtureRoot 'remote.git'; $worktree = Join-Path $script:FixtureRoot 'worktree'
         New-Item -ItemType Directory -Path $repo -Force | Out-Null

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "runId": "synthetic-story-run",
+  "ticketKey": "project:12:story:642",
+  "parent": {
+    "kind": "story",
+    "id": 642,
+    "projectId": 12,
+    "completionPolicy": "merged",
+    "prState": "merged",
+    "done": true,
+    "selectedTaskIds": [ 540, 541 ],
+    "acceptedTaskIds": [ 540, 541 ],
+    "branch": "codex/story-1-child-task-statuses-dadd",
+    "implementationChat": "implementer-story-642",
+    "reviewChat": "reviewer-story-642",
+    "pr": "https://github.com/example/taiga-mcp/pull/42"
+  },
+  "tasks": [
+    { "taskId": 540, "projectId": 12, "parentStoryId": 642, "ownedByStory": true, "branch": null, "childChat": null, "childPr": null, "events": [ "started", "ready_for_review", "accepted" ] },
+    { "taskId": 541, "projectId": 12, "parentStoryId": 642, "ownedByStory": true, "branch": null, "childChat": null, "childPr": null, "events": [ "started", "blocked", "reopen", "ready_for_review", "accepted" ] }
+  ],
+  "events": [
+    { "eventId": "evt-1", "sequence": 1, "taskId": 540, "eventType": "started", "logicalState": "in_progress", "statusId": 58, "currentSha": "abcdef1" },
+    { "eventId": "evt-2", "sequence": 2, "taskId": 540, "eventType": "ready_for_review", "logicalState": "awaiting_review", "statusId": 59, "currentSha": "abcdef2" },
+    { "eventId": "evt-3", "sequence": 3, "taskId": 540, "eventType": "accepted", "logicalState": "accepted", "statusId": 60, "currentSha": "abcdef2", "reviewAccepted": true },
+    { "eventId": "evt-4", "sequence": 4, "taskId": 541, "eventType": "started", "logicalState": "in_progress", "statusId": 58, "currentSha": "abcdef2" },
+    { "eventId": "evt-5", "sequence": 5, "taskId": 541, "eventType": "blocked", "logicalState": "blocked", "statusId": 61, "currentSha": "abcdef2" },
+    { "eventId": "evt-6", "sequence": 6, "taskId": 541, "eventType": "reopen", "logicalState": "in_progress", "statusId": 58, "currentSha": "abcdef3" },
+    { "eventId": "evt-7", "sequence": 7, "taskId": 541, "eventType": "ready_for_review", "logicalState": "awaiting_review", "statusId": 59, "currentSha": "abcdef3" },
+    { "eventId": "evt-8", "sequence": 8, "taskId": 541, "eventType": "accepted", "logicalState": "accepted", "statusId": 60, "currentSha": "abcdef3", "reviewAccepted": true }
+  ],
+  "operations": [
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 540, "statusId": 58 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 540, "statusId": 59 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 540, "statusId": 60 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 541, "statusId": 58 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 541, "statusId": 61 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 541, "statusId": 58 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 541, "statusId": 59 },
+    { "actor": "coordinator", "kind": "taiga_task_write", "taskId": 541, "statusId": 60 },
+    { "actor": "implementer", "kind": "task_evidence", "taskId": 540 },
+    { "actor": "reviewer", "kind": "task_acceptance", "taskId": 540 },
+    { "actor": "reviewer", "kind": "task_acceptance", "taskId": 541 }
+  ],
+  "restart": { "atSequence": 4, "persistedCursor": 4, "resumeCursor": 4 }
+}

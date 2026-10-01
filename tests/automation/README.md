@@ -27,3 +27,9 @@ action metadata, raw exit preservation, expected-red and intentional-shutdown
 classification, structured counts, and reported-only provenance. Run one case
 while developing with `pwsh -NoProfile -File tests/automation/Test-Automation.ps1 -Only evidence` or `-Only repair`.
 A nonzero exit code means a fixture failed.
+
+Story fixtures additionally cover complete child-task scope capture, bounded
+progress relay, review-gated version-bound task journals, selective scope
+reconciliation, and restart-safe parent lifecycle acceptance. The fixture
+`fixtures/child-task-story-lifecycle.json` is synthetic and never contacts
+Taiga or GitHub.

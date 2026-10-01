@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('replay','compatibility','trial-plan','acceptance-report')]
+    [ValidateSet('replay','compatibility','trial-plan','acceptance-report','story-lifecycle')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath
@@ -50,4 +50,46 @@ function Invoke-Report { param([System.Collections.IDictionary]$InputObject)
     if(-not $InputObject.Contains('offlineGates')){throw 'offlineGates must be supplied.'};$offline=@($InputObject.offlineGates);$offlinePassed=(@($offline|Where-Object{$_ -eq $true}).Count -eq $offline.Count -and $offline.Count -gt 0);$hostVerified=($InputObject.actualHostVerified -eq $true);$publicationVerified=($InputObject.publicationVerified -eq $true);return [ordered]@{offlineAccepted=$offlinePassed;actualHostVerified=$hostVerified;publicationVerified=$publicationVerified;overallOperationalAcceptance=($offlinePassed -and $hostVerified -and $publicationVerified);pendingGates=@(if(-not $hostVerified){'actual_host_trial'};if(-not $publicationVerified){'publication_exercise'});qualityEvidence=$InputObject.qualityEvidence;costEvidence=$InputObject.costEvidence;rawTokensAreNotAcceptanceGate=$true}
 }
 
-try{$inputObject=Read-Object;$data=switch($Operation){'replay'{Invoke-Replay $inputObject};'compatibility'{Invoke-Compatibility $inputObject};'trial-plan'{Invoke-TrialPlan $inputObject};'acceptance-report'{Invoke-Report $inputObject}};[ordered]@{ok=$true;operation=$Operation;data=$data}|ConvertTo-Json -Depth 100;exit 0}catch{[ordered]@{ok=$false;operation=$Operation;error=[ordered]@{category='workflow_acceptance';message=$_.Exception.Message}}|ConvertTo-Json -Depth 20;exit 1}
+function Invoke-StoryLifecycle { param([System.Collections.IDictionary]$InputObject)
+    foreach($name in @('schemaVersion','runId','ticketKey','parent','tasks','events','operations','restart')){Need $InputObject $name|Out-Null}
+    if([int]$InputObject.schemaVersion -ne 1){throw 'Unsupported story lifecycle scenario version.'}
+    $parent=$InputObject.parent;if($parent -isnot [System.Collections.IDictionary]){throw 'parent must be an object.'}
+    if([string]$parent.kind -cne 'story'){throw 'Story lifecycle requires a story parent.'}
+    foreach($name in @('id','projectId','completionPolicy','prState','done','selectedTaskIds','acceptedTaskIds')){if(-not $parent.Contains($name)){throw "parent.$name is required."}}
+    $parentId=[long]$parent.id;$projectId=[long]$parent.projectId;$selected=@($parent.selectedTaskIds|ForEach-Object{[long]$_});$acceptedParent=@($parent.acceptedTaskIds|ForEach-Object{[long]$_})
+    if($selected.Count -eq 0){throw 'The parent must bind at least one selected child task.'}
+    $tasks=@($InputObject.tasks);$taskById=@{}
+    foreach($task in $tasks){
+        if($task -isnot [System.Collections.IDictionary]){throw 'Each lifecycle task must be an object.'}
+        foreach($name in @('taskId','projectId','parentStoryId','ownedByStory','branch','childChat','childPr','events')){if(-not $task.Contains($name)){throw "task.$name is required."}}
+        $id=[long]$task.taskId;if($id -lt 1 -or $taskById.ContainsKey([string]$id)){throw "Task identity is duplicated or invalid: $id."}
+        if([long]$task.projectId -ne $projectId -or [long]$task.parentStoryId -ne $parentId -or $task.ownedByStory -ne $true){throw "Task $id is not owned by the selected story."}
+        if(-not [string]::IsNullOrWhiteSpace([string]$task.branch) -or -not [string]::IsNullOrWhiteSpace([string]$task.childChat) -or -not [string]::IsNullOrWhiteSpace([string]$task.childPr)){throw "Task $id created an independent branch, chat, or PR."}
+        $taskById[[string]$id]=$task
+    }
+    foreach($id in $selected){if(-not $taskById.ContainsKey([string]$id)){throw "Selected task evidence is missing: $id."}}
+    foreach($id in $taskById.Keys){if($selected -notcontains [long]$id){throw "Unselected task was included in the story acceptance: $id."}}
+    $events=@($InputObject.events)|Sort-Object {[long]$_.sequence};$seenEventIds=@{};$last=0L;$state=@{}
+    foreach($event in $events){
+        foreach($name in @('eventId','sequence','taskId','eventType','logicalState','statusId','currentSha')){if(-not $event.Contains($name)){throw "event.$name is required."}}
+        $sequence=[long]$event.sequence;if($sequence -ne ($last+1)){throw 'Lifecycle event sequences must be contiguous and restart-safe.'};$last=$sequence
+        $eventId=[string]$event.eventId;if($seenEventIds.ContainsKey($eventId)){throw "Lifecycle event is duplicated: $eventId."};$seenEventIds[$eventId]=$true
+        $taskId=[long]$event.taskId;if(-not $taskById.ContainsKey([string]$taskId)){throw "Lifecycle event references an unselected task: $taskId."}
+        $current=if($state.ContainsKey([string]$taskId)){[string]$state[[string]$taskId]}else{'not_started'}
+        $next=[string]$event.logicalState
+        $allowed=@{not_started=@('in_progress');in_progress=@('awaiting_review','blocked','in_progress');blocked=@('in_progress');awaiting_review=@('accepted','in_progress');accepted=@('in_progress','accepted')}
+        if(-not $allowed.ContainsKey($current)-or $allowed[$current] -notcontains $next){throw "Invalid task $taskId lifecycle transition $current -> $next."}
+        if($next -eq 'accepted' -and ([string]$event.eventType -cne 'accepted' -or $event.Contains('reviewAccepted') -and $event.reviewAccepted -ne $true)){throw "Task $taskId Done requires an individual reviewer acceptance event."}
+        $state[[string]$taskId]=$next
+    }
+    $restart=$InputObject.restart;if($restart -isnot [System.Collections.IDictionary]){throw 'restart must be an object.'}
+    foreach($name in @('atSequence','persistedCursor','resumeCursor')){if(-not $restart.Contains($name)){throw "restart.$name is required."}}
+    if([long]$restart.persistedCursor -ne [long]$restart.atSequence -or [long]$restart.resumeCursor -ne [long]$restart.atSequence){throw 'Restart must resume from the persisted progress cursor without replaying old transitions.'}
+    $writes=@($InputObject.operations|Where-Object{$_.kind -eq 'taiga_task_write'});$workerWrites=@($InputObject.operations|Where-Object{$_.actor -in @('implementer','reviewer') -and $_.kind -eq 'taiga_task_write'});if($workerWrites.Count -gt 0){throw 'Only the coordinator may write Taiga task status.'}
+    foreach($write in $writes){if([string]$write.actor -cne 'coordinator'){throw 'Task status write is not coordinator-owned.'};if($selected -notcontains [long]$write.taskId){throw "Task write is outside the selected story scope: $($write.taskId)."}}
+    foreach($id in $selected){if($state[[string]$id] -ne 'accepted' -or $acceptedParent -notcontains $id){throw "Parent completion is hiding missing accepted evidence for task $id."}}
+    if([string]$parent.prState -cne 'merged' -or $parent.done -ne $true -or [string]$parent.completionPolicy -ne 'merged'){throw 'Parent story completion does not satisfy its existing merged policy.'}
+    return [ordered]@{offline=$true;accepted=$true;runId=[string]$InputObject.runId;ticketKey=[string]$InputObject.ticketKey;selectedTaskIds=$selected;finalTaskStates=$state;eventCount=$events.Count;restartRecovered=$true;coordinatorOnlyWrites=$true;independentChildBranches=0;independentChildChats=0;independentChildPrs=0;parentCompletionPolicy=[string]$parent.completionPolicy;realHostVerified=$false}
+}
+
+try{$inputObject=Read-Object;$data=switch($Operation){'replay'{Invoke-Replay $inputObject};'compatibility'{Invoke-Compatibility $inputObject};'trial-plan'{Invoke-TrialPlan $inputObject};'acceptance-report'{Invoke-Report $inputObject};'story-lifecycle'{Invoke-StoryLifecycle $inputObject}};[ordered]@{ok=$true;operation=$Operation;data=$data}|ConvertTo-Json -Depth 100;exit 0}catch{[ordered]@{ok=$false;operation=$Operation;error=[ordered]@{category='workflow_acceptance';message=$_.Exception.Message}}|ConvertTo-Json -Depth 20;exit 1}
