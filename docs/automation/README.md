@@ -29,15 +29,18 @@ Story child-task status handling is defined in
 including closed tasks, and emits immutable task bindings. The
 `resolve-status-mapping` operation validates project/resource-specific status
 metadata and uses `in_progress` as the review fallback only when no review
-status is configured. Workers emit append-only progress through
+status is configured; the capture also binds every selected task to the
+immutable packet/scope hashes and exact criteria. Workers emit append-only progress through
 `workflow-progress.ps1`; the checkpoint records task IDs, run/action identity,
 sequences, revisions, criterion evidence, and idempotent event IDs. Progress
 is evidence of a milestone, not reviewer acceptance or a Done transition.
 The coordinator consumes that stream with
 `workflow-coordinate.ps1 -Operation relay-task-progress` on a bounded
-observation. It advances a per-consumer cursor, proposes only changed task
-states, and leaves `ready_for_review` in the mapped review state (or the
-documented in-progress fallback) until an independent reviewer accepts it.
+observation. It advances a persisted per-consumer cursor only into durable
+pending work, requires explicit outcome acknowledgement after reconciliation,
+and leaves `ready_for_review` in the mapped review state (or the documented
+in-progress fallback) until an independent reviewer accepts it. Pending work
+is retained across restart and failed writes.
 `workflow-taiga.ps1` provides `prepare-task-write`,
 `apply-reviewed-task-transition`, `reconcile-task-write`, and
 `reconcile-task-scope` for coordinator-owned, version-bound journals. Review

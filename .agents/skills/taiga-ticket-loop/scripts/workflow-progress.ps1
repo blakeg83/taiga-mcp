@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('record','consume','validate')]
+    [ValidateSet('record','consume','acknowledge','validate')]
     [string] $Operation,
     [string] $InputPath,
     [string] $StateRoot
@@ -76,6 +76,7 @@ function New-ProgressState {
         schemaVersion = 1
         runId = $RunId
         actionId = $ActionId
+        actionIds = @($ActionId)
         nextSequence = 1
         events = @()
         taskEvidence = [ordered]@{}
@@ -133,6 +134,12 @@ function Get-CriterionIds {
     return ,$ids.ToArray()
 }
 
+function Get-ShaProofDigest {
+    param([System.Collections.IDictionary] $InputObject, [string[]] $CriterionIds, [object] $Evidence, [string] $CurrentSha)
+    $proofPayload = [ordered]@{ runId = [string]$InputObject.runId; actionId = [string]$InputObject.actionId; ticketKey = [string]$InputObject.ticketKey; projectId = [long]$InputObject.projectId; parentStoryId = [long]$InputObject.parentStoryId; taskId = [long]$InputObject.taskId; sequence = [long]$InputObject.sequence; currentSha = $CurrentSha.ToLowerInvariant(); eventType = [string]$InputObject.eventType; criterionIds = @($CriterionIds); evidence = $Evidence; blockedReason = if ($InputObject.Contains('blockedReason')) { [string]$InputObject.blockedReason } else { $null } }
+    return Hash-Object $proofPayload
+}
+
 function Get-Event {
     param([System.Collections.IDictionary] $InputObject)
     $runId = [string](Need $InputObject 'runId'); $actionId = [string](Need $InputObject 'actionId'); $taskId = Positive-Int $InputObject 'taskId'; $sequence = Nonnegative-Int $InputObject 'sequence'
@@ -142,12 +149,19 @@ function Get-Event {
     $criterionIds = Get-CriterionIds $InputObject
     $evidence = if ($InputObject.Contains('evidence')) { $InputObject.evidence } else { throw 'evidence is required.' }
     if ([string]$evidence -match '(?i)(password|token|secret|raw.?log)') { throw 'Credential or raw-log content is not allowed in progress evidence.' }
+    if (-not $InputObject.Contains('ticketKey') -or [string]::IsNullOrWhiteSpace([string]$InputObject.ticketKey)) { throw 'ticketKey is required for a trusted progress event.' }
+    if (-not $InputObject.Contains('projectId') -or -not $InputObject.Contains('parentStoryId')) { throw 'projectId and parentStoryId are required for a trusted progress event.' }
+    $projectId = Positive-Int $InputObject 'projectId'; $parentStoryId = Positive-Int $InputObject 'parentStoryId'; $ticket = [string]$InputObject.ticketKey
+    if ($ticket -notmatch '^project:\d+:story:\d+$' -or [long]($ticket -replace '^project:(\d+):story:(\d+)$','$1') -ne $projectId -or [long]($ticket -replace '^project:(\d+):story:(\d+)$','$2') -ne $parentStoryId) { throw 'ticketKey must match the trusted project and parent story identity.' }
+    if ($evidence -is [System.Collections.IDictionary]) { foreach ($name in @('currentSha','headSha')) { if ($evidence.Contains($name) -and [string]$evidence[$name] -cne $currentSha) { throw "Progress evidence $name does not match currentSha." } } }
+    $proofDigest = if ($InputObject.Contains('shaDigest')) { [string]$InputObject.shaDigest } else { $null }
+    if ($null -ne $proofDigest -and $proofDigest -cne (Get-ShaProofDigest $InputObject $criterionIds $evidence $currentSha)) { throw 'shaDigest does not match the trusted progress event payload.' }
     $event = [ordered]@{
         runId = $runId
         actionId = $actionId
         ticketKey = if ($InputObject.Contains('ticketKey')) { [string]$InputObject.ticketKey } else { $null }
-        projectId = if ($InputObject.Contains('projectId')) { Positive-Int $InputObject 'projectId' } else { $null }
-        parentStoryId = if ($InputObject.Contains('parentStoryId')) { Positive-Int $InputObject 'parentStoryId' } else { $null }
+        projectId = $projectId
+        parentStoryId = $parentStoryId
         taskId = $taskId
         sequence = $sequence
         currentSha = $currentSha.ToLowerInvariant()
@@ -155,6 +169,7 @@ function Get-Event {
         criterionIds = @($criterionIds)
         evidence = $evidence
         blockedReason = if ($InputObject.Contains('blockedReason')) { [string]$InputObject.blockedReason } else { $null }
+        shaDigest = $proofDigest
         occurredAtUtc = if ($InputObject.Contains('occurredAtUtc')) { [string]$InputObject.occurredAtUtc } else { [DateTime]::UtcNow.ToString('o') }
     }
     $event.eventId = Hash-String (Get-EventIdentityKey $event)
@@ -165,10 +180,19 @@ function Get-Event {
 function Assert-ProgressState {
     param([System.Collections.IDictionary] $State)
     $last = 0L
+    $taskStates = @{}
+    $actionIds = [System.Collections.Generic.HashSet[string]]::new()
     foreach ($event in @($State.events)) {
         if ([long]$event.sequence -ne ($last + 1)) { throw 'Progress events must have contiguous increasing sequences.' }
         $expected = Hash-String (Get-EventIdentityKey $event)
-        if ([string]$event.eventId -cne $expected -and [string]$event.eventId -notmatch '^[0-9a-fA-F]{64}$') { throw "Progress event identity is invalid: $($event.sequence)." }
+        if ([string]$event.eventId -cne $expected) { throw "Progress event identity is invalid: $($event.sequence)." }
+        if ($event.Contains('shaDigest') -and -not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ShaProofDigest $event @($event.criterionIds) $event.evidence ([string]$event.currentSha))) { throw "Progress event SHA proof is invalid: $($event.sequence)." }
+        if (-not $actionIds.Add([string]$event.actionId)) { }
+        $taskKey = [string]$event.taskId; $prior = if ($taskStates.ContainsKey($taskKey)) { [string]$taskStates[$taskKey] } else { 'not_started' }; $next = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' }; 'accepted' { 'accepted' } }
+        $allowed = @{ not_started = @('in_progress','blocked'); in_progress = @('in_progress','blocked','awaiting_review'); blocked = @('in_progress','blocked'); awaiting_review = @('in_progress','accepted'); accepted = @('accepted','in_progress') }
+        if (-not $allowed.ContainsKey($prior) -or $allowed[$prior] -notcontains $next) { throw "Invalid progress transition for task ${taskKey}: $prior -> $next." }
+        if ($next -eq 'accepted') { throw 'Worker progress cannot emit accepted; reviewer acceptance is separate.' }
+        $taskStates[$taskKey] = $next
         $last = [long]$event.sequence
     }
     if ([long]$State.nextSequence -ne ($last + 1)) { throw 'Progress nextSequence does not follow the event log.' }
@@ -180,14 +204,25 @@ function Invoke-Record {
     return (Invoke-WithLock $Path {
         $state = Read-Progress $Path
         if ($null -eq $state) { $state = New-ProgressState $event.runId $event.actionId }
-        if ([string]$state.runId -cne $event.runId -or [string]$state.actionId -cne $event.actionId) { throw 'Progress checkpoint is bound to a different run/action.' }
+        if ([string]$state.runId -cne $event.runId) { throw 'Progress checkpoint is bound to a different run.' }
+        $continuation = $InputObject.Contains('continuationOfActionId') -and [string]$InputObject.continuationOfActionId -ceq [string]$state.actionId
+        if ([string]$state.actionId -cne $event.actionId -and -not $continuation -and (-not $state.Contains('actionIds') -or @($state.actionIds | ForEach-Object { [string]$_ }) -notcontains [string]$event.actionId)) { throw 'Progress checkpoint is bound to a different run/action without a declared continuation.' }
         Assert-ProgressState $state
         $existing = @($state.events | Where-Object { [string]$_.eventId -ceq $event.eventId })
         if ($existing.Count -gt 0) { return [ordered]@{ recorded = $false; idempotent = $true; event = $existing[0]; nextSequence = [long]$state.nextSequence } }
+        if ([string]$event.eventType -eq 'accepted') { throw 'Worker progress cannot emit accepted; reviewer acceptance is separate.' }
+        $prior = @($state.events | Where-Object { [long]$_.taskId -eq [long]$event.taskId } | Sort-Object sequence | Select-Object -Last 1)
+        $priorState = if ($prior.Count -eq 0) { 'not_started' } else { switch ([string]$prior[0].eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' }; default { throw 'Progress checkpoint contains an unsupported task transition.' } } }
+        $nextState = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' } }
+        $allowedStates = @{ not_started = @('in_progress','blocked'); in_progress = @('in_progress','blocked','awaiting_review'); blocked = @('in_progress','blocked'); awaiting_review = @('in_progress') }
+        if (-not $allowedStates.ContainsKey($priorState) -or $allowedStates[$priorState] -notcontains $nextState) { throw "Invalid progress transition for task $($event.taskId): $priorState -> $nextState." }
         $sameSequence = @($state.events | Where-Object { [long]$_.sequence -eq [long]$event.sequence })
         if ($sameSequence.Count -gt 0) { throw "Stale progress evidence for sequence $($event.sequence) does not match the recorded event." }
         if ([long]$event.sequence -ne [long]$state.nextSequence) { throw "Stale or gapped progress sequence: expected $($state.nextSequence), received $($event.sequence)." }
         $state.events = @($state.events) + @($event)
+        if (-not $state.Contains('actionIds')) { $state.actionIds = @([string]$state.actionId) }
+        if (@($state.actionIds | ForEach-Object { [string]$_ }) -notcontains [string]$event.actionId) { $state.actionIds = @($state.actionIds) + @([string]$event.actionId) }
+        if ($continuation) { $state.actionId = [string]$event.actionId }
         $taskKey = [string]$event.taskId
         $state.taskEvidence[$taskKey] = [ordered]@{ taskId = $event.taskId; lastSequence = $event.sequence; lastEventType = $event.eventType; currentSha = $event.currentSha; criterionIds = @($event.criterionIds); evidence = $event.evidence; eventId = $event.eventId }
         $state.nextSequence = [long]$state.nextSequence + 1
@@ -201,7 +236,7 @@ function Get-Transitions {
     $items = @()
     foreach ($event in $Events) {
         $logicalState = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'ready_for_review' { 'awaiting_review' }; 'blocked' { 'blocked' }; 'accepted' { 'accepted' }; 'reopen' { 'in_progress' } }
-        $items += [ordered]@{ eventId = [string]$event.eventId; sequence = [long]$event.sequence; taskId = [long]$event.taskId; logicalState = $logicalState; currentSha = [string]$event.currentSha; criterionIds = @($event.criterionIds); evidence = $event.evidence }
+        $items += [ordered]@{ eventId = [string]$event.eventId; actionId = [string]$event.actionId; sequence = [long]$event.sequence; ticketKey = [string]$event.ticketKey; projectId = [long]$event.projectId; parentStoryId = [long]$event.parentStoryId; taskId = [long]$event.taskId; eventType = [string]$event.eventType; logicalState = $logicalState; currentSha = [string]$event.currentSha; criterionIds = @($event.criterionIds); evidence = $event.evidence }
     }
     return $items
 }
@@ -209,34 +244,57 @@ function Get-Transitions {
 function Invoke-Consume {
     param([System.Collections.IDictionary] $InputObject, [string] $Path)
     $consumerId = [string](Need $InputObject 'consumerId')
-    $cursor = if ($InputObject.Contains('cursor')) { Nonnegative-Int $InputObject 'cursor' } else { 0L }
     $advance = -not ($InputObject.Contains('advance') -and $InputObject.advance -eq $false)
     return (Invoke-WithLock $Path {
         $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; Assert-ProgressState $state
         if ($InputObject.Contains('runId') -and [string]$InputObject.runId -cne [string]$state.runId) { throw 'runId does not match the progress checkpoint.' }
+        $consumerId = [string]$InputObject.consumerId
+        $consumer = if ($state.consumers.Contains($consumerId)) { $state.consumers[$consumerId] } else { [ordered]@{ cursor = 0; taskStates = [ordered]@{}; pending = @() } }
+        $persistedCursor = [long]$consumer.cursor
+        $cursor = if ($InputObject.Contains('cursor')) { Nonnegative-Int $InputObject 'cursor' } else { $persistedCursor }
+        if ($cursor -ne $persistedCursor) { throw "Consumer cursor must equal the persisted cursor $persistedCursor." }
         $events = @($state.events | Where-Object { [long]$_.sequence -gt $cursor })
         $transitions = @(Get-Transitions $events)
         $newCursor = if ($events.Count -gt 0) { [long]$events[-1].sequence } else { $cursor }
         $writes = @()
-        $consumer = if ($state.consumers.Contains($consumerId)) { $state.consumers[$consumerId] } else { [ordered]@{ cursor = 0; taskStates = [ordered]@{} } }
+        $pending = @($consumer.pending)
         foreach ($transition in $transitions) {
             $taskKey = [string]$transition.taskId
             $prior = if ($consumer.taskStates.Contains($taskKey)) { [string]$consumer.taskStates[$taskKey] } else { $null }
             if ($prior -ne $transition.logicalState) { $writes += $transition }
-            $consumer.taskStates[$taskKey] = $transition.logicalState
+            if (@($pending | Where-Object { [string]$_.eventId -ceq [string]$transition.eventId }).Count -eq 0) { $pending += $transition }
         }
         if ($advance) {
-            $consumer.cursor = $newCursor; $state.consumers[$consumerId] = $consumer
+            $consumer.cursor = $newCursor; $consumer.pending = @($pending); $state.consumers[$consumerId] = $consumer
             Write-Progress $Path $state
         }
-        return [ordered]@{ consumerId = $consumerId; previousCursor = $cursor; cursor = $newCursor; unchanged = ($events.Count -eq 0); events = $events; transitions = $transitions; taigaWrites = @($writes); stateMutation = ($advance -and $newCursor -ne $cursor) }
+        $pendingWrites = @($pending | Where-Object { if ($consumer.taskStates.Contains([string]$_.taskId)) { [string]$consumer.taskStates[[string]$_.taskId] -ne [string]$_.logicalState } else { $true } })
+        return [ordered]@{ consumerId = $consumerId; previousCursor = $cursor; cursor = $newCursor; unchanged = ($events.Count -eq 0 -and $pending.Count -eq 0); events = $events; transitions = $transitions; pending = @($pending); taigaWrites = @($writes + $pendingWrites | Sort-Object sequence -Unique); stateMutation = ($advance -and ($newCursor -ne $cursor -or $events.Count -gt 0)) }
+    })
+}
+
+function Invoke-Acknowledge {
+    param([System.Collections.IDictionary] $InputObject, [string] $Path)
+    $consumerId = [string](Need $InputObject 'consumerId')
+    return (Invoke-WithLock $Path {
+        $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; Assert-ProgressState $state
+        if (-not $state.consumers.Contains($consumerId)) { throw 'Consumer has no persisted progress state.' }
+        $consumer = $state.consumers[$consumerId]; $pending = @($consumer.pending); $outcomes = if ($InputObject.Contains('outcomes')) { @($InputObject.outcomes) } else { throw 'outcomes is required.' }
+        foreach ($outcome in $outcomes) {
+            if ($outcome -isnot [System.Collections.IDictionary] -or -not $outcome.Contains('eventId') -or -not $outcome.Contains('outcome')) { throw 'Each acknowledgement outcome requires eventId and outcome.' }
+            $match = @($pending | Where-Object { [string]$_.eventId -ceq [string]$outcome.eventId }); if ($match.Count -ne 1) { throw "Acknowledgement event is not pending: $($outcome.eventId)." }
+            if ([string]$outcome.outcome -notin @('applied','unchanged','reconciled')) { throw 'Only applied, unchanged, or reconciled outcomes can acknowledge progress.' }
+            $taskKey = [string]$match[0].taskId; $consumer.taskStates[$taskKey] = [string]$match[0].logicalState; $pending = @($pending | Where-Object { [string]$_.eventId -cne [string]$outcome.eventId })
+        }
+        $consumer.pending = @($pending); $state.consumers[$consumerId] = $consumer; Write-Progress $Path $state
+        return [ordered]@{ consumerId = $consumerId; acknowledged = @($outcomes | ForEach-Object eventId); pending = @($pending); cursor = [long]$consumer.cursor; stateMutation = $true }
     })
 }
 
 function Invoke-Validate {
     param([string] $Path)
     $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; Assert-ProgressState $state
-    return [ordered]@{ valid = $true; runId = [string]$state.runId; actionId = [string]$state.actionId; eventCount = @($state.events).Count; nextSequence = [long]$state.nextSequence; consumers = @($state.consumers.Keys) }
+    return [ordered]@{ valid = $true; runId = [string]$state.runId; actionId = [string]$state.actionId; actionIds = @($state.actionIds); eventCount = @($state.events).Count; nextSequence = [long]$state.nextSequence; consumers = @($state.consumers.Keys) }
 }
 
 try {
@@ -245,6 +303,7 @@ try {
     $data = switch ($Operation) {
         'record' { Invoke-Record $inputObject $path }
         'consume' { Invoke-Consume $inputObject $path }
+        'acknowledge' { Invoke-Acknowledge $inputObject $path }
         'validate' { Invoke-Validate $path }
     }
     [ordered]@{ ok = $true; operation = $Operation; path = $path; data = $data } | ConvertTo-Json -Depth 100

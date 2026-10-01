@@ -174,10 +174,14 @@ function Get-ReviewReceiptValidation {
         if (-not $acceptance.Contains('taskId') -or -not [long]::TryParse([string]$acceptance.taskId,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$taskId) -or $taskId -lt 1) { [void]$errors.Add('receipt.taskAcceptances.taskId: must be positive') }
         elseif ($taskAcceptanceIds.ContainsKey([string]$taskId)) { [void]$errors.Add("receipt.taskAcceptances.taskId: duplicate task '$taskId'") }
         else { $taskAcceptanceIds[[string]$taskId] = $true }
-        if ($acceptance.accepted -ne $true) { [void]$errors.Add("receipt.taskAcceptances[$taskId].accepted: explicit reviewer acceptance is required") }
+        if ($acceptance.accepted -ne $true -and [string]$normalized.verdict -notin @('changes_requested','blocked')) { [void]$errors.Add("receipt.taskAcceptances[$taskId].accepted: rejection is valid only for changes_requested or blocked receipts") }
         if ([string]$acceptance.reviewedSha -cne [string]$normalized.reviewedSha) { [void]$errors.Add("receipt.taskAcceptances[$taskId].reviewedSha: stale task review SHA") }
         if ($acceptance.criterionIds -is [string] -or $acceptance.criterionIds -isnot [System.Collections.IEnumerable] -or @($acceptance.criterionIds).Count -eq 0) { [void]$errors.Add("receipt.taskAcceptances[$taskId].criterionIds: at least one criterion is required") }
         if ([string]::IsNullOrWhiteSpace([string]$acceptance.evidence)) { [void]$errors.Add("receipt.taskAcceptances[$taskId].evidence: evidence is required") }
+        if ($acceptance.accepted -ne $true) {
+            if (-not $acceptance.Contains('rejectionReason') -or [string]::IsNullOrWhiteSpace([string]$acceptance.rejectionReason)) { [void]$errors.Add("receipt.taskAcceptances[$taskId].rejectionReason: required for a rejected task") }
+            if (-not $acceptance.Contains('routedActionId') -or [string]::IsNullOrWhiteSpace([string]$acceptance.routedActionId)) { [void]$errors.Add("receipt.taskAcceptances[$taskId].routedActionId: same-worker correction action is required") }
+        }
     }
 
     if ($null -eq $ExpectedCriteria -or @($ExpectedCriteria).Count -eq 0) {
