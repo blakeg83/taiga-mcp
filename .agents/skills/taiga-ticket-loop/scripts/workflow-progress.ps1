@@ -177,6 +177,21 @@ function Get-Event {
     return $event
 }
 
+function Migrate-LegacyProgressState {
+    param([System.Collections.IDictionary] $State)
+    if ($State.Contains('actionIds')) { return $false }
+    $changed = $false; $allActions = [System.Collections.Generic.List[string]]::new()
+    foreach ($event in @($State.events)) {
+        $action = [string]$event.actionId
+        if (-not [string]::IsNullOrWhiteSpace($action) -and -not $allActions.Contains($action)) { [void]$allActions.Add($action) }
+        $expected = Hash-String (Get-EventIdentityKey $event)
+        if ([string]$event.eventId -cne $expected -and (-not $event.Contains('legacyContentDigest') -or [string]$event.legacyContentDigest -cne $expected)) { $event.legacyContentDigest = $expected; $changed = $true }
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$State.actionId) -and -not $allActions.Contains([string]$State.actionId)) { [void]$allActions.Add([string]$State.actionId) }
+    $State.actionIds = @($allActions); $State.legacyIdentityVersion = 1
+    return $true
+}
+
 function Assert-ProgressState {
     param([System.Collections.IDictionary] $State)
     $last = 0L
@@ -185,7 +200,7 @@ function Assert-ProgressState {
     foreach ($event in @($State.events)) {
         if ([long]$event.sequence -ne ($last + 1)) { throw 'Progress events must have contiguous increasing sequences.' }
         $expected = Hash-String (Get-EventIdentityKey $event)
-        if ([string]$event.eventId -cne $expected) { throw "Progress event identity is invalid: $($event.sequence)." }
+        if ([string]$event.eventId -cne $expected -and (-not $event.Contains('legacyContentDigest') -or [string]$event.legacyContentDigest -cne $expected)) { throw "Progress event identity is invalid: $($event.sequence)." }
         if ($event.Contains('shaDigest') -and -not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ShaProofDigest $event @($event.criterionIds) $event.evidence ([string]$event.currentSha))) { throw "Progress event SHA proof is invalid: $($event.sequence)." }
         if (-not $actionIds.Add([string]$event.actionId)) { }
         $taskKey = [string]$event.taskId; $prior = if ($taskStates.ContainsKey($taskKey)) { [string]$taskStates[$taskKey] } else { 'not_started' }; $next = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' }; 'accepted' { 'accepted' } }
@@ -205,6 +220,7 @@ function Invoke-Record {
         $state = Read-Progress $Path
         if ($null -eq $state) { $state = New-ProgressState $event.runId $event.actionId }
         if ([string]$state.runId -cne $event.runId) { throw 'Progress checkpoint is bound to a different run.' }
+        $migrated = Migrate-LegacyProgressState $state
         $continuation = $InputObject.Contains('continuationOfActionId') -and [string]$InputObject.continuationOfActionId -ceq [string]$state.actionId
         if ([string]$state.actionId -cne $event.actionId -and -not $continuation -and (-not $state.Contains('actionIds') -or @($state.actionIds | ForEach-Object { [string]$_ }) -notcontains [string]$event.actionId)) { throw 'Progress checkpoint is bound to a different run/action without a declared continuation.' }
         Assert-ProgressState $state
@@ -246,7 +262,7 @@ function Invoke-Consume {
     $consumerId = [string](Need $InputObject 'consumerId')
     $advance = -not ($InputObject.Contains('advance') -and $InputObject.advance -eq $false)
     return (Invoke-WithLock $Path {
-        $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; Assert-ProgressState $state
+        $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; $migrated = Migrate-LegacyProgressState $state; if ($migrated) { Write-Progress $Path $state }; Assert-ProgressState $state
         if ($InputObject.Contains('runId') -and [string]$InputObject.runId -cne [string]$state.runId) { throw 'runId does not match the progress checkpoint.' }
         $consumerId = [string]$InputObject.consumerId
         $consumer = if ($state.consumers.Contains($consumerId)) { $state.consumers[$consumerId] } else { [ordered]@{ cursor = 0; taskStates = [ordered]@{}; pending = @() } }
@@ -277,7 +293,7 @@ function Invoke-Acknowledge {
     param([System.Collections.IDictionary] $InputObject, [string] $Path)
     $consumerId = [string](Need $InputObject 'consumerId')
     return (Invoke-WithLock $Path {
-        $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; Assert-ProgressState $state
+        $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; $migrated = Migrate-LegacyProgressState $state; if ($migrated) { Write-Progress $Path $state }; Assert-ProgressState $state
         if (-not $state.consumers.Contains($consumerId)) { throw 'Consumer has no persisted progress state.' }
         $consumer = $state.consumers[$consumerId]; $pending = @($consumer.pending); $outcomes = if ($InputObject.Contains('outcomes')) { @($InputObject.outcomes) } else { throw 'outcomes is required.' }
         foreach ($outcome in $outcomes) {
@@ -293,7 +309,7 @@ function Invoke-Acknowledge {
 
 function Invoke-Validate {
     param([string] $Path)
-    $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; Assert-ProgressState $state
+    $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; $migrated = Migrate-LegacyProgressState $state; if ($migrated) { Write-Progress $Path $state }; Assert-ProgressState $state
     return [ordered]@{ valid = $true; runId = [string]$state.runId; actionId = [string]$state.actionId; actionIds = @($state.actionIds); eventCount = @($state.events).Count; nextSequence = [long]$state.nextSequence; consumers = @($state.consumers.Keys) }
 }
 
