@@ -47,7 +47,13 @@ and allows successive documentation-only revisions to reuse an older record
 while rejecting environment drift, covered-file changes, and mixed
 documentation/source changes. The effective coverage is persisted even when
 the coordinator accepted it from the outer result input as a compatibility
-fallback.
+fallback. Documentation classification is conservative: only recognized
+documentation extensions under `docs/` or `documentation/` directories, or
+the root `README`/`CHANGELOG`/`CONTRIBUTING`/`LICENSE` names, are
+documentation; source, configuration, and executable files remain production
+changes even when stored under a documentation directory or given a
+document-like basename. Git interval paths are read as NUL-delimited names so
+Unicode filenames are compared without Git quoting or escaping.
 
 ## Outcome classification
 

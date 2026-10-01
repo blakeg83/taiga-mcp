@@ -59,7 +59,11 @@ function Test-DocumentationPath {
     $normalized = $Path.Replace('\','/').TrimStart('./')
     $leaf = [IO.Path]::GetFileName($normalized)
     $extension = [IO.Path]::GetExtension($leaf).ToLowerInvariant()
-    return $normalized -match '^(docs|documentation)/' -or $leaf -match '^(README|CHANGELOG|CONTRIBUTING|LICENSE)(\..*)?$' -or $extension -in @('.md','.mdx','.rst','.adoc')
+    $documentationExtensions = @('.md','.mdx','.rst','.adoc')
+    $isDocumentationExtension = $documentationExtensions -contains $extension
+    $isDocumentationDirectory = $normalized -match '^(docs|documentation)/'
+    $isRootDocumentationName = $normalized -notmatch '/' -and $leaf -match '^(README|CHANGELOG|CONTRIBUTING|LICENSE)\.(md|mdx|rst|adoc)$'
+    return $isDocumentationExtension -and ($isDocumentationDirectory -or $isRootDocumentationName)
 }
 
 function Get-GitChangedPaths {
@@ -69,9 +73,9 @@ function Get-GitChangedPaths {
     foreach ($revision in @($FromRevision,$ToRevision)) {
         if ([string]$revision -notmatch '^[0-9a-fA-F]{7,64}$') { throw 'Git interval revisions must be hexadecimal commit IDs.' }
     }
-    $output = & git -C $repositoryPath diff --name-only --no-renames $FromRevision $ToRevision -- 2>&1
+    $output = (& git -C $repositoryPath -c core.quotepath=false -c i18n.logOutputEncoding=utf-8 diff --name-only -z --no-renames $FromRevision $ToRevision -- 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the Git change interval for evidence reuse.' }
-    return @($output | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    return @($output -split "`0" | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | ForEach-Object { [string]$_ })
 }
 
 function Write-ImmutableJson {

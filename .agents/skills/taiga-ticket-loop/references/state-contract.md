@@ -35,6 +35,9 @@ performs the corresponding native desktop/provider operation and later calls
 `record-external`. `accept-result` consumes a durable result through the state
 helper and can apply one requested local phase transition. Its default output
 contains references and correlation fields, not a copied receipt or transcript.
+A blocked or otherwise non-completed result routes to `needs_input`/`wait`
+without invoking review assessment; receipt-shaped fields on such a result do
+not create review verdict or coverage metadata in the state registry.
 
 Reviewer dispatches freeze the packet ID/hash, scope hash, base SHA, reviewed
 SHA, and the eligible verification action IDs in the local action target. If

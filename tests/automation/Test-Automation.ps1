@@ -271,6 +271,12 @@ try {
         $bad = Copy-JsonObject $accept; $bad.resultReference.path = Join-Path $script:FixtureRoot 'missing-coordinate-result.json'
         $badResult = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath $bad 'coordinate-bad-result'),'-StateRoot',$coordRoot) $false
         Assert-True (-not $badResult.ok) 'missing result files must fail before state mutation'
+        $blockedDispatch = Copy-JsonObject $dispatch; $blockedDispatch.actionId = 'dispatch-blocked'; $blockedPrepared = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $blockedDispatch 'coordinate-blocked-dispatch'),'-StateRoot',$coordRoot)
+        $blockedResultPath = Join-Path $script:FixtureRoot 'coordinate-blocked-result.json'; Write-JsonFile @{ resultId = 'result-blocked'; cursor = 'cursor-blocked'; actionId = 'dispatch-blocked'; workerId = 'worker-1'; status = 'blocked'; decision = 'needs_input'; nextPhase = 'needs_input'; receiptReference = @{ path = $resultPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resultPath).Hash.ToLowerInvariant() } } $blockedResultPath
+        $blockedAccepted = Invoke-PsJson $script:CoordinateScript @('-Operation','accept-result','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; resultReference = @{ path = $blockedResultPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $blockedResultPath).Hash.ToLowerInvariant() } } 'coordinate-blocked-accept'),'-StateRoot',$coordRoot)
+        Assert-Equal 'needs_input' $blockedAccepted.data.decision 'blocked worker results with receipt references should route to needs_input'
+        $blockedState = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$coordRoot)
+        Assert-True (-not $blockedState.data.registry.actions['dispatch-blocked'].result.Contains('reviewVerdict')) 'blocked results must not persist review metadata when no assessment ran'
     }
 
     Test-Case 'require trusted review acceptance before publication preparation' {
@@ -408,6 +414,34 @@ try {
         Assert-True (-not $codeResult.data.reusable) 'changed source inputs must invalidate reuse'
         $unchanged = Copy-JsonObject $current; $unchanged.changedKind = 'unchanged'; $unchanged.changedPaths = @(); $unchangedResult = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ evidenceReferences = @($reference); current = $unchanged } 'reuse-unchanged'))
         Assert-True $unchangedResult.data.reusable 'exact-revision reuse must allow an explicit empty changed-path set'
+    }
+
+    Test-Case 'classify documentation conservatively and preserve Unicode Git paths' {
+        $repo = Join-Path $script:FixtureRoot 'documentation-classifier-repo'; New-Item -ItemType Directory -Path $repo -Force | Out-Null; $null = & git init -b master $repo; & git -C $repo config user.name 'Synthetic Test'; & git -C $repo config user.email 'test@example.invalid'
+        [IO.File]::WriteAllText((Join-Path $repo 'app.txt'), 'base', [Text.UTF8Encoding]::new($false)); & git -C $repo add --all; $null = & git -C $repo commit --quiet -m 'classifier base'; $base = ((& git -C $repo rev-parse HEAD).Trim())
+        New-Item -ItemType Directory -Path (Join-Path $repo 'docs') -Force | Out-Null; [IO.File]::WriteAllText((Join-Path $repo 'docs/runtime.cs'), 'public static class Runtime {}', [Text.UTF8Encoding]::new($false)); [IO.File]::WriteAllText((Join-Path $repo 'docs/README.json'), '{"runtime":true}', [Text.UTF8Encoding]::new($false)); & git -C $repo add --all; $null = & git -C $repo commit --quiet -m 'classifier source and config'; $codeHead = ((& git -C $repo rev-parse HEAD).Trim())
+        [IO.File]::WriteAllText((Join-Path $repo 'docs/guía.md'), '# guide', [Text.UTF8Encoding]::new($false)); & git -C $repo add --all; $null = & git -C $repo commit --quiet -m 'classifier Unicode documentation'; $docsHead = ((& git -C $repo rev-parse HEAD).Trim())
+        function New-ClassifierEvidence {
+            param([string] $EvidencePath, [string] $EvidenceId, [string] $CheckedRevision, [string] $BaseSha, [string[]] $Files)
+            $logPath = [IO.Path]::ChangeExtension($EvidencePath, '.log'); [IO.File]::WriteAllText($logPath, 'synthetic classifier evidence', [Text.UTF8Encoding]::new($false)); $logHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $logPath).Hash.ToLowerInvariant()
+            $record = @{ schemaVersion = 1; evidenceId = $EvidenceId; actionId = 'classifier-check'; runId = 'classifier-run'; ticketKey = 'project:1:issue:1'; scopeHash = 'classifier-scope'; checkedRevision = $CheckedRevision; capturedAtUtc = '2026-09-30T00:00:00Z'; evidenceKind = 'check'; outcome = 'passed'; actualExitCode = 0; assertionReportedPassed = $null; acceptedAsCheckPass = $true; log = @{ path = $logPath; sha256 = $logHash; bytes = ([IO.FileInfo]::new($logPath)).Length }; coverage = @{ revision = $CheckedRevision; baseSha = $BaseSha; environmentHash = 'env'; dependenciesHash = 'deps'; files = $Files } }
+            $recordJson = $record | ConvertTo-Json -Depth 100 -Compress; $hashAlgorithm = [Security.Cryptography.SHA256]::Create(); try { $recordHash = ([Convert]::ToHexString($hashAlgorithm.ComputeHash([Text.Encoding]::UTF8.GetBytes($recordJson)))).ToLowerInvariant() } finally { $hashAlgorithm.Dispose() }; Write-JsonFile @{ recordJson = $recordJson; recordSha256 = $recordHash } $EvidencePath
+            return @{ path = $EvidencePath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $EvidencePath).Hash.ToLowerInvariant(); evidenceId = $EvidenceId }
+        }
+        $staleReference = New-ClassifierEvidence (Join-Path $script:FixtureRoot 'classifier-stale.json') 'ev-classifier-stale' $base $base @('app.txt')
+        $codeCurrent = @{ fromRevision = $base; revision = $codeHead; baseSha = $base; environmentHash = 'env'; dependenciesHash = 'deps'; changedKind = 'code'; changedPaths = @('docs/runtime.cs','docs/README.json') }
+        $staleCode = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ repositoryPath = $repo; evidenceReferences = @($staleReference); current = $codeCurrent } 'classifier-stale-code'))
+        Assert-True (-not $staleCode.data.reusable) 'stale evidence must not be reused after source or config changes inside docs'
+        Assert-Equal 'changed_inputs' @($staleCode.data.evidence)[0].reason 'honest code changes inside docs must not be mislabeled as documentation'
+        $misclassifiedCode = Copy-JsonObject $codeCurrent; $misclassifiedCode.changedKind = 'documentation_only'; $misclassified = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ repositoryPath = $repo; evidenceReferences = @($staleReference); current = $misclassifiedCode } 'classifier-misclassified-code'))
+        Assert-Equal 'current_change_set_mismatch' @($misclassified.data.evidence)[0].reason 'source and config files inside docs must invalidate a documentation-only claim'
+        $freshReference = New-ClassifierEvidence (Join-Path $script:FixtureRoot 'classifier-fresh.json') 'ev-classifier-fresh' $codeHead $base @('app.txt','docs/runtime.cs','docs/README.json')
+        $freshCode = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ repositoryPath = $repo; evidenceReferences = @($freshReference); current = $codeCurrent } 'classifier-fresh-code'))
+        Assert-True $freshCode.data.reusable 'fresh evidence for an honest code change inside docs should be accepted'
+        $docsCurrent = @{ fromRevision = $codeHead; revision = $docsHead; baseSha = $base; environmentHash = 'env'; dependenciesHash = 'deps'; changedKind = 'documentation_only'; changedPaths = @('docs/guía.md') }
+        $unicodeDocs = Invoke-PsJson $script:VerificationScript @('-Operation','reuse-evidence','-InputPath',(New-InputPath @{ repositoryPath = $repo; evidenceReferences = @($freshReference); current = $docsCurrent } 'classifier-unicode-docs'))
+        Assert-True $unicodeDocs.data.reusable 'NUL-delimited Git paths must preserve non-ASCII documentation names'
+        Assert-Equal 'docs/guía.md' @($unicodeDocs.data.evidence)[0].intervalPaths[0] 'Git interval output must retain the original Unicode path'
     }
 
     Test-Case 'verify worker-owned validation handoff regressions' {

@@ -219,12 +219,14 @@ function Invoke-AcceptResult {
     $action = $inspection.data.registry.actions[[string]$result.actionId]
     if ($null -eq $action) { throw "Worker result action was not prepared for this ticket: $([string]$result.actionId)." }
     if ([string]$action.ticketKey -cne [string]$owner.ticketKey -or [string]$action.sessionId -cne [string]$owner.sessionId -or [string]$action.target.workerId -cne [string]$result.workerId) { throw 'Worker result is not bound to the prepared ticket action and worker.' }
+    $reviewRan = $false
     if ($result.status -eq 'blocked') { $decision = 'needs_input' }
     elseif ($result.status -ne 'completed') { $decision = 'wait' }
     elseif ($result.Contains('receiptReference')) {
         if (-not $InputObject.Contains('packetReference')) { throw 'A publication result must include its validated packetReference.' }
         $resultPacket = Read-ValidatedPacket $InputObject $owner
         $review = Invoke-ReviewDecision $InputObject $owner $result $resultPacket $action
+        $reviewRan = $true
         $decision = [string]$review.decision
     }
     else { $decision = 'review' }
@@ -237,7 +239,7 @@ function Invoke-AcceptResult {
     $reason = if ($result.Contains('reason')) { [string]$result.reason } else { "worker_$($result.status)" }
     $phase = switch ($decision) { 'publish' { 'publishing' }; 'correct' { 'correcting' }; 'needs_input' { if ($result.Contains('nextPhase')) { [string]$result.nextPhase } else { 'needs_input' } }; default { if ($decision -eq 'review' -and $result.Contains('nextPhase') -and [string]$result.nextPhase -in @('preparing','implementing','reviewing')) { [string]$result.nextPhase } else { $null } } }
     if ($decision -eq 'needs_input' -and $null -ne $phase -and $phase -ne 'needs_input') { $phase = 'needs_input' }
-    $hasReview = $result.Contains('receiptReference')
+    $hasReview = $reviewRan
     $routeValidated = if ($decision -eq 'publish') { 'review_publish' } elseif ($hasReview) { 'review_verdict' } else { 'derived_from_validated_result' }
     $stateResultPayload = [ordered]@{ resultId = if ($result.Contains('resultId')) { [string]$result.resultId } else { [string]$result.cursor }; actionId = [string]$result.actionId; workerId = [string]$result.workerId; status = [string]$result.status; resultReference = $resultRead.reference; summary = if ($result.Contains('summary')) { [string]$result.summary } else { $null }; decision = $decision; routeValidated = $routeValidated }
     if ($hasReview) {
