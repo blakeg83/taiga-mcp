@@ -1218,6 +1218,30 @@ try {
         Assert-True (-not $staleResult.ok) 'stale sequence evidence must be rejected'
     }
 
+    Test-Case 'relay bounded child progress without starting untouched tasks' {
+        $progressRoot = Join-Path $script:FixtureRoot 'relay-progress'; $relayRoot = Join-Path $script:FixtureRoot 'relay-state'; New-Item -ItemType Directory -Path $relayRoot -Force | Out-Null
+        $baseEvent = @{ runId = 'run-relay'; actionId = 'action-relay'; ticketKey = 'project:12:story:642'; projectId = 12; parentStoryId = 642; taskId = 540; currentSha = 'abcdef1'; criterionIds = @('AC10'); evidence = @{ source = 'milestone' } }
+        $started = $baseEvent.Clone(); $started.sequence = 1; $started.eventType = 'started'; $startedResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $started 'relay-started'),'-StateRoot',$progressRoot)
+        $review = $baseEvent.Clone(); $review.sequence = 2; $review.currentSha = 'abcdef2'; $review.eventType = 'ready_for_review'; $review.evidence = @{ source = 'implementation receipt' }; $reviewResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $review 'relay-ready'),'-StateRoot',$progressRoot); $review.eventId = $reviewResult.data.event.eventId
+        $second = $baseEvent.Clone(); $second.sequence = 3; $second.taskId = 541; $second.currentSha = 'abcdef2'; $second.eventType = 'started'; $second.evidence = @{ source = 'overlapping task milestone' }; $secondResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $second 'relay-second'),'-StateRoot',$progressRoot)
+        $blocked = $second.Clone(); $blocked.sequence = 4; $blocked.eventType = 'blocked'; $blocked.blockedReason = 'synthetic dependency'; $blocked.evidence = @{ source = 'blocked milestone' }; $blockedResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $blocked 'relay-blocked'),'-StateRoot',$progressRoot)
+        $relayInput = @{ progressRoot = $progressRoot; consumerId = 'coordinator-story-642'; runId = 'run-relay'; cursor = 0; statusMapping = @{ in_progress = 58; awaiting_review = 59; blocked = 60 } }
+        $firstRelay = Invoke-PsJson $script:CoordinateScript @('-Operation','relay-task-progress','-InputPath',(New-InputPath $relayInput 'relay-first'),'-StateRoot',$relayRoot)
+        Assert-Equal 4 @($firstRelay.data.taskTransitions).Count 'relay should expose each real milestone in order'
+        Assert-Equal 58 $firstRelay.data.taskTransitions[0].statusId 'only started task should be mapped to in-progress'
+        Assert-Equal 59 $firstRelay.data.taskTransitions[1].statusId 'ready-for-review should remain review-pending'
+        Assert-Equal 541 $firstRelay.data.taskTransitions[2].taskId 'overlapping progress must preserve task identity'
+        $unchangedInput = $relayInput.Clone(); $unchangedInput.cursor = 4
+        $unchanged = Invoke-PsJson $script:CoordinateScript @('-Operation','relay-task-progress','-InputPath',(New-InputPath $unchangedInput 'relay-unchanged'),'-StateRoot',$relayRoot)
+        Assert-True ($unchanged.data.stateMutation -eq $false) ("unchanged observations must not mutate task status state: " + ($unchanged.data | ConvertTo-Json -Depth 10 -Compress))
+        Assert-Equal 0 @($unchanged.data.taigaWrites).Count 'unchanged observations must not propose Taiga writes'
+        $duplicate = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $review 'relay-duplicate'),'-StateRoot',$progressRoot)
+        Assert-True $duplicate.data.idempotent 'repeated progress events must remain idempotent after relay'
+        $stale = $second.Clone(); $stale.currentSha = 'abcdef3'; $stale.eventType = 'blocked'; $stale.sequence = 3; $stale.blockedReason = 'stale'; $stale.evidence = @{ source = 'stale evidence' }
+        $staleRelayEvent = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $stale 'relay-stale'),'-StateRoot',$progressRoot) $false
+        Assert-True (-not $staleRelayEvent.ok) 'stale overlapping evidence must be rejected'
+    }
+
     Test-Case 'create and push a fresh branch using a local bare remote' {
         $repo = Join-Path $script:FixtureRoot 'repo'; $remote = Join-Path $script:FixtureRoot 'remote.git'; $worktree = Join-Path $script:FixtureRoot 'worktree'
         New-Item -ItemType Directory -Path $repo -Force | Out-Null

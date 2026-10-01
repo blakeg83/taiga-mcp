@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','status')]
+    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','status','relay-task-progress')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath,
@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:StateScript = Join-Path $PSScriptRoot 'workflow-state.ps1'
+$script:ProgressScript = Join-Path $PSScriptRoot 'workflow-progress.ps1'
 
 function Read-Object {
     if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) { throw 'Input file was not found.' }
@@ -424,6 +425,29 @@ function Invoke-HeartbeatPlan {
     return [ordered]@{ phase = [string]$session.state; decision = if ([string]::IsNullOrWhiteSpace($existing)) { 'create_heartbeat' } else { 'reuse_heartbeat' }; reason = if ([string]::IsNullOrWhiteSpace($existing)) { 'one_session_heartbeat' } else { 'existing_session_heartbeat' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'automation_update'; heartbeat = [ordered]@{ heartbeatId = if ([string]::IsNullOrWhiteSpace($existing)) { $null } else { $existing }; notificationPolicy = $requestedPolicy; nestedSchedules = $false; quietWhenUnchanged = $true } }
 }
 
+function Invoke-RelayTaskProgress {
+    param([System.Collections.IDictionary] $InputObject)
+    $progressRoot = [IO.Path]::GetFullPath((Need $InputObject 'progressRoot')); if (-not (Test-Path -LiteralPath $progressRoot -PathType Container)) { throw 'progressRoot is inaccessible.' }
+    $consumerId = Need $InputObject 'consumerId'; $cursor = if ($InputObject.Contains('cursor')) { [long]$InputObject.cursor } else { 0L }; if ($cursor -lt 0) { throw 'cursor must be nonnegative.' }
+    $request = [ordered]@{ consumerId = $consumerId; cursor = $cursor; advance = if ($InputObject.Contains('advance')) { [bool]$InputObject.advance } else { $true } }
+    if ($InputObject.Contains('runId')) { $request.runId = [string]$InputObject.runId }
+    $inputPath = Join-Path ([IO.Path]::GetFullPath($StateRoot)) ('.progress-relay-' + [Guid]::NewGuid().ToString('N') + '.json')
+    try {
+        [IO.File]::WriteAllText($inputPath, ($request | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        $lines = & pwsh -NoProfile -File $script:ProgressScript -Operation consume -InputPath $inputPath -StateRoot $progressRoot 2>&1
+        $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine
+        try { $progress = ConvertFrom-Json -InputObject $raw -AsHashtable -Depth 100 } catch { throw "Progress helper returned invalid JSON: $raw" }
+        if ($exitCode -ne 0 -or $progress.ok -ne $true) { throw [string]$progress.error.message }
+    } finally { if (Test-Path -LiteralPath $inputPath -PathType Leaf) { Remove-Item -LiteralPath $inputPath -Force } }
+    $mapping = if ($InputObject.Contains('statusMapping')) { $InputObject.statusMapping } else { @{} }
+    $proposals = @($progress.data.transitions | ForEach-Object {
+        $logical = [string]$_.logicalState
+        if ($logical -eq 'accepted') { throw 'Worker progress cannot accept a task; explicit reviewer acceptance is required.' }
+        [ordered]@{ eventId = [string]$_.eventId; sequence = [long]$_.sequence; taskId = [long]$_.taskId; logicalState = $logical; statusId = if ($mapping -is [System.Collections.IDictionary] -and $mapping.Contains($logical)) { [long]$mapping[$logical] } else { $null }; currentSha = [string]$_.currentSha; criterionIds = @($_.criterionIds); evidence = $_.evidence }
+    })
+    return [ordered]@{ phase = $null; decision = if ($progress.data.unchanged) { 'continue_wait' } else { 'relay_task_status_observations' }; reason = if ($progress.data.unchanged) { 'no_new_task_progress' } else { 'new_task_progress' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = if ($progress.data.stateMutation) { @('progress.cursor','task.evidence') } else { @() }; revision = $null; stateMutation = [bool]$progress.data.stateMutation; nativeOperation = 'bounded_progress_observation'; consumerId = $consumerId; cursor = [long]$progress.data.cursor; events = @($progress.data.events); taskTransitions = $proposals; taigaWrites = @($progress.data.taigaWrites) }
+}
+
 try {
     $inputObject = Read-Object
     if ([string]::IsNullOrWhiteSpace($StateRoot)) { throw 'StateRoot is required.' }
@@ -436,6 +460,7 @@ try {
         'observe-wait' { Invoke-ObserveWait $inputObject }
         'heartbeat-plan' { Invoke-HeartbeatPlan $inputObject }
         'status' { Invoke-Status $inputObject }
+        'relay-task-progress' { Invoke-RelayTaskProgress $inputObject }
     }
     [ordered]@{ ok = $true; operation = $Operation; data = $data } | ConvertTo-Json -Depth 100
     exit 0

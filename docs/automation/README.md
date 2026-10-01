@@ -33,6 +33,11 @@ status is configured. Workers emit append-only progress through
 `workflow-progress.ps1`; the checkpoint records task IDs, run/action identity,
 sequences, revisions, criterion evidence, and idempotent event IDs. Progress
 is evidence of a milestone, not reviewer acceptance or a Done transition.
+The coordinator consumes that stream with
+`workflow-coordinate.ps1 -Operation relay-task-progress` on a bounded
+observation. It advances a per-consumer cursor, proposes only changed task
+states, and leaves `ready_for_review` in the mapped review state (or the
+documented in-progress fallback) until an independent reviewer accepts it.
 
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
