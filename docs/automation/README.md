@@ -23,6 +23,17 @@ The harness uses synthetic state and Taiga/provider observations plus a local
 bare Git remote. It does not contact live Taiga or GitHub. Actual host and
 provider smoke evidence remains separate from fixture success.
 
+Story child-task status handling is defined in
+`.agents/skills/taiga-ticket-loop/references/child-task-status-contract.md`.
+`workflow-taiga.ps1 -Operation capture-context` captures complete task pages,
+including closed tasks, and emits immutable task bindings. The
+`resolve-status-mapping` operation validates project/resource-specific status
+metadata and uses `in_progress` as the review fallback only when no review
+status is configured. Workers emit append-only progress through
+`workflow-progress.ps1`; the checkpoint records task IDs, run/action identity,
+sequences, revisions, criterion evidence, and idempotent event IDs. Progress
+is evidence of a milestone, not reviewer acceptance or a Done transition.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the

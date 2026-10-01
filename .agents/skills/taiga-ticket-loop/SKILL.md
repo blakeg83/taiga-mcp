@@ -35,6 +35,9 @@ the relevant reference before each operation:
   immutable check records, log hashes, and outcome classification;
 - [Taiga, Git, and PR operations](references/taiga-git-pr.md) for context,
   status mapping, branch, provider, and merge evidence;
+- [child-task status contract](references/child-task-status-contract.md) for
+  story task identity, logical status mapping, progress events, and selective
+  reopening;
 - [scheduling and epics](references/scheduling-and-epics.md) for concurrency,
   dependency, and parent acceptance rules.
 

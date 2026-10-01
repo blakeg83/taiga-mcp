@@ -19,6 +19,7 @@ $script:MeasureScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-tick
 $script:AcceptanceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-acceptance.ps1'
 $script:AcceptanceScenarioPath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-acceptance-scenario.json'
 $script:TaigaScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-taiga.ps1'
+$script:ProgressScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-progress.ps1'
 $script:FixtureRoot = Join-Path $script:Root 'fixtures'
 $script:Passed = 0
 $script:Failed = 0
@@ -1168,6 +1169,53 @@ try {
         $final = @{ kind = 'issue'; requirementsHash = 'h'; currentRequirementsHash = 'h'; criteriaComplete = $true; checksPass = $true; completionPolicy = 'merged'; prState = 'merged'; allStoriesMerged = $true; epicAccepted = $true }
         $finalResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $final 'taiga-final'))
         Assert-True $finalResult.data.ready 'merged leaf should be finalizable'
+    }
+
+    Test-Case 'bind story child task identities and durable progress events' {
+        $taskContext = @{
+            kind = 'story'; projectId = 12; storyId = 642; ref = 1
+            detailPages = @(@{ page = 1; hasMore = $false; nextPage = $null })
+            commentPages = @(@{ page = 1; hasMore = $false; nextPage = $null })
+            taskPages = @(
+                @{ page = 1; hasMore = $true; nextPage = 2; total = 2; pageSize = 1; items = @(@{ id = 540; ref = 5; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC01'); closed = $false }) }
+                @{ page = 2; hasMore = $false; nextPage = $null; total = 2; pageSize = 1; items = @(@{ id = 541; ref = 6; projectId = 12; user_story_id = 642; status_id = 57; version = 4; criteria = @('AC02'); closed = $true }) }
+            )
+            selectedTaskIds = @(540, 541)
+        }
+        $capturedTasks = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $taskContext 'child-task-context'))
+        Assert-Equal 2 @($capturedTasks.data.taskScope.bindings).Count 'open and closed child tasks should both be bound'
+        Assert-Equal 541 $capturedTasks.data.taskScope.bindings[1].taskId 'task IDs should remain bound to source pages'
+        Assert-Equal 4 $capturedTasks.data.taskScope.bindings[1].version 'baseline task version should be captured'
+        $noChildren = Copy-JsonObject $taskContext; $noChildren.taskPages = @(@{ page = 1; hasMore = $false; nextPage = $null; total = 0; pageSize = 1; items = @() }); $noChildren.selectedTaskIds = @()
+        $empty = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $noChildren 'child-task-empty'))
+        Assert-Equal 0 @($empty.data.taskScope.bindings).Count 'a complete empty task page is a valid no-children scope'
+        $wrongParent = Copy-JsonObject $taskContext; $wrongParent.taskPages[0].items[0].user_story_id = 999
+        $wrongParentResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $wrongParent 'child-task-wrong-parent')) $false
+        Assert-True (-not $wrongParentResult.ok) 'wrong parent tasks must remain unresolved'
+        $duplicateAlias = Copy-JsonObject $taskContext; $duplicateAlias.taskPages[1].items[0].ref = 5
+        $duplicateAliasResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $duplicateAlias 'child-task-duplicate-alias')) $false
+        Assert-True (-not $duplicateAliasResult.ok) 'duplicate task aliases must be rejected'
+        $missingMapping = Copy-JsonObject $taskContext; $missingMapping.taskPages[0].items[0].Remove('status_id')
+        $missingMappingResult = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $missingMapping 'child-task-missing-mapping')) $false
+        Assert-True (-not $missingMappingResult.ok) 'missing task status mapping must be rejected'
+        $changedScope = Copy-JsonObject $taskContext; $changedScope.taskPages[1].items[0].version = 5
+        $changedCapture = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $changedScope 'child-task-changed-scope'))
+        Assert-True ($capturedTasks.data.requirementsHash -ne $changedCapture.data.requirementsHash) 'changed child scope must change the context hash'
+        $statusRequest = @{ projectId = 12; resource = 'task'; statusMetadata = @(@{ id = 56; name = 'New' }, @{ id = 58; name = 'In Progress' }, @{ id = 59; name = 'Done' }); mapping = @{ not_started = 56; in_progress = 58; accepted = 59 } }
+        $statusResult = Invoke-PsJson $script:TaigaScript @('-Operation','resolve-status-mapping','-InputPath',(New-InputPath $statusRequest 'child-status-resolve'))
+        Assert-Equal 58 $statusResult.data.in_progress 'mapping must use discovered task status IDs'
+        Assert-True $statusResult.data.reviewFallback 'missing review status must use the documented in-progress fallback'
+        $progressRoot = Join-Path $script:FixtureRoot 'child-progress'; $started = @{ runId = 'run-child'; actionId = 'action-child'; ticketKey = 'project:12:story:642'; projectId = 12; parentStoryId = 642; taskId = 540; sequence = 1; currentSha = 'abcdef1'; eventType = 'started'; criterionIds = @('AC01'); evidence = @{ milestone = 'implementation started' } }
+        $recorded = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $started 'child-progress-started'),'-StateRoot',$progressRoot)
+        Assert-True $recorded.data.recorded 'started event should be durable'
+        $ready = $started.Clone(); $ready.sequence = 2; $ready.currentSha = 'abcdef2'; $ready.eventType = 'ready_for_review'; $ready.evidence = @{ milestone = 'ready for review'; aggregateReceipt = 'receipt-child' }
+        $readyResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $ready 'child-progress-ready'),'-StateRoot',$progressRoot)
+        $ready.eventId = $readyResult.data.event.eventId
+        $duplicate = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $ready 'child-progress-duplicate'),'-StateRoot',$progressRoot)
+        Assert-True $duplicate.data.idempotent 'repeated event identity should be idempotent'
+        $stale = @{ runId = 'run-child'; actionId = 'action-child'; ticketKey = 'project:12:story:642'; projectId = 12; parentStoryId = 642; taskId = 540; sequence = 1; currentSha = 'abcdef3'; eventType = 'blocked'; criterionIds = @('AC01'); evidence = @{ milestone = 'stale' }; blockedReason = 'stale fixture' }
+        $staleResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $stale 'child-progress-stale'),'-StateRoot',$progressRoot) $false
+        Assert-True (-not $staleResult.ok) 'stale sequence evidence must be rejected'
     }
 
     Test-Case 'create and push a fresh branch using a local bare remote' {
