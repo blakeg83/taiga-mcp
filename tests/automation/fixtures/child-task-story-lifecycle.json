@@ -62,7 +62,7 @@
           { "page": 2, "hasMore": false, "nextPage": null, "items": [{ "id": 541, "ref": 6, "project": 12, "user_story": 642, "status": 56, "version": 4, "criteria": ["AC02"] }] }
         ],
         "selectedTaskIds": [540, 541],
-        "packetBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "criteriaByTask": { "540": ["AC01"], "541": ["AC02"] } }
+        "packetBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "trustedRevisions": ["abcdef1", "abcdef2"], "criteriaByTask": { "540": ["AC01"], "541": ["AC02"] } }
       },
       "expect": { "ok": true }
     },
@@ -77,7 +77,7 @@
           { "page": 2, "hasMore": false, "nextPage": null, "items": [{ "id": 541, "ref": 6, "project": 12, "user_story": 642, "status": 56, "version": 4, "criteria": ["AC02"] }] }
         ],
         "selectedTaskIds": [540, 541],
-        "packetBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "criteriaByTask": { "540": ["AC01"], "541": ["AC02"] } }
+        "packetBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "trustedRevisions": ["abcdef1", "abcdef2"], "criteriaByTask": { "540": ["AC01"], "541": ["AC02"] } }
       },
       "expect": { "ok": true }
     },

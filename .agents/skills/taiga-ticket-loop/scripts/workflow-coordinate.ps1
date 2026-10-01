@@ -49,10 +49,18 @@ function Get-ValidatedPacketBinding {
     if (-not $InputObject.Contains('packetBinding') -or $InputObject.packetBinding -isnot [System.Collections.IDictionary]) { throw 'Relay requires a validated packetBinding.' }
     $packet = $InputObject.packetBinding
     foreach ($name in @('runId','actionId','packetHash','scopeHash','projectId','parentStoryId','selectedTaskIds','criteriaByTask','tasksById','bindingDigest')) { if (-not $packet.Contains($name)) { throw "packetBinding.$name is required." } }
+    $trustedRevisions = $null
+    if ($packet.Contains('trustedRevisions')) {
+        if ($packet.trustedRevisions -is [string] -or $packet.trustedRevisions -isnot [System.Collections.IEnumerable]) { throw 'packetBinding.trustedRevisions must be an array.' }
+        $seenRevisions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $trustedRevisions = [System.Collections.Generic.List[string]]::new()
+        foreach ($value in $packet.trustedRevisions) { $revision = [string]$value; if ($revision -notmatch '^[0-9a-fA-F]{7,64}$' -or -not $seenRevisions.Add($revision.ToLowerInvariant())) { throw 'packetBinding.trustedRevisions must contain unique Git revisions.' }; [void]$trustedRevisions.Add($revision.ToLowerInvariant()) }
+        if ($trustedRevisions.Count -eq 0) { throw 'packetBinding.trustedRevisions cannot be empty when supplied.' }
+    }
     $selected = @($packet.selectedTaskIds | ForEach-Object { [long]$_ }); if ($selected.Count -eq 0 -or @($selected | Select-Object -Unique).Count -ne $selected.Count) { throw 'packetBinding.selectedTaskIds must be nonempty and unique.' }
     if ($packet.criteriaByTask -isnot [System.Collections.IDictionary] -or $packet.tasksById -isnot [System.Collections.IDictionary]) { throw 'packetBinding criteria and task bindings must be objects.' }
     foreach ($taskId in $selected) { $key = [string]$taskId; if (-not $packet.criteriaByTask.Contains($key) -or -not $packet.tasksById.Contains($key)) { throw "packetBinding is missing selected task $taskId." }; $criteria = @($packet.criteriaByTask[$key] | ForEach-Object { [string]$_ }); $task = $packet.tasksById[$key]; if ($task -isnot [System.Collections.IDictionary] -or [long]$task.taskId -ne $taskId -or ($criteria -join '|') -cne (@($task.criteria | ForEach-Object { [string]$_ }) -join '|')) { throw "packetBinding task $taskId is inconsistent." } }
     $normalized = [ordered]@{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = ([string]$packet.packetHash).ToLowerInvariant(); scopeHash = ([string]$packet.scopeHash).ToLowerInvariant(); projectId = [long]$packet.projectId; parentStoryId = [long]$packet.parentStoryId; selectedTaskIds = @($selected); criteriaByTask = $packet.criteriaByTask; tasksById = $packet.tasksById }
+    if ($null -ne $trustedRevisions) { $normalized.trustedRevisions = @($trustedRevisions) }
     $expected = Hash-Object $normalized
     if ([string]$packet.bindingDigest -cne $expected) { throw 'packetBinding.bindingDigest does not match its immutable contents.' }
     $normalized.bindingDigest = $expected

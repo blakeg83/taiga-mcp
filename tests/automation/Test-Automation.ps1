@@ -1181,7 +1181,7 @@ try {
                 @{ page = 2; hasMore = $false; nextPage = $null; total = 2; pageSize = 1; items = @(@{ id = 541; ref = 6; projectId = 12; user_story_id = 642; status_id = 57; version = 4; criteria = @('AC02'); closed = $true }) }
             )
             selectedTaskIds = @(540, 541)
-            packetBinding = @{ runId = 'run-child'; actionId = 'action-child'; packetHash = ('a' * 64); scopeHash = ('b' * 64); criteriaByTask = @{ '540' = @('AC01'); '541' = @('AC02') } }
+            packetBinding = @{ runId = 'run-child'; actionId = 'action-child'; packetHash = ('a' * 64); scopeHash = ('b' * 64); trustedRevisions = @('abcdef1','abcdef2','abcdef3'); criteriaByTask = @{ '540' = @('AC01'); '541' = @('AC02') } }
         }
          $capturedTasks = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $taskContext 'child-task-context'))
          Assert-Equal 2 @($capturedTasks.data.taskScope.bindings).Count 'open and closed child tasks should both be bound'
@@ -1226,9 +1226,26 @@ try {
         $arbitraryDuplicateResult = Invoke-PsJson $script:TaigaScript @('-Operation','resolve-status-mapping','-InputPath',(New-InputPath $arbitraryDuplicate 'child-status-arbitrary-duplicate')) $false
         Assert-True (-not $arbitraryDuplicateResult.ok) 'unrelated duplicate task statuses must not be accepted as a review fallback'
          $progressRoot = Join-Path $script:FixtureRoot 'child-progress'; $started = @{ runId = 'run-child'; actionId = 'action-child'; ticketKey = 'project:12:story:642'; projectId = 12; parentStoryId = 642; taskId = 540; sequence = 1; currentSha = 'abcdef1'; eventType = 'started'; criterionIds = @('AC01'); packetBinding = $packetBinding; evidence = @{ milestone = 'implementation started' } }
-        $recorded = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $started 'child-progress-started'),'-StateRoot',$progressRoot)
-        Assert-True $recorded.data.recorded 'started event should be durable'
-        $ready = $started.Clone(); $ready.sequence = 2; $ready.currentSha = 'abcdef2'; $ready.eventType = 'ready_for_review'; $ready.evidence = @{ milestone = 'ready for review'; aggregateReceipt = 'receipt-child' }
+         $recorded = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $started 'child-progress-started'),'-StateRoot',$progressRoot)
+         Assert-True $recorded.data.recorded 'started event should be durable'
+         $wrongAction = $started.Clone(); $wrongAction.actionId = 'unassigned-action'; $wrongAction.sequence = 2; $wrongAction.eventType = 'ready_for_review'; $wrongAction.evidence = @{ milestone = 'wrong action' }
+         $wrongActionResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $wrongAction 'child-progress-wrong-action'),'-StateRoot',$progressRoot) $false
+         Assert-True (-not $wrongActionResult.ok) 'progress must reject an action outside the immutable assignment'
+         $emptyCriteria = $started.Clone(); $emptyCriteria.sequence = 2; $emptyCriteria.eventType = 'ready_for_review'; $emptyCriteria.criterionIds = @(); $emptyCriteria.evidence = @{ milestone = 'empty criteria' }
+         $emptyCriteriaResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $emptyCriteria 'child-progress-empty-criteria'),'-StateRoot',$progressRoot) $false
+         Assert-True (-not $emptyCriteriaResult.ok) 'progress must reject an empty criterion set'
+         $foreignCriteria = $started.Clone(); $foreignCriteria.sequence = 2; $foreignCriteria.eventType = 'ready_for_review'; $foreignCriteria.criterionIds = @('AC99'); $foreignCriteria.evidence = @{ milestone = 'foreign criteria' }
+         $foreignCriteriaResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $foreignCriteria 'child-progress-foreign-criteria'),'-StateRoot',$progressRoot) $false
+         Assert-True (-not $foreignCriteriaResult.ok) 'progress must reject criteria outside the selected task assignment'
+         $unselectedTask = $started.Clone(); $unselectedTask.sequence = 2; $unselectedTask.taskId = 999999; $unselectedTask.eventType = 'started'; $unselectedTask.evidence = @{ milestone = 'unselected task' }
+         $unselectedTaskResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $unselectedTask 'child-progress-unselected-task'),'-StateRoot',$progressRoot) $false
+         Assert-True (-not $unselectedTaskResult.ok) 'progress must reject an unselected task ID'
+         $trustedContext = Copy-JsonObject $taskContext; $trustedContext.packetBinding.trustedRevisions = @('abcdef1')
+         $trustedCapture = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $trustedContext 'child-task-trusted-revision'))
+         $untrustedRevision = $started.Clone(); $untrustedRevision.packetBinding = $trustedCapture.data.taskScope.packetBinding; $untrustedRevision.currentSha = 'abcdef9'; $untrustedRevision.sequence = 1; $untrustedRevision.eventType = 'started'; $untrustedRevision.evidence = @{ milestone = 'untrusted revision' }
+         $untrustedRevisionResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $untrustedRevision 'child-progress-untrusted-revision'),'-StateRoot',(Join-Path $script:FixtureRoot 'child-progress-untrusted-revision')) $false
+         Assert-True (-not $untrustedRevisionResult.ok) 'progress must reject revisions outside the trusted assignment'
+         $ready = $started.Clone(); $ready.sequence = 2; $ready.currentSha = 'abcdef2'; $ready.eventType = 'ready_for_review'; $ready.evidence = @{ milestone = 'ready for review'; aggregateReceipt = 'receipt-child' }
         $readyResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $ready 'child-progress-ready'),'-StateRoot',$progressRoot)
         $ready.eventId = $readyResult.data.event.eventId
         $duplicate = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $ready 'child-progress-duplicate'),'-StateRoot',$progressRoot)
@@ -1237,8 +1254,11 @@ try {
         $workerAcceptedResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $workerAccepted 'child-progress-worker-accepted'),'-StateRoot',$progressRoot) $false
         Assert-True (-not $workerAcceptedResult.ok) 'workers must not emit an accepted task state'
         $correction = $ready.Clone(); $correction.Remove('eventId'); $correction.sequence = 3; $correction.actionId = 'action-child-correction'; $correction.continuationOfActionId = 'action-child'; $correction.eventType = 'reopen'; $correction.currentSha = 'abcdef3'; $correction.evidence = @{ milestone = 'correction started' }
-        $correctionResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $correction 'child-progress-correction'),'-StateRoot',$progressRoot)
-        Assert-True ($correctionResult.data.recorded) 'a correction must continue with a new action without rewriting prior events'
+         $correctionResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $correction 'child-progress-correction'),'-StateRoot',$progressRoot)
+         Assert-True ($correctionResult.data.recorded) 'a correction must continue with a new action without rewriting prior events'
+         $reusedAction = $correction.Clone(); $reusedAction.Remove('eventId'); $reusedAction.sequence = 4; $reusedAction.actionId = 'action-child'; $reusedAction.continuationOfActionId = 'action-child-correction'; $reusedAction.eventType = 'started'; $reusedAction.evidence = @{ milestone = 'reused action' }
+         $reusedActionResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $reusedAction 'child-progress-reused-action'),'-StateRoot',$progressRoot) $false
+         Assert-True (-not $reusedActionResult.ok) 'a prior progress action must not be reused after continuation'
         $tampered = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath (Join-Path $progressRoot 'task-progress.json')) -AsHashtable -Depth 100; $tampered.events[0].currentSha = 'abcdef9'; Write-JsonFile $tampered (Join-Path $progressRoot 'task-progress.json')
         # The helper must reject the retained event digest even when its replacement is a valid-looking Git prefix.
         $tamperedValidation = Invoke-PsJson $script:ProgressScript @('-Operation','validate','-InputPath',(New-InputPath @{} 'child-progress-tampered-validate'),'-StateRoot',$progressRoot) $false
@@ -1250,7 +1270,7 @@ try {
 
     Test-Case 'relay bounded child progress without starting untouched tasks' {
         $progressRoot = Join-Path $script:FixtureRoot 'relay-progress'; $relayRoot = Join-Path $script:FixtureRoot 'relay-state'; New-Item -ItemType Directory -Path $relayRoot -Force | Out-Null
-        $relayContext = @{ kind = 'story'; projectId = 12; storyId = 642; ref = 1; detailPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); commentPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); taskPages = @(@{ page = 1; hasMore = $true; nextPage = 2; total = 2; pageSize = 1; items = @(@{ id = 540; ref = 5; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC10') }) }, @{ page = 2; hasMore = $false; nextPage = $null; total = 2; pageSize = 1; items = @(@{ id = 541; ref = 6; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC11') }) }); selectedTaskIds = @(540,541); packetBinding = @{ runId = 'run-relay'; actionId = 'action-relay'; packetHash = ('a' * 64); scopeHash = ('b' * 64); criteriaByTask = @{ '540' = @('AC10'); '541' = @('AC11') } } }
+        $relayContext = @{ kind = 'story'; projectId = 12; storyId = 642; ref = 1; detailPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); commentPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); taskPages = @(@{ page = 1; hasMore = $true; nextPage = 2; total = 2; pageSize = 1; items = @(@{ id = 540; ref = 5; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC10') }) }, @{ page = 2; hasMore = $false; nextPage = $null; total = 2; pageSize = 1; items = @(@{ id = 541; ref = 6; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC11') }) }); selectedTaskIds = @(540,541); packetBinding = @{ runId = 'run-relay'; actionId = 'action-relay'; packetHash = ('a' * 64); scopeHash = ('b' * 64); trustedRevisions = @('abcdef1','abcdef2'); criteriaByTask = @{ '540' = @('AC10'); '541' = @('AC11') } } }
         $relayCapture = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $relayContext 'relay-task-context'))
         $relayPacket = $relayCapture.data.taskScope.packetBinding
         $statusRequest = @{ projectId = 12; resource = 'task'; statusMetadata = @(@{ id = 56; project = 12; resource = 'task'; name = 'New' }, @{ id = 58; project = 12; resource = 'task'; name = 'In Progress' }, @{ id = 59; project = 12; resource = 'task'; name = 'Done' }, @{ id = 60; project = 12; resource = 'task'; name = 'Blocked' }); mapping = @{ not_started = 56; in_progress = 58; accepted = 59; blocked = 60 }; packetBinding = $relayPacket }
@@ -1293,7 +1313,7 @@ try {
     }
 
     Test-Case 'journal reviewed child transitions and reconcile partial writes safely' {
-        $writeContext = @{ kind = 'story'; projectId = 12; storyId = 642; ref = 1; detailPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); commentPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); taskPages = @(@{ page = 1; hasMore = $false; nextPage = $null; total = 2; pageSize = 2; items = @(@{ id = 540; ref = 5; projectId = 12; user_story_id = 642; status_id = 59; version = 3; criteria = @('AC10') }, @{ id = 541; ref = 6; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC11') }) }); selectedTaskIds = @(540,541); packetBinding = @{ runId = 'run-relay'; actionId = 'action-review'; packetHash = ('a' * 64); scopeHash = ('b' * 64); criteriaByTask = @{ '540' = @('AC10'); '541' = @('AC11') } } }
+        $writeContext = @{ kind = 'story'; projectId = 12; storyId = 642; ref = 1; detailPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); commentPages = @(@{ page = 1; hasMore = $false; nextPage = $null }); taskPages = @(@{ page = 1; hasMore = $false; nextPage = $null; total = 2; pageSize = 2; items = @(@{ id = 540; ref = 5; projectId = 12; user_story_id = 642; status_id = 59; version = 3; criteria = @('AC10') }, @{ id = 541; ref = 6; projectId = 12; user_story_id = 642; status_id = 56; version = 1; criteria = @('AC11') }) }); selectedTaskIds = @(540,541); packetBinding = @{ runId = 'run-relay'; actionId = 'action-review'; packetHash = ('a' * 64); scopeHash = ('b' * 64); trustedRevisions = @('abcdef2'); criteriaByTask = @{ '540' = @('AC10'); '541' = @('AC11') } } }
         $writeCapture = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $writeContext 'task-write-context'))
         $writePacket = $writeCapture.data.taskScope.packetBinding
         $writeStatusRequest = @{ projectId = 12; resource = 'task'; statusMetadata = @(@{ id = 56; project = 12; resource = 'task'; name = 'New' }, @{ id = 58; project = 12; resource = 'task'; name = 'In Progress' }, @{ id = 59; project = 12; resource = 'task'; name = 'Done' }, @{ id = 60; project = 12; resource = 'task'; name = 'Blocked' }); mapping = @{ not_started = 56; in_progress = 58; accepted = 59; blocked = 60 } }

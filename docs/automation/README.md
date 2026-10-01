@@ -35,8 +35,10 @@ status is configured; the mapping retains the captured metadata and recomputed
 metadata/mapping digests. Workers emit append-only progress through
 `workflow-progress.ps1`; the checkpoint records the immutable packet binding,
 task IDs, run/action identity, sequences, revisions, criterion evidence, and
-idempotent event IDs. Progress is evidence of a milestone, not reviewer
-acceptance or a Done transition.
+idempotent event IDs. A packet may carry `trustedRevisions`; when present,
+progress outside that assignment is rejected. The first event uses the packet
+action and corrections form a non-reusable continuation chain. Progress is
+evidence of a milestone, not reviewer acceptance or a Done transition.
 The coordinator consumes that stream with
 `workflow-coordinate.ps1 -Operation relay-task-progress` on a bounded
 observation. It advances a persisted per-consumer cursor only into durable

@@ -33,7 +33,7 @@ function Hash-Text { param([string]$Value); $sha = [Security.Cryptography.SHA256
 function Get-ProgressEventIdentityKey {
     param([System.Collections.IDictionary] $Record)
     $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
-    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest)
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}|{15}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest,$Record.continuationOfActionId)
 }
 function Get-ProgressShaProofDigest {
     param([System.Collections.IDictionary] $Record)
@@ -197,6 +197,13 @@ function Get-TaskPacketBinding {
     foreach ($name in @('runId','actionId','packetHash','scopeHash','criteriaByTask')) { if (-not $packet.Contains($name)) { throw "packetBinding.$name is required." } }
     foreach ($name in @('runId','actionId','packetHash','scopeHash')) { if ([string]::IsNullOrWhiteSpace([string]$packet[$name])) { throw "packetBinding.$name cannot be blank." } }
     foreach ($name in @('packetHash','scopeHash')) { if ([string]$packet[$name] -notmatch '^[0-9a-fA-F]{64}$') { throw "packetBinding.$name must be a SHA-256 digest." } }
+    $trustedRevisions = $null
+    if ($packet.Contains('trustedRevisions')) {
+        if ($packet.trustedRevisions -is [string] -or $packet.trustedRevisions -isnot [System.Collections.IEnumerable]) { throw 'packetBinding.trustedRevisions must be an array.' }
+        $seenRevisions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $trustedRevisions = [System.Collections.Generic.List[string]]::new()
+        foreach ($value in $packet.trustedRevisions) { $revision = [string]$value; if ($revision -notmatch '^[0-9a-fA-F]{7,64}$' -or -not $seenRevisions.Add($revision.ToLowerInvariant())) { throw 'packetBinding.trustedRevisions must contain unique Git revisions.' }; [void]$trustedRevisions.Add($revision.ToLowerInvariant()) }
+        if ($trustedRevisions.Count -eq 0) { throw 'packetBinding.trustedRevisions cannot be empty when supplied.' }
+    }
     if ($packet.criteriaByTask -isnot [System.Collections.IDictionary]) { throw 'packetBinding.criteriaByTask must be an object.' }
     $normalized = [ordered]@{}
     foreach ($taskId in $SelectedTaskIds) {
@@ -234,6 +241,7 @@ function Get-TaskPacketBinding {
         criteriaByTask = $normalized
         tasksById = $taskBindings
     }
+    if ($null -ne $trustedRevisions) { $result.trustedRevisions = @($trustedRevisions) }
     $result.bindingDigest = Hash-Object $result
     return $result
 }
@@ -245,6 +253,13 @@ function Get-ValidatedPacketBinding {
     foreach ($name in @('runId','actionId','packetHash','scopeHash','projectId','parentStoryId','selectedTaskIds','criteriaByTask','tasksById','bindingDigest')) { if (-not $packet.Contains($name)) { throw "packetBinding.$name is required." } }
     foreach ($name in @('runId','actionId')) { if ([string]::IsNullOrWhiteSpace([string]$packet[$name])) { throw "packetBinding.$name cannot be blank." } }
     foreach ($name in @('packetHash','scopeHash','bindingDigest')) { if ([string]$packet[$name] -notmatch '^[0-9a-fA-F]{64}$') { throw "packetBinding.$name must be a SHA-256 digest." } }
+    $trustedRevisions = $null
+    if ($packet.Contains('trustedRevisions')) {
+        if ($packet.trustedRevisions -is [string] -or $packet.trustedRevisions -isnot [System.Collections.IEnumerable]) { throw 'packetBinding.trustedRevisions must be an array.' }
+        $seenRevisions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $trustedRevisions = [System.Collections.Generic.List[string]]::new()
+        foreach ($value in $packet.trustedRevisions) { $revision = [string]$value; if ($revision -notmatch '^[0-9a-fA-F]{7,64}$' -or -not $seenRevisions.Add($revision.ToLowerInvariant())) { throw 'packetBinding.trustedRevisions must contain unique Git revisions.' }; [void]$trustedRevisions.Add($revision.ToLowerInvariant()) }
+        if ($trustedRevisions.Count -eq 0) { throw 'packetBinding.trustedRevisions cannot be empty when supplied.' }
+    }
     $projectId = Get-TaskInteger $packet @('projectId') 'packetBinding.projectId' $true
     $parentStoryId = Get-TaskInteger $packet @('parentStoryId') 'packetBinding.parentStoryId' $true
     if ($ExpectedProjectId -gt 0 -and $projectId -ne $ExpectedProjectId) { throw "packetBinding is not bound to project $ExpectedProjectId." }
@@ -274,6 +289,7 @@ function Get-ValidatedPacketBinding {
         $taskBindings[$key] = [ordered]@{ taskId = $taskId; alias = [string]$taskBinding.alias; projectId = $projectId; parentStoryId = $parentStoryId; baselineStatusId = $baselineStatusId; version = $version; criteria = @($criteria) }
     }
     $normalized = [ordered]@{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = ([string]$packet.packetHash).ToLowerInvariant(); scopeHash = ([string]$packet.scopeHash).ToLowerInvariant(); projectId = $projectId; parentStoryId = $parentStoryId; selectedTaskIds = @($selected); criteriaByTask = $criteriaByTask; tasksById = $taskBindings }
+    if ($null -ne $trustedRevisions) { $normalized.trustedRevisions = @($trustedRevisions) }
     $expectedDigest = Hash-Object $normalized
     if ([string]$packet.bindingDigest -cne $expectedDigest) { throw 'packetBinding.bindingDigest does not match its immutable contents.' }
     $normalized.bindingDigest = $expectedDigest
@@ -305,7 +321,13 @@ function Get-ValidatedProgressBinding {
     if ([string]$progress.currentSha -notmatch '^[0-9a-fA-F]{7,64}$' -or [string]$progress.bindingDigest -notmatch '^[0-9a-fA-F]{64}$') { throw "progressBinding provenance digests are invalid for task $TaskId." }
     if ([string]$progress.eventType -notin @('started','blocked','ready_for_review','reopen')) { throw "progressBinding.eventType is not a worker milestone for task $TaskId." }
     $criteria = @($progress.criterionIds | ForEach-Object { [string]$_ })
-    if (($criteria -join '|') -cne ($RequiredCriteria -join '|')) { throw "progressBinding criteria do not match required criteria for task $TaskId." }
+    if ($criteria.Count -eq 0 -or @($criteria | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0 -or @($criteria | Select-Object -Unique).Count -ne $criteria.Count -or ($criteria -join '|') -cne ($RequiredCriteria -join '|')) { throw "progressBinding criteria do not match required criteria for task $TaskId." }
+    if ([string]$progress.actionId -cne [string]$Packet.actionId) {
+        if (-not $progress.Contains('continuationOfActionId') -or [string]::IsNullOrWhiteSpace([string]$progress.continuationOfActionId)) { throw "progressBinding action is outside the assigned action for task $TaskId." }
+    } elseif ($progress.Contains('continuationOfActionId') -and -not [string]::IsNullOrWhiteSpace([string]$progress.continuationOfActionId)) {
+        throw "progressBinding packet action cannot declare a continuation for task $TaskId."
+    }
+    if ($Packet.Contains('trustedRevisions') -and @($Packet.trustedRevisions | ForEach-Object { [string]$_ }) -notcontains ([string]$progress.currentSha).ToLowerInvariant()) { throw "progressBinding revision is outside the trusted assignment for task $TaskId." }
     if ([string]$progress.evidence -match '(?i)(password|token|secret|raw.?log)') { throw "progressBinding evidence is unsafe for task $TaskId." }
     $event = [ordered]@{ runId = [string]$progress.runId; actionId = [string]$progress.actionId; ticketKey = $ticketKey; projectId = $projectId; parentStoryId = $parentStoryId; taskId = $TaskId; packetHash = [string]$progress.packetHash; scopeHash = [string]$progress.scopeHash; bindingDigest = [string]$progress.bindingDigest; sequence = $sequence; currentSha = ([string]$progress.currentSha).ToLowerInvariant(); eventType = [string]$progress.eventType; criterionIds = @($criteria); evidence = $progress.evidence; blockedReason = if ($progress.Contains('blockedReason')) { [string]$progress.blockedReason } else { $null }; shaDigest = if ($progress.Contains('shaDigest')) { [string]$progress.shaDigest } else { $null }; continuationOfActionId = if ($progress.Contains('continuationOfActionId')) { [string]$progress.continuationOfActionId } else { $null }; occurredAtUtc = if ($progress.Contains('occurredAtUtc')) { [string]$progress.occurredAtUtc } else { $null } }
     if ([string]$progress.eventId -cne (Hash-Text (Get-ProgressEventIdentityKey $event))) { throw "progressBinding.eventId is not the deterministic identity of the captured event for task $TaskId." }

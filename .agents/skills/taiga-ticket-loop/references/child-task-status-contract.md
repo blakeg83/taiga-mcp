@@ -24,11 +24,15 @@ Worker progress is an append-only event stream in `task-progress.json`.
 `started`, `blocked`, and `ready_for_review` events carry the immutable packet
 binding, run/action ID, trusted ticket/project/parent identity, task ID, global
 sequence, current revision, exact packet criterion IDs, evidence, and a
-deterministic event ID. Replaying the same event is idempotent; a stale or
-gapped sequence, changed packet, or unrelated criterion is rejected. A
-correction uses a new continuation action ID without rewriting prior event
-identities. A final aggregate receipt may reference the events, but a progress
-event is not a completed worker turn and cannot mark a task Done.
+deterministic event ID. When the assignment supplies `trustedRevisions`, the
+revision must be one of those captured values. The first event uses the packet
+action; a correction uses one new continuation action ID, which must point to
+the immediately prior action and cannot be reused. Replaying the same event is
+idempotent; a stale or gapped sequence, changed packet, unselected task,
+empty/foreign criterion, untrusted revision, or invalid action chain is
+rejected before persistence and relay. A final aggregate receipt may reference
+the events, but a progress event is not a completed worker turn and cannot mark
+a task Done.
 
 The coordinator consumes progress on its existing bounded observation. It
 persists a per-consumer cursor and pending transitions, rejects caller cursor
