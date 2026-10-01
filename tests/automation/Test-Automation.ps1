@@ -1269,6 +1269,8 @@ try {
         Assert-Equal 58 $firstRelay.data.taskTransitions[0].statusId 'only started task should be mapped to in-progress'
         Assert-Equal 58 $firstRelay.data.taskTransitions[1].statusId 'ready-for-review should use the validated in-progress fallback'
         Assert-Equal 541 $firstRelay.data.taskTransitions[2].taskId 'overlapping progress must preserve task identity'
+        Assert-Equal $relayPacket.bindingDigest $firstRelay.data.taskTransitions[0].bindingDigest 'relay transitions must preserve the packet binding digest'
+        Assert-Equal $relayPacket.bindingDigest $firstRelay.data.taskTransitions[0].progressBinding.bindingDigest 'relay transitions must preserve the full progress binding'
         $retryInput = $relayInput.Clone(); $retryInput.Remove('cursor')
         $retry = Invoke-PsJson $script:CoordinateScript @('-Operation','relay-task-progress','-InputPath',(New-InputPath $retryInput 'relay-retry-before-ack'),'-StateRoot',$relayRoot)
         Assert-True (-not $retry.data.unchanged -and @($retry.data.pending).Count -eq 4) 'failed or interrupted writes must leave durable pending transitions for retry'
@@ -1293,10 +1295,23 @@ try {
         $writePacket = $writeCapture.data.taskScope.packetBinding
         $writeStatusRequest = @{ projectId = 12; resource = 'task'; statusMetadata = @(@{ id = 56; project = 12; resource = 'task'; name = 'New' }, @{ id = 58; project = 12; resource = 'task'; name = 'In Progress' }, @{ id = 59; project = 12; resource = 'task'; name = 'Done' }, @{ id = 60; project = 12; resource = 'task'; name = 'Blocked' }); mapping = @{ not_started = 56; in_progress = 58; accepted = 59; blocked = 60 } }
         $writeStatus = Invoke-PsJson $script:TaigaScript @('-Operation','resolve-status-mapping','-InputPath',(New-InputPath $writeStatusRequest 'task-write-status'))
-        $accepted = @{ taskId = 540; projectId = 12; parentStoryId = 642; currentStatusId = 59; version = 3; targetStatusId = 59; logicalState = 'accepted'; currentSha = 'abcdef2'; runMarker = 'run-relay/action-review'; selectedTaskIds = @(540,541); requiredCriterionIds = @('AC10'); packetBinding = $writePacket; progressBinding = @{ runId = 'run-relay'; actionId = 'action-review'; packetHash = $writePacket.packetHash; scopeHash = $writePacket.scopeHash; taskId = 540; sequence = 2; eventId = 'event-ready-540'; eventType = 'ready_for_review'; currentSha = 'abcdef2'; criterionIds = @('AC10') }; statusMapping = $writeStatus.data; reviewAcceptance = @{ accepted = $true; taskId = 540; reviewedSha = 'abcdef2'; reviewerId = 'reviewer-thread'; runId = 'run-relay'; actionId = 'review-action'; packetHash = $writePacket.packetHash; scopeHash = $writePacket.scopeHash; criterionIds = @('AC10'); evidence = 'accepted criterion evidence' } }
+        $writeProgressRoot = Join-Path $script:FixtureRoot 'task-write-progress'
+        $writeProgressBase = @{ runId = 'run-relay'; actionId = 'action-review'; ticketKey = 'project:12:story:642'; projectId = 12; parentStoryId = 642; taskId = 540; sequence = 1; packetBinding = $writePacket; currentSha = 'abcdef2'; eventType = 'started'; criterionIds = @('AC10'); evidence = @{ source = 'implementation started' } }
+        $writeStarted = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $writeProgressBase 'task-write-progress-started'),'-StateRoot',$writeProgressRoot)
+        $writeReadyInput = $writeProgressBase.Clone(); $writeReadyInput.sequence = 2; $writeReadyInput.eventType = 'ready_for_review'; $writeReadyInput.evidence = @{ source = 'implementation receipt' }
+        $writeReady = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $writeReadyInput 'task-write-progress-ready'),'-StateRoot',$writeProgressRoot)
+        $writeSecond = $writeProgressBase.Clone(); $writeSecond.taskId = 541; $writeSecond.sequence = 3; $writeSecond.eventType = 'started'; $writeSecond.criterionIds = @('AC11'); $writeSecond.evidence = @{ source = 'second task milestone' }
+        $writeSecondResult = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $writeSecond 'task-write-progress-second'),'-StateRoot',$writeProgressRoot)
+        $accepted = @{ taskId = 540; projectId = 12; parentStoryId = 642; currentStatusId = 59; version = 3; targetStatusId = 59; logicalState = 'accepted'; currentSha = 'abcdef2'; runMarker = 'run-relay/action-review'; selectedTaskIds = @(540,541); requiredCriterionIds = @('AC10'); packetBinding = $writePacket; progressBinding = $writeReady.data.event; statusMapping = $writeStatus.data; reviewAcceptance = @{ accepted = $true; taskId = 540; reviewedSha = 'abcdef2'; reviewerId = 'reviewer-thread'; runId = 'run-relay'; actionId = 'review-action'; packetHash = $writePacket.packetHash; scopeHash = $writePacket.scopeHash; criterionIds = @('AC10'); evidence = 'accepted criterion evidence' } }
         $journal = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $accepted 'task-write-accepted'))
         Assert-Equal 3 $journal.data.expectedVersion 'task write must bind the current authoritative version'
         Assert-Equal 'coordinator' $journal.data.writer 'only the coordinator may own the Taiga write'
+        $fabricatedProgress = Copy-JsonObject $accepted; $fabricatedProgress.progressBinding.eventId = ('d' * 64)
+        $fabricatedProgressResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $fabricatedProgress 'task-write-fabricated-progress')) $false
+        Assert-True (-not $fabricatedProgressResult.ok) 'task writes must reject a fabricated progress event identity'
+        $missingProgressEvidence = Copy-JsonObject $accepted; $missingProgressEvidence.progressBinding.Remove('evidence')
+        $missingProgressEvidenceResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $missingProgressEvidence 'task-write-missing-progress-evidence')) $false
+        Assert-True (-not $missingProgressEvidenceResult.ok) 'task writes must require captured progress evidence'
         $reviewReceipt = New-ReviewReceipt; $reviewReceipt.taskAcceptances = @(@{ taskId = 540; accepted = $true; reviewedSha = 'head'; criterionIds = @('criterion-1'); evidence = 'task acceptance evidence' })
         $reviewWithTasks = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath @{ receipt = $reviewReceipt; expectedCriteria = $script:ReviewCriteria } 'task-review-acceptance'))
         Assert-True $reviewWithTasks.data.valid 'review receipts should carry explicit per-task acceptance evidence'
@@ -1328,7 +1343,7 @@ try {
         Assert-True (-not $wrongSibling.ok) 'a reread of a sibling task must not confirm the journal'
         $batch = @{ projectId = 12; parentStoryId = 642; currentSha = 'abcdef2'; runMarker = 'run-relay/action-review'; selectedTaskIds = @(540,541); packetBinding = $writePacket; scopeReconciliation = 'preserve_scope'; statusMapping = $accepted.statusMapping; tasks = @(
             @{ taskId = 540; projectId = 12; parentStoryId = 642; currentStatusId = 56; version = 3; targetStatusId = 59; logicalState = 'accepted'; requiredCriterionIds = @('AC10'); progressBinding = $accepted.progressBinding; reviewAcceptance = $accepted.reviewAcceptance }
-            @{ taskId = 541; projectId = 12; parentStoryId = 642; currentStatusId = 56; version = 1; targetStatusId = 58; logicalState = 'in_progress'; requiredCriterionIds = @('AC11'); progressBinding = @{ runId = 'run-relay'; actionId = 'action-review'; packetHash = $writePacket.packetHash; scopeHash = $writePacket.scopeHash; taskId = 541; sequence = 3; eventId = 'event-start-541'; eventType = 'started'; currentSha = 'abcdef2'; criterionIds = @('AC11') } }
+            @{ taskId = 541; projectId = 12; parentStoryId = 642; currentStatusId = 56; version = 1; targetStatusId = 58; logicalState = 'in_progress'; requiredCriterionIds = @('AC11'); progressBinding = $writeSecondResult.data.event }
             @{ taskId = 542; projectId = 12; parentStoryId = 642; currentStatusId = 57; baselineStatusId = 56; version = 2; targetStatusId = 58; logicalState = 'in_progress'; humanChanged = $true }
         ) }
         $batchResult = Invoke-PsJson $script:TaigaScript @('-Operation','apply-reviewed-task-transition','-InputPath',(New-InputPath $batch 'task-write-batch'))
@@ -1376,11 +1391,14 @@ try {
         $statusInput = Copy-JsonObject $scenario.helperIntegration[2].input; $statusInput.Remove('packetBinding')
         $resolvedStatus = Invoke-PsJson $script:TaigaScript @('-Operation','resolve-status-mapping','-InputPath',(New-InputPath $statusInput 'child-story-write-status'))
         $packet = $captured.data.taskScope.packetBinding
+        $probeProgressRoot = Join-Path $script:FixtureRoot 'child-story-write-progress'
+        $probeProgress = @{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; ticketKey = 'project:12:story:642'; projectId = 12; parentStoryId = 642; taskId = 540; sequence = 1; currentSha = 'abcdef2'; eventType = 'started'; criterionIds = @('AC01'); packetBinding = $packet; evidence = @{ milestone = 'write probe' } }
+        $probeEvent = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $probeProgress 'child-story-write-progress'),'-StateRoot',$probeProgressRoot)
         $writeProbe = @{
             projectId = 12; parentStoryId = 642; selectedTaskIds = @(540, 541); packetBinding = $packet; statusMapping = $resolvedStatus.data
             task = @{ taskId = 540; projectId = 12; parentStoryId = 642; currentStatusId = 56; version = 1 }
             requiredCriterionIds = @('AC01'); logicalState = 'in_progress'; currentSha = 'abcdef2'; runMarker = 'synthetic-story-run/probe'
-            progressBinding = @{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = [string]$packet.packetHash; scopeHash = [string]$packet.scopeHash; taskId = 540; sequence = 2; eventId = 'evt-probe'; eventType = 'ready_for_review'; currentSha = 'abcdef2'; criterionIds = @('AC01') }
+            progressBinding = $probeEvent.data.event
         }
         $fabricatedMapping = Copy-JsonObject $writeProbe; $fabricatedMapping.statusMapping.mappingDigest = ('c' * 64)
         $fabricatedMappingResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $fabricatedMapping 'child-story-fabricated-mapping')) $false

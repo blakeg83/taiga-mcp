@@ -29,6 +29,17 @@ function Convert-ToCanonicalValue {
     return $Value
 }
 function Hash-Object { param([object]$Value); $bytes = [Text.Encoding]::UTF8.GetBytes((Convert-ToCanonicalValue $Value | ConvertTo-Json -Depth 100 -Compress)); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
+function Hash-Text { param([string]$Value); $sha = [Security.Cryptography.SHA256]::Create(); try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Value)))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() } }
+function Get-ProgressEventIdentityKey {
+    param([System.Collections.IDictionary] $Record)
+    $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest)
+}
+function Get-ProgressShaProofDigest {
+    param([System.Collections.IDictionary] $Record)
+    $proofPayload = [ordered]@{ runId = [string]$Record.runId; actionId = [string]$Record.actionId; ticketKey = [string]$Record.ticketKey; projectId = [long]$Record.projectId; parentStoryId = [long]$Record.parentStoryId; taskId = [long]$Record.taskId; sequence = [long]$Record.sequence; currentSha = ([string]$Record.currentSha).ToLowerInvariant(); eventType = [string]$Record.eventType; criterionIds = @($Record.criterionIds); evidence = $Record.evidence; blockedReason = if ($Record.Contains('blockedReason')) { [string]$Record.blockedReason } else { $null }; packetHash = [string]$Record.packetHash; scopeHash = [string]$Record.scopeHash; bindingDigest = [string]$Record.bindingDigest }
+    return Hash-Object $proofPayload
+}
 function Read-OptionalInteger {
     param([System.Collections.IDictionary] $Object, [string] $Name, [string] $Context, [long] $Minimum = 0)
     if (-not $Object.Contains($Name) -or $null -eq $Object[$Name]) { return [ordered]@{ present = $false; value = $null } }
@@ -282,15 +293,24 @@ function Get-ValidatedProgressBinding {
     param([System.Collections.IDictionary] $InputObject, [System.Collections.IDictionary] $Packet, [long] $TaskId, [string] $CurrentSha, [string[]] $RequiredCriteria)
     if (-not $InputObject.Contains('progressBinding') -or $InputObject.progressBinding -isnot [System.Collections.IDictionary]) { throw "Task $TaskId requires a validated progressBinding." }
     $progress = $InputObject.progressBinding
-    foreach ($name in @('runId','actionId','packetHash','scopeHash','taskId','sequence','eventId','eventType','currentSha','criterionIds')) { if (-not $progress.Contains($name)) { throw "progressBinding.$name is required for task $TaskId." } }
-    if ([string]$progress.runId -cne [string]$Packet.runId -or [string]$progress.packetHash -cne [string]$Packet.packetHash -or [string]$progress.scopeHash -cne [string]$Packet.scopeHash -or [long]$progress.taskId -ne $TaskId) { throw "progressBinding is not bound to task $TaskId and its packet." }
+    foreach ($name in @('runId','actionId','packetHash','scopeHash','bindingDigest','taskId','sequence','eventId','eventType','currentSha','criterionIds','ticketKey','projectId','parentStoryId','evidence')) { if (-not $progress.Contains($name)) { throw "progressBinding.$name is required for task $TaskId." } }
+    if ([string]$progress.runId -cne [string]$Packet.runId -or [string]$progress.packetHash -cne [string]$Packet.packetHash -or [string]$progress.scopeHash -cne [string]$Packet.scopeHash -or [string]$progress.bindingDigest -cne [string]$Packet.bindingDigest -or [long]$progress.taskId -ne $TaskId) { throw "progressBinding is not bound to task $TaskId and its packet." }
     if ([string]$progress.currentSha -cne $CurrentSha) { throw "progressBinding revision does not match currentSha for task $TaskId." }
+    $projectId = 0L; $parentStoryId = 0L
+    if (-not [long]::TryParse([string]$progress.projectId,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$projectId) -or $projectId -ne [long]$Packet.projectId -or -not [long]::TryParse([string]$progress.parentStoryId,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$parentStoryId) -or $parentStoryId -ne [long]$Packet.parentStoryId) { throw "progressBinding identity does not match the packet for task $TaskId." }
+    $ticketKey = [string]$progress.ticketKey
+    if ($ticketKey -notmatch '^project:\d+:story:\d+$' -or [long]($ticketKey -replace '^project:(\d+):story:(\d+)$','$1') -ne $projectId -or [long]($ticketKey -replace '^project:(\d+):story:(\d+)$','$2') -ne $parentStoryId) { throw "progressBinding ticket identity is invalid for task $TaskId." }
     $sequence = 0L; if (-not [long]::TryParse([string]$progress.sequence,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$sequence) -or $sequence -lt 1) { throw "progressBinding.sequence must be positive for task $TaskId." }
     if ([string]::IsNullOrWhiteSpace([string]$progress.actionId) -or [string]::IsNullOrWhiteSpace([string]$progress.eventId)) { throw "progressBinding action and event identities cannot be blank for task $TaskId." }
+    if ([string]$progress.currentSha -notmatch '^[0-9a-fA-F]{7,64}$' -or [string]$progress.bindingDigest -notmatch '^[0-9a-fA-F]{64}$') { throw "progressBinding provenance digests are invalid for task $TaskId." }
     if ([string]$progress.eventType -notin @('started','blocked','ready_for_review','reopen')) { throw "progressBinding.eventType is not a worker milestone for task $TaskId." }
     $criteria = @($progress.criterionIds | ForEach-Object { [string]$_ })
     if (($criteria -join '|') -cne ($RequiredCriteria -join '|')) { throw "progressBinding criteria do not match required criteria for task $TaskId." }
-    return [ordered]@{ runId = [string]$progress.runId; actionId = [string]$progress.actionId; packetHash = [string]$progress.packetHash; scopeHash = [string]$progress.scopeHash; taskId = $TaskId; sequence = $sequence; eventId = [string]$progress.eventId; eventType = [string]$progress.eventType; currentSha = [string]$progress.currentSha; criterionIds = @($criteria) }
+    if ([string]$progress.evidence -match '(?i)(password|token|secret|raw.?log)') { throw "progressBinding evidence is unsafe for task $TaskId." }
+    $event = [ordered]@{ runId = [string]$progress.runId; actionId = [string]$progress.actionId; ticketKey = $ticketKey; projectId = $projectId; parentStoryId = $parentStoryId; taskId = $TaskId; packetHash = [string]$progress.packetHash; scopeHash = [string]$progress.scopeHash; bindingDigest = [string]$progress.bindingDigest; sequence = $sequence; currentSha = ([string]$progress.currentSha).ToLowerInvariant(); eventType = [string]$progress.eventType; criterionIds = @($criteria); evidence = $progress.evidence; blockedReason = if ($progress.Contains('blockedReason')) { [string]$progress.blockedReason } else { $null }; shaDigest = if ($progress.Contains('shaDigest')) { [string]$progress.shaDigest } else { $null }; continuationOfActionId = if ($progress.Contains('continuationOfActionId')) { [string]$progress.continuationOfActionId } else { $null }; occurredAtUtc = if ($progress.Contains('occurredAtUtc')) { [string]$progress.occurredAtUtc } else { $null } }
+    if ([string]$progress.eventId -cne (Hash-Text (Get-ProgressEventIdentityKey $event))) { throw "progressBinding.eventId is not the deterministic identity of the captured event for task $TaskId." }
+    if (-not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ProgressShaProofDigest $event)) { throw "progressBinding.shaDigest does not match the captured event for task $TaskId." }
+    return $event
 }
 
 function Get-TaskItems {
@@ -569,12 +589,18 @@ try {
         'reconcile-task-scope' { Invoke-TaskScopeReconciliation $input }
         'finalize' {
             $errors = @(); if ((Need $input 'requirementsHash') -ne (Need $input 'currentRequirementsHash')) { $errors += 'Requirements changed.' }; if (-not $input.criteriaComplete) { $errors += 'Criteria are incomplete.' }; if (-not $input.checksPass) { $errors += 'Required checks did not pass.' }; if ($input.completionPolicy -eq 'merged' -and $input.prState -ne 'merged') { $errors += 'Observed PR is not merged.' }; if ($input.kind -eq 'epic' -and (-not $input.allStoriesMerged -or -not $input.epicAccepted)) { $errors += 'Epic requires all merged stories and integrated acceptance.' }
-            $selectedTaskIds = if ($input.Contains('selectedTaskIds')) { @($input.selectedTaskIds | ForEach-Object { $value = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or $value -lt 1) { $errors += 'selectedTaskIds must contain positive integers.' }; $value }) } else { @() }
-            if (@($selectedTaskIds | Select-Object -Unique).Count -ne $selectedTaskIds.Count) { $errors += 'selectedTaskIds contains duplicates.' }
+            $packet = $null
+            if ($input.Contains('packetBinding')) {
+                try { $packet = Get-ValidatedPacketBinding $input } catch { $errors += $_.Exception.Message }
+            }
+            $packetTaskIds = if ($null -ne $packet) { @($packet.selectedTaskIds | ForEach-Object { [long]$_ }) } else { @() }
+            $callerTaskIds = if ($input.Contains('selectedTaskIds')) { @($input.selectedTaskIds | ForEach-Object { $value = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or $value -lt 1) { $errors += 'selectedTaskIds must contain positive integers.' }; $value }) } else { $null }
+            if ($null -ne $callerTaskIds -and @($callerTaskIds | Select-Object -Unique).Count -ne $callerTaskIds.Count) { $errors += 'selectedTaskIds contains duplicates.' }
+            if ($null -ne $packet -and $null -ne $callerTaskIds -and ($callerTaskIds -join ',') -cne ($packetTaskIds -join ',')) { $errors += 'selectedTaskIds do not exactly match the validated packet scope.' }
+            $selectedTaskIds = if ($null -ne $packet) { $packetTaskIds } elseif ($null -ne $callerTaskIds) { @($callerTaskIds) } else { @() }
+            if ($selectedTaskIds.Count -gt 0 -and $null -eq $packet) { $errors += 'Selected child tasks require a validated packetBinding.' }
             $taskEvidence = if ($input.Contains('selectedTaskEvidence')) { @($input.selectedTaskEvidence) } else { @() }
             if ($selectedTaskIds.Count -gt 0) {
-                $packet = Get-ValidatedPacketBinding $input
-                if (($selectedTaskIds -join ',') -cne (@($packet.selectedTaskIds) -join ',')) { $errors += 'selectedTaskIds do not exactly match the validated packet scope.' }
                 if ($taskEvidence.Count -ne $selectedTaskIds.Count) { $errors += 'Every selected child requires final evidence.' }
                 foreach ($taskId in $selectedTaskIds) {
                     $matches = @($taskEvidence | Where-Object { $_ -is [System.Collections.IDictionary] -and $_.Contains('taskId') -and [long]$_.taskId -eq $taskId })
