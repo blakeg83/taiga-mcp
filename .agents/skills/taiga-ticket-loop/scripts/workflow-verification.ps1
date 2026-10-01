@@ -54,6 +54,26 @@ function Get-StringArray {
     return $items
 }
 
+function Test-DocumentationPath {
+    param([string] $Path)
+    $normalized = $Path.Replace('\','/').TrimStart('./')
+    $leaf = [IO.Path]::GetFileName($normalized)
+    $extension = [IO.Path]::GetExtension($leaf).ToLowerInvariant()
+    return $normalized -match '^(docs|documentation)/' -or $leaf -match '^(README|CHANGELOG|CONTRIBUTING|LICENSE)(\..*)?$' -or $extension -in @('.md','.mdx','.rst','.adoc')
+}
+
+function Get-GitChangedPaths {
+    param([string] $Repository, [string] $FromRevision, [string] $ToRevision)
+    $repositoryPath = [IO.Path]::GetFullPath($Repository)
+    if (-not (Test-Path -LiteralPath $repositoryPath -PathType Container)) { throw 'repositoryPath is inaccessible.' }
+    foreach ($revision in @($FromRevision,$ToRevision)) {
+        if ([string]$revision -notmatch '^[0-9a-fA-F]{7,64}$') { throw 'Git interval revisions must be hexadecimal commit IDs.' }
+    }
+    $output = & git -C $repositoryPath diff --name-only --no-renames $FromRevision $ToRevision -- 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the Git change interval for evidence reuse.' }
+    return @($output | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
 function Write-ImmutableJson {
     param([string] $Path, [object] $Value)
     $json = $Value | ConvertTo-Json -Depth 100
@@ -159,14 +179,34 @@ function Invoke-ReuseEvidence {
     foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','changedKind')) { Need $current $name | Out-Null }
     if (-not $current.Contains('changedPaths') -or $current.changedPaths -is [string] -or $current.changedPaths -isnot [System.Collections.IEnumerable]) { throw 'current.changedPaths must be an array.' }
     $currentChangedPaths = @($current.changedPaths | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_)) { throw 'current.changedPaths entries must be nonblank.' }; [string]$_ })
+    $repositoryPath = if ($InputObject.Contains('repositoryPath')) { Need $InputObject 'repositoryPath' } else { $null }
+    $currentIntervalValid = $true
+    $currentIntervalPaths = @($currentChangedPaths)
+    if ($current.Contains('fromRevision')) {
+        $fromRevision = Need $current 'fromRevision'
+        if ([string]::IsNullOrWhiteSpace($repositoryPath)) { throw 'repositoryPath is required when current.fromRevision is supplied.' }
+        $currentIntervalPaths = @(Get-GitChangedPaths $repositoryPath $fromRevision ([string]$current.revision))
+        $declared = @($currentChangedPaths | Sort-Object -Unique)
+        $observed = @($currentIntervalPaths | Sort-Object -Unique)
+        if (@(Compare-Object -ReferenceObject $declared -DifferenceObject $observed).Count -gt 0) { $currentIntervalValid = $false }
+        $observedKind = if ($observed.Count -eq 0) { 'unchanged' } elseif (@($observed | Where-Object { -not (Test-DocumentationPath $_) }).Count -eq 0) { 'documentation_only' } else { 'code' }
+        if ([string]$current.changedKind -cne $observedKind) { $currentIntervalValid = $false }
+    }
     foreach ($reference in @($InputObject.evidenceReferences)) {
         $item = Read-EvidenceReference $reference; $record = $item.record; $coverage = if ($record.Contains('coverage')) { $record.coverage } else { $null }; $reason = 'exact_revision'; $canReuse = $false
+        $intervalPaths = @($currentIntervalPaths)
+        if (-not [string]::IsNullOrWhiteSpace($repositoryPath)) { $intervalPaths = @(Get-GitChangedPaths $repositoryPath ([string]$record.checkedRevision) ([string]$current.revision)) }
         $coverageRevisionMatches = $null -ne $coverage -and [string]$record.checkedRevision -ceq [string]$coverage.revision -and [string]$coverage.revision -ceq [string]$current.revision
         $environmentMatches = $null -ne $coverage -and [string]$coverage.baseSha -ceq [string]$current.baseSha -and [string]$coverage.environmentHash -ceq [string]$current.environmentHash -and [string]$coverage.dependenciesHash -ceq [string]$current.dependenciesHash
-        if ($coverageRevisionMatches -and $environmentMatches) { $canReuse = $true }
-        elseif ($null -ne $coverage -and [string]$record.checkedRevision -ceq [string]$coverage.revision -and $current.changedKind -eq 'documentation_only' -and $environmentMatches) { $overlap = @($currentChangedPaths | Where-Object { @($coverage.files) -contains [string]$_ }); if ($overlap.Count -eq 0) { $canReuse = $true; $reason = 'documentation_only_inputs_unchanged' } }
-        if (-not $canReuse) { $reusable = $false; $reason = if ($null -eq $coverage) { 'missing_provenance' } else { 'changed_inputs' } }
-        $results += [ordered]@{ evidenceId = [string]$record.evidenceId; reusable = $canReuse; reason = $reason; originalActionId = [string]$record.actionId; checkedRevision = [string]$record.checkedRevision; capturedAtUtc = if ($null -ne $item.capturedAtUtcRaw) { $item.capturedAtUtcRaw } else { [string]$record.capturedAtUtc }; provenance = $coverage }
+        $intervalHasProductionChange = @($intervalPaths | Where-Object { -not (Test-DocumentationPath $_) }).Count -gt 0
+        $overlap = if ($null -ne $coverage) { @($intervalPaths | Where-Object { @($coverage.files) -contains [string]$_ }) } else { @() }
+        if ($currentIntervalValid -and $coverageRevisionMatches -and $environmentMatches) { $canReuse = $true }
+        elseif ($currentIntervalValid -and $null -ne $coverage -and [string]$record.checkedRevision -ceq [string]$coverage.revision -and $current.changedKind -eq 'documentation_only' -and $environmentMatches -and -not $intervalHasProductionChange -and $overlap.Count -eq 0) { $canReuse = $true; $reason = 'documentation_only_inputs_unchanged' }
+        if (-not $canReuse) {
+            $reusable = $false
+            $reason = if (-not $currentIntervalValid) { 'current_change_set_mismatch' } elseif ($null -eq $coverage) { 'missing_provenance' } elseif ($intervalHasProductionChange -and $current.changedKind -eq 'documentation_only') { 'mixed_change_set' } elseif ($overlap.Count -gt 0) { 'changed_inputs' } elseif (-not $environmentMatches) { 'environment_or_dependency_drift' } else { 'changed_inputs' }
+        }
+        $results += [ordered]@{ evidenceId = [string]$record.evidenceId; reusable = $canReuse; reason = $reason; originalActionId = [string]$record.actionId; checkedRevision = [string]$record.checkedRevision; capturedAtUtc = if ($null -ne $item.capturedAtUtcRaw) { $item.capturedAtUtcRaw } else { [string]$record.capturedAtUtc }; provenance = $coverage; intervalPaths = $intervalPaths }
     }
     return [ordered]@{ reusable = $reusable; evidence = $results; reviewerApprovalRequired = $true; freshlyExecuted = $false }
 }

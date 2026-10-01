@@ -71,11 +71,14 @@ function Validate-EvidenceReferences {
 }
 
 function Invoke-WorkerCoverageValidation {
-    param([object[]] $EvidenceReferences, [System.Collections.IDictionary] $CurrentCoverage)
+    param([object[]] $EvidenceReferences, [System.Collections.IDictionary] $CurrentCoverage, [string] $RepositoryPath = '', [string] $FromRevision = '')
     if ($null -eq $CurrentCoverage) { return @() }
     $validationPath = Join-Path ([IO.Path]::GetTempPath()) ('.ticket-loop-reuse-' + [Guid]::NewGuid().ToString('N') + '.json')
     $references = @($EvidenceReferences | ForEach-Object { [ordered]@{ path = [string]$_.path; sha256 = [string]$_.sha256; evidenceId = [string]$_.evidenceId } })
-    $request = [ordered]@{ evidenceReferences = $references; current = $CurrentCoverage }
+    $current = [ordered]@{}; foreach ($key in $CurrentCoverage.Keys) { $current[$key] = $CurrentCoverage[$key] }
+    if (-not [string]::IsNullOrWhiteSpace($RepositoryPath) -and -not [string]::IsNullOrWhiteSpace($FromRevision)) { $current.fromRevision = $FromRevision }
+    $request = [ordered]@{ evidenceReferences = $references; current = $current }
+    if (-not [string]::IsNullOrWhiteSpace($RepositoryPath)) { $request.repositoryPath = $RepositoryPath }
     try {
         [IO.File]::WriteAllText($validationPath, ($request | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
         $lines = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'workflow-verification.ps1') -Operation reuse-evidence -InputPath $validationPath 2>&1; $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine
@@ -89,6 +92,17 @@ function Need {
     param([hashtable] $Object, [string] $Name)
     if (-not $Object.Contains($Name) -or $null -eq $Object[$Name] -or [string]::IsNullOrWhiteSpace([string]$Object[$Name])) { throw "$Name is required." }
     return [string]$Object[$Name]
+}
+
+function Get-PathSet {
+    param([object] $Value, [string] $Name)
+    if ($Value -is [string] -or $Value -isnot [System.Collections.IEnumerable]) { throw "$Name must be an array." }
+    return @($Value | ForEach-Object { if ([string]::IsNullOrWhiteSpace([string]$_)) { throw "$Name entries must be nonblank." }; [string]$_ } | Sort-Object -Unique)
+}
+
+function Test-SamePathSet {
+    param([object[]] $Left, [object[]] $Right)
+    return @(Compare-Object -ReferenceObject @($Left) -DifferenceObject @($Right)).Count -eq 0
 }
 
 function Get-PublicationCheckBindingErrors {
@@ -219,8 +233,9 @@ try {
     } else {
         $receipt = $validation.normalizedReceipt
         $currentSha = Need $inputObject 'currentSha'; $currentScopeHash = Need $inputObject 'currentScopeHash'; $currentBaseSha = Need $inputObject 'currentBaseSha'; $expectedRunId = Need $inputObject 'expectedRunId'; $expectedActionId = Need $inputObject 'expectedActionId'; $expectedTicketKey = Need $inputObject 'expectedTicketKey'; $round = [int]$inputObject.correctionRound; $maxRounds = if ($inputObject.Contains('maxCorrectionRounds')) { [int]$inputObject.maxCorrectionRounds } else { 3 }; $remainingMinutes = if ($inputObject.Contains('remainingMinutes')) { [int]$inputObject.remainingMinutes } else { 1 }; $allowedEvidenceActions = if ($inputObject.Contains('allowedEvidenceActions')) { @($inputObject.allowedEvidenceActions) } else { @() }; $requiredCommands = if ($inputObject.Contains('requiredCommands')) { @($inputObject.requiredCommands | ForEach-Object { [string]$_ }) } else { @() }; $unresolvedRequirements = if ($inputObject.Contains('unresolvedRequirements')) { @($inputObject.unresolvedRequirements | ForEach-Object { [string]$_ }) } else { @() }; $expectedPacketHash = if ($inputObject.Contains('packetHash')) { [string]$inputObject.packetHash } else { '' }; $bindingErrors = @()
-        $reuseValidation = if ($inputObject.Contains('currentCoverage')) { @(Invoke-WorkerCoverageValidation $evidenceReferences $inputObject.currentCoverage) } else { @() }
+        $reuseValidation = @()
         $deltaError = $null
+        $coverageError = $null
         if ($inputObject.Contains('previousReviewedSha')) {
             $previousReviewedSha = Need $inputObject 'previousReviewedSha'
             if (-not $receipt.Contains('reviewDelta')) { $deltaError = 'missing_review_delta_assessment' }
@@ -228,11 +243,40 @@ try {
         } elseif ($receipt.Contains('reviewDelta')) {
             $deltaError = 'unbound_review_delta'
         }
+        if ($inputObject.Contains('currentCoverage')) {
+            $currentCoverage = $inputObject.currentCoverage
+            if ($currentCoverage -isnot [System.Collections.IDictionary]) { $coverageError = 'currentCoverage must be an object.' }
+            else {
+                foreach ($name in @('revision','baseSha','environmentHash','dependenciesHash','changedKind')) { if (-not $currentCoverage.Contains($name)) { $coverageError = "currentCoverage.$name is required."; break } }
+                if ($null -eq $coverageError -and ([string]$currentCoverage.revision -cne $currentSha -or [string]$currentCoverage.baseSha -cne $currentBaseSha)) { $coverageError = 'currentCoverage is not bound to the reviewed revision and base.' }
+                if ($null -eq $coverageError) {
+                    try { $coveragePaths = Get-PathSet $currentCoverage.changedPaths 'currentCoverage.changedPaths' } catch { $coverageError = $_.Exception.Message }
+                }
+                if ($null -eq $coverageError -and $receipt.Contains('reviewDelta') -and $inputObject.Contains('previousReviewedSha')) {
+                    try {
+                        $deltaPaths = Get-PathSet $receipt.reviewDelta.changedPaths 'reviewDelta.changedPaths'
+                        $documentationPaths = Get-PathSet $receipt.reviewDelta.documentationPaths 'reviewDelta.documentationPaths'
+                        if (-not (Test-SamePathSet $coveragePaths $deltaPaths)) { $coverageError = 'currentCoverage.changedPaths do not match reviewDelta.changedPaths.' }
+                        else {
+                            $expectedKind = if ($deltaPaths.Count -eq 0) { 'unchanged' } elseif ($receipt.reviewDelta.documentationChanged -eq $true -and (Test-SamePathSet $deltaPaths $documentationPaths)) { 'documentation_only' } else { 'code' }
+                            if ([string]$currentCoverage.changedKind -cne $expectedKind) { $coverageError = 'currentCoverage.changedKind contradicts the reviewed change set.' }
+                        }
+                    } catch { $coverageError = $_.Exception.Message }
+                }
+            }
+        }
+        if ($null -eq $coverageError -and $inputObject.Contains('currentCoverage')) {
+            $repositoryPath = if ($inputObject.Contains('repositoryPath')) { [string]$inputObject.repositoryPath } else { '' }
+            $fromRevision = if ($receipt.Contains('reviewDelta')) { [string]$receipt.reviewDelta.fromSha } else { '' }
+            $reuseValidation = @(Invoke-WorkerCoverageValidation $evidenceReferences $inputObject.currentCoverage $repositoryPath $fromRevision)
+        }
 
         if ($receipt.runId -ne $expectedRunId -or $receipt.actionId -ne $expectedActionId -or $receipt.ticketKey -ne $expectedTicketKey -or $receipt.reviewedSha -ne $currentSha -or $receipt.scopeHash -ne $currentScopeHash -or $receipt.baseSha -ne $currentBaseSha) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'stale_or_mismatched_review_input'; reviewedSha = $receipt.reviewedSha; currentSha = $currentSha }
         } elseif ($null -ne $deltaError) {
             $data = [ordered]@{ decision = 'needs_input'; reason = $deltaError; reviewedSha = $currentSha; previousReviewedSha = if ($inputObject.Contains('previousReviewedSha')) { $inputObject.previousReviewedSha } else { $null } }
+        } elseif ($null -ne $coverageError) {
+            $data = [ordered]@{ decision = 'needs_input'; reason = 'inconsistent_current_coverage'; detail = $coverageError; reviewedSha = $currentSha }
         } elseif ($remainingMinutes -le 0) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'elapsed_budget'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and -not $strictEvidence) {

@@ -141,10 +141,6 @@ function Get-TrustedEvidenceBindings {
     $resultIds = if ($null -ne $Result -and $Result.Contains('reviewCheckActionIds')) { @($Result.reviewCheckActionIds) } else { @() }
     if ($Action.target -is [System.Collections.IDictionary] -and $Action.target.Contains('reviewCheckActionIds') -and $Action.target.reviewCheckActionIds -is [string]) { throw 'reviewCheckActionIds must be an array.' }
     if ($null -ne $Result -and $Result.Contains('reviewCheckActionIds') -and $Result.reviewCheckActionIds -is [string]) { throw 'Worker reviewCheckActionIds must be an array.' }
-    if ($targetIds.Count -gt 0 -and $resultIds.Count -gt 0) {
-        $missingTargetIds = @($targetIds | ForEach-Object { [string]$_ } | Where-Object { @($resultIds | ForEach-Object { [string]$_ }) -notcontains $_ })
-        if ($missingTargetIds.Count -gt 0) { throw 'Worker reviewCheckActionIds omit a frozen reviewer action binding.' }
-    }
     $actionIds = @()
     if ($targetIds.Count -gt 0) { $actionIds = @($targetIds) + @($resultIds | Where-Object { @($targetIds | ForEach-Object { [string]$_ }) -notcontains [string]$_ }) } else { $actionIds = @($resultIds) }
     if ($actionIds.Count -eq 0) { return @() }
@@ -197,7 +193,7 @@ function Invoke-ReviewDecision {
         if ($currentCoverage.changedKind -eq 'documentation_only' -and $coveragePaths.Count -eq 0) { throw 'documentation_only currentCoverage must identify changed paths.' }
         if ([string]::IsNullOrWhiteSpace([string]$currentCoverage.environmentHash) -or [string]::IsNullOrWhiteSpace([string]$currentCoverage.dependenciesHash)) { throw 'currentCoverage environment and dependency hashes must be nonblank.' }
     }
-    $review = [ordered]@{ receiptPath = $receipt.path; receiptSha256 = $receipt.sha256; expectedCriteria = @($PacketInfo.value.criteria); requiredCommands = @($PacketInfo.value.requiredCommands); unresolvedRequirements = @($PacketInfo.value.unresolvedRequirements); packetHash = [string]$PacketInfo.value.packetHash; allowedEvidenceActions = $evidenceBindings; currentSha = [string]$trustedRepository.currentSha; currentScopeHash = [string]$PacketInfo.value.scopeHash; currentBaseSha = [string]$trustedRepository.baseSha; expectedRunId = [string]$PacketInfo.value.runId; expectedActionId = [string]$Result.actionId; expectedTicketKey = [string]$Owner.ticketKey; correctionRound = [int]$ticket.correctionRound; remainingMinutes = $remainingMinutes; maxCorrectionRounds = $maxRounds }
+    $review = [ordered]@{ receiptPath = $receipt.path; receiptSha256 = $receipt.sha256; expectedCriteria = @($PacketInfo.value.criteria); requiredCommands = @($PacketInfo.value.requiredCommands); unresolvedRequirements = @($PacketInfo.value.unresolvedRequirements); packetHash = [string]$PacketInfo.value.packetHash; allowedEvidenceActions = $evidenceBindings; currentSha = [string]$trustedRepository.currentSha; currentScopeHash = [string]$PacketInfo.value.scopeHash; currentBaseSha = [string]$trustedRepository.baseSha; expectedRunId = [string]$PacketInfo.value.runId; expectedActionId = [string]$Result.actionId; expectedTicketKey = [string]$Owner.ticketKey; repositoryPath = [string]$trustedRepository.repository; correctionRound = [int]$ticket.correctionRound; remainingMinutes = $remainingMinutes; maxCorrectionRounds = $maxRounds }
     if ($null -ne $currentCoverage) { $review.currentCoverage = $currentCoverage }
     if ($Action.target.Contains('previousReviewedSha') -and -not [string]::IsNullOrWhiteSpace([string]$Action.target.previousReviewedSha)) { $review.previousReviewedSha = [string]$Action.target.previousReviewedSha }
     if ($Result.Contains('previousReviewedSha') -and $Action.target.Contains('previousReviewedSha') -and [string]$Result.previousReviewedSha -cne [string]$Action.target.previousReviewedSha) { throw 'Worker previousReviewedSha does not match the frozen reviewer action.' }
@@ -208,6 +204,7 @@ function Invoke-ReviewDecision {
         $lines = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'workflow-review.ps1') -Operation decide -InputPath $reviewPath 2>&1; $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine
         try { $response = ConvertFrom-Json -InputObject $raw -AsHashtable -Depth 100 } catch { throw "Review helper returned invalid JSON: $raw" }
         if ($exitCode -ne 0 -or $response.ok -ne $true) { throw [string]$response.error.message }
+        if ($null -ne $currentCoverage) { $response.data.currentCoverage = $currentCoverage }
         return $response.data
     } finally { if (Test-Path -LiteralPath $reviewPath -PathType Leaf) { Remove-Item -LiteralPath $reviewPath -Force } }
 }
@@ -254,7 +251,7 @@ function Invoke-AcceptResult {
         $stateResultPayload.evidenceReferences = if ($result.Contains('evidenceReferences')) { $result.evidenceReferences } else { @() }
         $stateResultPayload.evidenceStateRoot = if ($result.Contains('evidenceStateRoot')) { [string]$result.evidenceStateRoot } else { $null }
         if ($result.Contains('reviewCheckActionIds')) { $stateResultPayload.reviewCheckActionIds = @($result.reviewCheckActionIds | ForEach-Object { [string]$_ }) }
-        if ($result.Contains('currentCoverage')) { $stateResultPayload.currentCoverage = $result.currentCoverage }
+        if ($review.Contains('currentCoverage')) { $stateResultPayload.currentCoverage = $review.currentCoverage }
     }
     $stateResult = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = $revision; ticketKey = $owner.ticketKey; cursor = [string]$result.cursor; actionId = [string]$result.actionId; workerId = [string]$result.workerId; decision = $decision; toPhase = $phase; reason = $reason; routeValidated = $routeValidated; result = $stateResultPayload }
     $accepted = Invoke-State 'accept-result' $stateResult

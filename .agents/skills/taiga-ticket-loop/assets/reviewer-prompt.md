@@ -28,6 +28,8 @@ documentation changes explicitly. If documentation changed, the amendment must
 be present in a new commit and `documentationPaths` plus
 `documentationAssessment` must identify what you reviewed. If reusing checks,
 list their evidence IDs and explain why the changed revision does not invalidate
-them in `reuseJustification`; otherwise rerun the necessary checks. Evidence or
-receipt corrections require a fresh independent decision and must not be
-accepted solely because the author amended the receipt.
+them in `reuseJustification`; the completed result's `currentCoverage.changedPaths`
+must exactly cover the same interval and classification as `reviewDelta`, or
+the coordinator will reject the review. Otherwise rerun the necessary checks.
+Evidence or receipt corrections require a fresh independent decision and must
+not be accepted solely because the author amended the receipt.

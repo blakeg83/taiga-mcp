@@ -35,12 +35,19 @@ changing a record/log causes validation to fail.
 When a reviewer reuses prior evidence, the completed result must provide a
 trusted `currentCoverage` object containing the current revision and base,
 environment/dependency hashes, `changedKind`, and `changedPaths`. The
-coordinator passes that worker metadata to
-`workflow-verification.ps1 -Operation reuse-evidence`; stale evidence is
-eligible only when that helper returns reusable. This preserves evidence origin
+`changedPaths` and classification must agree with the receipt's
+`reviewDelta`; a worker cannot omit a source path from that metadata. The
+coordinator passes the validated metadata and the trusted worktree to
+`workflow-verification.ps1 -Operation reuse-evidence`. That helper checks the
+actual current review interval and the full Git interval from each evidence
+record's `checkedRevision` to the current revision. Stale evidence is eligible
+only when the complete interval is documentation-only, its covered files do
+not overlap, and the helper returns reusable. This preserves evidence origin
 and allows successive documentation-only revisions to reuse an older record
 while rejecting environment drift, covered-file changes, and mixed
-documentation/source changes.
+documentation/source changes. The effective coverage is persisted even when
+the coordinator accepted it from the outer result input as a compatibility
+fallback.
 
 ## Outcome classification
 

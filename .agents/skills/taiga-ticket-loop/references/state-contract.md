@@ -45,8 +45,12 @@ and fencing generation. A completed review result may supply additional
 before accepting its receipt and persists the binding for final publication
 revalidation. A result may also carry worker-provided `currentCoverage` with
 the current revision/base, environment/dependency hashes, `changedKind`, and
-`changedPaths`; the facade validates its shape and the verification helper
-decides whether prior evidence remains reusable.
+`changedPaths`; the facade validates its shape and consistency with the
+receipt's `reviewDelta`, while the verification helper checks both the current
+and evidence-origin Git intervals. The validated effective coverage is stored
+with the accepted result regardless of whether it came from the result file or
+the compatibility input field, so final publication revalidation sees the
+same evidence context.
 
 Repeated preparation of an existing action ID returns `reconcile` with the
 stored action status instead of redispatching. An observed provider client ID
