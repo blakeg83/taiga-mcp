@@ -38,6 +38,12 @@ The coordinator consumes that stream with
 observation. It advances a per-consumer cursor, proposes only changed task
 states, and leaves `ready_for_review` in the mapped review state (or the
 documented in-progress fallback) until an independent reviewer accepts it.
+`workflow-taiga.ps1` provides `prepare-task-write`,
+`apply-reviewed-task-transition`, `reconcile-task-write`, and
+`reconcile-task-scope` for coordinator-owned, version-bound journals. Review
+receipts can include one `taskAcceptances` entry per claimed completed task;
+Done is rejected without a matching accepted task ID, criterion evidence, and
+reviewed SHA.
 
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.

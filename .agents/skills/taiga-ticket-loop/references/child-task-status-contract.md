@@ -27,8 +27,17 @@ The coordinator consumes progress on its existing bounded observation. It
 persists a per-consumer cursor and task state, proposes writes only for actual
 state changes, and performs no write for an unchanged observation. Only the
 coordinator may call the Taiga write path. Implementers and reviewers provide
-task evidence; reviewer acceptance is required for the `accepted`/Done
-transition.
+task evidence; review receipts may carry `taskAcceptances`, and reviewer
+acceptance is required for the `accepted`/Done transition.
+
+Task writes are journaled through the existing Taiga task update path. Every
+journal binds the authoritative version read immediately before the write,
+the expected old and target status IDs, project/story/task identity, current
+revision, and the run marker. A response-lost or version-conflict result is
+uncertain until task detail/history is reread. A human status edit is
+preserved and surfaced as unresolved; it is never overwritten by a blind
+retry. A batch can retain successful sibling journals while reporting only
+the failed or unresolved task.
 
 Reopening is selective. A changed or rejected task is routed to the same
 implementer and reopens only that task after new evidence is bound to the

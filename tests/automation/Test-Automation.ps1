@@ -1242,6 +1242,40 @@ try {
         Assert-True (-not $staleRelayEvent.ok) 'stale overlapping evidence must be rejected'
     }
 
+    Test-Case 'journal reviewed child transitions and reconcile partial writes safely' {
+        $accepted = @{ taskId = 540; projectId = 12; parentStoryId = 642; currentStatusId = 59; version = 3; targetStatusId = 60; logicalState = 'accepted'; currentSha = 'abcdef2'; runMarker = 'run-relay/action-review'; reviewAcceptance = @{ accepted = $true; taskId = 540; reviewedSha = 'abcdef2'; reviewerId = 'reviewer-thread'; criterionIds = @('AC10'); evidence = 'accepted criterion evidence' } }
+        $journal = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $accepted 'task-write-accepted'))
+        Assert-Equal 3 $journal.data.expectedVersion 'task write must bind the current authoritative version'
+        Assert-Equal 'coordinator' $journal.data.writer 'only the coordinator may own the Taiga write'
+        $reviewReceipt = New-ReviewReceipt; $reviewReceipt.taskAcceptances = @(@{ taskId = 540; accepted = $true; reviewedSha = 'head'; criterionIds = @('criterion-1'); evidence = 'task acceptance evidence' })
+        $reviewWithTasks = Invoke-PsJson $script:StateScript @('-Operation','validate-receipt','-InputPath',(New-InputPath @{ receipt = $reviewReceipt; expectedCriteria = $script:ReviewCriteria } 'task-review-acceptance'))
+        Assert-True $reviewWithTasks.data.valid 'review receipts should carry explicit per-task acceptance evidence'
+        $missingReview = $accepted.Clone(); $missingReview.Remove('reviewAcceptance')
+        $missingReviewResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $missingReview 'task-write-missing-review')) $false
+        Assert-True (-not $missingReviewResult.ok) 'Done transitions without explicit review acceptance must be rejected'
+        $staleReview = Copy-JsonObject $accepted; $staleReview.reviewAcceptance.reviewedSha = 'abcdef1'
+        $staleReviewResult = Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $staleReview 'task-write-stale-review')) $false
+        Assert-True (-not $staleReviewResult.ok) 'stale reviewed SHAs must be rejected'
+        $responseLost = Invoke-PsJson $script:TaigaScript @('-Operation','reconcile-task-write','-InputPath',(New-InputPath @{ responseLost = $true } 'task-write-response-lost'))
+        Assert-Equal 'reread_task_detail_history' $responseLost.data.action 'response loss must reconcile by rereading'
+        $versionConflict = Invoke-PsJson $script:TaigaScript @('-Operation','reconcile-task-write','-InputPath',(New-InputPath @{ versionConflict = $true } 'task-write-version-conflict'))
+        Assert-True (-not $versionConflict.data.blindRetry) 'version conflicts must never blind retry'
+        $batch = @{ projectId = 12; parentStoryId = 642; currentSha = 'abcdef2'; tasks = @(
+            @{ taskId = 540; projectId = 12; parentStoryId = 642; currentStatusId = 59; version = 3; targetStatusId = 60; logicalState = 'accepted'; reviewAcceptance = $accepted.reviewAcceptance }
+            @{ taskId = 541; projectId = 12; parentStoryId = 642; currentStatusId = 56; version = 1; targetStatusId = 58; logicalState = 'in_progress' }
+            @{ taskId = 542; projectId = 12; parentStoryId = 642; currentStatusId = 57; version = 2; targetStatusId = 58; logicalState = 'in_progress'; humanChanged = $true }
+        ) }
+        $batchResult = Invoke-PsJson $script:TaigaScript @('-Operation','apply-reviewed-task-transition','-InputPath',(New-InputPath $batch 'task-write-batch'))
+        Assert-Equal 2 @($batchResult.data.writes).Count 'successful task journals should survive a sibling conflict'
+        Assert-Equal 1 @($batchResult.data.unresolved).Count 'human edits should remain unresolved and preserved'
+        Assert-True $batchResult.data.taskDoneRequiresReviewAcceptance 'batch planner must keep the Done gate explicit'
+        $scope = @{ projectId = 12; parentStoryId = 642; baselineTaskIds = @(540,541); currentTaskIds = @(540,542); reparentedTaskIds = @(542) }
+        $scopeResult = Invoke-PsJson $script:TaigaScript @('-Operation','reconcile-task-scope','-InputPath',(New-InputPath $scope 'task-write-scope'))
+        Assert-Equal 542 $scopeResult.data.addedTaskIds[0] 'new child tasks require scope reconciliation'
+        Assert-Equal 541 $scopeResult.data.removedTaskIds[0] 'removed child tasks are not silently discarded'
+        Assert-Equal 'reconcile_scope_before_writes' $scopeResult.data.decision 'scope changes must precede writes'
+    }
+
     Test-Case 'create and push a fresh branch using a local bare remote' {
         $repo = Join-Path $script:FixtureRoot 'repo'; $remote = Join-Path $script:FixtureRoot 'remote.git'; $worktree = Join-Path $script:FixtureRoot 'worktree'
         New-Item -ItemType Directory -Path $repo -Force | Out-Null

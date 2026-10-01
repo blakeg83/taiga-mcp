@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('capture-context','validate-status-mappings','resolve-status-mapping','prepare-write','reconcile-write','finalize')]
+    [ValidateSet('capture-context','validate-status-mappings','resolve-status-mapping','prepare-write','prepare-task-write','reconcile-write','reconcile-task-write','apply-reviewed-task-transition','reconcile-task-scope','finalize')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath
@@ -197,7 +197,7 @@ function Get-TaskBindings {
         $parent = Get-TaskInteger $item @('parentStoryId','parent_story_id','userStoryId','user_story_id','userStory','user_story') 'parentStoryId' $true
         if ($null -ne $storyId -and $parent -ne $storyId) { throw "Child task $taskId is parented by story $parent, not $storyId." }
         $status = Get-TaskInteger $item @('statusId','status_id','status') 'statusId' $true
-        $version = Get-TaskInteger $item @('version','entityVersion') 'version' $true
+        $versionValue = Get-OptionalTaskValue $item @('version','entityVersion'); if (-not $versionValue.present) { throw "Child task $taskId is missing version." }; $version = 0L; if (-not [long]::TryParse([string]$versionValue.value,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$version) -or $version -lt 0) { throw "Child task $taskId version must be nonnegative." }
         $aliasValue = Get-OptionalTaskValue $item @('alias','ref','taskRef')
         $alias = if ($aliasValue.present) { [string]$aliasValue.value } else { "id:$taskId" }
         if ([string]::IsNullOrWhiteSpace($alias) -or -not $seenAliases.Add($alias.ToLowerInvariant())) { throw "Child task alias is duplicated or blank: $alias." }
@@ -246,6 +246,58 @@ function Resolve-LogicalStatusMapping {
     return $resolved
 }
 
+function Require-TaskIdentity {
+    param([System.Collections.IDictionary] $Task, [long] $ExpectedProjectId = 0, [long] $ExpectedParentStoryId = 0)
+    $taskId = Get-TaskInteger $Task @('taskId','id','task_id') 'taskId' $true
+    $projectId = Get-TaskInteger $Task @('projectId','project_id') 'projectId' $true
+    $parentStoryId = Get-TaskInteger $Task @('parentStoryId','parent_story_id','userStoryId','user_story_id') 'parentStoryId' $true
+    $versionValue = Get-OptionalTaskValue $Task @('version','entityVersion'); if (-not $versionValue.present) { throw 'Child task is missing version.' }; $version = 0L; if (-not [long]::TryParse([string]$versionValue.value,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$version) -or $version -lt 0) { throw 'Child task version must be nonnegative.' }
+    $statusId = Get-TaskInteger $Task @('currentStatusId','statusId','status_id') 'currentStatusId' $true
+    if ($ExpectedProjectId -gt 0 -and $projectId -ne $ExpectedProjectId) { throw "Task $taskId is not in project $ExpectedProjectId." }
+    if ($ExpectedParentStoryId -gt 0 -and $parentStoryId -ne $ExpectedParentStoryId) { throw "Task $taskId is not owned by story $ExpectedParentStoryId." }
+    return [ordered]@{ taskId = $taskId; projectId = $projectId; parentStoryId = $parentStoryId; currentStatusId = $statusId; version = $version }
+}
+
+function Require-ReviewAcceptance {
+    param([System.Collections.IDictionary] $InputObject, [long] $TaskId, [string] $CurrentSha)
+    if (-not $InputObject.Contains('reviewAcceptance') -or $InputObject.reviewAcceptance -isnot [System.Collections.IDictionary]) { throw "Task $TaskId requires explicit reviewer acceptance before Done." }
+    $acceptance = $InputObject.reviewAcceptance
+    if ($acceptance.accepted -ne $true) { throw "Task $TaskId is not reviewer-accepted." }
+    if (-not $acceptance.Contains('taskId') -or [long]$acceptance.taskId -ne $TaskId) { throw "Reviewer acceptance is bound to a different task: $TaskId." }
+    if (-not $acceptance.Contains('reviewedSha') -or [string]$acceptance.reviewedSha -cne $CurrentSha) { throw "Task $TaskId reviewer acceptance is stale for the current revision." }
+    if (-not $acceptance.Contains('criterionIds') -or $acceptance.criterionIds -is [string] -or $acceptance.criterionIds -isnot [System.Collections.IEnumerable] -or @($acceptance.criterionIds).Count -eq 0) { throw "Task $TaskId reviewer acceptance must identify criteria." }
+    if (-not $acceptance.Contains('evidence') -or [string]::IsNullOrWhiteSpace([string]$acceptance.evidence)) { throw "Task $TaskId reviewer acceptance must include evidence." }
+    return [ordered]@{ taskId = $TaskId; reviewerId = if ($acceptance.Contains('reviewerId')) { [string]$acceptance.reviewerId } else { $null }; reviewedSha = [string]$acceptance.reviewedSha; criterionIds = @($acceptance.criterionIds); evidence = $acceptance.evidence; accepted = $true }
+}
+
+function Get-TaskWriteJournal {
+    param([hashtable] $InputObject)
+    $projectId = Get-TaskInteger $InputObject @('projectId') 'projectId' $true; $parentStoryId = Get-TaskInteger $InputObject @('parentStoryId','storyId') 'parentStoryId' $true
+    $task = if ($InputObject.Contains('task')) { $InputObject.task } else { $InputObject }
+    if ($task -isnot [System.Collections.IDictionary]) { throw 'task must be an object.' }
+    $identity = Require-TaskIdentity $task $projectId $parentStoryId
+    $targetStatusId = Get-TaskInteger $InputObject @('targetStatusId','statusId') 'targetStatusId' $true
+    $logicalState = if ($InputObject.Contains('logicalState')) { [string]$InputObject.logicalState } else { $null }
+    if ($logicalState -notin @($null,'not_started','in_progress','awaiting_review','blocked','accepted','done')) { throw 'logicalState is unsupported.' }
+    $currentSha = [string](Need $InputObject 'currentSha'); if ($currentSha -notmatch '^[0-9a-fA-F]{7,64}$') { throw 'currentSha must be a Git revision.' }
+    $review = $null
+    if ($logicalState -in @('accepted','done') -or $InputObject.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $InputObject $identity.taskId $currentSha }
+    $runMarker = [string](Need $InputObject 'runMarker')
+    $journal = [ordered]@{ journalId = Hash-Object @{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; fromStatusId = $identity.currentStatusId; targetStatusId = $targetStatusId; version = $identity.version; currentSha = $currentSha; logicalState = $logicalState; review = $review; runMarker = $runMarker }; actionKind = 'taiga_task_update'; target = [ordered]@{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; statusId = $targetStatusId }; expectedVersion = $identity.version; fromStatusId = $identity.currentStatusId; targetStatusId = $targetStatusId; logicalState = $logicalState; currentSha = $currentSha; runMarker = $runMarker; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false }
+    return $journal
+}
+
+function Invoke-TaskScopeReconciliation {
+    param([hashtable] $InputObject)
+    $projectId = Get-TaskInteger $InputObject @('projectId') 'projectId' $true; $parentStoryId = Get-TaskInteger $InputObject @('parentStoryId','storyId') 'parentStoryId' $true
+    foreach ($field in @('baselineTaskIds','currentTaskIds')) { if (-not $InputObject.Contains($field) -or $InputObject[$field] -is [string] -or $InputObject[$field] -isnot [System.Collections.IEnumerable]) { throw "$field must be an array." } }
+    $baseline = @($InputObject.baselineTaskIds | ForEach-Object { $v = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$v) -or $v -lt 1) { throw 'baselineTaskIds must contain positive integers.' }; $v } | Select-Object -Unique)
+    $current = @($InputObject.currentTaskIds | ForEach-Object { $v = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$v) -or $v -lt 1) { throw 'currentTaskIds must contain positive integers.' }; $v } | Select-Object -Unique)
+    $added = @($current | Where-Object { $baseline -notcontains $_ }); $removed = @($baseline | Where-Object { $current -notcontains $_ }); $reparented = @()
+    if ($InputObject.Contains('reparentedTaskIds')) { $reparented = @($InputObject.reparentedTaskIds | ForEach-Object { [long]$_ }) }
+    return [ordered]@{ projectId = $projectId; parentStoryId = $parentStoryId; unchanged = ($added.Count -eq 0 -and $removed.Count -eq 0 -and $reparented.Count -eq 0); addedTaskIds = $added; removedTaskIds = $removed; reparentedTaskIds = $reparented; decision = if ($added.Count -eq 0 -and $removed.Count -eq 0 -and $reparented.Count -eq 0) { 'preserve_scope' } else { 'reconcile_scope_before_writes' }; writes = @() }
+}
+
 try {
     $input = Read-Object
     $data = switch ($Operation) {
@@ -263,6 +315,7 @@ try {
             [ordered]@{ valid = ($errors.Count -eq 0); errors = $errors }
         }
         'resolve-status-mapping' { Resolve-LogicalStatusMapping $input }
+        'prepare-task-write' { Get-TaskWriteJournal $input }
         'prepare-write' {
             $kind = [string](Need $input 'writeKind'); $target = Need $input 'target'; $version = [int](Need $input 'version'); if ($version -lt 0) { throw 'Version must be nonnegative.' }; $payload = Need $input 'payload'; $marker = Need $input 'runMarker'; if ([string]$payload -match '(?i)(password|token|secret)' -or [string]$payload -match '(?i)raw.?log') { throw 'Unsafe credential or raw-log content is not allowed in a milestone write.' }; [ordered]@{ actionKind = "taiga_$kind"; target = $target; version = $version; runMarker = $marker; payload = $payload; inputDigest = Hash-Object @{ target = $target; version = $version; payload = $payload } }
         }
@@ -272,6 +325,33 @@ try {
             elseif ($input.Contains('observed') -and $input.observed -eq $true) { [ordered]@{ state = 'confirmed'; action = 'record_receipt'; blindRetry = $false } }
             else { [ordered]@{ state = 'needs_input'; action = 'reconcile_external_state'; blindRetry = $false } }
         }
+        'reconcile-task-write' {
+            if ($input.Contains('versionConflict') -and $input.versionConflict -eq $true) { [ordered]@{ state = 'conflict'; action = 'reread_task_detail_history'; blindRetry = $false; preserveHumanChange = $true } }
+            elseif ($input.Contains('responseLost') -and $input.responseLost -eq $true) { [ordered]@{ state = 'uncertain'; action = 'reread_task_detail_history'; blindRetry = $false; preserveHumanChange = $true } }
+            elseif ($input.Contains('currentTask') -and $input.currentTask -is [System.Collections.IDictionary] -and $input.Contains('journal')) {
+                $journal = $input.journal; $current = Require-TaskIdentity $input.currentTask ([long]$journal.target.projectId) ([long]$journal.target.parentStoryId)
+                if ($current.version -lt [long]$journal.expectedVersion) { throw 'Authoritative task version moved backwards.' }
+                if ($current.currentStatusId -eq [long]$journal.targetStatusId) { [ordered]@{ state = 'confirmed'; action = 'record_receipt'; blindRetry = $false; applied = $true; authoritativeVersion = $current.version } }
+                else { [ordered]@{ state = 'human_change_preserved'; action = 'surface_unresolved'; blindRetry = $false; applied = $false; authoritativeVersion = $current.version; currentStatusId = $current.currentStatusId } }
+            }
+            elseif ($input.Contains('observed') -and $input.observed -eq $true) { [ordered]@{ state = 'confirmed'; action = 'record_receipt'; blindRetry = $false; applied = $true } }
+            else { [ordered]@{ state = 'needs_input'; action = 'reread_task_detail_history'; blindRetry = $false } }
+        }
+        'apply-reviewed-task-transition' {
+            if (-not $input.Contains('tasks') -or $input.tasks -is [string] -or $input.tasks -isnot [System.Collections.IEnumerable]) { throw 'tasks must be an array.' }
+            $projectId = Get-TaskInteger $input @('projectId') 'projectId' $true; $parentStoryId = Get-TaskInteger $input @('parentStoryId','storyId') 'parentStoryId' $true; $currentSha = [string](Need $input 'currentSha'); $writes = @(); $unchanged = @(); $unresolved = @(); $seen = [System.Collections.Generic.HashSet[long]]::new()
+            foreach ($taskInput in @($input.tasks)) {
+                if ($taskInput -isnot [System.Collections.IDictionary]) { throw 'Each reviewed task must be an object.' }
+                $identity = Require-TaskIdentity $taskInput $projectId $parentStoryId; if (-not $seen.Add($identity.taskId)) { throw "Reviewed task is duplicated: $($identity.taskId)." }
+                $target = Get-TaskInteger $taskInput @('targetStatusId','statusId') 'targetStatusId' $true; $logical = if ($taskInput.Contains('logicalState')) { [string]$taskInput.logicalState } else { $null }
+                if ($logical -in @('accepted','done') -or $taskInput.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $taskInput $identity.taskId $currentSha } else { $review = $null }
+                if ($identity.currentStatusId -eq $target) { $unchanged += [ordered]@{ taskId = $identity.taskId; statusId = $target; version = $identity.version; preserved = $true } }
+                elseif ($taskInput.Contains('humanChanged') -and $taskInput.humanChanged -eq $true) { $unresolved += [ordered]@{ taskId = $identity.taskId; reason = 'human_status_changed'; currentStatusId = $identity.currentStatusId; targetStatusId = $target; version = $identity.version } }
+                else { $writes += [ordered]@{ journalId = Hash-Object @{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; version = $identity.version; targetStatusId = $target; currentSha = $currentSha; review = $review }; taskId = $identity.taskId; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; fromStatusId = $identity.currentStatusId; targetStatusId = $target; expectedVersion = $identity.version; currentSha = $currentSha; logicalState = $logical; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false } }
+            }
+            [ordered]@{ projectId = $projectId; parentStoryId = $parentStoryId; currentSha = $currentSha; writes = $writes; unchanged = $unchanged; unresolved = $unresolved; successfulUpdatesPreserved = $true; onlyCoordinatorWrites = $true; taskDoneRequiresReviewAcceptance = $true }
+        }
+        'reconcile-task-scope' { Invoke-TaskScopeReconciliation $input }
         'finalize' {
             $errors = @(); if ((Need $input 'requirementsHash') -ne (Need $input 'currentRequirementsHash')) { $errors += 'Requirements changed.' }; if (-not $input.criteriaComplete) { $errors += 'Criteria are incomplete.' }; if (-not $input.checksPass) { $errors += 'Required checks did not pass.' }; if ($input.completionPolicy -eq 'merged' -and $input.prState -ne 'merged') { $errors += 'Observed PR is not merged.' }; if ($input.kind -eq 'epic' -and (-not $input.allStoriesMerged -or -not $input.epicAccepted)) { $errors += 'Epic requires all merged stories and integrated acceptance.' }; [ordered]@{ ready = ($errors.Count -eq 0); errors = $errors; taigaDoneMayBeSelected = ($errors.Count -eq 0) }
         }
