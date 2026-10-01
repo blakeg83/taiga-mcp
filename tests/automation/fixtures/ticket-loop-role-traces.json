@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "scenarios": [
+    {
+      "name": "normal-review-correction-and-user-scope-change",
+      "result": "accepted",
+      "ticketKey": "project:123:issue:456",
+      "workers": {
+        "implementerThreadId": "synthetic-implementer-01",
+        "implementerModel": "gpt-5.6-luna",
+        "implementerEffort": "xhigh",
+        "reviewerThreadId": "synthetic-reviewer-01",
+        "reviewerModel": "gpt-6.1-sol",
+        "reviewerEffort": "high"
+      },
+      "actions": [
+        { "actor": "coordinator", "class": "metadata_read", "operation": "read_ticket_requirements" },
+        { "actor": "coordinator", "class": "metadata_read", "operation": "read_repository_instructions_and_commands" },
+        { "actor": "coordinator", "class": "metadata_read", "operation": "inspect_git_identity_status_and_shas" },
+        { "actor": "coordinator", "class": "provider_read", "operation": "inspect_host_capability_snapshot" },
+        { "actor": "coordinator", "class": "scope_capture", "operation": "capture_scope", "packetId": "packet-v1", "scopeHash": "scope-v1", "source": "ticket" },
+        { "actor": "coordinator", "class": "worker_request", "operation": "dispatch_implementation", "workerId": "synthetic-implementer-01" },
+        { "actor": "implementer", "class": "engineering", "operation": "investigate_and_change_source" },
+        { "actor": "implementer", "class": "engineering", "operation": "run_required_checks" },
+        { "actor": "coordinator", "class": "bounded_wait", "operation": "wait_for_implementation_result" },
+        { "actor": "coordinator", "class": "receipt_read", "operation": "read_implementation_receipt" },
+        { "actor": "coordinator", "class": "worker_request", "operation": "dispatch_review", "workerId": "synthetic-reviewer-01" },
+        { "actor": "reviewer", "class": "engineering", "operation": "inspect_bound_diff_and_check_coverage" },
+        { "actor": "coordinator", "class": "bounded_wait", "operation": "wait_for_review_result" },
+        { "actor": "coordinator", "class": "receipt_read", "operation": "read_review_receipt" },
+        { "actor": "coordinator", "class": "correction_route", "operation": "route_review_finding", "workerId": "synthetic-implementer-01" },
+        { "actor": "implementer", "class": "engineering", "operation": "correct_and_reverify" },
+        { "actor": "user", "class": "user_input", "operation": "clarify_changed_requirement" },
+        { "actor": "coordinator", "class": "scope_capture", "operation": "capture_scope", "packetId": "packet-v2", "scopeHash": "scope-v2", "source": "user" },
+        { "actor": "coordinator", "class": "correction_route", "operation": "route_new_scope_to_same_implementer", "workerId": "synthetic-implementer-01", "packetId": "packet-v2", "scopeHash": "scope-v2" },
+        { "actor": "implementer", "class": "engineering", "operation": "implement_user_clarification_and_reverify" },
+        { "actor": "coordinator", "class": "worker_request", "operation": "dispatch_updated_revision_for_review", "workerId": "synthetic-reviewer-01", "scopeHash": "scope-v2" },
+        { "actor": "reviewer", "class": "engineering", "operation": "assess_updated_revision" },
+        { "actor": "coordinator", "class": "receipt_read", "operation": "read_final_review_receipt" }
+      ]
+    },
+    {
+      "name": "blocked-failed-check-routed-to-producing-worker",
+      "result": "blocked_pending_implementation_evidence",
+      "ticketKey": "project:123:issue:457",
+      "workers": { "implementerThreadId": "synthetic-implementer-02", "reviewerThreadId": "synthetic-reviewer-02" },
+      "actions": [
+        { "actor": "implementer", "class": "engineering", "operation": "run_required_check_exit_1" },
+        { "actor": "coordinator", "class": "bounded_wait", "operation": "wait_for_implementation_result" },
+        { "actor": "coordinator", "class": "receipt_read", "operation": "read_failed_check_evidence" },
+        { "actor": "coordinator", "class": "correction_route", "operation": "route_failed_check_to_producer", "workerId": "synthetic-implementer-02" },
+        { "actor": "implementer", "class": "engineering", "operation": "repair_or_explain_failed_check" }
+      ]
+    },
+    {
+      "name": "blocked-unavailable-exact-review-profile",
+      "result": "blocked_before_dispatch",
+      "ticketKey": "project:123:issue:458",
+      "missingProfile": { "model": "gpt-6.1-sol", "effort": "high" },
+      "actions": [
+        { "actor": "coordinator", "class": "provider_read", "operation": "inspect_current_profile_catalog" },
+        { "actor": "coordinator", "class": "authorization_block", "operation": "report_exact_profile_unavailable" }
+      ]
+    }
+  ]
+}
