@@ -52,6 +52,21 @@
   "restart": { "atSequence": 4, "persistedCursor": 4, "resumeCursor": 4, "omittedCursor": true },
   "helperIntegration": [
     {
+      "name": "capture-story-task-scope", "script": "workflow-taiga.ps1", "operation": "capture-context",
+      "input": {
+        "kind": "story", "projectId": 12, "storyId": 642, "ref": 1,
+        "detailPages": [{ "page": 1, "hasMore": false, "nextPage": null }],
+        "commentPages": [{ "page": 1, "hasMore": false, "nextPage": null }],
+        "taskPages": [
+          { "page": 1, "hasMore": true, "nextPage": 2, "items": [{ "id": 540, "ref": 5, "project": 12, "user_story": 642, "status": 56, "version": 1, "criteria": ["AC01"] }] },
+          { "page": 2, "hasMore": false, "nextPage": null, "items": [{ "id": 541, "ref": 6, "project": 12, "user_story": 642, "status": 56, "version": 4, "criteria": ["AC02"] }] }
+        ],
+        "selectedTaskIds": [540, 541],
+        "packetBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "scopeHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "criteriaByTask": { "540": ["AC01"], "541": ["AC02"] } }
+      },
+      "expect": { "ok": true }
+    },
+    {
       "name": "capture-raw-dto-task-scope", "script": "workflow-taiga.ps1", "operation": "capture-context",
       "input": {
         "kind": "story", "projectId": 12, "storyId": 642, "ref": 1,
@@ -77,18 +92,19 @@
           { "id": 59, "project": 12, "resource": "task", "name": "Done" },
           { "id": 60, "project": 12, "resource": "task", "name": "Blocked" }
         ],
-        "mapping": { "not_started": 56, "in_progress": 58, "awaiting_review": 57, "accepted": 59, "blocked": 60 }
+        "mapping": { "not_started": 56, "in_progress": 58, "awaiting_review": 57, "accepted": 59, "blocked": 60 },
+        "packetBinding": "__CASE:capture-story-task-scope:data:taskScope:packetBinding"
       },
       "expect": { "ok": true }
     },
     {
       "name": "record-task-start", "script": "workflow-progress.ps1", "operation": "record", "usesStateRoot": true, "stateName": "story-progress",
-      "input": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "ticketKey": "project:12:story:642", "projectId": 12, "parentStoryId": 642, "taskId": 540, "sequence": 1, "currentSha": "abcdef1", "eventType": "started", "criterionIds": ["AC01"], "evidence": { "milestone": "implementation started" } },
+      "input": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "ticketKey": "project:12:story:642", "projectId": 12, "parentStoryId": 642, "taskId": 540, "sequence": 1, "currentSha": "abcdef1", "eventType": "started", "criterionIds": ["AC01"], "packetBinding": "__CASE:capture-story-task-scope:data:taskScope:packetBinding", "evidence": { "milestone": "implementation started" } },
       "expect": { "ok": true }
     },
     {
       "name": "record-task-ready", "script": "workflow-progress.ps1", "operation": "record", "usesStateRoot": true, "stateName": "story-progress",
-      "input": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "ticketKey": "project:12:story:642", "projectId": 12, "parentStoryId": 642, "taskId": 540, "sequence": 2, "currentSha": "abcdef2", "eventType": "ready_for_review", "criterionIds": ["AC01"], "evidence": { "milestone": "ready for review" } },
+      "input": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "ticketKey": "project:12:story:642", "projectId": 12, "parentStoryId": 642, "taskId": 540, "sequence": 2, "currentSha": "abcdef2", "eventType": "ready_for_review", "criterionIds": ["AC01"], "packetBinding": "__CASE:capture-story-task-scope:data:taskScope:packetBinding", "evidence": { "milestone": "ready for review" } },
       "expect": { "ok": true }
     },
     {
@@ -97,7 +113,7 @@
     },
     {
       "name": "relay-child-progress", "script": "workflow-coordinate.ps1", "operation": "relay-task-progress", "usesStateRoot": true, "stateName": "story-progress",
-      "input": { "progressRoot": "__CASE_ROOT__", "consumerId": "coordinator-story-642", "runId": "synthetic-story-run", "statusMapping": "__CASE:resolve-task-status-metadata:data" },
+      "input": { "progressRoot": "__CASE_ROOT__", "consumerId": "coordinator-story-642", "runId": "synthetic-story-run", "packetBinding": "__CASE:capture-story-task-scope:data:taskScope:packetBinding", "statusMapping": "__CASE:resolve-task-status-metadata:data" },
       "expect": { "ok": true }
     },
     {
@@ -108,10 +124,10 @@
     {
       "name": "plan-reviewed-task-writes", "script": "workflow-taiga.ps1", "operation": "apply-reviewed-task-transition",
       "input": {
-        "projectId": 12, "parentStoryId": 642, "currentSha": "abcdef2", "runMarker": "synthetic-story-run/review-1", "selectedTaskIds": [540, 541], "scopeReconciliation": "preserve_scope", "statusMapping": "__CASE:resolve-task-status-metadata:data",
+        "projectId": 12, "parentStoryId": 642, "currentSha": "abcdef2", "runMarker": "synthetic-story-run/review-1", "selectedTaskIds": [540, 541], "packetBinding": "__CASE:capture-story-task-scope:data:taskScope:packetBinding", "scopeReconciliation": "preserve_scope", "statusMapping": "__CASE:resolve-task-status-metadata:data",
         "tasks": [
-          { "taskId": 540, "projectId": 12, "parentStoryId": 642, "currentStatusId": 56, "version": 1, "logicalState": "accepted", "targetStatusId": 59, "requiredCriterionIds": ["AC01"], "reviewAcceptance": { "accepted": true, "taskId": 540, "reviewedSha": "abcdef2", "criterionIds": ["AC01"], "evidence": "reviewer accepted AC01" } },
-          { "taskId": 541, "projectId": 12, "parentStoryId": 642, "currentStatusId": 56, "version": 4, "logicalState": "in_progress", "targetStatusId": 58 }
+          { "taskId": 540, "projectId": 12, "parentStoryId": 642, "currentStatusId": 56, "version": 1, "logicalState": "accepted", "targetStatusId": 59, "requiredCriterionIds": ["AC01"], "progressBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:packetHash", "scopeHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:scopeHash", "taskId": 540, "sequence": 2, "eventId": "__CASE:record-task-ready:data:event:eventId", "eventType": "ready_for_review", "currentSha": "abcdef2", "criterionIds": ["AC01"] }, "reviewAcceptance": { "accepted": true, "taskId": 540, "reviewedSha": "abcdef2", "reviewerId": "reviewer-story-642", "runId": "synthetic-story-run", "actionId": "review-1", "packetHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:packetHash", "scopeHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:scopeHash", "criterionIds": ["AC01"], "evidence": "reviewer accepted AC01" } },
+          { "taskId": 541, "projectId": 12, "parentStoryId": 642, "currentStatusId": 56, "version": 4, "logicalState": "in_progress", "targetStatusId": 58, "requiredCriterionIds": ["AC02"], "progressBinding": { "runId": "synthetic-story-run", "actionId": "implement-story-642", "packetHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:packetHash", "scopeHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:scopeHash", "taskId": 541, "sequence": 3, "eventId": "synthetic-event-541", "eventType": "started", "currentSha": "abcdef2", "criterionIds": ["AC02"] } }
         ]
       },
       "expect": { "ok": true }
@@ -128,7 +144,7 @@
     },
     {
       "name": "finalize-selected-child-evidence", "script": "workflow-taiga.ps1", "operation": "finalize",
-      "input": { "kind": "story", "requirementsHash": "scope-hash", "currentRequirementsHash": "scope-hash", "criteriaComplete": true, "checksPass": true, "completionPolicy": "merged", "prState": "merged", "selectedTaskIds": [540, 541], "currentSha": "abcdef2", "expectedCriteriaByTask": { "540": ["AC01"], "541": ["AC02"] }, "selectedTaskEvidence": [{ "taskId": 540, "accepted": true, "reviewAccepted": true, "criteriaComplete": true, "statusOutcome": "reconciled", "reviewedSha": "abcdef2", "criterionIds": ["AC01"] }, { "taskId": 541, "accepted": true, "reviewAccepted": true, "criteriaComplete": true, "statusOutcome": "reconciled", "reviewedSha": "abcdef2", "criterionIds": ["AC02"] }], "pr": "https://github.com/example/taiga-mcp/pull/42" },
+      "input": { "kind": "story", "requirementsHash": "scope-hash", "currentRequirementsHash": "scope-hash", "criteriaComplete": true, "checksPass": true, "completionPolicy": "merged", "prState": "merged", "selectedTaskIds": [540, 541], "packetBinding": "__CASE:capture-story-task-scope:data:taskScope:packetBinding", "currentSha": "abcdef2", "expectedCriteriaByTask": { "540": ["AC01"], "541": ["AC02"] }, "selectedTaskEvidence": [{ "taskId": 540, "accepted": true, "reviewAccepted": true, "criteriaComplete": true, "statusOutcome": "reconciled", "reviewedSha": "abcdef2", "currentSha": "abcdef2", "runId": "synthetic-story-run", "actionId": "review-1", "packetHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:packetHash", "scopeHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:scopeHash", "sequence": 2, "eventId": "__CASE:record-task-ready:data:event:eventId", "eventType": "ready_for_review", "criterionIds": ["AC01"] }, { "taskId": 541, "accepted": true, "reviewAccepted": true, "criteriaComplete": true, "statusOutcome": "reconciled", "reviewedSha": "abcdef2", "currentSha": "abcdef2", "runId": "synthetic-story-run", "actionId": "review-1", "packetHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:packetHash", "scopeHash": "__CASE:capture-story-task-scope:data:taskScope:packetBinding:scopeHash", "sequence": 3, "eventId": "synthetic-event-541", "eventType": "started", "criterionIds": ["AC02"] }], "pr": "https://github.com/example/taiga-mcp/pull/42" },
       "expect": { "ok": true }
     },
     {

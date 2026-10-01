@@ -67,16 +67,58 @@ function Hash-String {
 function Get-EventIdentityKey {
     param([System.Collections.IDictionary] $Record)
     $evidenceJson = ConvertTo-Json -InputObject $Record.evidence -Depth 100 -Compress
-    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason)
+    return ('{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|{9}|{10}|{11}|{12}|{13}|{14}' -f $Record.runId,$Record.actionId,$Record.ticketKey,$Record.projectId,$Record.parentStoryId,$Record.taskId,$Record.sequence,$Record.currentSha,$Record.eventType,(@($Record.criterionIds) -join ','),$evidenceJson,$Record.blockedReason,$Record.packetHash,$Record.scopeHash,$Record.bindingDigest)
+}
+
+function Get-PacketBinding {
+    param([System.Collections.IDictionary] $InputObject)
+    if (-not $InputObject.Contains('packetBinding') -or $InputObject.packetBinding -isnot [System.Collections.IDictionary]) { throw 'Progress requires a validated packetBinding.' }
+    $packet = $InputObject.packetBinding
+    foreach ($name in @('runId','actionId','packetHash','scopeHash','projectId','parentStoryId','selectedTaskIds','criteriaByTask','tasksById','bindingDigest')) { if (-not $packet.Contains($name)) { throw "packetBinding.$name is required." } }
+    foreach ($name in @('runId','actionId')) { if ([string]::IsNullOrWhiteSpace([string]$packet[$name])) { throw "packetBinding.$name cannot be blank." } }
+    foreach ($name in @('packetHash','scopeHash','bindingDigest')) { if ([string]$packet[$name] -notmatch '^[0-9a-fA-F]{64}$') { throw "packetBinding.$name must be a SHA-256 digest." } }
+    $projectId = Positive-Int $packet 'projectId'; $parentStoryId = Positive-Int $packet 'parentStoryId'
+    if ($packet.selectedTaskIds -is [string] -or $packet.selectedTaskIds -isnot [System.Collections.IEnumerable]) { throw 'packetBinding.selectedTaskIds must be an array.' }
+    $selected = @($packet.selectedTaskIds | ForEach-Object { $value = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or $value -lt 1) { throw 'packetBinding.selectedTaskIds must contain positive integers.' }; $value })
+    if (@($selected | Select-Object -Unique).Count -ne $selected.Count) { throw 'packetBinding.selectedTaskIds must not contain duplicates.' }
+    if ($packet.criteriaByTask -isnot [System.Collections.IDictionary] -or $packet.tasksById -isnot [System.Collections.IDictionary]) { throw 'packetBinding criteria and task bindings must be objects.' }
+    $criteriaByTask = [ordered]@{}; $tasksById = [ordered]@{}
+    foreach ($taskId in $selected) {
+        $key = [string]$taskId
+        if (-not $packet.criteriaByTask.Contains($key) -or -not $packet.tasksById.Contains($key)) { throw "packetBinding is missing selected task $taskId." }
+        $criteria = @($packet.criteriaByTask[$key] | ForEach-Object { [string]$_ })
+        if ($criteria.Count -eq 0 -or @($criteria | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0 -or @($criteria | Select-Object -Unique).Count -ne $criteria.Count) { throw "packetBinding criteria for task $taskId must be unique and nonempty." }
+        $task = $packet.tasksById[$key]
+        if ($task -isnot [System.Collections.IDictionary]) { throw "packetBinding task binding for $taskId must be an object." }
+        foreach ($name in @('taskId','alias','projectId','parentStoryId','baselineStatusId','version','criteria')) { if (-not $task.Contains($name)) { throw "packetBinding.tasksById.$taskId.$name is required." } }
+        if ([long]$task.taskId -ne $taskId -or [long]$task.projectId -ne $projectId -or [long]$task.parentStoryId -ne $parentStoryId) { throw "packetBinding task identity does not match selected task $taskId." }
+        if ([string]::IsNullOrWhiteSpace([string]$task.alias)) { throw "packetBinding task alias for $taskId cannot be blank." }
+        if (($criteria -join '|') -cne (@($task.criteria | ForEach-Object { [string]$_ }) -join '|')) { throw "packetBinding criteria do not match task binding $taskId." }
+        $criteriaByTask[$key] = @($criteria)
+        $tasksById[$key] = [ordered]@{ taskId = $taskId; alias = [string]$task.alias; projectId = $projectId; parentStoryId = $parentStoryId; baselineStatusId = [long]$task.baselineStatusId; version = [long]$task.version; criteria = @($criteria) }
+    }
+    $normalized = [ordered]@{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = ([string]$packet.packetHash).ToLowerInvariant(); scopeHash = ([string]$packet.scopeHash).ToLowerInvariant(); projectId = $projectId; parentStoryId = $parentStoryId; selectedTaskIds = @($selected); criteriaByTask = $criteriaByTask; tasksById = $tasksById }
+    $expectedDigest = Hash-Object $normalized
+    if ([string]$packet.bindingDigest -cne $expectedDigest) { throw 'packetBinding.bindingDigest does not match its immutable contents.' }
+    $normalized.bindingDigest = $expectedDigest
+    return $normalized
+}
+
+function Compare-PacketBinding {
+    param([System.Collections.IDictionary] $Left, [System.Collections.IDictionary] $Right)
+    $leftDigest = [string]$Left.bindingDigest; $rightDigest = [string]$Right.bindingDigest
+    if ([string]::IsNullOrWhiteSpace($leftDigest) -or $leftDigest -cne $rightDigest) { throw 'Progress packet binding changed after initialization.' }
 }
 
 function New-ProgressState {
-    param([string] $RunId, [string] $ActionId)
+    param([string] $RunId, [string] $ActionId, [System.Collections.IDictionary] $PacketBinding)
     return [ordered]@{
         schemaVersion = 1
         runId = $RunId
         actionId = $ActionId
         actionIds = @($ActionId)
+        packetBinding = $PacketBinding
+        bindingDigest = [string]$PacketBinding.bindingDigest
         nextSequence = 1
         events = @()
         taskEvidence = [ordered]@{}
@@ -96,7 +138,7 @@ function Read-Progress {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     try { $state = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $Path) -AsHashtable -Depth 100 } catch { throw "Progress checkpoint is not valid JSON: $($_.Exception.Message)" }
     if ($state -isnot [System.Collections.IDictionary] -or [int]$state.schemaVersion -ne 1) { throw 'Progress checkpoint schemaVersion is unsupported.' }
-    foreach ($field in @('runId','actionId','nextSequence','events','taskEvidence','consumers')) { if (-not $state.Contains($field)) { throw "Progress checkpoint is missing $field." } }
+    foreach ($field in @('runId','actionId','nextSequence','events','taskEvidence','consumers','packetBinding','bindingDigest')) { if (-not $state.Contains($field)) { throw "Progress checkpoint is missing $field." } }
     return $state
 }
 
@@ -136,12 +178,13 @@ function Get-CriterionIds {
 
 function Get-ShaProofDigest {
     param([System.Collections.IDictionary] $InputObject, [string[]] $CriterionIds, [object] $Evidence, [string] $CurrentSha)
-    $proofPayload = [ordered]@{ runId = [string]$InputObject.runId; actionId = [string]$InputObject.actionId; ticketKey = [string]$InputObject.ticketKey; projectId = [long]$InputObject.projectId; parentStoryId = [long]$InputObject.parentStoryId; taskId = [long]$InputObject.taskId; sequence = [long]$InputObject.sequence; currentSha = $CurrentSha.ToLowerInvariant(); eventType = [string]$InputObject.eventType; criterionIds = @($CriterionIds); evidence = $Evidence; blockedReason = if ($InputObject.Contains('blockedReason')) { [string]$InputObject.blockedReason } else { $null } }
+    $proofPayload = [ordered]@{ runId = [string]$InputObject.runId; actionId = [string]$InputObject.actionId; ticketKey = [string]$InputObject.ticketKey; projectId = [long]$InputObject.projectId; parentStoryId = [long]$InputObject.parentStoryId; taskId = [long]$InputObject.taskId; sequence = [long]$InputObject.sequence; currentSha = $CurrentSha.ToLowerInvariant(); eventType = [string]$InputObject.eventType; criterionIds = @($CriterionIds); evidence = $Evidence; blockedReason = if ($InputObject.Contains('blockedReason')) { [string]$InputObject.blockedReason } else { $null }; packetHash = [string]$InputObject.packetHash; scopeHash = [string]$InputObject.scopeHash; bindingDigest = [string]$InputObject.bindingDigest }
     return Hash-Object $proofPayload
 }
 
 function Get-Event {
     param([System.Collections.IDictionary] $InputObject)
+    $packet = Get-PacketBinding $InputObject
     $runId = [string](Need $InputObject 'runId'); $actionId = [string](Need $InputObject 'actionId'); $taskId = Positive-Int $InputObject 'taskId'; $sequence = Nonnegative-Int $InputObject 'sequence'
     if ($sequence -lt 1) { throw 'sequence must be positive.' }
     $currentSha = [string](Need $InputObject 'currentSha'); if ($currentSha -notmatch '^[0-9a-fA-F]{7,64}$') { throw 'currentSha must be a Git revision.' }
@@ -153,6 +196,9 @@ function Get-Event {
     if (-not $InputObject.Contains('projectId') -or -not $InputObject.Contains('parentStoryId')) { throw 'projectId and parentStoryId are required for a trusted progress event.' }
     $projectId = Positive-Int $InputObject 'projectId'; $parentStoryId = Positive-Int $InputObject 'parentStoryId'; $ticket = [string]$InputObject.ticketKey
     if ($ticket -notmatch '^project:\d+:story:\d+$' -or [long]($ticket -replace '^project:(\d+):story:(\d+)$','$1') -ne $projectId -or [long]($ticket -replace '^project:(\d+):story:(\d+)$','$2') -ne $parentStoryId) { throw 'ticketKey must match the trusted project and parent story identity.' }
+    if ($runId -cne [string]$packet.runId -or $projectId -ne [long]$packet.projectId -or $parentStoryId -ne [long]$packet.parentStoryId -or $packet.selectedTaskIds -notcontains $taskId) { throw 'Progress event is outside the validated packet scope.' }
+    $expectedCriteria = @($packet.criteriaByTask[[string]$taskId] | ForEach-Object { [string]$_ })
+    if (($criterionIds -join '|') -cne ($expectedCriteria -join '|')) { throw "Progress event criteria do not match the selected task $taskId packet criteria." }
     if ($evidence -is [System.Collections.IDictionary]) { foreach ($name in @('currentSha','headSha')) { if ($evidence.Contains($name) -and [string]$evidence[$name] -cne $currentSha) { throw "Progress evidence $name does not match currentSha." } } }
     $proofDigest = if ($InputObject.Contains('shaDigest')) { [string]$InputObject.shaDigest } else { $null }
     if ($null -ne $proofDigest -and $proofDigest -cne (Get-ShaProofDigest $InputObject $criterionIds $evidence $currentSha)) { throw 'shaDigest does not match the trusted progress event payload.' }
@@ -163,6 +209,9 @@ function Get-Event {
         projectId = $projectId
         parentStoryId = $parentStoryId
         taskId = $taskId
+        packetHash = [string]$packet.packetHash
+        scopeHash = [string]$packet.scopeHash
+        bindingDigest = [string]$packet.bindingDigest
         sequence = $sequence
         currentSha = $currentSha.ToLowerInvariant()
         eventType = $eventType
@@ -170,6 +219,7 @@ function Get-Event {
         evidence = $evidence
         blockedReason = if ($InputObject.Contains('blockedReason')) { [string]$InputObject.blockedReason } else { $null }
         shaDigest = $proofDigest
+        continuationOfActionId = if ($InputObject.Contains('continuationOfActionId')) { [string]$InputObject.continuationOfActionId } else { $null }
         occurredAtUtc = if ($InputObject.Contains('occurredAtUtc')) { [string]$InputObject.occurredAtUtc } else { [DateTime]::UtcNow.ToString('o') }
     }
     $event.eventId = Hash-String (Get-EventIdentityKey $event)
@@ -194,6 +244,10 @@ function Migrate-LegacyProgressState {
 
 function Assert-ProgressState {
     param([System.Collections.IDictionary] $State)
+    if ($State.packetBinding -isnot [System.Collections.IDictionary]) { throw 'Progress checkpoint is missing its immutable packet binding.' }
+    $statePacketInput = [ordered]@{ packetBinding = $State.packetBinding }
+    $statePacket = Get-PacketBinding $statePacketInput
+    if ([string]$State.bindingDigest -cne [string]$statePacket.bindingDigest) { throw 'Progress checkpoint packet binding digest is invalid.' }
     $last = 0L
     $taskStates = @{}
     $actionIds = [System.Collections.Generic.HashSet[string]]::new()
@@ -202,6 +256,8 @@ function Assert-ProgressState {
         $expected = Hash-String (Get-EventIdentityKey $event)
         if ([string]$event.eventId -cne $expected -and (-not $event.Contains('legacyContentDigest') -or [string]$event.legacyContentDigest -cne $expected)) { throw "Progress event identity is invalid: $($event.sequence)." }
         if ($event.Contains('shaDigest') -and -not [string]::IsNullOrWhiteSpace([string]$event.shaDigest) -and [string]$event.shaDigest -cne (Get-ShaProofDigest $event @($event.criterionIds) $event.evidence ([string]$event.currentSha))) { throw "Progress event SHA proof is invalid: $($event.sequence)." }
+        if ([string]$event.packetHash -cne [string]$statePacket.packetHash -or [string]$event.scopeHash -cne [string]$statePacket.scopeHash -or [string]$event.bindingDigest -cne [string]$statePacket.bindingDigest -or [long]$event.projectId -ne [long]$statePacket.projectId -or [long]$event.parentStoryId -ne [long]$statePacket.parentStoryId -or $statePacket.selectedTaskIds -notcontains [long]$event.taskId) { throw "Progress event $($event.sequence) is outside the immutable packet binding." }
+        $expectedCriteria = @($statePacket.criteriaByTask[[string]$event.taskId] | ForEach-Object { [string]$_ }); $actualCriteria = @($event.criterionIds | ForEach-Object { [string]$_ }); if (($expectedCriteria -join '|') -cne ($actualCriteria -join '|')) { throw "Progress event $($event.sequence) criteria are not bound to its selected task." }
         if (-not $actionIds.Add([string]$event.actionId)) { }
         $taskKey = [string]$event.taskId; $prior = if ($taskStates.ContainsKey($taskKey)) { [string]$taskStates[$taskKey] } else { 'not_started' }; $next = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'blocked' { 'blocked' }; 'ready_for_review' { 'awaiting_review' }; 'reopen' { 'in_progress' }; 'accepted' { 'accepted' } }
         $allowed = @{ not_started = @('in_progress','blocked'); in_progress = @('in_progress','blocked','awaiting_review'); blocked = @('in_progress','blocked'); awaiting_review = @('in_progress','accepted'); accepted = @('accepted','in_progress') }
@@ -218,8 +274,9 @@ function Invoke-Record {
     $event = Get-Event $InputObject
     return (Invoke-WithLock $Path {
         $state = Read-Progress $Path
-        if ($null -eq $state) { $state = New-ProgressState $event.runId $event.actionId }
+        if ($null -eq $state) { $state = New-ProgressState $event.runId $event.actionId (Get-PacketBinding $InputObject) }
         if ([string]$state.runId -cne $event.runId) { throw 'Progress checkpoint is bound to a different run.' }
+        $eventPacket = Get-PacketBinding $InputObject; $statePacket = Get-PacketBinding ([ordered]@{ packetBinding = $state.packetBinding }); Compare-PacketBinding $eventPacket $statePacket
         $migrated = Migrate-LegacyProgressState $state
         $continuation = $InputObject.Contains('continuationOfActionId') -and [string]$InputObject.continuationOfActionId -ceq [string]$state.actionId
         if ([string]$state.actionId -cne $event.actionId -and -not $continuation -and (-not $state.Contains('actionIds') -or @($state.actionIds | ForEach-Object { [string]$_ }) -notcontains [string]$event.actionId)) { throw 'Progress checkpoint is bound to a different run/action without a declared continuation.' }
@@ -252,7 +309,7 @@ function Get-Transitions {
     $items = @()
     foreach ($event in $Events) {
         $logicalState = switch ([string]$event.eventType) { 'started' { 'in_progress' }; 'ready_for_review' { 'awaiting_review' }; 'blocked' { 'blocked' }; 'accepted' { 'accepted' }; 'reopen' { 'in_progress' } }
-        $items += [ordered]@{ eventId = [string]$event.eventId; actionId = [string]$event.actionId; sequence = [long]$event.sequence; ticketKey = [string]$event.ticketKey; projectId = [long]$event.projectId; parentStoryId = [long]$event.parentStoryId; taskId = [long]$event.taskId; eventType = [string]$event.eventType; logicalState = $logicalState; currentSha = [string]$event.currentSha; criterionIds = @($event.criterionIds); evidence = $event.evidence }
+        $items += [ordered]@{ eventId = [string]$event.eventId; actionId = [string]$event.actionId; sequence = [long]$event.sequence; ticketKey = [string]$event.ticketKey; projectId = [long]$event.projectId; parentStoryId = [long]$event.parentStoryId; taskId = [long]$event.taskId; eventType = [string]$event.eventType; logicalState = $logicalState; currentSha = [string]$event.currentSha; packetHash = [string]$event.packetHash; scopeHash = [string]$event.scopeHash; bindingDigest = [string]$event.bindingDigest; criterionIds = @($event.criterionIds); evidence = $event.evidence }
     }
     return $items
 }
@@ -263,6 +320,7 @@ function Invoke-Consume {
     $advance = -not ($InputObject.Contains('advance') -and $InputObject.advance -eq $false)
     return (Invoke-WithLock $Path {
         $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; $migrated = Migrate-LegacyProgressState $state; if ($migrated) { Write-Progress $Path $state }; Assert-ProgressState $state
+        if ($InputObject.Contains('packetBinding')) { Compare-PacketBinding (Get-PacketBinding $InputObject) (Get-PacketBinding ([ordered]@{ packetBinding = $state.packetBinding })) }
         if ($InputObject.Contains('runId') -and [string]$InputObject.runId -cne [string]$state.runId) { throw 'runId does not match the progress checkpoint.' }
         $consumerId = [string]$InputObject.consumerId
         $consumer = if ($state.consumers.Contains($consumerId)) { $state.consumers[$consumerId] } else { [ordered]@{ cursor = 0; taskStates = [ordered]@{}; pending = @() } }
@@ -285,7 +343,7 @@ function Invoke-Consume {
             Write-Progress $Path $state
         }
         $pendingWrites = @($pending | Where-Object { if ($consumer.taskStates.Contains([string]$_.taskId)) { [string]$consumer.taskStates[[string]$_.taskId] -ne [string]$_.logicalState } else { $true } })
-        return [ordered]@{ consumerId = $consumerId; previousCursor = $cursor; cursor = $newCursor; unchanged = ($events.Count -eq 0 -and $pending.Count -eq 0); events = $events; transitions = $transitions; pending = @($pending); taigaWrites = @($writes + $pendingWrites | Sort-Object sequence -Unique); stateMutation = ($advance -and ($newCursor -ne $cursor -or $events.Count -gt 0)) }
+        return [ordered]@{ consumerId = $consumerId; previousCursor = $cursor; cursor = $newCursor; packetBinding = $state.packetBinding; unchanged = ($events.Count -eq 0 -and $pending.Count -eq 0); events = $events; transitions = $transitions; pending = @($pending); taigaWrites = @($writes + $pendingWrites | Sort-Object sequence -Unique); stateMutation = ($advance -and ($newCursor -ne $cursor -or $events.Count -gt 0)) }
     })
 }
 
@@ -310,7 +368,7 @@ function Invoke-Acknowledge {
 function Invoke-Validate {
     param([string] $Path)
     $state = Read-Progress $Path; if ($null -eq $state) { throw 'Progress checkpoint was not found.' }; $migrated = Migrate-LegacyProgressState $state; if ($migrated) { Write-Progress $Path $state }; Assert-ProgressState $state
-    return [ordered]@{ valid = $true; runId = [string]$state.runId; actionId = [string]$state.actionId; actionIds = @($state.actionIds); eventCount = @($state.events).Count; nextSequence = [long]$state.nextSequence; consumers = @($state.consumers.Keys) }
+    return [ordered]@{ valid = $true; runId = [string]$state.runId; actionId = [string]$state.actionId; actionIds = @($state.actionIds); packetBinding = $state.packetBinding; eventCount = @($state.events).Count; nextSequence = [long]$state.nextSequence; consumers = @($state.consumers.Keys) }
 }
 
 try {

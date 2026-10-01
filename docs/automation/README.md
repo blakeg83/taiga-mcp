@@ -26,14 +26,17 @@ provider smoke evidence remains separate from fixture success.
 Story child-task status handling is defined in
 `.agents/skills/taiga-ticket-loop/references/child-task-status-contract.md`.
 `workflow-taiga.ps1 -Operation capture-context` captures complete task pages,
-including closed tasks, and emits immutable task bindings. The
+including closed tasks, and emits immutable task bindings. The binding includes
+the selected task set, source aliases, baseline status/version, exact criteria,
+project/story identity, and a recomputed digest. The
 `resolve-status-mapping` operation validates project/resource-specific status
 metadata and uses `in_progress` as the review fallback only when no review
-status is configured; the capture also binds every selected task to the
-immutable packet/scope hashes and exact criteria. Workers emit append-only progress through
-`workflow-progress.ps1`; the checkpoint records task IDs, run/action identity,
-sequences, revisions, criterion evidence, and idempotent event IDs. Progress
-is evidence of a milestone, not reviewer acceptance or a Done transition.
+status is configured; the mapping retains the captured metadata and recomputed
+metadata/mapping digests. Workers emit append-only progress through
+`workflow-progress.ps1`; the checkpoint records the immutable packet binding,
+task IDs, run/action identity, sequences, revisions, criterion evidence, and
+idempotent event IDs. Progress is evidence of a milestone, not reviewer
+acceptance or a Done transition.
 The coordinator consumes that stream with
 `workflow-coordinate.ps1 -Operation relay-task-progress` on a bounded
 observation. It advances a persisted per-consumer cursor only into durable
@@ -45,8 +48,11 @@ is retained across restart and failed writes.
 `apply-reviewed-task-transition`, `reconcile-task-write`, and
 `reconcile-task-scope` for coordinator-owned, version-bound journals. Review
 receipts can include one `taskAcceptances` entry per claimed completed task;
-Done is rejected without a matching accepted task ID, criterion evidence, and
-reviewed SHA.
+every write must carry the exact packet selected-task set, required criteria,
+and revision-bound progress receipt. Accepted/Done is rejected without a
+matching reviewer identity, packet/action binding, accepted task ID, criterion
+evidence, and reviewed SHA. Status writes reject fabricated mappings by
+recomputing provenance from the captured status metadata.
 
 ## Story operator guidance
 

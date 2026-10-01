@@ -199,7 +199,98 @@ function Get-TaskPacketBinding {
         $bound = @($normalized[$key] | Sort-Object)
         if (($captured -join '|') -cne ($bound -join '|')) { throw "packetBinding criteria do not match captured criteria for task $taskId." }
     }
-    return [ordered]@{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = ([string]$packet.packetHash).ToLowerInvariant(); scopeHash = ([string]$packet.scopeHash).ToLowerInvariant(); criteriaByTask = $normalized }
+    $taskBindings = [ordered]@{}
+    foreach ($taskId in $SelectedTaskIds) {
+        $binding = @($Bindings | Where-Object { [long]$_.taskId -eq $taskId })[0]
+        $taskBindings[[string]$taskId] = [ordered]@{
+            taskId = [long]$binding.taskId
+            alias = [string]$binding.alias
+            projectId = [long]$binding.projectId
+            parentStoryId = [long]$binding.parentStoryId
+            baselineStatusId = [long]$binding.baselineStatusId
+            version = [long]$binding.version
+            criteria = @($normalized[[string]$taskId])
+        }
+    }
+    $result = [ordered]@{
+        runId = [string]$packet.runId
+        actionId = [string]$packet.actionId
+        packetHash = ([string]$packet.packetHash).ToLowerInvariant()
+        scopeHash = ([string]$packet.scopeHash).ToLowerInvariant()
+        projectId = [long]$ProjectId
+        parentStoryId = [long]$storyId
+        selectedTaskIds = @($SelectedTaskIds)
+        criteriaByTask = $normalized
+        tasksById = $taskBindings
+    }
+    $result.bindingDigest = Hash-Object $result
+    return $result
+}
+
+function Get-ValidatedPacketBinding {
+    param([System.Collections.IDictionary] $InputObject, [long] $ExpectedProjectId = 0, [long] $ExpectedParentStoryId = 0)
+    if (-not $InputObject.Contains('packetBinding') -or $InputObject.packetBinding -isnot [System.Collections.IDictionary]) { throw 'A validated packetBinding is required.' }
+    $packet = $InputObject.packetBinding
+    foreach ($name in @('runId','actionId','packetHash','scopeHash','projectId','parentStoryId','selectedTaskIds','criteriaByTask','tasksById','bindingDigest')) { if (-not $packet.Contains($name)) { throw "packetBinding.$name is required." } }
+    foreach ($name in @('runId','actionId')) { if ([string]::IsNullOrWhiteSpace([string]$packet[$name])) { throw "packetBinding.$name cannot be blank." } }
+    foreach ($name in @('packetHash','scopeHash','bindingDigest')) { if ([string]$packet[$name] -notmatch '^[0-9a-fA-F]{64}$') { throw "packetBinding.$name must be a SHA-256 digest." } }
+    $projectId = Get-TaskInteger $packet @('projectId') 'packetBinding.projectId' $true
+    $parentStoryId = Get-TaskInteger $packet @('parentStoryId') 'packetBinding.parentStoryId' $true
+    if ($ExpectedProjectId -gt 0 -and $projectId -ne $ExpectedProjectId) { throw "packetBinding is not bound to project $ExpectedProjectId." }
+    if ($ExpectedParentStoryId -gt 0 -and $parentStoryId -ne $ExpectedParentStoryId) { throw "packetBinding is not bound to story $ExpectedParentStoryId." }
+    if ($packet.selectedTaskIds -is [string] -or $packet.selectedTaskIds -isnot [System.Collections.IEnumerable]) { throw 'packetBinding.selectedTaskIds must be an array.' }
+    $selected = @($packet.selectedTaskIds | ForEach-Object { $value = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or $value -lt 1) { throw 'packetBinding.selectedTaskIds must contain positive integers.' }; $value })
+    if (@($selected | Select-Object -Unique).Count -ne $selected.Count) { throw 'packetBinding.selectedTaskIds must not contain duplicates.' }
+    if ($packet.criteriaByTask -isnot [System.Collections.IDictionary] -or $packet.tasksById -isnot [System.Collections.IDictionary]) { throw 'packetBinding criteria and task bindings must be objects.' }
+    $criteriaByTask = [ordered]@{}
+    $taskBindings = [ordered]@{}
+    foreach ($taskId in $selected) {
+        $key = [string]$taskId
+        if (-not $packet.criteriaByTask.Contains($key) -or -not $packet.tasksById.Contains($key)) { throw "packetBinding is missing selected task $taskId." }
+        $criteria = @($packet.criteriaByTask[$key] | ForEach-Object { [string]$_ })
+        if ($criteria.Count -eq 0 -or @($criteria | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0 -or @($criteria | Select-Object -Unique).Count -ne $criteria.Count) { throw "packetBinding criteria for task $taskId must be unique and nonempty." }
+        $taskBinding = $packet.tasksById[$key]
+        if ($taskBinding -isnot [System.Collections.IDictionary]) { throw "packetBinding task binding for $taskId must be an object." }
+        foreach ($name in @('taskId','alias','projectId','parentStoryId','baselineStatusId','version','criteria')) { if (-not $taskBinding.Contains($name)) { throw "packetBinding.tasksById.$taskId.$name is required." } }
+        if ([long]$taskBinding.taskId -ne $taskId -or [long]$taskBinding.projectId -ne $projectId -or [long]$taskBinding.parentStoryId -ne $parentStoryId) { throw "packetBinding task identity does not match selected task $taskId." }
+        if ([string]::IsNullOrWhiteSpace([string]$taskBinding.alias)) { throw "packetBinding task alias for $taskId cannot be blank." }
+        $baselineStatusId = 0L; $version = 0L
+        if (-not [long]::TryParse([string]$taskBinding.baselineStatusId,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$baselineStatusId) -or $baselineStatusId -lt 1) { throw "packetBinding baseline status for task $taskId must be positive." }
+        if (-not [long]::TryParse([string]$taskBinding.version,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$version) -or $version -lt 0) { throw "packetBinding version for task $taskId must be nonnegative." }
+        $boundCriteria = @($taskBinding.criteria | ForEach-Object { [string]$_ })
+        if (($boundCriteria -join '|') -cne ($criteria -join '|')) { throw "packetBinding criteria do not match task binding $taskId." }
+        $criteriaByTask[$key] = @($criteria)
+        $taskBindings[$key] = [ordered]@{ taskId = $taskId; alias = [string]$taskBinding.alias; projectId = $projectId; parentStoryId = $parentStoryId; baselineStatusId = $baselineStatusId; version = $version; criteria = @($criteria) }
+    }
+    $normalized = [ordered]@{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = ([string]$packet.packetHash).ToLowerInvariant(); scopeHash = ([string]$packet.scopeHash).ToLowerInvariant(); projectId = $projectId; parentStoryId = $parentStoryId; selectedTaskIds = @($selected); criteriaByTask = $criteriaByTask; tasksById = $taskBindings }
+    $expectedDigest = Hash-Object $normalized
+    if ([string]$packet.bindingDigest -cne $expectedDigest) { throw 'packetBinding.bindingDigest does not match its immutable contents.' }
+    $normalized.bindingDigest = $expectedDigest
+    return $normalized
+}
+
+function Assert-SelectedTaskCriteria {
+    param([System.Collections.IDictionary] $InputObject, [System.Collections.IDictionary] $Packet, [long] $TaskId)
+    if (-not $InputObject.Contains('requiredCriterionIds') -or $InputObject.requiredCriterionIds -is [string] -or $InputObject.requiredCriterionIds -isnot [System.Collections.IEnumerable]) { throw "Task $TaskId requires requiredCriterionIds from the validated packet." }
+    $required = @($InputObject.requiredCriterionIds | ForEach-Object { [string]$_ })
+    $expected = @($Packet.criteriaByTask[[string]$TaskId] | ForEach-Object { [string]$_ })
+    if ($required.Count -eq 0 -or @($required | Select-Object -Unique).Count -ne $required.Count -or ($required -join '|') -cne ($expected -join '|')) { throw "Task $TaskId requiredCriterionIds do not exactly match the validated packet." }
+    return $required
+}
+
+function Get-ValidatedProgressBinding {
+    param([System.Collections.IDictionary] $InputObject, [System.Collections.IDictionary] $Packet, [long] $TaskId, [string] $CurrentSha, [string[]] $RequiredCriteria)
+    if (-not $InputObject.Contains('progressBinding') -or $InputObject.progressBinding -isnot [System.Collections.IDictionary]) { throw "Task $TaskId requires a validated progressBinding." }
+    $progress = $InputObject.progressBinding
+    foreach ($name in @('runId','actionId','packetHash','scopeHash','taskId','sequence','eventId','eventType','currentSha','criterionIds')) { if (-not $progress.Contains($name)) { throw "progressBinding.$name is required for task $TaskId." } }
+    if ([string]$progress.runId -cne [string]$Packet.runId -or [string]$progress.packetHash -cne [string]$Packet.packetHash -or [string]$progress.scopeHash -cne [string]$Packet.scopeHash -or [long]$progress.taskId -ne $TaskId) { throw "progressBinding is not bound to task $TaskId and its packet." }
+    if ([string]$progress.currentSha -cne $CurrentSha) { throw "progressBinding revision does not match currentSha for task $TaskId." }
+    $sequence = 0L; if (-not [long]::TryParse([string]$progress.sequence,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$sequence) -or $sequence -lt 1) { throw "progressBinding.sequence must be positive for task $TaskId." }
+    if ([string]::IsNullOrWhiteSpace([string]$progress.actionId) -or [string]::IsNullOrWhiteSpace([string]$progress.eventId)) { throw "progressBinding action and event identities cannot be blank for task $TaskId." }
+    if ([string]$progress.eventType -notin @('started','blocked','ready_for_review','reopen')) { throw "progressBinding.eventType is not a worker milestone for task $TaskId." }
+    $criteria = @($progress.criterionIds | ForEach-Object { [string]$_ })
+    if (($criteria -join '|') -cne ($RequiredCriteria -join '|')) { throw "progressBinding criteria do not match required criteria for task $TaskId." }
+    return [ordered]@{ runId = [string]$progress.runId; actionId = [string]$progress.actionId; packetHash = [string]$progress.packetHash; scopeHash = [string]$progress.scopeHash; taskId = $TaskId; sequence = $sequence; eventId = [string]$progress.eventId; eventType = [string]$progress.eventType; currentSha = [string]$progress.currentSha; criterionIds = @($criteria) }
 }
 
 function Get-TaskItems {
@@ -297,7 +388,18 @@ function Resolve-LogicalStatusMapping {
     $duplicates = @($ids | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
     $allowedFallbackDuplicate = $resolved.reviewFallback -and $duplicates.Count -eq 1 -and [string]$duplicates[0] -ceq [string]$resolved.in_progress -and [long]$resolved.awaiting_review -eq [long]$resolved.in_progress
     if ($duplicates.Count -gt 0 -and -not $allowedFallbackDuplicate) { throw "Logical status mapping reuses status IDs: $($duplicates -join ', ')." }
-    $resolved.validated = $true; $resolved.metadataProjectId = $projectId; $resolved.metadataResource = $resource; $resolved.metadataIds = @($metadataIds | Sort-Object); $resolved.mappingDigest = Hash-Object @{ projectId = $projectId; resource = $resource; metadata = $metadata; mapping = $resolved }
+    $resolved.validated = $true
+    $resolved.metadataProjectId = $projectId
+    $resolved.metadataResource = $resource
+    $resolved.metadataIds = @($metadataIds | Sort-Object)
+    $resolved.statusMetadata = @($metadata)
+    $resolved.metadataDigest = Hash-Object @($metadata)
+    $resolved.mappingDigest = Hash-Object [ordered]@{
+        projectId = $projectId
+        resource = $resource
+        statusMetadata = @($metadata)
+        mapping = [ordered]@{ not_started = $resolved.not_started; in_progress = $resolved.in_progress; awaiting_review = $resolved.awaiting_review; accepted = $resolved.accepted; blocked = $resolved.blocked; reviewFallback = $resolved.reviewFallback }
+    }
     return $resolved
 }
 
@@ -305,17 +407,34 @@ function Get-ValidatedTaskMapping {
     param([System.Collections.IDictionary] $InputObject)
     if (-not $InputObject.Contains('statusMapping') -or $InputObject.statusMapping -isnot [System.Collections.IDictionary]) { throw 'A validated statusMapping is required.' }
     $mapping = $InputObject.statusMapping
-    foreach ($name in @('projectId','resource','metadataProjectId','metadataResource','not_started','in_progress','awaiting_review','accepted','validated','metadataIds','mappingDigest')) { if (-not $mapping.Contains($name)) { throw "statusMapping.$name is required." } }
+    foreach ($name in @('projectId','resource','metadataProjectId','metadataResource','not_started','in_progress','awaiting_review','accepted','validated','metadataIds','statusMetadata','metadataDigest','mappingDigest')) { if (-not $mapping.Contains($name)) { throw "statusMapping.$name is required." } }
     if ($mapping.validated -ne $true -or [string]$mapping.resource -cne 'task') { throw 'statusMapping must be a validated task mapping.' }
     $projectId = Get-TaskInteger $InputObject @('projectId') 'projectId' $true
     if ([long]$mapping.projectId -ne $projectId -or [long]$mapping.metadataProjectId -ne $projectId -or [string]$mapping.metadataResource -cne 'task') { throw 'statusMapping metadata does not match the task write project/resource.' }
-    $metadataIds = @($mapping.metadataIds | ForEach-Object { [long]$_ })
-    if ($metadataIds.Count -eq 0 -or @($metadataIds | Select-Object -Unique).Count -ne $metadataIds.Count -or [string]$mapping.mappingDigest -notmatch '^[0-9a-fA-F]{64}$') { throw 'statusMapping metadata identity is incomplete.' }
+    $metadata = @($mapping.statusMetadata)
+    if ($metadata.Count -eq 0) { throw 'statusMapping.statusMetadata cannot be empty.' }
+    $metadataIdsSet = [System.Collections.Generic.HashSet[long]]::new()
+    foreach ($statusMetadata in $metadata) {
+        if ($statusMetadata -isnot [System.Collections.IDictionary]) { throw 'statusMapping.statusMetadata must contain objects.' }
+        $metadataIdValue = if ($statusMetadata.Contains('id')) { $statusMetadata.id } elseif ($statusMetadata.Contains('statusId')) { $statusMetadata.statusId } else { $null }
+        $metadataId = 0L
+        if ($null -eq $metadataIdValue -or -not [long]::TryParse([string]$metadataIdValue,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$metadataId) -or $metadataId -lt 1 -or -not $metadataIdsSet.Add($metadataId)) { throw 'statusMapping.statusMetadata must contain unique positive IDs.' }
+        $metadataProjectValue = if ($statusMetadata.Contains('projectId')) { $statusMetadata.projectId } elseif ($statusMetadata.Contains('project_id')) { $statusMetadata.project_id } elseif ($statusMetadata.Contains('project')) { $statusMetadata.project } else { $null }
+        if ($metadataProjectValue -is [System.Collections.IDictionary]) { $metadataProjectValue = if ($metadataProjectValue.Contains('id')) { $metadataProjectValue.id } elseif ($metadataProjectValue.Contains('pk')) { $metadataProjectValue.pk } else { $null } }
+        $metadataProject = 0L
+        if ($null -eq $metadataProjectValue -or -not [long]::TryParse([string]$metadataProjectValue,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$metadataProject) -or $metadataProject -ne $projectId) { throw "statusMapping metadata $metadataId is not bound to project $projectId." }
+        if (-not $statusMetadata.Contains('resource') -or [string]$statusMetadata.resource -cne 'task') { throw "statusMapping metadata $metadataId is not bound to resource task." }
+    }
+    $metadataIds = @($metadataIdsSet | Sort-Object)
+    if (($metadataIds -join ',') -cne (@($mapping.metadataIds | ForEach-Object { [long]$_ } | Sort-Object) -join ',') -or [string]$mapping.metadataDigest -notmatch '^[0-9a-fA-F]{64}$' -or [string]$mapping.mappingDigest -notmatch '^[0-9a-fA-F]{64}$') { throw 'statusMapping metadata identity is incomplete.' }
+    if ([string]$mapping.metadataDigest -cne (Hash-Object @($metadata))) { throw 'statusMapping.metadataDigest does not match captured status metadata.' }
     $ids = @($mapping.not_started,$mapping.in_progress,$mapping.awaiting_review,$mapping.accepted) + @($mapping.blocked)
-    foreach ($id in $ids | Where-Object { $null -ne $_ }) { if ($metadataIds -notcontains [long]$id) { throw "statusMapping contains an undiscovered status ID: $id." } }
+    foreach ($id in $ids | Where-Object { $null -ne $_ }) { if (-not $metadataIdsSet.Contains([long]$id)) { throw "statusMapping contains an undiscovered status ID: $id." } }
     $duplicates = @($ids | Where-Object { $null -ne $_ } | Group-Object | Where-Object Count -gt 1 | ForEach-Object Name)
     $allowedFallbackDuplicate = $mapping.reviewFallback -eq $true -and $duplicates.Count -eq 1 -and [string]$duplicates[0] -ceq [string]$mapping.in_progress -and [long]$mapping.awaiting_review -eq [long]$mapping.in_progress
     if ($duplicates.Count -gt 0 -and -not $allowedFallbackDuplicate) { throw 'statusMapping has an invalid duplicate status ID.' }
+    $mappingDigest = Hash-Object [ordered]@{ projectId = $projectId; resource = 'task'; statusMetadata = @($metadata); mapping = [ordered]@{ not_started = [long]$mapping.not_started; in_progress = [long]$mapping.in_progress; awaiting_review = [long]$mapping.awaiting_review; accepted = [long]$mapping.accepted; blocked = if ($null -eq $mapping.blocked) { $null } else { [long]$mapping.blocked }; reviewFallback = ($mapping.reviewFallback -eq $true) } }
+    if ([string]$mapping.mappingDigest -cne $mappingDigest) { throw 'statusMapping.mappingDigest does not match captured status metadata and logical mapping.' }
     return $mapping
 }
 
@@ -332,18 +451,19 @@ function Require-TaskIdentity {
 }
 
 function Require-ReviewAcceptance {
-    param([System.Collections.IDictionary] $InputObject, [long] $TaskId, [string] $CurrentSha)
+    param([System.Collections.IDictionary] $InputObject, [long] $TaskId, [string] $CurrentSha, [System.Collections.IDictionary] $Packet, [string[]] $RequiredCriteria)
     if (-not $InputObject.Contains('reviewAcceptance') -or $InputObject.reviewAcceptance -isnot [System.Collections.IDictionary]) { throw "Task $TaskId requires explicit reviewer acceptance before Done." }
     $acceptance = $InputObject.reviewAcceptance
     if ($acceptance.accepted -ne $true) { throw "Task $TaskId is not reviewer-accepted." }
     if (-not $acceptance.Contains('taskId') -or [long]$acceptance.taskId -ne $TaskId) { throw "Reviewer acceptance is bound to a different task: $TaskId." }
     if (-not $acceptance.Contains('reviewedSha') -or [string]$acceptance.reviewedSha -cne $CurrentSha) { throw "Task $TaskId reviewer acceptance is stale for the current revision." }
     if (-not $acceptance.Contains('criterionIds') -or $acceptance.criterionIds -is [string] -or $acceptance.criterionIds -isnot [System.Collections.IEnumerable] -or @($acceptance.criterionIds).Count -eq 0) { throw "Task $TaskId reviewer acceptance must identify criteria." }
-    if ($InputObject.Contains('requiredCriterionIds')) {
-        $required = @($InputObject.requiredCriterionIds | ForEach-Object { [string]$_ } | Select-Object -Unique); $actual = @($acceptance.criterionIds | ForEach-Object { [string]$_ } | Select-Object -Unique); foreach ($criterion in $required) { if ($actual -notcontains $criterion) { throw "Task $TaskId reviewer acceptance omits required criterion $criterion." } }; foreach ($criterion in $actual) { if ($required -notcontains $criterion) { throw "Task $TaskId reviewer acceptance contains unrelated criterion $criterion." } }; if ($actual.Count -ne $required.Count) { throw "Task $TaskId reviewer acceptance does not exactly cover required criteria." }
-    }
+    $actual = @($acceptance.criterionIds | ForEach-Object { [string]$_ } | Select-Object -Unique)
+    if (($actual -join '|') -cne ($RequiredCriteria -join '|')) { throw "Task $TaskId reviewer acceptance does not exactly cover the validated packet criteria." }
+    foreach ($name in @('runId','actionId','packetHash','scopeHash','reviewerId')) { if (-not $acceptance.Contains($name) -or [string]::IsNullOrWhiteSpace([string]$acceptance[$name])) { throw "Task $TaskId reviewer acceptance.$name is required." } }
+    if ([string]$acceptance.runId -cne [string]$Packet.runId -or [string]$acceptance.packetHash -cne [string]$Packet.packetHash -or [string]$acceptance.scopeHash -cne [string]$Packet.scopeHash) { throw "Task $TaskId reviewer acceptance is not bound to the validated packet." }
     if (-not $acceptance.Contains('evidence') -or [string]::IsNullOrWhiteSpace([string]$acceptance.evidence)) { throw "Task $TaskId reviewer acceptance must include evidence." }
-    return [ordered]@{ taskId = $TaskId; reviewerId = if ($acceptance.Contains('reviewerId')) { [string]$acceptance.reviewerId } else { $null }; reviewedSha = [string]$acceptance.reviewedSha; criterionIds = @($acceptance.criterionIds); evidence = $acceptance.evidence; accepted = $true }
+    return [ordered]@{ taskId = $TaskId; reviewerId = [string]$acceptance.reviewerId; runId = [string]$acceptance.runId; actionId = [string]$acceptance.actionId; packetHash = [string]$acceptance.packetHash; scopeHash = [string]$acceptance.scopeHash; reviewedSha = [string]$acceptance.reviewedSha; criterionIds = @($actual); evidence = $acceptance.evidence; accepted = $true }
 }
 
 function Get-TaskWriteJournal {
@@ -352,18 +472,22 @@ function Get-TaskWriteJournal {
     $task = if ($InputObject.Contains('task')) { $InputObject.task } else { $InputObject }
     if ($task -isnot [System.Collections.IDictionary]) { throw 'task must be an object.' }
     $identity = Require-TaskIdentity $task $projectId $parentStoryId
+    $packet = Get-ValidatedPacketBinding $InputObject $projectId $parentStoryId
     $mapping = Get-ValidatedTaskMapping $InputObject
     $selected = if ($InputObject.Contains('selectedTaskIds')) { @($InputObject.selectedTaskIds | ForEach-Object { [long]$_ }) } else { throw 'selectedTaskIds is required for a task write.' }
+    if (($selected -join ',') -cne (@($packet.selectedTaskIds) -join ',')) { throw 'selectedTaskIds must exactly match the validated packet scope.' }
     if ($selected -notcontains $identity.taskId) { throw "Task $($identity.taskId) is outside the selected task scope." }
+    $requiredCriteria = Assert-SelectedTaskCriteria $InputObject $packet $identity.taskId
     $logicalState = if ($InputObject.Contains('logicalState')) { [string]$InputObject.logicalState } else { throw 'logicalState is required for a task write.' }
     if ($logicalState -notin @('not_started','in_progress','awaiting_review','blocked','accepted','done')) { throw 'logicalState is unsupported.' }
     $targetStatusId = switch ($logicalState) { 'not_started' { [long]$mapping.not_started }; 'in_progress' { [long]$mapping.in_progress }; 'awaiting_review' { [long]$mapping.awaiting_review }; 'blocked' { if ($null -eq $mapping.blocked) { throw 'Blocked status is not configured.' }; [long]$mapping.blocked }; 'accepted' { [long]$mapping.accepted }; 'done' { [long]$mapping.accepted } }
     if ($InputObject.Contains('targetStatusId') -and [long]$InputObject.targetStatusId -ne $targetStatusId) { throw 'Caller targetStatusId does not match the validated logical mapping.' }
     $currentSha = [string](Need $InputObject 'currentSha'); if ($currentSha -notmatch '^[0-9a-fA-F]{7,64}$') { throw 'currentSha must be a Git revision.' }
+    $progress = Get-ValidatedProgressBinding $InputObject $packet $identity.taskId $currentSha $requiredCriteria
     $review = $null
-    if ($targetStatusId -eq [long]$mapping.accepted -or $logicalState -in @('accepted','done') -or $InputObject.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $InputObject $identity.taskId $currentSha }
+    if ($targetStatusId -eq [long]$mapping.accepted -or $logicalState -in @('accepted','done') -or $InputObject.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $InputObject $identity.taskId $currentSha $packet $requiredCriteria }
     $runMarker = [string](Need $InputObject 'runMarker')
-    $journal = [ordered]@{ journalId = Hash-Object @{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; fromStatusId = $identity.currentStatusId; targetStatusId = $targetStatusId; version = $identity.version; currentSha = $currentSha; logicalState = $logicalState; review = $review; runMarker = $runMarker }; actionKind = 'taiga_task_update'; target = [ordered]@{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; statusId = $targetStatusId }; expectedVersion = $identity.version; fromStatusId = $identity.currentStatusId; targetStatusId = $targetStatusId; logicalState = $logicalState; currentSha = $currentSha; runMarker = $runMarker; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false }
+    $journal = [ordered]@{ journalId = Hash-Object @{ packetBinding = $packet; progressBinding = $progress; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; fromStatusId = $identity.currentStatusId; targetStatusId = $targetStatusId; version = $identity.version; currentSha = $currentSha; logicalState = $logicalState; review = $review; runMarker = $runMarker }; actionKind = 'taiga_task_update'; packetBinding = $packet; progressBinding = $progress; target = [ordered]@{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; statusId = $targetStatusId }; expectedVersion = $identity.version; fromStatusId = $identity.currentStatusId; targetStatusId = $targetStatusId; logicalState = $logicalState; currentSha = $currentSha; runMarker = $runMarker; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false }
     return $journal
 }
 
@@ -424,16 +548,16 @@ try {
         }
         'apply-reviewed-task-transition' {
             if (-not $input.Contains('tasks') -or $input.tasks -is [string] -or $input.tasks -isnot [System.Collections.IEnumerable]) { throw 'tasks must be an array.' }
-            $projectId = Get-TaskInteger $input @('projectId') 'projectId' $true; $parentStoryId = Get-TaskInteger $input @('parentStoryId','storyId') 'parentStoryId' $true; $currentSha = [string](Need $input 'currentSha'); $mapping = Get-ValidatedTaskMapping $input; $selected = if ($input.Contains('selectedTaskIds')) { @($input.selectedTaskIds | ForEach-Object { $value = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or $value -lt 1) { throw 'selectedTaskIds must contain positive integers.' }; $value }) } else { throw 'selectedTaskIds is required for reviewed task transitions.' }; if (@($selected | Select-Object -Unique).Count -ne $selected.Count) { throw 'selectedTaskIds must not contain duplicates.' }; $scopeDecision = if ($input.Contains('scopeReconciliation')) { [string]$input.scopeReconciliation } else { 'preserve_scope' }; if ($scopeDecision -ne 'preserve_scope') { throw 'Task scope must be reconciled before reviewed writes.' }; $writes = @(); $unchanged = @(); $unresolved = @(); $outcomes = @(); $seen = [System.Collections.Generic.HashSet[long]]::new()
+            $projectId = Get-TaskInteger $input @('projectId') 'projectId' $true; $parentStoryId = Get-TaskInteger $input @('parentStoryId','storyId') 'parentStoryId' $true; $currentSha = [string](Need $input 'currentSha'); $packet = Get-ValidatedPacketBinding $input $projectId $parentStoryId; $mapping = Get-ValidatedTaskMapping $input; $selected = if ($input.Contains('selectedTaskIds')) { @($input.selectedTaskIds | ForEach-Object { $value = 0L; if (-not [long]::TryParse([string]$_,[Globalization.NumberStyles]::Integer,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or $value -lt 1) { throw 'selectedTaskIds must contain positive integers.' }; $value }) } else { throw 'selectedTaskIds is required for reviewed task transitions.' }; if (@($selected | Select-Object -Unique).Count -ne $selected.Count) { throw 'selectedTaskIds must not contain duplicates.' }; if (($selected -join ',') -cne (@($packet.selectedTaskIds) -join ',')) { throw 'selectedTaskIds must exactly match the validated packet scope.' }; $scopeDecision = if ($input.Contains('scopeReconciliation')) { [string]$input.scopeReconciliation } else { 'preserve_scope' }; if ($scopeDecision -ne 'preserve_scope') { throw 'Task scope must be reconciled before reviewed writes.' }; $writes = @(); $unchanged = @(); $unresolved = @(); $outcomes = @(); $seen = [System.Collections.Generic.HashSet[long]]::new()
             foreach ($taskInput in @($input.tasks)) {
                 if ($taskInput -isnot [System.Collections.IDictionary]) { $unresolved += [ordered]@{ taskId = $null; outcome = 'failed'; reason = 'task_not_object' }; continue }
                 try {
-                    $identity = Require-TaskIdentity $taskInput $projectId $parentStoryId; if (-not $seen.Add($identity.taskId)) { throw "Reviewed task is duplicated: $($identity.taskId)." }; if ($selected -notcontains $identity.taskId) { throw "Reviewed task $($identity.taskId) is outside the selected task scope." }
+                    $identity = Require-TaskIdentity $taskInput $projectId $parentStoryId; if (-not $seen.Add($identity.taskId)) { throw "Reviewed task is duplicated: $($identity.taskId)." }; if ($selected -notcontains $identity.taskId) { throw "Reviewed task $($identity.taskId) is outside the selected task scope." }; $requiredCriteria = Assert-SelectedTaskCriteria $taskInput $packet $identity.taskId; $progress = Get-ValidatedProgressBinding $taskInput $packet $identity.taskId $currentSha $requiredCriteria
                     $logical = if ($taskInput.Contains('logicalState')) { [string]$taskInput.logicalState } else { throw "Task $($identity.taskId) logicalState is required." }
                     $target = switch ($logical) { 'not_started' { [long]$mapping.not_started }; 'in_progress' { [long]$mapping.in_progress }; 'awaiting_review' { [long]$mapping.awaiting_review }; 'blocked' { if ($null -eq $mapping.blocked) { throw 'Blocked status is not configured.' }; [long]$mapping.blocked }; 'accepted' { [long]$mapping.accepted }; 'done' { [long]$mapping.accepted }; default { throw "Task $($identity.taskId) logicalState is unsupported." } }
                     if ($taskInput.Contains('targetStatusId') -and [long]$taskInput.targetStatusId -ne $target) { throw "Task $($identity.taskId) target status does not match mapping." }
-                    if ($target -eq [long]$mapping.accepted -or $logical -in @('accepted','done') -or $taskInput.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $taskInput $identity.taskId $currentSha } else { $review = $null }
-                    $journal = [ordered]@{ journalId = Hash-Object @{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; version = $identity.version; targetStatusId = $target; currentSha = $currentSha; runMarker = $input.runMarker; review = $review }; taskId = $identity.taskId; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; target = [ordered]@{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; statusId = $target }; fromStatusId = $identity.currentStatusId; targetStatusId = $target; expectedVersion = $identity.version; currentSha = $currentSha; runMarker = [string](Need $input 'runMarker'); logicalState = $logical; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false }
+                    if ($target -eq [long]$mapping.accepted -or $logical -in @('accepted','done') -or $taskInput.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $taskInput $identity.taskId $currentSha $packet $requiredCriteria } else { $review = $null }
+                    $journal = [ordered]@{ journalId = Hash-Object @{ packetBinding = $packet; progressBinding = $progress; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; version = $identity.version; targetStatusId = $target; currentSha = $currentSha; runMarker = $input.runMarker; review = $review }; taskId = $identity.taskId; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; packetBinding = $packet; progressBinding = $progress; target = [ordered]@{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; statusId = $target }; fromStatusId = $identity.currentStatusId; targetStatusId = $target; expectedVersion = $identity.version; currentSha = $currentSha; runMarker = [string](Need $input 'runMarker'); logicalState = $logical; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false }
                     if ($taskInput.Contains('baselineStatusId') -and [long]$taskInput.baselineStatusId -ne $identity.currentStatusId -and -not ($taskInput.Contains('lastCoordinatorStatusId') -and [long]$taskInput.lastCoordinatorStatusId -eq $identity.currentStatusId)) { $unresolved += [ordered]@{ taskId = $identity.taskId; outcome = 'human_changed'; reason = 'authoritative status differs from baseline'; currentStatusId = $identity.currentStatusId; targetStatusId = $target; version = $identity.version }; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'human_changed'; journalId = $journal.journalId } }
                     elseif ($identity.currentStatusId -eq $target) { $unchanged += [ordered]@{ taskId = $identity.taskId; statusId = $target; version = $identity.version; preserved = $true }; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'unchanged'; journalId = $journal.journalId } }
                     else { $writes += $journal; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'planned'; journalId = $journal.journalId } }
@@ -449,17 +573,19 @@ try {
             if (@($selectedTaskIds | Select-Object -Unique).Count -ne $selectedTaskIds.Count) { $errors += 'selectedTaskIds contains duplicates.' }
             $taskEvidence = if ($input.Contains('selectedTaskEvidence')) { @($input.selectedTaskEvidence) } else { @() }
             if ($selectedTaskIds.Count -gt 0) {
+                $packet = Get-ValidatedPacketBinding $input
+                if (($selectedTaskIds -join ',') -cne (@($packet.selectedTaskIds) -join ',')) { $errors += 'selectedTaskIds do not exactly match the validated packet scope.' }
                 if ($taskEvidence.Count -ne $selectedTaskIds.Count) { $errors += 'Every selected child requires final evidence.' }
                 foreach ($taskId in $selectedTaskIds) {
                     $matches = @($taskEvidence | Where-Object { $_ -is [System.Collections.IDictionary] -and $_.Contains('taskId') -and [long]$_.taskId -eq $taskId })
                     if ($matches.Count -ne 1) { $errors += "Selected task $taskId has missing or duplicate final evidence."; continue }
                     $evidence = $matches[0]
-                    foreach ($field in @('accepted','reviewAccepted','criteriaComplete','statusOutcome','reviewedSha','criterionIds')) { if (-not $evidence.Contains($field)) { $errors += "Selected task $taskId final evidence is missing $field." } }
+                    foreach ($field in @('accepted','reviewAccepted','criteriaComplete','statusOutcome','reviewedSha','criterionIds','runId','actionId','packetHash','scopeHash','sequence','eventId','eventType')) { if (-not $evidence.Contains($field)) { $errors += "Selected task $taskId final evidence is missing $field." } }
                     if ($evidence.accepted -ne $true -or $evidence.reviewAccepted -ne $true -or $evidence.criteriaComplete -ne $true -or [string]$evidence.statusOutcome -notin @('applied','unchanged','reconciled')) { $errors += "Selected task $taskId is not individually accepted and reconciled." }
                     if ($input.Contains('currentSha') -and [string]$evidence.reviewedSha -cne [string]$input.currentSha) { $errors += "Selected task $taskId final evidence is stale for the final revision." }
-                    if ($input.Contains('expectedCriteriaByTask') -and $input.expectedCriteriaByTask -is [System.Collections.IDictionary] -and $input.expectedCriteriaByTask.Contains([string]$taskId)) {
-                        $expected = @($input.expectedCriteriaByTask[[string]$taskId] | ForEach-Object { [string]$_ } | Select-Object -Unique); $actual = @($evidence.criterionIds | ForEach-Object { [string]$_ } | Select-Object -Unique); if (($expected | Sort-Object) -join '|' -cne ($actual | Sort-Object) -join '|') { $errors += "Selected task $taskId final evidence criteria do not match the bound packet." }
-                    }
+                    if ([string]$evidence.runId -cne [string]$packet.runId -or [string]$evidence.packetHash -cne [string]$packet.packetHash -or [string]$evidence.scopeHash -cne [string]$packet.scopeHash) { $errors += "Selected task $taskId final evidence is not bound to the validated packet." }
+                    if (-not $input.Contains('currentSha') -or [string]$evidence.currentSha -cne [string]$evidence.reviewedSha) { $errors += "Selected task $taskId final evidence revision binding is incomplete." }
+                    $expected = @($packet.criteriaByTask[[string]$taskId] | ForEach-Object { [string]$_ }); $actual = @($evidence.criterionIds | ForEach-Object { [string]$_ } | Select-Object -Unique); if (($expected -join '|') -cne ($actual -join '|')) { $errors += "Selected task $taskId final evidence criteria do not match the validated packet." }
                     if ($evidence.criterionIds -is [string] -or $evidence.criterionIds -isnot [System.Collections.IEnumerable] -or @($evidence.criterionIds).Count -eq 0) { $errors += "Selected task $taskId has no criterion evidence." }
                 }
             }
