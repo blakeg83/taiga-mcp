@@ -109,7 +109,7 @@ public sealed class WorkItemAttachmentDownloadTests
     public async Task DownloadAsync_EnforcesLimitWhenContentLengthIsUnavailableAndCleansPartialFile()
     {
         var handler = new FakeHttpMessageHandler()
-            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithSize)
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new UnknownLengthContent([1, 2, 3, 4, 5])
@@ -137,7 +137,7 @@ public sealed class WorkItemAttachmentDownloadTests
     public async Task DownloadAsync_CleansPartialFileAfterInterruptedResponse()
     {
         var handler = new FakeHttpMessageHandler()
-            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithSize)
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new FaultingContent([1, 2, 3, 4], failAfter: 2)
@@ -212,11 +212,36 @@ public sealed class WorkItemAttachmentDownloadTests
     }
 
     [Fact]
+    public async Task DownloadAsync_RejectsUnknownLengthWhenMetadataSizeIsAbsent()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new UnknownLengthContent([1, 2, 3])
+            });
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            try
+            {
+                var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                    NewApi(handler, auth).DownloadAsync("task", 901, destination));
+
+                Assert.Contains("verifiable size", error.Message);
+                Assert.False(File.Exists(destination));
+            }
+            finally { File.Delete(destination); }
+        }
+    }
+
+    [Fact]
     public async Task DownloadAsync_PropagatesCancellationAndCleansPartialFile()
     {
         var content = new BlockingContent();
         var handler = new FakeHttpMessageHandler()
-            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithSize)
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = content
@@ -524,7 +549,7 @@ internal static class DownloadFixtures
           "project":123,
           "object_id":42,
           "name":"metadata-sized.bin",
-          "size":5,
+          "size":4,
           "url":"https://fake.taiga.test/media/901.bin"
         }
         """;

@@ -41,8 +41,9 @@ The configured `TAIGA__MAXATTACHMENTBYTES` limit applies to downloads as well
 as uploads. Its default is 10 MiB; a zero-byte file and a file exactly at the
 limit are valid. The client rejects a known oversized attachment `size` or
 `Content-Length` before writing, requires the received byte count to equal each
-known declared size, and also enforces the limit while reading when a length is missing
-or untrusted.
+known declared size, and rejects a response when neither metadata `size` nor
+`Content-Length` provides a verifiable completion boundary. A missing
+`Content-Length` is supported when metadata `size` is present.
 
 Bytes are written to a uniquely named temporary file in the destination's
 same directory. The temporary file is flushed and moved into place only after
