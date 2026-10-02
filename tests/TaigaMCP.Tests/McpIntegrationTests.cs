@@ -796,6 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
+            Assert.Equal(36, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -825,6 +826,7 @@ public sealed class McpIntegrationTests
                 "list_tasks",
                 "list_user_stories",
                 "list_user_story_statuses",
+                "list_work_item_attachments",
                 "list_work_item_comments",
                 "resolve_project",
                 "resolve_work_item",
@@ -835,6 +837,18 @@ public sealed class McpIntegrationTests
                 "update_user_story"
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
+
+            var listWorkItemAttachments = Assert.Single(tools, tool => tool.Name == "list_work_item_attachments");
+            var attachmentProperties = listWorkItemAttachments.JsonSchema.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray();
+            Assert.Equal(new[] { "kind", "id", "projectId", "page" }, attachmentProperties);
+            var attachmentRequired = listWorkItemAttachments.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray();
+            Assert.Equal(new[] { "kind", "id", "projectId" }, attachmentRequired);
+            Assert.Contains("one page", listWorkItemAttachments.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cancellationToken", attachmentProperties);
 
             foreach (var tool in tools)
                 Assert.DoesNotContain("cancellationToken", tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name));
@@ -2104,6 +2118,57 @@ public sealed class McpIntegrationTests
         {
             McpProtocolLineValidator.ValidateLine(line);
         }
+    }
+
+    [Fact]
+    public async Task ProductionServer_ListWorkItemAttachments_ListsEverySupportedKind()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        var tool = Assert.Single(tools, candidate => candidate.Name == "list_work_item_attachments");
+        Assert.Equal(
+            new[] { "kind", "id", "projectId", "page" },
+            tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+
+        foreach (var kind in new[] { "epic", "user_story", "task" })
+        {
+            var result = await client.CallToolAsync(
+                "list_work_item_attachments",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = kind,
+                    ["id"] = 42,
+                    ["projectId"] = 123,
+                    ["page"] = 2
+                },
+                cancellationToken: timeout.Token);
+
+            Assert.False(result.IsError == true, GetText(result));
+            var json = JsonSerializer.Deserialize<JsonElement>(GetText(result));
+            Assert.Equal(2, json.GetProperty("page").GetInt32());
+            Assert.Equal(901, json.GetProperty("items")[0].GetProperty("id").GetInt32());
+            Assert.Equal("Attachment", json.GetProperty("items")[0].GetProperty("description").GetString());
+        }
+
+        Assert.Equal(
+            new[]
+            {
+                "/api/v1/epics/attachments?object_id=42&project=123&page=2",
+                "/api/v1/userstories/attachments?object_id=42&project=123&page=2",
+                "/api/v1/tasks/attachments?object_id=42&project=123&page=2"
+            },
+            taiga.Requests
+                .Where(request => request.Method == "GET" && request.PathAndQuery.Contains("/attachments?", StringComparison.Ordinal))
+                .Select(request => request.PathAndQuery));
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
     }
 
     [Fact]
