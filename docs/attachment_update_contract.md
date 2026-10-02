@@ -44,8 +44,8 @@ The following response or upload fields are intentionally not public update
 fields: `id`, `project`, `owner`, `name`, `attached_file`, `size`, `object_id`,
 `sha1`, `from_comment`, `created_date`, and `modified_date`. In particular, the
 file bytes, parent association, and project cannot be changed by this command.
-`PUT` is not exposed because Taiga's full update requires the complete object
-and the attachment file; partial metadata changes use `PATCH`.
+`PUT` is unsupported by the pinned backend because its attachment update
+handler rejects non-partial updates; partial metadata changes use `PATCH`.
 
 There are no per-kind field differences identified in the shared backend
 validator. Permissions remain authoritative upstream: each kind permits an
@@ -80,4 +80,3 @@ field or conflict information; raw upstream bodies are not returned.
 - [Pinned attachment validator](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/validators.py)
 - [Pinned attachment model](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/models.py)
 - [Taiga optimistic-concurrency notes](https://github.com/taigaio/taiga-doc/blob/main/api/general-notes.adoc)
-
