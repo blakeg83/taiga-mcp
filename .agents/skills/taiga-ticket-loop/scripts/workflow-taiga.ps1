@@ -499,6 +499,16 @@ function Require-TaskIdentity {
     return [ordered]@{ taskId = $taskId; projectId = $projectId; parentStoryId = $parentStoryId; currentStatusId = $statusId; version = $version }
 }
 
+function Test-TaskHumanStatusChange {
+    param([System.Collections.IDictionary] $Task, [long] $CurrentStatusId, [long] $FallbackBaselineStatusId = 0)
+    if ($Task.Contains('humanChanged') -and $Task.humanChanged -eq $true) { return $true }
+    $lastCoordinatorStatusId = Get-TaskInteger $Task @('lastCoordinatorStatusId') 'lastCoordinatorStatusId'
+    if ($null -ne $lastCoordinatorStatusId) { return $lastCoordinatorStatusId -ne $CurrentStatusId }
+    $baselineStatusId = Get-TaskInteger $Task @('baselineStatusId') 'baselineStatusId'
+    if ($null -eq $baselineStatusId -and $FallbackBaselineStatusId -gt 0) { $baselineStatusId = $FallbackBaselineStatusId }
+    return $null -ne $baselineStatusId -and $baselineStatusId -ne $CurrentStatusId
+}
+
 function Require-ReviewAcceptance {
     param([System.Collections.IDictionary] $InputObject, [long] $TaskId, [string] $CurrentSha, [System.Collections.IDictionary] $Packet, [string[]] $RequiredCriteria)
     if (-not $InputObject.Contains('reviewAcceptance') -or $InputObject.reviewAcceptance -isnot [System.Collections.IDictionary]) { throw "Task $TaskId requires explicit reviewer acceptance before Done." }
@@ -522,6 +532,9 @@ function Get-TaskWriteJournal {
     if ($task -isnot [System.Collections.IDictionary]) { throw 'task must be an object.' }
     $identity = Require-TaskIdentity $task $projectId $parentStoryId
     $packet = Get-ValidatedPacketBinding $InputObject $projectId $parentStoryId
+    $packetTask = $packet.tasksById[[string]$identity.taskId]
+    $baselineStatusId = if ($null -ne $packetTask) { [long]$packetTask.baselineStatusId } else { 0L }
+    if (Test-TaskHumanStatusChange $task $identity.currentStatusId $baselineStatusId) { throw "Task $($identity.taskId) has an authoritative human status change (current=$($identity.currentStatusId), baseline=$baselineStatusId); preserve it and surface the task as unresolved." }
     $mapping = Get-ValidatedTaskMapping $InputObject
     $selected = if ($InputObject.Contains('selectedTaskIds')) { @($InputObject.selectedTaskIds | ForEach-Object { [long]$_ }) } else { throw 'selectedTaskIds is required for a task write.' }
     if (($selected -join ',') -cne (@($packet.selectedTaskIds) -join ',')) { throw 'selectedTaskIds must exactly match the validated packet scope.' }
@@ -549,6 +562,31 @@ function Invoke-TaskScopeReconciliation {
     $added = @($current | Where-Object { $baseline -notcontains $_ }); $removed = @($baseline | Where-Object { $current -notcontains $_ }); $reparented = @()
     if ($InputObject.Contains('reparentedTaskIds')) { $reparented = @($InputObject.reparentedTaskIds | ForEach-Object { [long]$_ }) }
     return [ordered]@{ projectId = $projectId; parentStoryId = $parentStoryId; unchanged = ($added.Count -eq 0 -and $removed.Count -eq 0 -and $reparented.Count -eq 0); addedTaskIds = $added; removedTaskIds = $removed; reparentedTaskIds = $reparented; decision = if ($added.Count -eq 0 -and $removed.Count -eq 0 -and $reparented.Count -eq 0) { 'preserve_scope' } else { 'reconcile_scope_before_writes' }; writes = @() }
+}
+
+function Assert-FinalTaskEvidence {
+    param([object] $Evidence, [System.Collections.IDictionary] $Packet, [long] $TaskId, [string] $CurrentSha, [System.Collections.Generic.HashSet[string]] $SeenEventIds, [System.Collections.Generic.HashSet[long]] $SeenSequences)
+    if ($Evidence -isnot [System.Collections.IDictionary]) { throw "Selected task $TaskId final evidence must be an object." }
+    foreach ($field in @('taskId','accepted','reviewAccepted','criteriaComplete','statusOutcome','reviewedSha','currentSha','criterionIds','runId','actionId','packetHash','scopeHash','sequence','eventId','eventType')) { if (-not $Evidence.Contains($field)) { throw "Selected task $TaskId final evidence is missing $field." } }
+    $evidenceTaskId = Get-TaskInteger $Evidence @('taskId') 'final evidence taskId' $true
+    if ($evidenceTaskId -ne $TaskId) { throw "Selected task $TaskId final evidence is bound to task $evidenceTaskId." }
+    if ($Evidence.accepted -ne $true -or $Evidence.reviewAccepted -ne $true -or $Evidence.criteriaComplete -ne $true) { throw "Selected task $TaskId is not individually accepted and criteria-complete." }
+    if ([string]$Evidence.statusOutcome -notin @('applied','unchanged','reconciled')) { throw "Selected task $TaskId final evidence has no reconciled status outcome." }
+    if ([string]$Evidence.eventType -cne 'accepted') { throw "Selected task $TaskId final evidence must reference an accepted event." }
+    if ([string]::IsNullOrWhiteSpace([string]$Evidence.runId) -or [string]$Evidence.runId -cne [string]$Packet.runId) { throw "Selected task $TaskId final evidence is not bound to the validated run." }
+    if ([string]::IsNullOrWhiteSpace([string]$Evidence.actionId)) { throw "Selected task $TaskId final evidence actionId cannot be blank." }
+    if ([string]$Evidence.packetHash -cne [string]$Packet.packetHash -or [string]$Evidence.scopeHash -cne [string]$Packet.scopeHash) { throw "Selected task $TaskId final evidence is not bound to the validated packet." }
+    if ([string]$Evidence.reviewedSha -notmatch '^[0-9a-fA-F]{7,64}$' -or [string]$Evidence.currentSha -notmatch '^[0-9a-fA-F]{7,64}$' -or [string]$CurrentSha -notmatch '^[0-9a-fA-F]{7,64}$') { throw "Selected task $TaskId final evidence revision binding is invalid." }
+    if ([string]$Evidence.reviewedSha -cne [string]$CurrentSha -or [string]$Evidence.currentSha -cne [string]$Evidence.reviewedSha) { throw "Selected task $TaskId final evidence is stale for the final revision." }
+    $sequence = 0L
+    if (-not [long]::TryParse([string]$Evidence.sequence, [Globalization.NumberStyles]::Integer, [Globalization.CultureInfo]::InvariantCulture, [ref]$sequence) -or $sequence -lt 1 -or -not $SeenSequences.Add($sequence)) { throw "Selected task $TaskId final evidence sequence is invalid or duplicated." }
+    $eventId = [string]$Evidence.eventId
+    if ([string]::IsNullOrWhiteSpace($eventId) -or -not $SeenEventIds.Add($eventId)) { throw "Selected task $TaskId final evidence eventId is invalid or duplicated." }
+    if ($Evidence.criterionIds -is [string] -or $Evidence.criterionIds -isnot [System.Collections.IEnumerable]) { throw "Selected task $TaskId final evidence criterionIds must be an array." }
+    $actual = @($Evidence.criterionIds | ForEach-Object { [string]$_ })
+    if ($actual.Count -eq 0 -or @($actual | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0 -or @($actual | Select-Object -Unique).Count -ne $actual.Count) { throw "Selected task $TaskId final evidence has invalid criterion IDs." }
+    $expected = @($Packet.criteriaByTask[[string]$TaskId] | ForEach-Object { [string]$_ })
+    if (($expected | Sort-Object) -join '|' -cne (($actual | Sort-Object) -join '|')) { throw "Selected task $TaskId final evidence criteria do not match the validated packet." }
 }
 
 try {
@@ -608,7 +646,9 @@ try {
                     if ($taskInput.Contains('targetStatusId') -and [long]$taskInput.targetStatusId -ne $target) { throw "Task $($identity.taskId) target status does not match mapping." }
                     if ($target -eq [long]$mapping.accepted -or $logical -in @('accepted','done') -or $taskInput.Contains('reviewAcceptance')) { $review = Require-ReviewAcceptance $taskInput $identity.taskId $currentSha $packet $requiredCriteria } else { $review = $null }
                     $journal = [ordered]@{ journalId = Hash-Object @{ packetBinding = $packet; progressBinding = $progress; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; version = $identity.version; targetStatusId = $target; currentSha = $currentSha; runMarker = $input.runMarker; review = $review }; taskId = $identity.taskId; projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; packetBinding = $packet; progressBinding = $progress; target = [ordered]@{ projectId = $identity.projectId; parentStoryId = $identity.parentStoryId; taskId = $identity.taskId; statusId = $target }; fromStatusId = $identity.currentStatusId; targetStatusId = $target; expectedVersion = $identity.version; currentSha = $currentSha; runMarker = [string](Need $input 'runMarker'); logicalState = $logical; reviewerAcceptance = $review; writer = 'coordinator'; blindRetry = $false }
-                    if ($taskInput.Contains('baselineStatusId') -and [long]$taskInput.baselineStatusId -ne $identity.currentStatusId -and -not ($taskInput.Contains('lastCoordinatorStatusId') -and [long]$taskInput.lastCoordinatorStatusId -eq $identity.currentStatusId)) { $unresolved += [ordered]@{ taskId = $identity.taskId; outcome = 'human_changed'; reason = 'authoritative status differs from baseline'; currentStatusId = $identity.currentStatusId; targetStatusId = $target; version = $identity.version }; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'human_changed'; journalId = $journal.journalId } }
+                    $packetTask = $packet.tasksById[[string]$identity.taskId]
+                    $baselineStatusId = if ($null -ne $packetTask) { [long]$packetTask.baselineStatusId } else { 0L }
+                    if (Test-TaskHumanStatusChange $taskInput $identity.currentStatusId $baselineStatusId) { $unresolved += [ordered]@{ taskId = $identity.taskId; outcome = 'human_changed'; reason = 'authoritative status differs from the last coordinator status or baseline'; currentStatusId = $identity.currentStatusId; targetStatusId = $target; version = $identity.version }; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'human_changed'; journalId = $journal.journalId } }
                     elseif ($identity.currentStatusId -eq $target) { $unchanged += [ordered]@{ taskId = $identity.taskId; statusId = $target; version = $identity.version; preserved = $true }; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'unchanged'; journalId = $journal.journalId } }
                     else { $writes += $journal; $outcomes += [ordered]@{ taskId = $identity.taskId; outcome = 'planned'; journalId = $journal.journalId } }
                 } catch { $unresolved += [ordered]@{ taskId = if ($taskInput.Contains('taskId')) { [long]$taskInput.taskId } else { $null }; outcome = 'failed'; reason = $_.Exception.Message }; $outcomes += [ordered]@{ taskId = if ($taskInput.Contains('taskId')) { [long]$taskInput.taskId } else { $null }; outcome = 'failed' } }
@@ -632,17 +672,14 @@ try {
             $taskEvidence = if ($input.Contains('selectedTaskEvidence')) { @($input.selectedTaskEvidence) } else { @() }
             if ($selectedTaskIds.Count -gt 0) {
                 if ($taskEvidence.Count -ne $selectedTaskIds.Count) { $errors += 'Every selected child requires final evidence.' }
+                $currentSha = if ($input.Contains('currentSha')) { [string]$input.currentSha } else { $null }
+                $seenEventIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                $seenSequences = [System.Collections.Generic.HashSet[long]]::new()
                 foreach ($taskId in $selectedTaskIds) {
                     $matches = @($taskEvidence | Where-Object { $_ -is [System.Collections.IDictionary] -and $_.Contains('taskId') -and [long]$_.taskId -eq $taskId })
                     if ($matches.Count -ne 1) { $errors += "Selected task $taskId has missing or duplicate final evidence."; continue }
                     $evidence = $matches[0]
-                    foreach ($field in @('accepted','reviewAccepted','criteriaComplete','statusOutcome','reviewedSha','criterionIds','runId','actionId','packetHash','scopeHash','sequence','eventId','eventType')) { if (-not $evidence.Contains($field)) { $errors += "Selected task $taskId final evidence is missing $field." } }
-                    if ($evidence.accepted -ne $true -or $evidence.reviewAccepted -ne $true -or $evidence.criteriaComplete -ne $true -or [string]$evidence.statusOutcome -notin @('applied','unchanged','reconciled')) { $errors += "Selected task $taskId is not individually accepted and reconciled." }
-                    if ($input.Contains('currentSha') -and [string]$evidence.reviewedSha -cne [string]$input.currentSha) { $errors += "Selected task $taskId final evidence is stale for the final revision." }
-                    if ([string]$evidence.runId -cne [string]$packet.runId -or [string]$evidence.packetHash -cne [string]$packet.packetHash -or [string]$evidence.scopeHash -cne [string]$packet.scopeHash) { $errors += "Selected task $taskId final evidence is not bound to the validated packet." }
-                    if (-not $input.Contains('currentSha') -or [string]$evidence.currentSha -cne [string]$evidence.reviewedSha) { $errors += "Selected task $taskId final evidence revision binding is incomplete." }
-                    $expected = @($packet.criteriaByTask[[string]$taskId] | ForEach-Object { [string]$_ }); $actual = @($evidence.criterionIds | ForEach-Object { [string]$_ } | Select-Object -Unique); if (($expected -join '|') -cne ($actual -join '|')) { $errors += "Selected task $taskId final evidence criteria do not match the validated packet." }
-                    if ($evidence.criterionIds -is [string] -or $evidence.criterionIds -isnot [System.Collections.IEnumerable] -or @($evidence.criterionIds).Count -eq 0) { $errors += "Selected task $taskId has no criterion evidence." }
+                    try { Assert-FinalTaskEvidence $evidence $packet ([long]$taskId) $currentSha $seenEventIds $seenSequences } catch { $errors += $_.Exception.Message }
                 }
             }
             [ordered]@{ ready = ($errors.Count -eq 0); errors = $errors; selectedTaskIds = $selectedTaskIds; selectedTaskEvidence = $taskEvidence; selectedChildrenVerified = ($selectedTaskIds.Count -eq 0 -or $errors.Count -eq 0); taigaDoneMayBeSelected = ($errors.Count -eq 0) }

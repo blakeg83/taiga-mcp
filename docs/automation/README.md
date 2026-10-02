@@ -74,9 +74,11 @@ parent story remains the single branch/chat/PR and keeps its existing merge
 completion policy. A blocked or rejected child reopens only that child after
 new revision-bound evidence; unrelated tasks and human edits are preserved.
 New, removed, or reparented children require scope reconciliation before any
-status write. The lifecycle verifier covers restart midway through
-synchronization and refuses parent completion when selected-task acceptance
-evidence is missing. No real-host trial is implied by offline fixture success.
+status write. Parent completion requires revision-bound accepted evidence for
+every selected child; a started or ready-for-review milestone is insufficient.
+The lifecycle verifier covers restart midway through synchronization and refuses
+parent completion when selected-task acceptance evidence is missing. No real-host
+trial is implied by offline fixture success.
 
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.

@@ -50,7 +50,10 @@ transition.
 Task writes are journaled through the existing Taiga task update path. Every
 journal requires the exact packet selected-task set, packet criteria,
 revision-bound progress receipt, and (for accepted status) reviewer acceptance
-bound to that same packet and criteria. Status mapping writes carry the
+bound to that same packet and criteria. Parent completion additionally requires
+one revision-bound `accepted` event for every selected task; a `started` or
+`ready_for_review` milestone cannot serve as final child evidence. Status
+mapping writes carry the
 discovered project/resource metadata and recomputed metadata/mapping digests;
 caller-supplied IDs or digests cannot substitute for captured metadata. Every
 journal also binds the authoritative version read immediately before the
