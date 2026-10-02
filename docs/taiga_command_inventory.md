@@ -1,33 +1,40 @@
 # Taiga command inventory
 
-Reviewed September 29, 2026. This inventory includes the 33 commands already
+Reviewed October 2, 2026 against repository source and the implemented tool
+reference. This inventory includes the 35 commands already
 implemented by the repository and the larger command set that remains planned;
 it does not imply that planned commands are deployed.
 
-The [first-batch summary](goals/first-batch/README.md) records all 15 delivered functions within their selected scope. The [second-batch plan index](goals/second-batch/README.md) defines the next 12 functions and their implementation checklists. Second-batch plans do not imply those functions are implemented.
+All 15 selected first-batch functions and all 12 second-batch functions are
+implemented within their selected scope. The first batch expanded three tools
+and added twelve, bringing the total to 23; the second batch added twelve more.
+The [implemented tool reference](taiga_tools_reference.md#current-tool-contracts)
+records the current contracts. The former `docs/goals/` batch plans are absent
+from this checkout, so this inventory links to the maintained reference instead.
 
 ## Scope and notation
 
 - **Tickets** means user stories and tasks here. Taiga exposes issues, epics, user stories, and tasks as separate resources; command names preserve those distinctions.
 - **Existing** means exposed by this repository today. **Extend** means an existing command needs broader behavior. **New** means a proposed command. Parameters below describe the intended interface, not exact current signatures. The exact current signatures and JSON shapes are in the [implemented tool reference](taiga_tools_reference.md).
-- **Delivered subset** identifies implemented behavior with remaining inventory scope. **Planned — batch 2** links to an unimplemented second-batch goal; those functions are not part of today's 33-tool count.
+- **Delivered subset** identifies an exposed command whose selected behavior is implemented; broader fields or related operations can still remain planned. **New** rows are unimplemented and excluded from the 35-tool count.
 - Shared commands take `kind = issue | epic | user_story | task` and an internal numeric `id`. A displayed `#ref` must first be resolved within its project.
-- List commands should expose pagination, supported filters, ordering, and an explicit choice to include completed work. Return JSON with IDs, references, useful labels, versions where available, and pagination information.
+- The broader list design calls for pagination, supported filters, ordering, and an explicit choice to include completed work. Current commands request one upstream page per call. `list_issues` and `list_user_stories` return arrays by default and offer `includePageInfo=true`; task/epic lists, membership/sprint lists, story/task/epic status lists, epic relationship lists, and shared comment/history reads always return `{ items, page, total, next_page, has_more }`. Project and issue metadata lists retain arrays. Unknown page metadata remains explicit null; null resource fields are omitted.
 - Updates should distinguish omitted fields from explicit clearing, use Taiga's version checks where required, and report conflicts. Closing and reopening mean selecting a project status; status names must not be hardcoded.
-- New commands below are proposed wrappers over Taiga APIs unless marked **composite**. Source-backed features must be checked against the deployed Taiga version before eventual implementation; this inventory did not test a live instance.
+- Delivered issue, story, task, and epic updates omit ordinary null fields, accept `clearFields=["assigned_to"]`, and support `description=""` and `tags=[]`. Story updates also accept `clearFields=["milestone"]`; task updates accept `blockedNote=""`. Unsupported clear names and set/clear collisions are rejected. Versions are caller-supplied and never automatically refreshed; only a received HTTP 401 permits one authentication replay, and ambiguous writes are not retried.
+- New commands below are proposed wrappers over Taiga APIs unless marked **composite**. Source-backed features must be checked against the deployed Taiga version before eventual implementation. This review checked local coverage and links; it did not reverify the upstream sources linked below or test a live instance.
 
 ## Project context and discovery
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_projects` | Existing | `member?, page?`; list accessible projects, using the configured numeric member ID when filtering by a user. |
+| `list_projects` | Existing | `member?, page?`; list one page of accessible projects as an array. `member` is an optional caller-supplied member ID string; null or empty means no member filter. |
 | `resolve_project` | Existing | `slug`; return the internal project ID. |
 | `get_project` | New | `projectId`; return project details, enabled modules, defaults, and available permission information needed to interpret work items. |
-| `get_current_user` | Delivered subset — [batch 2, goal 01](goals/second-batch/01-get-current-user.md) | No arguments; return the authenticated user's positive ID plus optional username, full name, and active state for assignment, ownership, and personal filters. |
-| `list_project_members` | Delivered subset — [batch 2, goal 02](goals/second-batch/02-list-project-members.md) | `projectId, page?`; return one page of membership records with distinct `membership_id` and optional `user_id`, role/name/activity/admin/owner fields. Pending and inactive records remain visible; email and invitation fields are excluded. |
+| `get_current_user` | Delivered subset | No arguments; return the authenticated user's positive ID plus optional username, full name, and active state for assignment, ownership, and personal filters. |
+| `list_project_members` | Delivered subset | `projectId, page?`; return one page of membership records with distinct `membership_id` and optional `user_id`, role/name/activity/admin/owner fields. Pending and inactive records remain visible; email and invitation fields are excluded. |
 | `list_project_roles` | New | `projectId`; return role IDs and estimation participation for role-based story points. |
 | `search_work_items` | New; composite | `projectId, query, kinds?, page?`; search selected resource lists using supported text filters and combine results with their kinds and references. Track each resource's pagination separately. |
-| `resolve_work_item` | Delivered subset — [batch 2, goal 03](goals/second-batch/03-resolve-work-item.md) | `projectId, kind, ref`; use the known resource's `by_ref` lookup to return its internal ID plus available subject/version. The caller uses that ID with the matching detail tool before editing. |
+| `resolve_work_item` | Delivered subset | `projectId, kind, ref`; use the known resource's `by_ref` lookup to return its internal ID plus available subject/version. The caller uses that ID with the matching detail tool before editing. |
 | `get_work_item_filters` | New | `projectId, kind, filters?`; use `filters_data` to return available filter choices and counts where supplied by Taiga. |
 
 API basis: [Taiga REST API: projects, users, memberships, roles, and resource lookups](https://docs.taiga.io/api.html).
@@ -36,8 +43,8 @@ API basis: [Taiga REST API: projects, users, memberships, roles, and resource lo
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_issues` | Extend — delivered subset | `projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?`; supports status, type, severity, priority, assignee, tags, and text filters plus an opt-in page envelope. Date, owner, sprint, sort, and all-page export behavior remain planned. |
-| `get_issue` | Extend | `issueId, includeComments?`; retain existing issue/comment retrieval and expose full useful fields, including metadata IDs, tags, sprint, due date, blocking information, and version. |
+| `list_issues` | Extend — delivered subset | `projectId, page?, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?`; supports status, type, severity, priority, assignee, tags, and text filters plus an opt-in page envelope. Date, owner, sprint, sort, and all-page export behavior remain planned. |
+| `get_issue` | Extend — delivered subset | `issueId`; currently returns `{ issue, comments }` with core issue fields, classification/status IDs and labels, assignment, version, and visible nonempty comments. Optional `includeComments`, tags, sprint, due dates, and blocking detail remain planned. |
 | `create_issue` | Extend | `projectId, subject, fields?`; retain description, classification, assignment, and tags; add supported sprint, due-date, blocking, and watcher fields. |
 | `update_issue` | Extend — delivered subset | `issueId, version, subject?, description?, status?, type?, priority?, severity?, assigned_to?, tags?, comment?, clearFields?`; supports versioned partial edits, explicit assignee clearing, and description/tag clearing. Due dates, sprints, blocking fields, and project moves remain planned. |
 | `delete_issue` | New | `issueId`; delete the issue and report the result. |
@@ -55,17 +62,17 @@ API/source basis: [issue endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_epics` | New — delivered subset | `projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with verified status, assignee, tag, and text filters, including closed epics when requested. Related-story progress aggregation remains planned. |
-| `get_epic` | New — delivered subset | `epicId`; retrieve description, status, assignment, color, tags, version, and server-supplied summary fields. Related-story listing and computed progress remain planned. |
-| `create_epic` | New — delivered subset | `projectId, subject, description?, status?, assigned_to?, color?, tags?`; create one epic with optional fields sent only when supplied. Requirement flags and bulk creation remain planned; story linking is provided separately by `link_user_story_to_epic`. |
+| `list_epics` | Delivered subset | `projectId, page?, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with verified status, assignee, tag, and text filters, including closed epics when requested. Related-story progress aggregation remains planned. |
+| `get_epic` | Delivered subset | `epicId`; retrieve description, status, assignment, color, tags, version, and server-supplied summary fields. Related stories are listed separately by `list_epic_user_stories`; full story expansion and computed progress remain planned. |
+| `create_epic` | Delivered subset | `projectId, subject, description?, status?, assigned_to?, color?, tags?`; create one epic with optional fields sent only when supplied. Requirement flags and bulk creation remain planned; story linking is provided separately by `link_user_story_to_epic`. |
 | `update_epic` | Delivered subset | `epicId, version, subject?, description?, status?, assigned_to?, color?, tags?, comment?, clearFields?`; versioned content/status/assignment/color/tag/comment edits with explicit assignee clearing. Epic order, requirement flags, blocking, dates, custom fields, project moves, and linked-story changes remain planned. |
 | `delete_epic` | New | `epicId`; delete the epic grouping. Do not issue separate deletion requests for its related stories. |
 | `bulk_create_epics` | New | `projectId, subjects[], statusId?`; create several epics through the bulk endpoint and return their identities. |
-| `list_epic_user_stories` | Delivered subset — [batch 2, goal 09](goals/second-batch/09-list-epic-user-stories.md) | `epicId, page?`; list one page of linked story IDs and relationship order. Use `get_user_story` for selected details; project context, full story expansion, progress aggregation, and all-page fetching remain out of scope. |
+| `list_epic_user_stories` | Delivered subset | `epicId, page?`; list one page of linked story IDs and relationship order. Use `get_user_story` for selected details; project context, full story expansion, progress aggregation, and all-page fetching remain out of scope. |
 | `get_epic_user_story_link` | New | `epicId, userStoryId`; retrieve one epic/story relationship and its ordering data. |
-| `link_user_story_to_epic` | New — delivered subset | `epicId, userStoryId, order?`; associate an existing story with the epic, preserve Taiga's ability to relate stories from accessible projects, and make repeated calls idempotent without changing existing order. |
+| `link_user_story_to_epic` | Delivered subset | `epicId, userStoryId, order?`; associate an existing story with the epic, preserve Taiga's ability to relate stories from accessible projects, and make repeated calls idempotent without changing existing order. |
 | `update_epic_user_story_link` | New | `epicId, userStoryId, order`; change the story's order within the epic without changing its backlog position. |
-| `unlink_user_story_from_epic` | Delivered subset — [batch 2, goal 10](goals/second-batch/10-unlink-user-story-from-epic.md) | `epicId, userStoryId`; remove only the selected relationship after confirmed HTTP 204 while retaining the story, epic, and other links. A 404 is an error and ambiguous DELETE failures are not retried. |
+| `unlink_user_story_from_epic` | Delivered subset | `epicId, userStoryId`; remove only the selected relationship after confirmed HTTP 204 while retaining the story, epic, and other links. A 404 is an error and ambiguous DELETE failures are not retried. |
 | `bulk_create_epic_user_stories` | New | `epicId, projectId, subjects[]`; create new stories and associate them with the epic using the related-stories bulk endpoint. This endpoint is not a bulk linker for existing IDs. |
 | `get_epic_progress` | New; composite | `epicId`; aggregate related stories by status and available estimates, showing completed/total counts and cross-project breakdowns. Label calculated totals and incomplete pagination. |
 | `list_epic_statuses` | Delivered subset | `projectId, page?`; list one page of all project epic workflow statuses, including open and closed choices, with IDs, localized names, slug, order, color, and closure flags. Story-only archive and WIP fields are not exposed. |
@@ -77,7 +84,7 @@ API/source basis: [epic endpoints](https://github.com/taigaio/taiga-doc/blob/mai
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
 | `list_user_stories` | Extend — delivered subset | `projectId, page?, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?`; backlog/sprint, status, assignment, tags, and text filters are delivered. Ordering, swimlane, and epic filters remain planned. |
-| `get_user_story` | Delivered subset | `userStoryId`; retrieve core detail fields, authoritative version, assignment, tags, sprint, and available epic/source relationships. Comments, tasks, estimates, and swimlane data remain deferred. |
+| `get_user_story` | Delivered subset | `userStoryId`; retrieve core detail fields, authoritative version, assignment, tags, sprint, and available epic/source relationships. Comments are available separately through `list_work_item_comments`; bundled comments, tasks, estimates, and swimlane data remain deferred. |
 | `create_user_story` | Delivered subset | `projectId, subject, description?, status?, assigned_to?, tags?, milestoneId?`; creates one backlog or sprint story and returns authoritative detail. Acceptance criteria belong in `description`; estimates, multiple assignees, swimlanes, epic links, bulk creation, and custom fields remain planned. |
 | `update_user_story` | Delivered subset | `userStoryId, version, subject?, description?, status?, assigned_to?, tags?, milestoneId?, comment?, clearFields?`; updates content, status, primary assignment, tags, sprint placement/removal, and comments. Blocking, due dates, swimlanes, requirement flags, estimates, multiple assignees, and project moves remain planned. |
 | `delete_user_story` | New | `userStoryId`; delete the story and report Taiga's result, including any documented effects on child tasks for the deployed version. |
@@ -96,10 +103,10 @@ API/source basis: [story endpoints](https://github.com/taigaio/taiga-doc/blob/ma
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_tasks` | New — delivered subset | `projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with supported parent story, sprint, status, assignee, tag, and text filters, including closed tasks when requested. Date, sort, and arbitrary export filters remain planned; task detail is available through get_task. |
-| `get_task` | Delivered subset | `taskId`; retrieve description, status, assignee, parent story, sprint, tags, due date, blocking information, and version. Comments, attachments, and parent details remain deferred. |
+| `list_tasks` | Delivered subset | `projectId, page?, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?`; list one page with supported parent story, sprint, status, assignee, tag, and text filters, including closed tasks when requested. Date, sort, and arbitrary export filters remain planned; task detail is available through `get_task`. |
+| `get_task` | Delivered subset | `taskId`; retrieve description, status, assignee, parent story, sprint, tags, due date, blocking information, and version. Comments are available separately through `list_work_item_comments`; bundled comments, attachments, and parent details remain deferred. |
 | `create_task` | Delivered subset | `projectId, subject, userStoryId?, milestoneId?, description?, status?, assigned_to?, tags?`; create a story task or standalone task, validate an optional parent, and return authoritative detail. Story-linked tasks inherit their story's sprint. Bulk fields, due dates, blockers, iocaine, and cross-project creation remain planned. |
-| `update_task` | Delivered subset | `taskId, version, subject?, description?, status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?`; versioned task content/status/assignment/tag/blocking/comment edits with explicit clearing semantics. Due dates, reparenting, sprint moves, iocaine, and project changes remain planned. |
+| `update_task` | Delivered subset | `taskId, version, subject?, description?, status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?`; versioned task content/status/assignment/tag/blocking/comment edits with explicit clearing semantics. `isBlocked=false` explicitly unblocks; Taiga clears the blocking note when the saved task is unblocked. Due dates, reparenting, sprint moves, iocaine, and project changes remain planned. |
 | `delete_task` | New | `taskId`; delete the task and report the result. |
 | `bulk_create_tasks` | New | `projectId, milestoneId, subjects[], userStoryId?, statusId?`; use the native bulk endpoint, which currently requires a sprint. Tasks outside a sprint need individual creation if the deployed endpoint retains that restriction. |
 | `set_task_user_story` | New | `taskId, version, userStoryId or null`; attach, reparent, or detach a task, then return its resulting parent and sprint. |
@@ -112,7 +119,9 @@ API/source basis: [task endpoints](https://github.com/taigaio/taiga-doc/blob/mai
 
 ## Shared daily work commands
 
-These are proposed common commands across the four resource kinds. Fields that a kind does not support should return a clear validation error rather than being silently ignored.
+This section includes delivered comment/history commands and proposed common
+commands across the four resource kinds. Fields that a kind does not support
+should return a clear validation error rather than being silently ignored.
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
@@ -121,13 +130,13 @@ These are proposed common commands across the four resource kinds. Fields that a
 | `set_work_item_blocked` | New | `kind, id, version, blocked, reason?`; set/clear blocking information for supported kinds. A blocked flag is not a structured dependency relationship. |
 | `set_work_item_due_date` | New | `kind, id, version, date or null, reason?`; set or clear due-date fields for kinds that support them. |
 | `update_work_item_tags` | New; composite | `kind, id, version, add?, remove?`; read current tags and patch the merged set, retaining tag colors and unrelated tags. |
-| `list_work_item_comments` | Delivered subset — [batch 2, goal 11](goals/second-batch/11-list-work-item-comments.md) | `kind, id, page?`; return one upstream page of visible nonblank comments from history with opaque entry IDs, safe authors, timestamps, edit information, and upstream pagination metadata. Hidden/deleted comments, revisions, and later-page filling remain out of scope. Issue comments remain bundled into `get_issue` separately. |
+| `list_work_item_comments` | Delivered subset | `kind, id, page?`; return one upstream page of visible nonblank comments from history with opaque entry IDs, safe authors, timestamps, edit information, and upstream pagination metadata. Hidden/deleted comments, revisions, and later-page filling remain out of scope. Issue comments remain bundled into `get_issue` separately. |
 | `add_work_item_comment` | Delivered subset | `kind, id, version, text`; submit a comment through the item's update API, preserving supported Markdown and mentions. The closed kind set is `issue`, `user_story`, `task`, or `epic`; the receipt returns the authoritative version and `comment_submitted=true`, not a fabricated history-entry ID. Comment revisions/editing/deletion, attachments, and watcher management remain planned. |
 | `edit_work_item_comment` | New | `kind, id, historyEntryId, text`; edit the comment through the history API using its permissions and revision behavior. |
 | `delete_work_item_comment` | New | `kind, id, historyEntryId`; hide/delete a comment through Taiga's history action. |
 | `restore_work_item_comment` | New | `kind, id, historyEntryId`; restore a deleted comment through the undelete action when permitted. |
 | `get_work_item_comment_versions` | New | `kind, id, historyEntryId`; return a comment's prior revisions. |
-| `get_work_item_history` | Delivered subset — [batch 2, goal 12](goals/second-batch/12-get-work-item-history.md) | `kind, id, page?`; return visible field changes and comments with opaque IDs, numeric event types, authors/timestamps, structured diffs, and safe deleted-comment metadata. Hidden entries and deleted comment content are suppressed. |
+| `get_work_item_history` | Delivered subset | `kind, id, page?`; return one upstream page of visible field changes and comments with opaque IDs, numeric event types, authors/timestamps, structured diffs, and safe deleted-comment metadata. Hidden entries and deleted comment content are suppressed. |
 | `watch_work_item` | New | `kind, id`; subscribe the current user to the item. |
 | `unwatch_work_item` | New | `kind, id`; unsubscribe the current user. |
 | `list_work_item_watchers` | New | `kind, id, page?`; return subscribers. |
@@ -158,7 +167,7 @@ API basis: the resource attachment inventories above and [custom attribute value
 
 | Command | Coverage | Basic inputs and behavior |
 | --- | --- | --- |
-| `list_sprints` | Delivered subset — [batch 2, goal 07](goals/second-batch/07-list-sprints.md) | `projectId, page?, closed?`; list one page of Taiga milestones with `id`, project, name, slug, ISO date-only start/finish values, and closure state. Use the returned `id` as `milestoneId`; nested stories, point aggregates, statistics, and date filters remain out of scope. |
+| `list_sprints` | Delivered subset | `projectId, page?, closed?`; list one page of Taiga milestones; omitted/null `closed` includes all, false selects open, and true selects closed. Return `id`, project, name, slug, ISO date-only start/finish values, and closure state. Use the returned `id` as `milestoneId`; nested stories, point aggregates, statistics, and date filters remain out of scope. |
 | `get_sprint` | New | `milestoneId`; return sprint details and available work-item summary information. |
 | `create_sprint` | New | `projectId, name, startDate, endDate`; create a milestone for planned work. |
 | `update_sprint` | New | `milestoneId, fields`; edit name, dates, and supported closure fields. |

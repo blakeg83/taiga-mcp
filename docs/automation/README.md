@@ -23,6 +23,72 @@ The harness uses synthetic state and Taiga/provider observations plus a local
 bare Git remote. It does not contact live Taiga or GitHub. Actual host and
 provider smoke evidence remains separate from fixture success.
 
+Story child-task status handling is defined in
+`.agents/skills/taiga-ticket-loop/references/child-task-status-contract.md`.
+`workflow-taiga.ps1 -Operation capture-context` captures complete task pages,
+including closed tasks, and emits immutable task bindings. The binding includes
+the selected task set, source aliases, baseline status/version, exact criteria,
+project/story identity, and a recomputed digest. The
+`resolve-status-mapping` operation validates project/resource-specific status
+metadata and uses `in_progress` as the review fallback only when no review
+status is configured; the mapping retains the captured metadata and recomputed
+metadata/mapping digests. Workers emit append-only progress through
+`workflow-progress.ps1`; the checkpoint records the immutable packet binding,
+task IDs, run/action identity, sequences, revisions, criterion evidence, and
+idempotent event IDs. Existing event identities remain stable across checkpoint
+upgrades, and retrying a captured event remains idempotent. A packet may carry
+`trustedRevisions`; when present, progress outside
+that assignment is rejected. The first event uses the packet action and
+corrections form a non-reusable continuation chain; later milestones may remain
+within the active correction action. Progress is
+evidence of a milestone, not reviewer acceptance or a Done transition.
+The coordinator consumes that stream with
+`workflow-coordinate.ps1 -Operation relay-task-progress` on a bounded
+observation. It advances a persisted per-consumer cursor only into durable
+pending work, requires explicit outcome acknowledgement after reconciliation,
+and leaves `ready_for_review` in the mapped review state (or the documented
+in-progress fallback) until an independent reviewer accepts it. Pending work
+is retained across restart and failed writes.
+`workflow-taiga.ps1` provides `prepare-task-write`,
+`apply-reviewed-task-transition`, `reconcile-task-write`, and
+`reconcile-task-scope` for coordinator-owned, version-bound journals. Review
+receipts can include one `taskAcceptances` entry per claimed completed task;
+every write must carry the exact packet selected-task set, required criteria,
+and revision-bound progress receipt. Accepted/Done is rejected without a
+matching reviewer identity, packet/action binding, accepted task ID, criterion
+evidence, and reviewed SHA. Status writes reject fabricated mappings by
+recomputing provenance from the captured status metadata.
+`finalize` does not accept those labels as evidence. For a nonempty story scope,
+it requires `stateRoot`, `progressRoot`, `reviewActionId`, `expectedCriteria`,
+the validated task `statusMapping`, and one `{ taskId, eventId,
+taskWriteActionId }` reference per selected task. It resolves the reviewer
+action and its hash-checked receipt from the registry, validates the receipt's
+per-task acceptances at the final SHA, resolves each persisted coordinator task
+write, and derives the returned final evidence from the records. Unknown action
+or event IDs, tampered receipts, pending/uncertain writes, and stale or
+cross-task references fail closed.
+
+## Story operator guidance
+
+Configure mappings per project and resource from discovered Taiga status
+metadata, for example `not_started`, `in_progress`, `awaiting_review`,
+`accepted`, and optional `blocked` task status IDs. If a task resource has no
+review status, `awaiting_review` deliberately falls back to `in_progress` and
+the task remains not-Done until reviewer acceptance. Workers report
+`started`, `blocked`, and `ready_for_review`; the coordinator is the only
+writer of task status.
+
+Operators should read child tasks for milestone and review detail while the
+parent story remains the single branch/chat/PR and keeps its existing merge
+completion policy. A blocked or rejected child reopens only that child after
+new revision-bound evidence; unrelated tasks and human edits are preserved.
+New, removed, or reparented children require scope reconciliation before any
+status write. Parent completion requires revision-bound accepted evidence for
+every selected child; a started or ready-for-review milestone is insufficient.
+The lifecycle verifier covers restart midway through synchronization and refuses
+parent completion when selected-task acceptance evidence is missing. No real-host
+trial is implied by offline fixture success.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the

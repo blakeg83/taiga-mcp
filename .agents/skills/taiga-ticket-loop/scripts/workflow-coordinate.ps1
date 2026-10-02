@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','status')]
+    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','status','relay-task-progress','ack-task-progress')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath,
@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:StateScript = Join-Path $PSScriptRoot 'workflow-state.ps1'
+$script:ProgressScript = Join-Path $PSScriptRoot 'workflow-progress.ps1'
 
 function Read-Object {
     if (-not (Test-Path -LiteralPath $InputPath -PathType Leaf)) { throw 'Input file was not found.' }
@@ -23,6 +24,61 @@ function Need {
     param([System.Collections.IDictionary] $Object, [string] $Name)
     if (-not $Object.Contains($Name) -or $null -eq $Object[$Name] -or [string]::IsNullOrWhiteSpace([string]$Object[$Name])) { throw "$Name is required." }
     return [string]$Object[$Name]
+}
+
+function Canonical {
+    param([object] $Value)
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in @($Value.Keys | ForEach-Object { [string]$_ } | Sort-Object)) { $result[$key] = Canonical $Value[$key] }
+        return ,$result
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) { $items = [System.Collections.Generic.List[object]]::new(); foreach ($item in $Value) { [void]$items.Add((Canonical $item)) }; return ,$items.ToArray() }
+    return $Value
+}
+
+function Hash-Object {
+    param([object] $Value)
+    $json = ConvertTo-Json -InputObject (Canonical $Value) -Depth 100 -Compress
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([Convert]::ToHexString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json)))).ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+function Get-ValidatedPacketBinding {
+    param([System.Collections.IDictionary] $InputObject)
+    if (-not $InputObject.Contains('packetBinding') -or $InputObject.packetBinding -isnot [System.Collections.IDictionary]) { throw 'Relay requires a validated packetBinding.' }
+    $packet = $InputObject.packetBinding
+    foreach ($name in @('runId','actionId','packetHash','scopeHash','projectId','parentStoryId','selectedTaskIds','criteriaByTask','tasksById','bindingDigest')) { if (-not $packet.Contains($name)) { throw "packetBinding.$name is required." } }
+    $trustedRevisions = $null
+    if ($packet.Contains('trustedRevisions')) {
+        if ($packet.trustedRevisions -is [string] -or $packet.trustedRevisions -isnot [System.Collections.IEnumerable]) { throw 'packetBinding.trustedRevisions must be an array.' }
+        $seenRevisions = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase); $trustedRevisions = [System.Collections.Generic.List[string]]::new()
+        foreach ($value in $packet.trustedRevisions) { $revision = [string]$value; if ($revision -notmatch '^[0-9a-fA-F]{7,64}$' -or -not $seenRevisions.Add($revision.ToLowerInvariant())) { throw 'packetBinding.trustedRevisions must contain unique Git revisions.' }; [void]$trustedRevisions.Add($revision.ToLowerInvariant()) }
+        if ($trustedRevisions.Count -eq 0) { throw 'packetBinding.trustedRevisions cannot be empty when supplied.' }
+    }
+    $selected = @($packet.selectedTaskIds | ForEach-Object { [long]$_ }); if ($selected.Count -eq 0 -or @($selected | Select-Object -Unique).Count -ne $selected.Count) { throw 'packetBinding.selectedTaskIds must be nonempty and unique.' }
+    if ($packet.criteriaByTask -isnot [System.Collections.IDictionary] -or $packet.tasksById -isnot [System.Collections.IDictionary]) { throw 'packetBinding criteria and task bindings must be objects.' }
+    foreach ($taskId in $selected) { $key = [string]$taskId; if (-not $packet.criteriaByTask.Contains($key) -or -not $packet.tasksById.Contains($key)) { throw "packetBinding is missing selected task $taskId." }; $criteria = @($packet.criteriaByTask[$key] | ForEach-Object { [string]$_ }); $task = $packet.tasksById[$key]; if ($task -isnot [System.Collections.IDictionary] -or [long]$task.taskId -ne $taskId -or ($criteria -join '|') -cne (@($task.criteria | ForEach-Object { [string]$_ }) -join '|')) { throw "packetBinding task $taskId is inconsistent." } }
+    $normalized = [ordered]@{ runId = [string]$packet.runId; actionId = [string]$packet.actionId; packetHash = ([string]$packet.packetHash).ToLowerInvariant(); scopeHash = ([string]$packet.scopeHash).ToLowerInvariant(); projectId = [long]$packet.projectId; parentStoryId = [long]$packet.parentStoryId; selectedTaskIds = @($selected); criteriaByTask = $packet.criteriaByTask; tasksById = $packet.tasksById }
+    if ($null -ne $trustedRevisions) { $normalized.trustedRevisions = @($trustedRevisions) }
+    $expected = Hash-Object $normalized
+    if ([string]$packet.bindingDigest -cne $expected) { throw 'packetBinding.bindingDigest does not match its immutable contents.' }
+    $normalized.bindingDigest = $expected
+    return $normalized
+}
+
+function Assert-StatusMappingProvenance {
+    param([System.Collections.IDictionary] $Mapping, [long] $ProjectId)
+    foreach ($name in @('projectId','resource','metadataProjectId','metadataResource','metadataIds','statusMetadata','metadataDigest','mappingDigest','not_started','in_progress','awaiting_review','accepted','validated')) { if (-not $Mapping.Contains($name)) { throw "statusMapping.$name is required." } }
+    if ($Mapping.validated -ne $true -or [string]$Mapping.resource -cne 'task' -or [string]$Mapping.metadataResource -cne 'task' -or [long]$Mapping.projectId -ne $ProjectId -or [long]$Mapping.metadataProjectId -ne $ProjectId) { throw 'statusMapping is not bound to the task project/resource.' }
+    $metadata = @($Mapping.statusMetadata); $ids = [System.Collections.Generic.HashSet[long]]::new()
+    foreach ($status in $metadata) { if ($status -isnot [System.Collections.IDictionary]) { throw 'statusMapping.statusMetadata must contain objects.' }; $id = if ($status.Contains('id')) { [long]$status.id } elseif ($status.Contains('statusId')) { [long]$status.statusId } else { 0L }; if ($id -lt 1 -or -not $ids.Add($id)) { throw 'statusMapping.statusMetadata must contain unique positive IDs.' }; $project = if ($status.Contains('project')) { $status.project } elseif ($status.Contains('projectId')) { $status.projectId } elseif ($status.Contains('project_id')) { $status.project_id } else { 0L }; if ($project -is [System.Collections.IDictionary]) { $project = if ($project.Contains('id')) { $project.id } else { $project.pk } }; if ([long]$project -ne $ProjectId -or -not $status.Contains('resource') -or [string]$status.resource -cne 'task') { throw "statusMapping metadata $id is not bound to the task project/resource." } }
+    $metadataIds = @($ids | Sort-Object); if (($metadataIds -join ',') -cne (@($Mapping.metadataIds | ForEach-Object { [long]$_ } | Sort-Object) -join ',') -or [string]$Mapping.metadataDigest -cne (Hash-Object $metadata)) { throw 'statusMapping metadata provenance does not match the captured metadata.' }
+    $mapped = [ordered]@{ not_started = [long]$Mapping.not_started; in_progress = [long]$Mapping.in_progress; awaiting_review = [long]$Mapping.awaiting_review; accepted = [long]$Mapping.accepted; blocked = if ($null -eq $Mapping.blocked) { $null } else { [long]$Mapping.blocked }; reviewFallback = ($Mapping.reviewFallback -eq $true) }
+    $mappedIds = @($mapped.not_started,$mapped.in_progress,$mapped.awaiting_review,$mapped.accepted,$mapped.blocked | Where-Object { $null -ne $_ })
+    foreach ($id in $mappedIds) { if (-not $ids.Contains([long]$id)) { throw "statusMapping contains an undiscovered status ID: $id." } }
+    $duplicates = @($mappedIds | Group-Object | Where-Object Count -gt 1); $fallback = $Mapping.reviewFallback -eq $true -and $duplicates.Count -eq 1 -and [long]$Mapping.awaiting_review -eq [long]$Mapping.in_progress; if ($duplicates.Count -gt 0 -and -not $fallback) { throw 'statusMapping contains an unauthorized duplicate status ID.' }
+    $expectedDigest = Hash-Object [ordered]@{ projectId = $ProjectId; resource = 'task'; statusMetadata = $metadata; mapping = $mapped }; if ([string]$Mapping.mappingDigest -cne $expectedDigest) { throw 'statusMapping.mappingDigest does not match the captured metadata and mapping.' }
 }
 
 function Get-FileSha256 {
@@ -228,6 +284,18 @@ function Invoke-AcceptResult {
         $review = Invoke-ReviewDecision $InputObject $owner $result $resultPacket $action
         $reviewRan = $true
         $decision = [string]$review.decision
+        if ($result.Contains('taskAcceptances')) {
+            $rejectedTasks = @($result.taskAcceptances | Where-Object { $_ -is [System.Collections.IDictionary] -and $_.accepted -ne $true })
+            if ($rejectedTasks.Count -gt 0 -and $decision -ne 'correct') { throw 'Rejected child-task decisions require the bounded correction route.' }
+            foreach ($rejected in $rejectedTasks) {
+                if (-not $rejected.Contains('routedActionId') -or [string]::IsNullOrWhiteSpace([string]$rejected.routedActionId)) { throw "Rejected child task $($rejected.taskId) requires a same-worker routed correction action." }
+                $routeAction = $inspection.data.registry.actions[[string]$rejected.routedActionId]
+                if ($null -eq $routeAction -or [string]$routeAction.ticketKey -cne [string]$owner.ticketKey -or [string]$routeAction.sessionId -cne [string]$owner.sessionId -or [string]$routeAction.target.workerId -eq [string]$result.workerId -or [string]$routeAction.target.workerId -eq '') { throw "Correction route for child task $($rejected.taskId) is not bound to the same implementer." }
+                if ([string]$routeAction.kind -notin @('worker_dispatch','implementation_check')) { throw "Correction route for child task $($rejected.taskId) is not an implementation action." }
+                $sameImplementer = @($inspection.data.registry.actions.Values | Where-Object { $_.ticketKey -ceq $owner.ticketKey -and [string]$_.target.workerId -ceq [string]$routeAction.target.workerId -and [string]$_.target.workerId -ne [string]$result.workerId -and [string]$_.kind -in @('worker_dispatch','implementation_check') })
+                if ($sameImplementer.Count -eq 0) { throw "Correction route for child task $($rejected.taskId) does not identify the previously assigned implementer." }
+            }
+        }
     }
     else { $decision = 'review' }
     if ($result.Contains('decision') -and [string]$result.decision -eq 'publish' -and $decision -ne 'publish') { throw 'Worker result cannot authorize publication without a validated review decision.' }
@@ -254,6 +322,12 @@ function Invoke-AcceptResult {
         $stateResultPayload.evidenceStateRoot = if ($result.Contains('evidenceStateRoot')) { [string]$result.evidenceStateRoot } else { $null }
         if ($result.Contains('reviewCheckActionIds')) { $stateResultPayload.reviewCheckActionIds = @($result.reviewCheckActionIds | ForEach-Object { [string]$_ }) }
         if ($review.Contains('currentCoverage')) { $stateResultPayload.currentCoverage = $review.currentCoverage }
+    }
+    if ($result.Contains('taskAcceptances')) {
+        $stateResultPayload.taskAcceptances = @($result.taskAcceptances | ForEach-Object {
+            if ($_ -isnot [System.Collections.IDictionary] -or -not $_.Contains('taskId') -or -not $_.Contains('accepted') -or -not $_.Contains('reviewedSha') -or -not $_.Contains('criterionIds') -or -not $_.Contains('evidence')) { throw 'Worker taskAcceptances must contain taskId, accepted, reviewedSha, criterionIds, and evidence.' }
+            [ordered]@{ taskId = [long]$_.taskId; accepted = [bool]$_.accepted; reviewedSha = [string]$_.reviewedSha; criterionIds = @($_.criterionIds); evidence = [string]$_.evidence; rejectionReason = if ($_.Contains('rejectionReason')) { [string]$_.rejectionReason } else { $null }; routedActionId = if ($_.Contains('routedActionId')) { [string]$_.routedActionId } else { $null } }
+        })
     }
     $stateResult = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = $revision; ticketKey = $owner.ticketKey; cursor = [string]$result.cursor; actionId = [string]$result.actionId; workerId = [string]$result.workerId; decision = $decision; toPhase = $phase; reason = $reason; routeValidated = $routeValidated; result = $stateResultPayload }
     $accepted = Invoke-State 'accept-result' $stateResult
@@ -424,6 +498,43 @@ function Invoke-HeartbeatPlan {
     return [ordered]@{ phase = [string]$session.state; decision = if ([string]::IsNullOrWhiteSpace($existing)) { 'create_heartbeat' } else { 'reuse_heartbeat' }; reason = if ([string]::IsNullOrWhiteSpace($existing)) { 'one_session_heartbeat' } else { 'existing_session_heartbeat' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'automation_update'; heartbeat = [ordered]@{ heartbeatId = if ([string]::IsNullOrWhiteSpace($existing)) { $null } else { $existing }; notificationPolicy = $requestedPolicy; nestedSchedules = $false; quietWhenUnchanged = $true } }
 }
 
+function Invoke-RelayTaskProgress {
+    param([System.Collections.IDictionary] $InputObject)
+    $progressRoot = [IO.Path]::GetFullPath((Need $InputObject 'progressRoot')); if (-not (Test-Path -LiteralPath $progressRoot -PathType Container)) { throw 'progressRoot is inaccessible.' }
+    $consumerId = Need $InputObject 'consumerId'; if ($InputObject.Contains('cursor') -and [long]$InputObject.cursor -lt 0) { throw 'cursor must be nonnegative.' }
+    if (-not $InputObject.Contains('statusMapping') -or $InputObject.statusMapping -isnot [System.Collections.IDictionary] -or $InputObject.statusMapping.validated -ne $true) { throw 'relay requires a validated task statusMapping.' }
+    $packet = Get-ValidatedPacketBinding $InputObject; $mapping = $InputObject.statusMapping; Assert-StatusMappingProvenance $mapping ([long]$packet.projectId)
+    $request = [ordered]@{ consumerId = $consumerId; advance = if ($InputObject.Contains('advance')) { [bool]$InputObject.advance } else { $true } }
+    if ($InputObject.Contains('cursor')) { $request.cursor = [long]$InputObject.cursor }
+    if ($InputObject.Contains('runId')) { $request.runId = [string]$InputObject.runId }
+    $request.packetBinding = $packet
+    $inputPath = Join-Path ([IO.Path]::GetFullPath($StateRoot)) ('.progress-relay-' + [Guid]::NewGuid().ToString('N') + '.json')
+    try {
+        [IO.File]::WriteAllText($inputPath, ($request | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+        $lines = & pwsh -NoProfile -File $script:ProgressScript -Operation consume -InputPath $inputPath -StateRoot $progressRoot 2>&1
+        $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine
+        try { $progress = ConvertFrom-Json -InputObject $raw -AsHashtable -Depth 100 } catch { throw "Progress helper returned invalid JSON: $raw" }
+        if ($exitCode -ne 0 -or $progress.ok -ne $true) { throw [string]$progress.error.message }
+    } finally { if (Test-Path -LiteralPath $inputPath -PathType Leaf) { Remove-Item -LiteralPath $inputPath -Force } }
+    $mapping = $InputObject.statusMapping
+    $proposals = @($progress.data.transitions | ForEach-Object {
+        $logical = [string]$_.logicalState
+        if ($logical -eq 'accepted') { throw 'Worker progress cannot accept a task; explicit reviewer acceptance is required.' }
+        $event = if ($_.Contains('event') -and $_.event -is [System.Collections.IDictionary]) { $_.event } else { throw "Progress transition $($_.eventId) did not carry its complete event." }
+        [ordered]@{ eventId = [string]$_.eventId; actionId = [string]$_.actionId; sequence = [long]$_.sequence; ticketKey = [string]$_.ticketKey; projectId = [long]$_.projectId; parentStoryId = [long]$_.parentStoryId; taskId = [long]$_.taskId; packetHash = [string]$_.packetHash; scopeHash = [string]$_.scopeHash; bindingDigest = [string]$_.bindingDigest; eventType = [string]$_.eventType; logicalState = $logical; statusId = if ($mapping -is [System.Collections.IDictionary] -and $mapping.Contains($logical)) { [long]$mapping[$logical] } else { $null }; currentSha = [string]$_.currentSha; criterionIds = @($_.criterionIds); evidence = $_.evidence; progressBinding = $event }
+    })
+    return [ordered]@{ phase = $null; decision = if ($progress.data.unchanged) { 'continue_wait' } else { 'relay_task_status_observations' }; reason = if ($progress.data.unchanged) { 'no_new_task_progress' } else { if (@($progress.data.pending).Count -gt 0) { 'pending_task_actions_require_reconciliation' } else { 'new_task_progress' } }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = if ($progress.data.stateMutation) { @('progress.cursor','task.evidence.pending') } else { @() }; revision = $null; stateMutation = [bool]$progress.data.stateMutation; nativeOperation = 'bounded_progress_observation'; consumerId = $consumerId; cursor = [long]$progress.data.cursor; packetBinding = $packet; statusMappingDigest = [string]$mapping.mappingDigest; events = @($progress.data.events); pending = @($progress.data.pending); taskTransitions = $proposals; taigaWrites = @($progress.data.taigaWrites) }
+}
+
+function Invoke-AcknowledgeTaskProgress {
+    param([System.Collections.IDictionary] $InputObject)
+    $progressRoot = [IO.Path]::GetFullPath((Need $InputObject 'progressRoot')); if (-not (Test-Path -LiteralPath $progressRoot -PathType Container)) { throw 'progressRoot is inaccessible.' }
+    $request = [ordered]@{ consumerId = Need $InputObject 'consumerId'; outcomes = @($InputObject.outcomes) }
+    $inputPath = Join-Path ([IO.Path]::GetFullPath($StateRoot)) ('.progress-ack-' + [Guid]::NewGuid().ToString('N') + '.json')
+    try { [IO.File]::WriteAllText($inputPath, ($request | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false)); $lines = & pwsh -NoProfile -File $script:ProgressScript -Operation acknowledge -InputPath $inputPath -StateRoot $progressRoot 2>&1; $exitCode = $LASTEXITCODE; $raw = $lines -join [Environment]::NewLine; try { $response = ConvertFrom-Json -InputObject $raw -AsHashtable -Depth 100 } catch { throw "Progress helper returned invalid JSON: $raw" }; if ($exitCode -ne 0 -or $response.ok -ne $true) { throw [string]$response.error.message } } finally { if (Test-Path -LiteralPath $inputPath -PathType Leaf) { Remove-Item -LiteralPath $inputPath -Force } }
+    return [ordered]@{ phase = $null; decision = if (@($response.data.pending).Count -eq 0) { 'task_progress_acknowledged' } else { 'task_progress_partially_acknowledged' }; reason = 'durable_task_outcomes_recorded'; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @('progress.pending','progress.taskStates'); revision = $null; stateMutation = $true; consumerId = [string]$response.data.consumerId; cursor = [long]$response.data.cursor; acknowledged = @($response.data.acknowledged); pending = @($response.data.pending) }
+}
+
 try {
     $inputObject = Read-Object
     if ([string]::IsNullOrWhiteSpace($StateRoot)) { throw 'StateRoot is required.' }
@@ -436,6 +547,8 @@ try {
         'observe-wait' { Invoke-ObserveWait $inputObject }
         'heartbeat-plan' { Invoke-HeartbeatPlan $inputObject }
         'status' { Invoke-Status $inputObject }
+        'relay-task-progress' { Invoke-RelayTaskProgress $inputObject }
+        'ack-task-progress' { Invoke-AcknowledgeTaskProgress $inputObject }
     }
     [ordered]@{ ok = $true; operation = $Operation; data = $data } | ConvertTo-Json -Depth 100
     exit 0
