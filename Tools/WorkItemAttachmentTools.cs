@@ -40,6 +40,18 @@ public sealed class WorkItemAttachmentTools
         return ToolResponseJson.Serialize(result);
     });
 
+    [McpServerTool(Name = "delete_work_item_attachment")]
+    [Description("Delete one explicitly selected epic, user story, or task attachment with one kind-specific DELETE request. Only a confirmed HTTP 204 returns { kind, attachment_id, deleted: true }; repeated deletion/not-found is an error, ambiguous writes are never retried, and issue attachments, parent work items, sibling attachments, relationships, and local files are not affected by this tool.")]
+    public async Task<string> DeleteWorkItemAttachment(
+        [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
+        [Description("Positive internal attachment ID selected by the caller, not a work-item or displayed #ref ID.")] int attachmentId,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _attachments.DeleteAsync(kind, attachmentId, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
     [McpServerTool(Name = "download_work_item_attachment")]
     [Description("Download one epic, user story, or task attachment to an explicit absolute local destination. The server retrieves authoritative metadata first, applies the configured attachment size limit, never overwrites an existing file, keeps bearer authentication on the configured Taiga origin, and does not include binary data or secrets in the receipt.")]
     public async Task<string> DownloadWorkItemAttachment(

@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(40, tools.Count);
+            Assert.Equal(41, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -804,6 +804,7 @@ public sealed class McpIntegrationTests
                 "create_issue",
                 "create_task",
                 "create_user_story",
+                "delete_work_item_attachment",
                 "download_work_item_attachment",
                 "get_current_user",
                 "get_epic",
@@ -853,6 +854,18 @@ public sealed class McpIntegrationTests
             Assert.Equal(new[] { "kind", "attachmentId", "fields" }, updateAttachmentRequired);
             Assert.Contains("PATCH", updateWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("cancellationToken", updateAttachmentProperties);
+
+            var deleteWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "delete_work_item_attachment");
+            var deleteProperties = deleteWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId" }, deleteProperties);
+            var deleteRequired = deleteWorkItemAttachment.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId" }, deleteRequired);
+            Assert.Contains("204", deleteWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cancellationToken", deleteProperties);
 
             var listWorkItemAttachments = Assert.Single(tools, tool => tool.Name == "list_work_item_attachments");
             var attachmentProperties = listWorkItemAttachments.JsonSchema.GetProperty("properties").EnumerateObject()
@@ -930,6 +943,61 @@ public sealed class McpIntegrationTests
             Assert.False(updatePayload.GetProperty("is_deprecated").GetBoolean());
             Assert.False(updatePayload.TryGetProperty("version", out _));
             Assert.False(updatePayload.TryGetProperty("attached_file", out _));
+
+            var deletionRoutes = new[]
+            {
+                (Kind: "epic", Path: "/api/v1/epics/attachments/901"),
+                (Kind: "user_story", Path: "/api/v1/userstories/attachments/901"),
+                (Kind: "task", Path: "/api/v1/tasks/attachments/901")
+            };
+            foreach (var (kind, path) in deletionRoutes)
+            {
+                var deletedAttachment = await Call("delete_work_item_attachment", new()
+                {
+                    ["kind"] = kind,
+                    ["attachmentId"] = 901
+                });
+                Assert.False(deletedAttachment.IsError == true, GetText(deletedAttachment));
+                var deletedAttachmentJson = JsonSerializer.Deserialize<JsonElement>(GetText(deletedAttachment));
+                Assert.Equal(kind, deletedAttachmentJson.GetProperty("kind").GetString());
+                Assert.Equal(901, deletedAttachmentJson.GetProperty("attachment_id").GetInt32());
+                Assert.True(deletedAttachmentJson.GetProperty("deleted").GetBoolean());
+                var deleteRequest = Assert.Single(taiga.Requests, request =>
+                    request.Method == "DELETE" && request.PathAndQuery == path);
+                Assert.Equal("Bearer integration-token", deleteRequest.Authorization);
+                Assert.Empty(deleteRequest.Body);
+            }
+
+            var deletionFailures = new[]
+            {
+                (Status: HttpStatusCode.NotFound, Expected: "404", Category: "resource not found"),
+                (Status: HttpStatusCode.Forbidden, Expected: "403", Category: "permission denied"),
+                (Status: HttpStatusCode.OK, Expected: "unexpected HTTP 200", Category: "may already have applied")
+            };
+            foreach (var (status, expected, category) in deletionFailures)
+            {
+                taiga.AttachmentDeleteStatusCode = status;
+                var beforeFailure = taiga.Requests.Count(request =>
+                    request.Method == "DELETE" && request.PathAndQuery == "/api/v1/tasks/attachments/901");
+                var failedDeletion = await Call("delete_work_item_attachment", new()
+                {
+                    ["kind"] = "task",
+                    ["attachmentId"] = 901
+                });
+
+                Assert.True(failedDeletion.IsError);
+                var errorText = GetText(failedDeletion);
+                Assert.Contains(expected, errorText);
+                Assert.Contains(category, errorText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("synthetic attachment deletion secret", errorText);
+                Assert.Equal(beforeFailure + 1, taiga.Requests.Count(request =>
+                    request.Method == "DELETE" && request.PathAndQuery == "/api/v1/tasks/attachments/901"));
+            }
+            taiga.AttachmentDeleteStatusCode = HttpStatusCode.NoContent;
+
+            Assert.DoesNotContain(taiga.Requests, request =>
+                request.Method == "DELETE" &&
+                request.PathAndQuery is "/api/v1/tasks/204" or "/api/v1/userstories/102" or "/api/v1/epics/301");
 
             var getWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "get_work_item_attachment");
             var getAttachmentProperties = getWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()

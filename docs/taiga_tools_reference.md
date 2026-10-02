@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 40 tools:
+The current server exposes 41 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,10 +22,11 @@ The current server exposes 40 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 9 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+- 10 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
   `get_work_item_history`, `resolve_work_item`, `list_work_item_attachments`,
   `get_work_item_attachment`, `upload_work_item_attachment`, and
-  `download_work_item_attachment`, and `update_work_item_attachment`.
+  `download_work_item_attachment`, `update_work_item_attachment`, and
+  `delete_work_item_attachment`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -302,6 +303,36 @@ and [task endpoints](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/en
 their edit-attachment documentation, and pinned taiga-back attachment
 view/validator/serializer/model sources. This is pinned source evidence, not a
 deployed-version claim.
+
+### `delete_work_item_attachment` contract
+
+The signature is `delete_work_item_attachment(kind, attachmentId)`. The
+supported kinds are exactly `epic`, `user_story`, and `task`; `attachmentId`
+is the positive internal attachment ID selected by the caller. The client
+sends exactly one authenticated `DELETE` to the selected route:
+
+| kind | upstream route |
+| --- | --- |
+| `epic` | `/api/v1/epics/attachments/{attachmentId}` |
+| `user_story` | `/api/v1/userstories/attachments/{attachmentId}` |
+| `task` | `/api/v1/tasks/attachments/{attachmentId}` |
+
+Only a confirmed HTTP 204 response returns the receipt
+`{"kind":"task","attachment_id":901,"deleted":true}`. The shared transport
+checks the status only and does not parse or require a response body; any body
+on a 204 is ignored. A 404, including a repeated delete, is a safe error and
+is not treated as idempotent success.
+Unexpected successful statuses, permission failures, transport failures, and
+cancellation remain safe errors; ambiguous DELETE failures are never retried,
+while the shared one-401 authentication replay remains allowed. The tool does
+not fetch the parent, list or mutate siblings, change epic relationships, or
+delete a local downloaded file. Issue attachments remain outside scope.
+
+This contract is recorded in
+[attachment_delete_contract.md](attachment_delete_contract.md) and was checked
+on 2026-10-02 against the official epic, user-story, and task endpoint
+inventories plus the pinned attachment view, permission, model, and destroy
+sources. This is pinned source evidence, not a deployed-version claim.
 
 ### `list_work_item_comments` contract
 
@@ -738,6 +769,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `add_work_item_comment` | `kind`, `id`, `version`, and `text` required; `kind` is one of `issue`, `user_story`, `task`, or `epic`; `id` is positive; `version` is nonnegative; `text` is nonblank | `{ "kind": "task", "id": 203, "version": 3, "comment_submitted": true }` after one confirmed comment-only PATCH. |
 | `download_work_item_attachment` | `kind`, `attachmentId`, and `destination` required; `kind` is one of `epic`, `user_story`, or `task` | `{ destination, bytes, attachment }`; streams bounded binary bytes to a new explicit absolute destination after metadata inspection, with origin-scoped authentication, manual redirects, atomic placement, and cleanup on failure. |
 | `update_work_item_attachment` | `kind`, `attachmentId`, and `fields` required; `fields` is a nonempty object containing only `description`, `order`, and/or `is_deprecated` | One authoritative attachment object after one JSON PATCH; omitted fields stay unchanged, empty/zero/false values are preserved, no attachment version is sent, and only a received 401 is replayed. |
+| `delete_work_item_attachment` | `kind` and `attachmentId` required; `kind` is one of `epic`, `user_story`, or `task` | `{ kind, attachment_id, deleted: true }` only after one confirmed HTTP 204 DELETE; 404/repeated deletion is an error and ambiguous writes are not retried. |
 | `list_issue_statuses` | `projectId` integer, required | Array of `{ id, name, slug, is_closed }`. |
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
