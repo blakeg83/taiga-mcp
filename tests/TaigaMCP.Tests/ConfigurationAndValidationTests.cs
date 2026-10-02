@@ -43,6 +43,30 @@ public sealed class ConfigurationTests
     }
 
     [Fact]
+    public void Options_DefaultAttachmentLimit_IsTenMiB()
+    {
+        using var provider = Build("http://localhost/api");
+        Assert.Equal(10 * 1024 * 1024, provider.GetRequiredService<IOptions<TaigaOptions>>().Value.MaxAttachmentBytes);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Options_InvalidAttachmentLimit_Rejects(long maxAttachmentBytes)
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Taiga:BaseUrl"] = "http://localhost/api",
+            ["Taiga:Username"] = "synthetic",
+            ["Taiga:Password"] = "synthetic",
+            ["Taiga:MaxAttachmentBytes"] = maxAttachmentBytes.ToString()
+        }).Build();
+
+        using var provider = new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<TaigaOptions>>().Value);
+    }
+
+    [Fact]
     public void Host_DocumentedEnvironmentKeysAndCommandLinePrecedence_WorkWithoutExtraProvider()
     {
         var values = new Dictionary<string, string>
@@ -82,6 +106,44 @@ public sealed class ConfigurationTests
             ["Taiga:MetadataTtlSeconds"] = ttl.ToString()
         }).Build();
         return new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();
+    }
+}
+
+public sealed class AttachmentFileContractTests
+{
+    [Fact]
+    public void Validate_RequiresAbsoluteExistingFileAndPreservesBoundarySize()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"taiga-attachment-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(path, "12345");
+        try
+        {
+            var options = Microsoft.Extensions.Options.Options.Create(new TaigaOptions { MaxAttachmentBytes = 5 });
+            var source = AttachmentFileContract.Validate(path, options);
+
+            Assert.Equal(Path.GetFullPath(path), source.FullPath);
+            Assert.Equal(Path.GetFileName(path), source.FileName);
+            Assert.Equal(5, source.Length);
+            Assert.Equal("text/plain", source.MediaType);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Validate_RejectsRelativeMissingDirectoryAndOversizedSources()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"taiga-attachment-{Guid.NewGuid():N}.bin");
+        File.WriteAllBytes(path, [1, 2, 3]);
+        try
+        {
+            var options = Microsoft.Extensions.Options.Options.Create(new TaigaOptions { MaxAttachmentBytes = 2 });
+            Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate("relative.txt", options));
+            Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), options));
+            Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(Path.GetTempPath(), options));
+            Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(path, options));
+            Assert.Equal("application/octet-stream", AttachmentFileContract.GetMediaType("unknown.extension"));
+        }
+        finally { File.Delete(path); }
     }
 }
 
