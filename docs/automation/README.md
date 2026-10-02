@@ -58,6 +58,15 @@ and revision-bound progress receipt. Accepted/Done is rejected without a
 matching reviewer identity, packet/action binding, accepted task ID, criterion
 evidence, and reviewed SHA. Status writes reject fabricated mappings by
 recomputing provenance from the captured status metadata.
+`finalize` does not accept those labels as evidence. For a nonempty story scope,
+it requires `stateRoot`, `progressRoot`, `reviewActionId`, `expectedCriteria`,
+the validated task `statusMapping`, and one `{ taskId, eventId,
+taskWriteActionId }` reference per selected task. It resolves the reviewer
+action and its hash-checked receipt from the registry, validates the receipt's
+per-task acceptances at the final SHA, resolves each persisted coordinator task
+write, and derives the returned final evidence from the records. Unknown action
+or event IDs, tampered receipts, pending/uncertain writes, and stale or
+cross-task references fail closed.
 
 ## Story operator guidance
 

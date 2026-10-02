@@ -1470,6 +1470,105 @@ try {
         Assert-True (-not $missingPacketResult.ok) 'task writes must require a validated packet reference'
     }
 
+    Test-Case 'finalize resolves persisted reviewer and task-write evidence' {
+        $finalizeRegistryRoot = Join-Path $script:FixtureRoot 'finalize-persisted-registry'
+        $finalizeProgressRoot = Join-Path $script:FixtureRoot 'finalize-persisted-progress'
+        $scenario = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'fixtures\child-task-story-lifecycle.json')) -AsHashtable -Depth 100
+        $capture = Invoke-PsJson $script:TaigaScript @('-Operation','capture-context','-InputPath',(New-InputPath $scenario.helperIntegration[0].input 'finalize-capture'))
+        $packet = $capture.data.taskScope.packetBinding
+        $status = Invoke-PsJson $script:TaigaScript @('-Operation','resolve-status-mapping','-InputPath',(New-InputPath $scenario.helperIntegration[2].input 'finalize-status'))
+        $statusMapping = $status.data
+        $initValue = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $syntheticPath) -AsHashtable -Depth 100
+        $initValue.sessionId = 'finalize-session'
+        $init = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',(New-InputPath $initValue 'finalize-init'),'-StateRoot',$finalizeRegistryRoot)
+        $ticketKey = 'project:12:story:642'
+        $claim = Invoke-PsJson $script:StateScript @('-Operation','claim-ticket','-InputPath',(New-InputPath @{ sessionId = 'finalize-session'; ownerGeneration = 1; expectedRevision = $init.revision; ticketKey = $ticketKey; repositoryIdentity = 'finalize-repo'; workType = 'story' } 'finalize-claim'),'-StateRoot',$finalizeRegistryRoot)
+
+        function Add-FinalizeRegistryAction {
+            param([string] $ActionId, [string] $ActionKind, [hashtable] $Target, [hashtable] $Receipt, [string] $ObservationStatus = 'observed', [bool] $ReconcileRequired = $false)
+            $inspection = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$finalizeRegistryRoot)
+            $prepared = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath @{ sessionId = 'finalize-session'; ownerGeneration = 1; expectedRevision = $inspection.revision; ticketKey = $ticketKey; actionId = $ActionId; actionKind = $ActionKind; target = $Target; input = @{} } ('finalize-prepare-' + $ActionId)),'-StateRoot',$finalizeRegistryRoot)
+            $observed = Invoke-PsJson $script:StateScript @('-Operation','record-observation','-InputPath',(New-InputPath @{ sessionId = 'finalize-session'; ownerGeneration = 1; expectedRevision = $prepared.revision; actionId = $ActionId; observationStatus = $ObservationStatus; reconcileRequired = $ReconcileRequired; receipt = $Receipt } ('finalize-observe-' + $ActionId)),'-StateRoot',$finalizeRegistryRoot)
+            return $observed
+        }
+
+        $receipt = @{ schemaVersion = 1; kind = 'review'; runId = 'synthetic-story-run'; actionId = 'review-action'; ticketKey = $ticketKey; scopeHash = $packet.scopeHash; baseSha = 'abcdef1'; reviewedSha = 'abcdef2'; verdict = 'pass'; reviewerModel = 'gpt-6.1-sol'; reviewerEffort = 'high'; criteria = @(@{ id = 'story-criterion'; text = 'Persisted child evidence is required.'; passed = $true; evidence = 'reviewed story criterion' }); checks = @(@{ command = 'synthetic-check'; exitCode = 0; passed = $true; evidence = 'check passed' }); findings = @(); taskAcceptances = @(@{ taskId = 540; accepted = $true; reviewedSha = 'abcdef2'; reviewerId = 'reviewer-story-642'; criterionIds = @('AC01'); evidence = 'accepted AC01' }, @{ taskId = 541; accepted = $true; reviewedSha = 'abcdef2'; reviewerId = 'reviewer-story-642'; criterionIds = @('AC02'); evidence = 'accepted AC02' }) }
+        $receiptPath = Join-Path $script:FixtureRoot 'finalize-review-receipt.json'; Write-JsonFile $receipt $receiptPath
+        $receiptReference = @{ path = $receiptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $receiptPath).Hash.ToLowerInvariant() }
+        $reviewObserved = Add-FinalizeRegistryAction 'review-action' 'worker_dispatch' @{ workerId = 'reviewer-story-642'; runId = $packet.runId; packetHash = $packet.packetHash; scopeHash = $packet.scopeHash; ticketKey = $ticketKey } @{ receiptReference = $receiptReference }
+
+        function Add-FinalizeProgressEvent {
+            param([long] $TaskId, [long] $Sequence, [string] $EventType, [string] $Sha, [string[]] $Criteria, [string] $Evidence)
+            $eventInput = @{ runId = $packet.runId; actionId = $packet.actionId; ticketKey = $ticketKey; projectId = 12; parentStoryId = 642; taskId = $TaskId; sequence = $Sequence; currentSha = $Sha; eventType = $EventType; criterionIds = $Criteria; packetBinding = $packet; evidence = @{ source = $Evidence } }
+            return Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $eventInput ('finalize-progress-' + $TaskId + '-' + $Sequence)),'-StateRoot',$finalizeProgressRoot)
+        }
+        $task540Start = Add-FinalizeProgressEvent 540 1 'started' 'abcdef1' @('AC01') 'task 540 started'
+        $task540Ready = Add-FinalizeProgressEvent 540 2 'ready_for_review' 'abcdef2' @('AC01') 'task 540 ready'
+        $task541Start = Add-FinalizeProgressEvent 541 3 'started' 'abcdef1' @('AC02') 'task 541 started'
+        $task541Ready = Add-FinalizeProgressEvent 541 4 'ready_for_review' 'abcdef2' @('AC02') 'task 541 ready'
+
+        function New-FinalizeJournal {
+            param([long] $TaskId, [object] $ProgressEvent)
+            $journalInput = @{ projectId = 12; parentStoryId = 642; selectedTaskIds = @(540,541); packetBinding = $packet; statusMapping = $statusMapping; task = @{ taskId = $TaskId; projectId = 12; parentStoryId = 642; currentStatusId = 56; version = 1 }; requiredCriterionIds = @($packet.criteriaByTask[[string]$TaskId]); logicalState = 'accepted'; currentSha = 'abcdef2'; runMarker = 'synthetic-story-run/finalize'; progressBinding = $ProgressEvent; reviewAcceptance = @{ accepted = $true; taskId = $TaskId; reviewedSha = 'abcdef2'; reviewerId = 'reviewer-story-642'; runId = $packet.runId; actionId = 'review-action'; packetHash = $packet.packetHash; scopeHash = $packet.scopeHash; criterionIds = @($packet.criteriaByTask[[string]$TaskId]); evidence = 'persisted reviewer acceptance' } }
+            return (Invoke-PsJson $script:TaigaScript @('-Operation','prepare-task-write','-InputPath',(New-InputPath $journalInput ('finalize-journal-' + $TaskId)))).data
+        }
+        $journal540 = New-FinalizeJournal 540 $task540Ready.data.event
+        $journal541 = New-FinalizeJournal 541 $task541Ready.data.event
+        $write540 = Add-FinalizeRegistryAction 'write-540' 'taiga_task_update' @{ journal = $journal540; runId = $packet.runId; taskId = 540 } @{ outcome = 'reconciled'; journalId = $journal540.journalId; taskId = 540; statusId = 59 }
+        $write541 = Add-FinalizeRegistryAction 'write-541' 'taiga_task_update' @{ journal = $journal541; runId = $packet.runId; taskId = 541 } @{ outcome = 'reconciled'; journalId = $journal541.journalId; taskId = 541; statusId = 59 }
+        $finalizeBase = @{ kind = 'story'; projectId = 12; requirementsHash = 'scope-hash'; currentRequirementsHash = 'scope-hash'; criteriaComplete = $true; checksPass = $true; completionPolicy = 'merged'; prState = 'merged'; selectedTaskIds = @(540,541); packetBinding = $packet; currentSha = 'abcdef2'; expectedCriteria = @(@{ id = 'story-criterion'; text = 'Persisted child evidence is required.' }); statusMapping = $statusMapping; stateRoot = $finalizeRegistryRoot; progressRoot = $finalizeProgressRoot; reviewActionId = 'review-action'; reviewerId = 'reviewer-story-642'; selectedTaskEvidence = @(@{ taskId = 540; eventId = $task540Ready.data.event.eventId; taskWriteActionId = 'write-540'; accepted = $true; reviewAccepted = $true }, @{ taskId = 541; eventId = $task541Ready.data.event.eventId; taskWriteActionId = 'write-541'; accepted = $true; reviewAccepted = $true }) }
+        $valid = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $finalizeBase 'finalize-persisted-valid'))
+        Assert-True $valid.data.ready ("actual persisted reviewer and write records must authorize finalization: " + ($valid.data.errors -join '; '))
+        Assert-Equal 'reconciled' $valid.data.selectedTaskEvidence[0].statusOutcome 'final evidence must derive its outcome from the persisted write record'
+
+        $fabricated = Copy-JsonObject $finalizeBase; $fabricated.reviewActionId = 'invented-review-action'; $fabricated.selectedTaskEvidence[0].eventId = 'invented-event'; $fabricated.selectedTaskEvidence[0].taskWriteActionId = 'invented-write'; $fabricated.selectedTaskEvidence[0].accepted = $true
+        $fabricatedResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $fabricated 'finalize-fabricated-references'))
+        Assert-True (-not $fabricatedResult.data.ready) 'invented review, event, and write references must fail despite true labels'
+
+        [IO.File]::AppendAllText($receiptPath, 'tampered', [Text.UTF8Encoding]::new($false))
+        $tamperedResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $finalizeBase 'finalize-tampered-receipt'))
+        Assert-True (-not $tamperedResult.data.ready) 'tampering with the persisted receipt must block finalization'
+        [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
+
+        $wrongTask = Copy-JsonObject $finalizeBase; $wrongTask.selectedTaskEvidence[0].eventId = $task541Ready.data.event.eventId
+        $wrongTaskResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $wrongTask 'finalize-wrong-task'))
+        Assert-True (-not $wrongTaskResult.data.ready) 'a sibling progress event must not satisfy the selected task'
+        $wrongRunReceipt = Copy-JsonObject $receipt; $wrongRunReceipt.actionId = 'review-wrong-run'; $wrongRunReceipt.runId = 'wrong-run'; $wrongRunReceiptPath = Join-Path $script:FixtureRoot 'finalize-wrong-run-receipt.json'; Write-JsonFile $wrongRunReceipt $wrongRunReceiptPath
+        $wrongRunReference = @{ path = $wrongRunReceiptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $wrongRunReceiptPath).Hash.ToLowerInvariant() }
+        $null = Add-FinalizeRegistryAction 'review-wrong-run' 'worker_dispatch' @{ workerId = 'reviewer-story-642'; runId = 'wrong-run'; packetHash = $packet.packetHash; scopeHash = $packet.scopeHash; ticketKey = $ticketKey } @{ receiptReference = $wrongRunReference }
+        $wrongRun = Copy-JsonObject $finalizeBase; $wrongRun.reviewActionId = 'review-wrong-run'
+        $wrongRunResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $wrongRun 'finalize-wrong-run'))
+        Assert-True (-not $wrongRunResult.data.ready) 'a receipt from another run must block finalization'
+        $wrongCriteriaReceipt = Copy-JsonObject $receipt; $wrongCriteriaReceipt.actionId = 'review-wrong-criteria'; $wrongCriteriaReceipt.taskAcceptances[0].criterionIds = @('AC99'); $wrongCriteriaReceiptPath = Join-Path $script:FixtureRoot 'finalize-wrong-criteria-receipt.json'; Write-JsonFile $wrongCriteriaReceipt $wrongCriteriaReceiptPath
+        $wrongCriteriaReference = @{ path = $wrongCriteriaReceiptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $wrongCriteriaReceiptPath).Hash.ToLowerInvariant() }
+        $null = Add-FinalizeRegistryAction 'review-wrong-criteria' 'worker_dispatch' @{ workerId = 'reviewer-story-642'; runId = $packet.runId; packetHash = $packet.packetHash; scopeHash = $packet.scopeHash; ticketKey = $ticketKey } @{ receiptReference = $wrongCriteriaReference }
+        $wrongCriteria = Copy-JsonObject $finalizeBase; $wrongCriteria.reviewActionId = 'review-wrong-criteria'
+        $wrongCriteriaResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $wrongCriteria 'finalize-wrong-criteria'))
+        Assert-True (-not $wrongCriteriaResult.data.ready) 'receipt criteria unrelated to the selected task must block finalization'
+        $wrongSha = Copy-JsonObject $finalizeBase; $wrongSha.currentSha = 'abcdef1'
+        $wrongShaResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $wrongSha 'finalize-wrong-sha'))
+        Assert-True (-not $wrongShaResult.data.ready) 'a stale final SHA must block finalization'
+
+        $pendingJournal = New-FinalizeJournal 540 $task540Ready.data.event
+        # Keep the action pending after its journal is prepared; finalize must not infer success from the journal alone.
+        $pendingInspection = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$finalizeRegistryRoot)
+        $pendingAction = Invoke-PsJson $script:StateScript @('-Operation','prepare-action','-InputPath',(New-InputPath @{ sessionId = 'finalize-session'; ownerGeneration = 1; expectedRevision = $pendingInspection.revision; ticketKey = $ticketKey; actionId = 'write-pending-only'; actionKind = 'taiga_task_update'; target = @{ journal = $pendingJournal; runId = $packet.runId; taskId = 540 }; input = @{} } 'finalize-pending-only'),'-StateRoot',$finalizeRegistryRoot)
+        $pendingProbe = Copy-JsonObject $finalizeBase; $pendingProbe.selectedTaskEvidence[0].taskWriteActionId = 'write-pending-only'
+        $pendingResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $pendingProbe 'finalize-pending-write'))
+        Assert-True (-not $pendingResult.data.ready) 'pending task writes must block finalization'
+
+        $uncertainJournal = New-FinalizeJournal 540 $task540Ready.data.event
+        $uncertain = Add-FinalizeRegistryAction 'write-uncertain' 'taiga_task_update' @{ journal = $uncertainJournal; runId = $packet.runId; taskId = 540 } @{ state = 'uncertain' } 'uncertain' $true
+        $uncertainProbe = Copy-JsonObject $finalizeBase; $uncertainProbe.selectedTaskEvidence[0].taskWriteActionId = 'write-uncertain'
+        $uncertainResult = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $uncertainProbe 'finalize-response-lost-write'))
+        Assert-True (-not $uncertainResult.data.ready) 'response-lost or uncertain task writes must block finalization'
+
+        $null = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$finalizeRegistryRoot)
+        $null = Invoke-PsJson $script:ProgressScript @('-Operation','validate','-InputPath',(New-InputPath @{} 'finalize-restart-validate'),'-StateRoot',$finalizeProgressRoot)
+        $restarted = Invoke-PsJson $script:TaigaScript @('-Operation','finalize','-InputPath',(New-InputPath $finalizeBase 'finalize-after-restart'))
+        Assert-True $restarted.data.ready 'valid persisted evidence must survive a fresh inspection and restart path'
+    }
+
     Test-Case 'create and push a fresh branch using a local bare remote' {
         $repo = Join-Path $script:FixtureRoot 'repo'; $remote = Join-Path $script:FixtureRoot 'remote.git'; $worktree = Join-Path $script:FixtureRoot 'worktree'
         New-Item -ItemType Directory -Path $repo -Force | Out-Null
