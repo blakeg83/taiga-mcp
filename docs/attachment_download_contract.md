@@ -39,8 +39,9 @@ destination files are rejected and are never overwritten.
 
 The configured `TAIGA__MAXATTACHMENTBYTES` limit applies to downloads as well
 as uploads. Its default is 10 MiB; a zero-byte file and a file exactly at the
-limit are valid. The client rejects a known oversized `Content-Length` before
-writing and also enforces the limit while reading when the length is missing
+limit are valid. The client rejects a known oversized attachment `size` or
+`Content-Length` before writing and also enforces the limit while reading when
+the length is missing
 or untrusted.
 
 Bytes are written to a uniquely named temporary file in the destination's
