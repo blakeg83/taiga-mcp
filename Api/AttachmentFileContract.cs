@@ -38,6 +38,8 @@ internal static class AttachmentFileContract
         InputValidation.Required(file, nameof(file));
         ArgumentNullException.ThrowIfNull(options);
         InputValidation.Positive(options.Value.MaxAttachmentBytes, nameof(TaigaOptions.MaxAttachmentBytes));
+        if (!Path.IsPathFullyQualified(file))
+            throw new ArgumentException("file must be an absolute local file path.", nameof(file));
 
         string fullPath;
         try
@@ -49,8 +51,6 @@ internal static class AttachmentFileContract
             throw new ArgumentException("file must be a valid local file path.", nameof(file), ex);
         }
 
-        if (!Path.IsPathFullyQualified(fullPath))
-            throw new ArgumentException("file must be an absolute local file path.", nameof(file));
         if (Directory.Exists(fullPath))
             throw new ArgumentException("file must identify a file, not a directory.", nameof(file));
 

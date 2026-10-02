@@ -52,6 +52,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public string AttachmentResponseBody { get; set; } =
         "[{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"spec.txt\",\"description\":\"Attachment\",\"order\":1,\"size\":2048,\"url\":\"https://files.example/901\"}]";
 
+    public HttpStatusCode AttachmentUploadStatusCode { get; set; } = HttpStatusCode.Created;
+
+    public string AttachmentUploadResponseBody { get; set; } =
+        "{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"upload.txt\",\"description\":\"Uploaded\",\"size\":22,\"url\":\"https://files.example/901\"}";
+
     public HttpStatusCode AttachmentDetailStatusCode { get; set; } = HttpStatusCode.OK;
 
     public string AttachmentDetailResponseBody { get; set; } =
@@ -168,6 +173,13 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         if (request.HttpMethod == HttpMethod.Post.Method && path.EndsWith("/auth", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(context.Response, HttpStatusCode.OK, "{\"auth_token\":\"integration-token\",\"refresh\":\"integration-refresh\"}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Post.Method &&
+            path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments")
+        {
+            await RespondAsync(context.Response, AttachmentUploadStatusCode, AttachmentUploadResponseBody);
             return;
         }
 

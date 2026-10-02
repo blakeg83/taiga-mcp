@@ -11,7 +11,10 @@ public sealed record RecordedHttpRequest(
     HttpMethod Method,
     Uri Uri,
     IReadOnlyDictionary<string, string[]> Headers,
-    string Body);
+    string Body)
+{
+    public byte[] BodyBytes { get; init; } = [];
+}
 
 public sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
@@ -61,9 +64,10 @@ public sealed class FakeHttpMessageHandler : HttpMessageHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        var body = request.Content is null
-            ? string.Empty
-            : await request.Content.ReadAsStringAsync(cancellationToken);
+        var bodyBytes = request.Content is null
+            ? []
+            : await request.Content.ReadAsByteArrayAsync(cancellationToken);
+        var body = Encoding.UTF8.GetString(bodyBytes);
         var headers = request.Headers
             .Concat(request.Content?.Headers ?? Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>())
             .GroupBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
@@ -71,7 +75,10 @@ public sealed class FakeHttpMessageHandler : HttpMessageHandler
                 group => group.Key,
                 group => group.SelectMany(pair => pair.Value).ToArray(),
                 StringComparer.OrdinalIgnoreCase);
-        var recorded = new RecordedHttpRequest(request.Method, request.RequestUri!, headers, body);
+        var recorded = new RecordedHttpRequest(request.Method, request.RequestUri!, headers, body)
+        {
+            BodyBytes = bodyBytes
+        };
         _requests.Enqueue(recorded);
 
         var route = _routes.FirstOrDefault(candidate => candidate.Matches(recorded));

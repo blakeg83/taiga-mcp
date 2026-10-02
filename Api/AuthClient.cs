@@ -100,7 +100,8 @@ public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClien
                     ? replayable.CreateReplay()
                     : new ByteArrayContent(await request.Content.ReadAsByteArrayAsync(cancellationToken));
                 foreach (var header in request.Content.Headers)
-                    clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                    if (!clone.Content.Headers.Contains(header.Key))
+                        clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
             return clone;
         }

@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 37 tools:
+The current server exposes 38 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,9 +22,9 @@ The current server exposes 37 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 6 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+- 7 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
   `get_work_item_history`, `resolve_work_item`, `list_work_item_attachments`,
-  and `get_work_item_attachment`.
+  `get_work_item_attachment`, and `upload_work_item_attachment`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -145,6 +145,58 @@ on 2026-10-02 against the official [epic](https://github.com/taigaio/taiga-doc/b
 and [task](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/endpoints.adoc)
 endpoint inventories plus the pinned shared attachment serializer and view
 set. This is pinned source evidence, not a deployed-version claim.
+
+### `upload_work_item_attachment` contract
+
+The signature is `upload_work_item_attachment(kind, id, projectId, file,
+description?)`. The supported kinds are exactly `epic`, `user_story`, and
+`task`; `id` and `projectId` are positive internal IDs. `file` is a required
+absolute local path visible to the stdio server process. URLs, relative paths,
+directories, wildcards, and bulk selection are rejected before any HTTP
+request. The default maximum file size is 10 MiB and can be changed with the
+positive `TAIGA__MAXATTACHMENTBYTES` setting. Empty files and files exactly at
+the limit are valid. The server derives the filename and media type from the
+selected path; unknown extensions use `application/octet-stream`.
+
+The client sends one authenticated multipart POST to the kind-specific route:
+
+| kind | upstream route | required parts |
+| --- | --- | --- |
+| `epic` | `/api/v1/epics/attachments` | `object_id`, `project`, `attached_file` |
+| `user_story` | `/api/v1/userstories/attachments` | `object_id`, `project`, `attached_file` |
+| `task` | `/api/v1/tasks/attachments` | `object_id`, `project`, `attached_file` |
+
+`description` is an optional text part; it is omitted when absent and empty
+text is preserved. The tool does not expose server-defaulted `is_deprecated`
+or `from_comment` fields. A successful call returns the authoritative
+attachment detail object and rejects a response associated with another
+project or parent object.
+
+For example:
+
+```json
+{"kind":"task","id":42,"projectId":123,"file":"C:\\Temp\\notes.txt","description":"Release notes"}
+```
+
+```json
+{"id":901,"project":123,"object_id":42,"name":"notes.txt","description":"Release notes","size":12,"url":"https://files.example/901"}
+```
+
+Missing/inaccessible/oversize files, invalid kinds or IDs, malformed success
+responses, association mismatches, permission failures, and transport errors
+become safe MCP errors. The upload is streamed from disk; the one permitted
+401 replay creates a fresh file stream, while ambiguous POST failures are not
+retried. If a successful POST cannot be read or mapped, the error states that
+the upload may already have applied. Issue attachments, download, update,
+delete, and bulk upload remain outside this command.
+
+This contract is recorded in
+[attachment_upload_contract.md](attachment_upload_contract.md) and was checked
+against the official [epic create-attachment](https://github.com/taigaio/taiga-doc/blob/main/api/epics/create-attachment.adoc),
+[user-story create-attachment](https://github.com/taigaio/taiga-doc/blob/main/api/user-stories/create-attachment.adoc),
+and [task create-attachment](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/create-attachment.adoc)
+contracts plus the pinned attachment validator and serializer. This is pinned
+source evidence, not a deployed-version claim.
 
 ### `list_work_item_comments` contract
 

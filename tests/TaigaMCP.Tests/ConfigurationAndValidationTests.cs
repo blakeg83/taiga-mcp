@@ -133,17 +133,24 @@ public sealed class AttachmentFileContractTests
     public void Validate_RejectsRelativeMissingDirectoryAndOversizedSources()
     {
         var path = Path.Combine(Path.GetTempPath(), $"taiga-attachment-{Guid.NewGuid():N}.bin");
+        var relativeName = $"taiga-relative-{Guid.NewGuid():N}.txt";
         File.WriteAllBytes(path, [1, 2, 3]);
+        File.WriteAllText(relativeName, "relative");
         try
         {
             var options = Microsoft.Extensions.Options.Options.Create(new TaigaOptions { MaxAttachmentBytes = 2 });
             Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate("relative.txt", options));
+            Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(relativeName, options));
             Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), options));
             Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(Path.GetTempPath(), options));
             Assert.Throws<ArgumentException>(() => AttachmentFileContract.Validate(path, options));
             Assert.Equal("application/octet-stream", AttachmentFileContract.GetMediaType("unknown.extension"));
         }
-        finally { File.Delete(path); }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(relativeName);
+        }
     }
 }
 
