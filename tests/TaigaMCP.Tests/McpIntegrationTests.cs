@@ -825,6 +825,7 @@ public sealed class McpIntegrationTests
                 "list_tasks",
                 "list_user_stories",
                 "list_user_story_statuses",
+                "list_work_item_attachments",
                 "list_work_item_comments",
                 "resolve_project",
                 "resolve_work_item",
