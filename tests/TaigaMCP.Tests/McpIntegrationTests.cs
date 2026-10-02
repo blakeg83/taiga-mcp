@@ -967,6 +967,34 @@ public sealed class McpIntegrationTests
                 Assert.Equal("Bearer integration-token", deleteRequest.Authorization);
                 Assert.Empty(deleteRequest.Body);
             }
+
+            var deletionFailures = new[]
+            {
+                (Status: HttpStatusCode.NotFound, Expected: "404", Category: "resource not found"),
+                (Status: HttpStatusCode.Forbidden, Expected: "403", Category: "permission denied"),
+                (Status: HttpStatusCode.OK, Expected: "unexpected HTTP 200", Category: "may already have applied")
+            };
+            foreach (var (status, expected, category) in deletionFailures)
+            {
+                taiga.AttachmentDeleteStatusCode = status;
+                var beforeFailure = taiga.Requests.Count(request =>
+                    request.Method == "DELETE" && request.PathAndQuery == "/api/v1/tasks/attachments/901");
+                var failedDeletion = await Call("delete_work_item_attachment", new()
+                {
+                    ["kind"] = "task",
+                    ["attachmentId"] = 901
+                });
+
+                Assert.True(failedDeletion.IsError);
+                var errorText = GetText(failedDeletion);
+                Assert.Contains(expected, errorText);
+                Assert.Contains(category, errorText, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("synthetic attachment deletion secret", errorText);
+                Assert.Equal(beforeFailure + 1, taiga.Requests.Count(request =>
+                    request.Method == "DELETE" && request.PathAndQuery == "/api/v1/tasks/attachments/901"));
+            }
+            taiga.AttachmentDeleteStatusCode = HttpStatusCode.NoContent;
+
             Assert.DoesNotContain(taiga.Requests, request =>
                 request.Method == "DELETE" &&
                 request.PathAndQuery is "/api/v1/tasks/204" or "/api/v1/userstories/102" or "/api/v1/epics/301");
