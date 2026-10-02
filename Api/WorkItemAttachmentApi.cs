@@ -112,6 +112,26 @@ public sealed class WorkItemAttachmentApi
         }
     }
 
+    internal async Task<WorkItemAttachmentDeleteDto> DeleteAsync(
+        string kind,
+        int attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Required(kind, nameof(kind));
+        InputValidation.Positive(attachmentId, nameof(attachmentId));
+
+        var route = WorkItemAttachmentRoutes.GetRoute(kind);
+        using var request = new HttpRequestMessage(HttpMethod.Delete, $"{route}/{attachmentId}");
+        await _transport.SendNoContentAsync(request, cancellationToken, "attachment");
+
+        return new WorkItemAttachmentDeleteDto
+        {
+            Kind = kind,
+            AttachmentId = attachmentId,
+            Deleted = true
+        };
+    }
+
     internal async Task<WorkItemAttachmentDownloadDto> DownloadAsync(
         string kind,
         int attachmentId,

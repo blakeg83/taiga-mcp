@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(40, tools.Count);
+            Assert.Equal(41, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -804,6 +804,7 @@ public sealed class McpIntegrationTests
                 "create_issue",
                 "create_task",
                 "create_user_story",
+                "delete_work_item_attachment",
                 "download_work_item_attachment",
                 "get_current_user",
                 "get_epic",

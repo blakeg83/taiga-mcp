@@ -48,7 +48,8 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
 
     public async Task SendNoContentAsync(
         HttpRequestMessage request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string writeTarget = "relationship")
     {
         var applied = false;
         try
@@ -59,18 +60,18 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             applied = true;
             if (response.StatusCode != HttpStatusCode.NoContent)
                 throw new TaigaRequestException(
-                    $"Taiga returned unexpected HTTP {(int)response.StatusCode} for a no-content write; the write may already have applied. Read the relationship before retrying.",
+                    $"Taiga returned unexpected HTTP {(int)response.StatusCode} for a no-content {writeTarget} write; the write may already have applied. Read the {writeTarget} before retrying.",
                     response.StatusCode);
         }
         catch (OperationCanceledException exception) when (IsHttpTimeout(exception, cancellationToken))
         {
             throw new TaigaRequestException(
-                "Taiga request timed out; the write may already have applied. Read the relationship before retrying.");
+                $"Taiga request timed out; the {writeTarget} write may already have applied. Read the {writeTarget} before retrying.");
         }
         catch (OperationCanceledException) when (applied)
         {
             throw new OperationCanceledException(
-                "Taiga write may already have applied; response handling was cancelled. Read the relationship before retrying.",
+                $"Taiga {writeTarget} write may already have applied; response handling was cancelled. Read the {writeTarget} before retrying.",
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
@@ -78,7 +79,7 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
         catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
             throw new TaigaRequestException(
-                "Taiga transport failure; the write may already have applied. Read the relationship before retrying.");
+                $"Taiga transport failure; the {writeTarget} write may already have applied. Read the {writeTarget} before retrying.");
         }
     }
 
