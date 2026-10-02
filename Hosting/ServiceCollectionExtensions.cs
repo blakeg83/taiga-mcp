@@ -31,6 +31,10 @@ public static class ServiceCollectionExtensions
             var baseUrl = opts.BaseUrl ?? "https://api.taiga.io/api/v1/";
             client.BaseAddress = new Uri(baseUrl.EndsWith("/") ? baseUrl : baseUrl + "/");
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AllowAutoRedirect = false
         });
 
         services.AddSingleton(TimeProvider.System);

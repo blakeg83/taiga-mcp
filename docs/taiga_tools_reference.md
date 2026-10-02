@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 38 tools:
+The current server exposes 39 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,9 +22,10 @@ The current server exposes 38 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 7 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+- 8 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
   `get_work_item_history`, `resolve_work_item`, `list_work_item_attachments`,
-  `get_work_item_attachment`, and `upload_work_item_attachment`.
+  `get_work_item_attachment`, `upload_work_item_attachment`, and
+  `download_work_item_attachment`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -187,7 +188,7 @@ responses, association mismatches, permission failures, and transport errors
 become safe MCP errors. The upload is streamed from disk; the one permitted
 401 replay creates a fresh file stream, while ambiguous POST failures are not
 retried. If a successful POST cannot be read or mapped, the error states that
-the upload may already have applied. Issue attachments, download, update,
+the upload may already have applied. Issue attachments, update,
 delete, and bulk upload remain outside this command.
 
 This contract is recorded in
@@ -197,6 +198,52 @@ against the official [epic create-attachment](https://github.com/taigaio/taiga-d
 and [task create-attachment](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/create-attachment.adoc)
 contracts plus the pinned attachment validator and serializer. This is pinned
 source evidence, not a deployed-version claim.
+
+### `download_work_item_attachment` contract
+
+The signature is `download_work_item_attachment(kind, attachmentId,
+destination)`. The supported kinds are exactly `epic`, `user_story`, and
+`task`; `attachmentId` is the positive internal attachment ID. The server
+first performs the kind-specific authenticated attachment detail GET, then
+uses its `url` as the preferred binary source or resolves `attached_file`
+against the configured Taiga base URL when `url` is absent. Preview and
+thumbnail URLs are never download sources.
+
+Only HTTP and HTTPS sources are accepted. A source on the configured Taiga
+origin uses the Taiga bearer token. An external storage or signed URL is
+requested without that token. Redirects are followed manually for at most
+five hops: same-origin redirects may remain authenticated, while a redirect
+to another origin is requested without the bearer; unsupported redirect
+schemes are rejected. The named HTTP client disables automatic redirects so
+credentials cannot be copied implicitly.
+
+`destination` must be an absolute path whose parent directory already exists.
+The upstream filename is never used, and an existing destination is rejected
+instead of overwritten. The positive `TAIGA__MAXATTACHMENTBYTES` setting
+(10 MiB by default) applies to the downloaded byte stream. A known oversized
+attachment `size` or `Content-Length` is rejected before writing. The
+attachment metadata `size` is required to verify completion; `Content-Length`
+is only a safety bound and consistency check, so it is not sufficient by
+itself. A missing `Content-Length` is supported when metadata `size` is
+present. Each known declared size must equal the received byte count. Bytes are written to a unique temporary sibling and moved
+into place only after a successful, complete response; cancellation, errors,
+and destination races remove the temporary file.
+
+The receipt is small and contains the confirmed local path, byte count, and
+the authoritative attachment metadata:
+
+```json
+{
+  "destination":"C:\\Temp\\notes.txt",
+  "bytes":12,
+  "attachment":{"id":901,"project":123,"object_id":42,"name":"notes.txt","size":12}
+}
+```
+
+Binary content, bearer tokens, raw upstream bodies, issue attachments,
+overwrite controls, directory creation, and attachment mutation remain out
+of scope. See [attachment_download_contract.md](attachment_download_contract.md)
+for the source and filesystem evidence record.
 
 ### `list_work_item_comments` contract
 
@@ -631,6 +678,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId` and `version` required; `subject`, `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One issue object returned by Taiga after the PATCH. |
 | `add_work_item_comment` | `kind`, `id`, `version`, and `text` required; `kind` is one of `issue`, `user_story`, `task`, or `epic`; `id` is positive; `version` is nonnegative; `text` is nonblank | `{ "kind": "task", "id": 203, "version": 3, "comment_submitted": true }` after one confirmed comment-only PATCH. |
+| `download_work_item_attachment` | `kind`, `attachmentId`, and `destination` required; `kind` is one of `epic`, `user_story`, or `task` | `{ destination, bytes, attachment }`; streams bounded binary bytes to a new explicit absolute destination after metadata inspection, with origin-scoped authentication, manual redirects, atomic placement, and cleanup on failure. |
 | `list_issue_statuses` | `projectId` integer, required | Array of `{ id, name, slug, is_closed }`. |
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
