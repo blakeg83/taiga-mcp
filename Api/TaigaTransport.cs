@@ -118,8 +118,8 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                 var contentLength = response.Content.Headers.ContentLength;
                 if (contentLength.HasValue && contentLength.Value > plan.MaximumBytes)
                     throw new TaigaRequestException($"attachment exceeds the configured maximum size of {plan.MaximumBytes} bytes.");
-                if (!plan.ExpectedBytes.HasValue && !contentLength.HasValue)
-                    throw new TaigaRequestException("Taiga attachment response did not provide a verifiable size.");
+                if (!plan.ExpectedBytes.HasValue)
+                    throw new TaigaRequestException("Taiga attachment metadata did not provide a declared size.");
 
                 var bytesWritten = await WriteDownloadAsync(response, temporaryPath, plan.MaximumBytes, cancellationToken);
                 if (plan.ExpectedBytes.HasValue && bytesWritten != plan.ExpectedBytes.Value)

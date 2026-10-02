@@ -51,7 +51,7 @@ public sealed class WorkItemAttachmentDownloadTests
     public async Task DownloadTool_ReturnsSmallReceiptAndPreservesAttachmentMetadata()
     {
         var handler = new FakeHttpMessageHandler()
-            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/901.bin", size: 3))
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent([5, 4, 3])
@@ -163,10 +163,10 @@ public sealed class WorkItemAttachmentDownloadTests
     public async Task DownloadAsync_RejectsResponseShorterThanDeclaredContentLength()
     {
         var handler = new FakeHttpMessageHandler()
-            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithSize)
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ =>
             {
-                var content = new ByteArrayContent([1, 2, 3]);
+                var content = new ByteArrayContent([1, 2, 3, 4]);
                 content.Headers.ContentLength = 5;
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
             });
@@ -229,7 +229,32 @@ public sealed class WorkItemAttachmentDownloadTests
                 var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
                     NewApi(handler, auth).DownloadAsync("task", 901, destination));
 
-                Assert.Contains("verifiable size", error.Message);
+                Assert.Contains("declared size", error.Message);
+                Assert.False(File.Exists(destination));
+            }
+            finally { File.Delete(destination); }
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAsync_RejectsContentLengthWhenMetadataSizeIsAbsent()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([1, 2, 3])
+            });
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            try
+            {
+                var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                    NewApi(handler, auth).DownloadAsync("task", 901, destination));
+
+                Assert.Contains("declared size", error.Message);
                 Assert.False(File.Exists(destination));
             }
             finally { File.Delete(destination); }
@@ -271,7 +296,7 @@ public sealed class WorkItemAttachmentDownloadTests
             .AddJsonRoute(
                 HttpMethod.Get,
                 "/api/v1/tasks/attachments/901",
-                DownloadFixtures.DetailWithUrl("https://files.example/external/901.bin"))
+                DownloadFixtures.DetailWithUrl("https://files.example/external/901.bin", size: 3))
             .AddRoute(HttpMethod.Get, "/external/901.bin", _ => new HttpResponseMessage(HttpStatusCode.Redirect)
             {
                 Headers = { Location = new Uri("https://redirect.example/signed/901.bin") }
@@ -305,7 +330,7 @@ public sealed class WorkItemAttachmentDownloadTests
             .AddJsonRoute(
                 HttpMethod.Get,
                 "/api/v1/tasks/attachments/901",
-                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/redirect"))
+                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/redirect", size: 3))
             .AddRoute(HttpMethod.Get, "/media/redirect", _ => new HttpResponseMessage(HttpStatusCode.Redirect)
             {
                 Headers = { Location = new Uri("https://files.example/signed/901.bin") }
@@ -338,7 +363,7 @@ public sealed class WorkItemAttachmentDownloadTests
             .AddJsonRoute(
                 HttpMethod.Get,
                 "/api/v1/tasks/attachments/901",
-                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/901.bin", "..\\evil.bin"))
+                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/901.bin", "..\\evil.bin", size: 2))
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent([4, 2])
@@ -372,7 +397,7 @@ public sealed class WorkItemAttachmentDownloadTests
             .AddJsonRoute(
                 HttpMethod.Get,
                 "/api/v1/tasks/attachments/901",
-                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/redirect"))
+                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/redirect", size: 3))
             .AddRoute(HttpMethod.Get, "/media/redirect", _ => new HttpResponseMessage(HttpStatusCode.Redirect)
             {
                 Headers = { Location = new Uri("file:///secret.bin") }
@@ -401,7 +426,7 @@ public sealed class WorkItemAttachmentDownloadTests
             .AddJsonRoute(
                 HttpMethod.Get,
                 "/api/v1/tasks/attachments/901",
-                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/redirect"))
+                DownloadFixtures.DetailWithUrl("https://fake.taiga.test/media/redirect", size: 3))
             .AddRoute(HttpMethod.Get, "/media/redirect", _ => new HttpResponseMessage(HttpStatusCode.Redirect)
             {
                 Headers = { Location = new Uri("/media/final", UriKind.Relative) }
@@ -554,8 +579,8 @@ internal static class DownloadFixtures
         }
         """;
 
-    public static string DetailWithUrl(string url, string name = "upstream-name.bin")
-        => $"{{\"id\":901,\"project\":123,\"object_id\":42,\"name\":{JsonSerializer.Serialize(name)},\"url\":{JsonSerializer.Serialize(url)}}}";
+    public static string DetailWithUrl(string url, string name = "upstream-name.bin", int? size = null)
+        => $"{{\"id\":901,\"project\":123,\"object_id\":42,\"name\":{JsonSerializer.Serialize(name)},\"size\":{JsonSerializer.Serialize(size)},\"url\":{JsonSerializer.Serialize(url)}}}";
 }
 
 internal sealed class UnknownLengthContent(byte[] bytes) : HttpContent
