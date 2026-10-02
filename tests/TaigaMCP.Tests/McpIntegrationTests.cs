@@ -944,20 +944,29 @@ public sealed class McpIntegrationTests
             Assert.False(updatePayload.TryGetProperty("version", out _));
             Assert.False(updatePayload.TryGetProperty("attached_file", out _));
 
-            var deletedAttachment = await Call("delete_work_item_attachment", new()
+            var deletionRoutes = new[]
             {
-                ["kind"] = "task",
-                ["attachmentId"] = 901
-            });
-            Assert.False(deletedAttachment.IsError == true, GetText(deletedAttachment));
-            var deletedAttachmentJson = JsonSerializer.Deserialize<JsonElement>(GetText(deletedAttachment));
-            Assert.Equal("task", deletedAttachmentJson.GetProperty("kind").GetString());
-            Assert.Equal(901, deletedAttachmentJson.GetProperty("attachment_id").GetInt32());
-            Assert.True(deletedAttachmentJson.GetProperty("deleted").GetBoolean());
-            var deleteRequest = Assert.Single(taiga.Requests, request =>
-                request.Method == "DELETE" && request.PathAndQuery == "/api/v1/tasks/attachments/901");
-            Assert.Equal("Bearer integration-token", deleteRequest.Authorization);
-            Assert.Empty(deleteRequest.Body);
+                (Kind: "epic", Path: "/api/v1/epics/attachments/901"),
+                (Kind: "user_story", Path: "/api/v1/userstories/attachments/901"),
+                (Kind: "task", Path: "/api/v1/tasks/attachments/901")
+            };
+            foreach (var (kind, path) in deletionRoutes)
+            {
+                var deletedAttachment = await Call("delete_work_item_attachment", new()
+                {
+                    ["kind"] = kind,
+                    ["attachmentId"] = 901
+                });
+                Assert.False(deletedAttachment.IsError == true, GetText(deletedAttachment));
+                var deletedAttachmentJson = JsonSerializer.Deserialize<JsonElement>(GetText(deletedAttachment));
+                Assert.Equal(kind, deletedAttachmentJson.GetProperty("kind").GetString());
+                Assert.Equal(901, deletedAttachmentJson.GetProperty("attachment_id").GetInt32());
+                Assert.True(deletedAttachmentJson.GetProperty("deleted").GetBoolean());
+                var deleteRequest = Assert.Single(taiga.Requests, request =>
+                    request.Method == "DELETE" && request.PathAndQuery == path);
+                Assert.Equal("Bearer integration-token", deleteRequest.Authorization);
+                Assert.Empty(deleteRequest.Body);
+            }
             Assert.DoesNotContain(taiga.Requests, request =>
                 request.Method == "DELETE" &&
                 request.PathAndQuery is "/api/v1/tasks/204" or "/api/v1/userstories/102" or "/api/v1/epics/301");

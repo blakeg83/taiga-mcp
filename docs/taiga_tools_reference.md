@@ -318,8 +318,10 @@ sends exactly one authenticated `DELETE` to the selected route:
 | `task` | `/api/v1/tasks/attachments/{attachmentId}` |
 
 Only a confirmed HTTP 204 response returns the receipt
-`{"kind":"task","attachment_id":901,"deleted":true}`. A 404, including a
-repeated delete, is a safe error and is not treated as idempotent success.
+`{"kind":"task","attachment_id":901,"deleted":true}`. The shared transport
+checks the status only and does not parse or require a response body; any body
+on a 204 is ignored. A 404, including a repeated delete, is a safe error and
+is not treated as idempotent success.
 Unexpected successful statuses, permission failures, transport failures, and
 cancellation remain safe errors; ambiguous DELETE failures are never retried,
 while the shared one-401 authentication replay remains allowed. The tool does

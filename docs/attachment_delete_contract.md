@@ -42,17 +42,20 @@ filesystem operation.
 
 ## Success receipt and failure policy
 
-Taiga's documented destroy path returns HTTP `204 No Content`. Only that
-confirmed no-content response is success. The tool returns this small receipt:
+Taiga's documented destroy path returns HTTP `204 No Content`. The shared
+transport confirms the status and does not parse or require a response body;
+only that confirmed 204 response is success. The tool returns this small
+receipt:
 
 ```json
 {"kind":"task","attachment_id":901,"deleted":true}
 ```
 
 The `kind` is the validated public kind and `attachment_id` is the caller's
-positive internal attachment ID. A response with another 2xx status, a body,
-or an otherwise unexpected successful response is not fabricated into a
-deletion receipt.
+positive internal attachment ID. A response with another 2xx status or an
+otherwise unexpected successful response is not fabricated into a deletion
+receipt. A body on a 204 response is ignored and is not exposed in the
+receipt.
 
 A missing attachment, including a repeated delete, remains a safe Taiga HTTP
 404 error; it is not treated as an idempotent success. Permission failures,
