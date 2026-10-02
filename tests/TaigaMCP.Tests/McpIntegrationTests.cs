@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(39, tools.Count);
+            Assert.Equal(40, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -837,9 +837,22 @@ public sealed class McpIntegrationTests
                 "update_issue",
                 "update_task",
                 "update_user_story",
+                "update_work_item_attachment",
                 "upload_work_item_attachment"
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
+
+            var updateWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "update_work_item_attachment");
+            var updateAttachmentProperties = updateWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId", "fields" }, updateAttachmentProperties);
+            var updateAttachmentRequired = updateWorkItemAttachment.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId", "fields" }, updateAttachmentRequired);
+            Assert.Contains("PATCH", updateWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cancellationToken", updateAttachmentProperties);
 
             var listWorkItemAttachments = Assert.Single(tools, tool => tool.Name == "list_work_item_attachments");
             var attachmentProperties = listWorkItemAttachments.JsonSchema.GetProperty("properties").EnumerateObject()
