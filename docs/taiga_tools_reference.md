@@ -222,7 +222,8 @@ The upstream filename is never used, and an existing destination is rejected
 instead of overwritten. The positive `TAIGA__MAXATTACHMENTBYTES` setting
 (10 MiB by default) applies to the downloaded byte stream. A known oversized
 attachment `size` or `Content-Length` is rejected before writing; streams with
-no usable length are bounded while read. Bytes are written to a unique temporary sibling and moved
+no usable length are bounded while read, and a declared length must equal the
+received byte count. Bytes are written to a unique temporary sibling and moved
 into place only after a successful, complete response; cancellation, errors,
 and destination races remove the temporary file.
 

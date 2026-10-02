@@ -160,6 +160,33 @@ public sealed class WorkItemAttachmentDownloadTests
     }
 
     [Fact]
+    public async Task DownloadAsync_RejectsResponseShorterThanDeclaredContentLength()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
+            .AddRoute(HttpMethod.Get, "/media/901.bin", _ =>
+            {
+                var content = new ByteArrayContent([1, 2, 3]);
+                content.Headers.ContentLength = 5;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+            });
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            try
+            {
+                var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                    NewApi(handler, auth).DownloadAsync("task", 901, destination));
+
+                Assert.Contains("declared content length", error.Message);
+                Assert.False(File.Exists(destination));
+            }
+            finally { File.Delete(destination); }
+        }
+    }
+
+    [Fact]
     public async Task DownloadAsync_PropagatesCancellationAndCleansPartialFile()
     {
         var content = new BlockingContent();

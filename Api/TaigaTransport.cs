@@ -120,6 +120,9 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                     throw new TaigaRequestException($"attachment exceeds the configured maximum size of {plan.MaximumBytes} bytes.");
 
                 var bytesWritten = await WriteDownloadAsync(response, temporaryPath, plan.MaximumBytes, cancellationToken);
+                if (contentLength.HasValue && bytesWritten != contentLength.Value)
+                    throw new TaigaRequestException("Taiga attachment response ended before its declared content length.");
+
                 try
                 {
                     File.Move(temporaryPath, plan.DestinationPath);
