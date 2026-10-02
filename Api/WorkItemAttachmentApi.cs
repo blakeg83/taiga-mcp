@@ -1,3 +1,4 @@
+using System.Text;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -72,6 +73,43 @@ public sealed class WorkItemAttachmentApi
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{route}/{attachmentId}");
         using var document = await _transport.ReadAsync(request, cancellationToken);
         return MapAttachment(document.RootElement, attachmentId);
+    }
+
+    internal async Task<WorkItemAttachmentDto> UpdateAsync(
+        string kind,
+        int attachmentId,
+        JsonElement fields,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Required(kind, nameof(kind));
+        InputValidation.Positive(attachmentId, nameof(attachmentId));
+
+        var route = WorkItemAttachmentRoutes.GetRoute(kind);
+        var payload = WorkItemAttachmentUpdateContract.Parse(fields);
+        var json = JsonSerializer.Serialize(payload);
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"{route}/{attachmentId}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            return MapAttachment(document.RootElement, attachmentId);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga attachment update may already have applied; response parsing was cancelled. Read the attachment before retrying.",
+                cancellationToken);
+        }
+        catch (TaigaRequestException exception)
+        {
+            throw new TaigaRequestException(
+                $"{exception.Message.TrimEnd('.')} The update may already have applied; read the attachment before retrying.",
+                exception.StatusCode);
+        }
     }
 
     internal async Task<WorkItemAttachmentDownloadDto> DownloadAsync(

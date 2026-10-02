@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json;
 using ModelContextProtocol.Server;
 using TaigaMCP.Api;
 
@@ -23,6 +24,19 @@ public sealed class WorkItemAttachmentTools
     => await ToolErrors.RunAsync(async () =>
     {
         var result = await _attachments.GetAsync(kind, attachmentId, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
+    [McpServerTool(Name = "update_work_item_attachment")]
+    [Description("Partially update one epic, user story, or task attachment's metadata with one JSON PATCH. fields must be an object containing one or more of description (string, including empty), order (32-bit integer, including zero), and is_deprecated (boolean, including false). Omitted fields remain unchanged; attachment bytes, parent association, project, and issue attachments are not supported. The authoritative attachment metadata is returned and ambiguous writes are never retried.")]
+    public async Task<string> UpdateWorkItemAttachment(
+        [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
+        [Description("Positive internal attachment ID, not a work-item or displayed #ref ID.")] int attachmentId,
+        [Description("JSON object with one or more allowlisted fields: description (string), order (32-bit integer), and is_deprecated (boolean). Null and unknown fields are rejected; omitted fields remain unchanged.")] JsonElement fields,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _attachments.UpdateAsync(kind, attachmentId, fields, cancellationToken);
         return ToolResponseJson.Serialize(result);
     });
 

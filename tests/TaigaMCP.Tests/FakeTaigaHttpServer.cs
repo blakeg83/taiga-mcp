@@ -62,6 +62,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public string AttachmentDetailResponseBody { get; set; } =
         "{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"résumé & 檔案.txt\",\"description\":\"Attachment detail\",\"size\":2048,\"attached_file\":\"attachments/901.txt\",\"url\":\"https://files.example/901#token\",\"preview_url\":null,\"thumbnail_card_url\":null,\"sha1\":\"abc123\",\"is_deprecated\":false,\"from_comment\":false}";
 
+    public HttpStatusCode AttachmentUpdateStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public string AttachmentUpdateResponseBody { get; set; } =
+        "{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"spec.txt\",\"description\":\"Updated attachment\",\"order\":0,\"size\":2048,\"attached_file\":\"attachments/spec.txt\",\"url\":\"https://files.example/901#token\",\"is_deprecated\":false,\"from_comment\":false,\"sha1\":\"abc123\"}";
+
     public HttpStatusCode AttachmentDownloadStatusCode { get; set; } = HttpStatusCode.OK;
 
     public byte[] AttachmentDownloadResponseBody { get; set; } = [0, 1, 127, 128, 254, 255];
@@ -190,6 +195,18 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments")
         {
             await RespondAsync(context.Response, AttachmentUploadStatusCode, AttachmentUploadResponseBody);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Patch.Method &&
+            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901")
+        {
+            await RespondAsync(
+                context.Response,
+                AttachmentUpdateStatusCode,
+                AttachmentUpdateStatusCode == HttpStatusCode.OK
+                    ? AttachmentUpdateResponseBody
+                    : "{\"detail\":\"synthetic attachment update secret\"}");
             return;
         }
 

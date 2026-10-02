@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 39 tools:
+The current server exposes 40 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,10 +22,10 @@ The current server exposes 39 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 8 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+- 9 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
   `get_work_item_history`, `resolve_work_item`, `list_work_item_attachments`,
   `get_work_item_attachment`, `upload_work_item_attachment`, and
-  `download_work_item_attachment`.
+  `download_work_item_attachment`, and `update_work_item_attachment`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -244,6 +244,64 @@ Binary content, bearer tokens, raw upstream bodies, issue attachments,
 overwrite controls, directory creation, and attachment mutation remain out
 of scope. See [attachment_download_contract.md](attachment_download_contract.md)
 for the source and filesystem evidence record.
+
+### `update_work_item_attachment` contract
+
+The signature is `update_work_item_attachment(kind, attachmentId, fields)`.
+The supported kinds are exactly `epic`, `user_story`, and `task`; the positive
+`attachmentId` is the internal attachment ID. `fields` is a required JSON
+object with at least one of these exact allowlisted properties:
+
+| field | JSON type | behavior |
+| --- | --- | --- |
+| `description` | string | Empty string explicitly sets an empty description. |
+| `order` | integer | A signed 32-bit integer is forwarded unchanged; zero is valid. |
+| `is_deprecated` | boolean | Both `true` and `false` are forwarded unchanged. |
+
+The client sends exactly one authenticated JSON PATCH to the selected route:
+
+| kind | upstream route |
+| --- | --- |
+| `epic` | `/api/v1/epics/attachments/{attachmentId}` |
+| `user_story` | `/api/v1/userstories/attachments/{attachmentId}` |
+| `task` | `/api/v1/tasks/attachments/{attachmentId}` |
+
+Omitted fields remain unchanged. Null, unknown, duplicate, and empty fields
+objects fail before HTTP. The request never includes attachment bytes,
+`project`, `object_id`, `name`, `owner`, `size`, `sha1`, timestamps, or a
+caller-supplied `version`: the pinned attachment model and validator expose no
+attachment version field. A successful response is the authoritative
+attachment detail object; required positive `id`, `project`, and `object_id`
+values are validated and `id` must match `attachmentId`. Null response fields
+are omitted from the MCP result.
+
+For example:
+
+```json
+{"kind":"task","attachmentId":901,"fields":{"description":"","order":0,"is_deprecated":false}}
+```
+
+```json
+{"id":901,"project":123,"object_id":42,"name":"spec.txt","description":"","order":0,"size":2048,"is_deprecated":false}
+```
+
+Invalid kinds/IDs, unsupported or invalid field values, permission/validation/
+not-found/conflict responses, malformed successful responses, transport
+failures, and cancellation become safe MCP errors. Only a received 401 can
+replay the request through shared authentication; ambiguous writes and
+conflicts are never retried. If a successful PATCH cannot be mapped, the
+error says the update may already have applied and directs the caller to read
+the attachment before retrying. Issue attachments, delete, bulk reordering,
+file replacement, and project/parent changes remain outside this command.
+
+This contract is recorded in
+[attachment_update_contract.md](attachment_update_contract.md) and was checked
+on 2026-10-02 against the official [epic endpoints](https://github.com/taigaio/taiga-doc/blob/main/api/epics/endpoints.adoc),
+[user-story endpoints](https://github.com/taigaio/taiga-doc/blob/main/api/user-stories/endpoints.adoc),
+and [task endpoints](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/endpoints.adoc),
+their edit-attachment documentation, and pinned taiga-back attachment
+view/validator/serializer/model sources. This is pinned source evidence, not a
+deployed-version claim.
 
 ### `list_work_item_comments` contract
 
@@ -679,6 +737,7 @@ show the JSON contents, not an MCP `content` wrapper.
 | `update_issue` | `issueId` and `version` required; `subject`, `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One issue object returned by Taiga after the PATCH. |
 | `add_work_item_comment` | `kind`, `id`, `version`, and `text` required; `kind` is one of `issue`, `user_story`, `task`, or `epic`; `id` is positive; `version` is nonnegative; `text` is nonblank | `{ "kind": "task", "id": 203, "version": 3, "comment_submitted": true }` after one confirmed comment-only PATCH. |
 | `download_work_item_attachment` | `kind`, `attachmentId`, and `destination` required; `kind` is one of `epic`, `user_story`, or `task` | `{ destination, bytes, attachment }`; streams bounded binary bytes to a new explicit absolute destination after metadata inspection, with origin-scoped authentication, manual redirects, atomic placement, and cleanup on failure. |
+| `update_work_item_attachment` | `kind`, `attachmentId`, and `fields` required; `fields` is a nonempty object containing only `description`, `order`, and/or `is_deprecated` | One authoritative attachment object after one JSON PATCH; omitted fields stay unchanged, empty/zero/false values are preserved, no attachment version is sent, and only a received 401 is replayed. |
 | `list_issue_statuses` | `projectId` integer, required | Array of `{ id, name, slug, is_closed }`. |
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
