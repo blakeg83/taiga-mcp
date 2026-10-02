@@ -855,6 +855,18 @@ public sealed class McpIntegrationTests
             Assert.Contains("PATCH", updateWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("cancellationToken", updateAttachmentProperties);
 
+            var deleteWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "delete_work_item_attachment");
+            var deleteProperties = deleteWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId" }, deleteProperties);
+            var deleteRequired = deleteWorkItemAttachment.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId" }, deleteRequired);
+            Assert.Contains("204", deleteWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cancellationToken", deleteProperties);
+
             var listWorkItemAttachments = Assert.Single(tools, tool => tool.Name == "list_work_item_attachments");
             var attachmentProperties = listWorkItemAttachments.JsonSchema.GetProperty("properties").EnumerateObject()
                 .Select(property => property.Name)
@@ -931,6 +943,24 @@ public sealed class McpIntegrationTests
             Assert.False(updatePayload.GetProperty("is_deprecated").GetBoolean());
             Assert.False(updatePayload.TryGetProperty("version", out _));
             Assert.False(updatePayload.TryGetProperty("attached_file", out _));
+
+            var deletedAttachment = await Call("delete_work_item_attachment", new()
+            {
+                ["kind"] = "task",
+                ["attachmentId"] = 901
+            });
+            Assert.False(deletedAttachment.IsError == true, GetText(deletedAttachment));
+            var deletedAttachmentJson = JsonSerializer.Deserialize<JsonElement>(GetText(deletedAttachment));
+            Assert.Equal("task", deletedAttachmentJson.GetProperty("kind").GetString());
+            Assert.Equal(901, deletedAttachmentJson.GetProperty("attachment_id").GetInt32());
+            Assert.True(deletedAttachmentJson.GetProperty("deleted").GetBoolean());
+            var deleteRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "DELETE" && request.PathAndQuery == "/api/v1/tasks/attachments/901");
+            Assert.Equal("Bearer integration-token", deleteRequest.Authorization);
+            Assert.Empty(deleteRequest.Body);
+            Assert.DoesNotContain(taiga.Requests, request =>
+                request.Method == "DELETE" &&
+                request.PathAndQuery is "/api/v1/tasks/204" or "/api/v1/userstories/102" or "/api/v1/epics/301");
 
             var getWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "get_work_item_attachment");
             var getAttachmentProperties = getWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()

@@ -67,6 +67,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public string AttachmentUpdateResponseBody { get; set; } =
         "{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"spec.txt\",\"description\":\"Updated attachment\",\"order\":0,\"size\":2048,\"attached_file\":\"attachments/spec.txt\",\"url\":\"https://files.example/901#token\",\"is_deprecated\":false,\"from_comment\":false,\"sha1\":\"abc123\"}";
 
+    public HttpStatusCode AttachmentDeleteStatusCode { get; set; } = HttpStatusCode.NoContent;
+
     public HttpStatusCode AttachmentDownloadStatusCode { get; set; } = HttpStatusCode.OK;
 
     public byte[] AttachmentDownloadResponseBody { get; set; } = [0, 1, 127, 128, 254, 255];
@@ -207,6 +209,16 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 AttachmentUpdateStatusCode == HttpStatusCode.OK
                     ? AttachmentUpdateResponseBody
                     : "{\"detail\":\"synthetic attachment update secret\"}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Delete.Method &&
+            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901")
+        {
+            if (AttachmentDeleteStatusCode == HttpStatusCode.NoContent)
+                await RespondNoContentAsync(context.Response);
+            else
+                await RespondAsync(context.Response, AttachmentDeleteStatusCode, "{\"detail\":\"synthetic attachment deletion secret\"}");
             return;
         }
 
