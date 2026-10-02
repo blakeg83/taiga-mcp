@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 36 tools:
+The current server exposes 37 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,8 +22,9 @@ The current server exposes 36 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 5 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
-  `get_work_item_history`, `resolve_work_item`, and `list_work_item_attachments`.
+- 6 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+  `get_work_item_history`, `resolve_work_item`, `list_work_item_attachments`,
+  and `get_work_item_attachment`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -85,7 +86,7 @@ Invalid kinds, nonpositive IDs/pages, malformed required attachment identities,
 malformed list data, permission failures, and transport failures become safe
 MCP errors. The command does not read parent details, fetch later pages,
 download file content, or mutate attachments. Issue attachments and attachment
-detail/upload/update/delete/download commands remain outside this goal.
+detail/upload/update/delete/download commands remain outside this list command.
 
 This contract was checked on 2026-10-02 against the official [epic](https://github.com/taigaio/taiga-doc/blob/main/api/epics/list-attachments.adoc),
 [user-story](https://github.com/taigaio/taiga-doc/blob/main/api/user-stories/list-attachments.adoc),
@@ -96,6 +97,54 @@ defines the project/object filters and resource content types, while the
 [attachment serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/serializers.py)
 defines the mapped fields and generated URLs. This is pinned source evidence,
 not a deployed-version claim.
+
+### `get_work_item_attachment` contract
+
+The signature is `get_work_item_attachment(kind, attachmentId)`. The supported
+kinds are exactly `epic`, `user_story`, and `task`; `attachmentId` is the
+positive internal attachment ID, not a work-item or displayed `#ref` ID. The
+tool requests exactly one authenticated detail resource and does not accept a
+project or parent ID:
+
+| kind | upstream route |
+| --- | --- |
+| `epic` | `/api/v1/epics/attachments/{attachmentId}` |
+| `user_story` | `/api/v1/userstories/attachments/{attachmentId}` |
+| `task` | `/api/v1/tasks/attachments/{attachmentId}` |
+
+The response is one attachment object with required positive `id`, `project`,
+and `object_id` values. It can include `owner`, `name`, `description`, `order`,
+`size`, `attached_file`, `url`, `preview_url`, `thumbnail_card_url`, `sha1`,
+`is_deprecated`, `from_comment`, `created_date`, and `modified_date`. Null
+properties are omitted; empty strings and unusual filenames are preserved.
+`url`, `preview_url`, and `thumbnail_card_url` are opaque available locations;
+the client does not follow them or download binary content. The returned `id`
+must match `attachmentId`; missing, nonpositive, or inconsistent required
+identity is rejected safely.
+
+For example:
+
+```json
+{"kind":"task","attachmentId":901}
+```
+
+```json
+{"id":901,"project":123,"object_id":42,"name":"résumé & 檔案.txt","description":"Attachment detail","size":2048,"attached_file":"attachments/901.txt","url":"https://files.example/901#token","sha1":"abc123","is_deprecated":false,"from_comment":false}
+```
+
+Invalid kinds, nonpositive IDs, malformed JSON or identity, permission/not-found
+responses, transport failures, and cancellation become the established safe
+MCP errors. The tool performs no parent-detail, relationship, list, or content
+download request. Issue attachments and upload/update/delete/download
+operations remain outside this command.
+
+This contract is recorded in
+[attachment_detail_contract.md](attachment_detail_contract.md) and was checked
+on 2026-10-02 against the official [epic](https://github.com/taigaio/taiga-doc/blob/main/api/epics/endpoints.adoc),
+[user-story](https://github.com/taigaio/taiga-doc/blob/main/api/user-stories/endpoints.adoc),
+and [task](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/endpoints.adoc)
+endpoint inventories plus the pinned shared attachment serializer and view
+set. This is pinned source evidence, not a deployed-version claim.
 
 ### `list_work_item_comments` contract
 

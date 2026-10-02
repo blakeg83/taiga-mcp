@@ -14,6 +14,20 @@ public sealed class WorkItemAttachmentApi
         _transport = transport;
     }
 
+    internal async Task<WorkItemAttachmentDto> GetAsync(
+        string kind,
+        int attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Required(kind, nameof(kind));
+        InputValidation.Positive(attachmentId, nameof(attachmentId));
+
+        var route = WorkItemAttachmentRoutes.GetRoute(kind);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{route}/{attachmentId}");
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        return MapAttachment(document.RootElement, attachmentId);
+    }
+
     internal async Task<WorkItemAttachmentListPage> ListPageAsync(
         string kind,
         int id,
@@ -51,14 +65,18 @@ public sealed class WorkItemAttachmentApi
             pageInfo.HasMore);
     }
 
-    private static WorkItemAttachmentDto MapAttachment(JsonElement attachment)
+    private static WorkItemAttachmentDto MapAttachment(JsonElement attachment, int? expectedId = null)
     {
         if (attachment.ValueKind != JsonValueKind.Object)
             throw new TaigaRequestException("Taiga returned invalid work-item attachment data.");
 
+        var id = ReadRequiredPositiveInt(attachment, "id");
+        if (expectedId.HasValue && id != expectedId.Value)
+            throw new TaigaRequestException("Taiga returned a work-item attachment with an unexpected id.");
+
         return new WorkItemAttachmentDto
         {
-            Id = ReadRequiredPositiveInt(attachment, "id"),
+            Id = id,
             Project = ReadRequiredPositiveInt(attachment, "project"),
             ObjectId = ReadRequiredPositiveInt(attachment, "object_id"),
             Owner = ReadOptionalPositiveInt(attachment, "owner"),

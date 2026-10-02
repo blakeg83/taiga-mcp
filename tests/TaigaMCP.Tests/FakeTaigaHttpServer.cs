@@ -52,6 +52,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public string AttachmentResponseBody { get; set; } =
         "[{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"spec.txt\",\"description\":\"Attachment\",\"order\":1,\"size\":2048,\"url\":\"https://files.example/901\"}]";
 
+    public HttpStatusCode AttachmentDetailStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public string AttachmentDetailResponseBody { get; set; } =
+        "{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"résumé & 檔案.txt\",\"description\":\"Attachment detail\",\"size\":2048,\"attached_file\":\"attachments/901.txt\",\"url\":\"https://files.example/901#token\",\"preview_url\":null,\"thumbnail_card_url\":null,\"sha1\":\"abc123\",\"is_deprecated\":false,\"from_comment\":false}";
+
     public string CurrentUserResponseBody { get; set; } =
         "{\"id\":42,\"username\":\"integration-user\",\"full_name\":\"Integration User\",\"is_active\":true,\"email\":\"private@example.test\",\"auth_token\":\"must-not-escape\",\"roles\":[\"admin\"]}";
 
@@ -163,6 +168,19 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         if (request.HttpMethod == HttpMethod.Post.Method && path.EndsWith("/auth", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(context.Response, HttpStatusCode.OK, "{\"auth_token\":\"integration-token\",\"refresh\":\"integration-refresh\"}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method &&
+            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901")
+        {
+            if (AttachmentDetailStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, AttachmentDetailStatusCode, "{\"detail\":\"synthetic attachment detail secret\"}");
+                return;
+            }
+
+            await RespondAsync(context.Response, HttpStatusCode.OK, AttachmentDetailResponseBody);
             return;
         }
 

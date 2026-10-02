@@ -14,6 +14,18 @@ public sealed class WorkItemAttachmentTools
         _attachments = attachments;
     }
 
+    [McpServerTool(Name = "get_work_item_attachment")]
+    [Description("Retrieve one file attachment's metadata and available download locations for an epic, user story, or task. The kind is closed to epic, user_story, and task; issue attachments, binary download, parent-detail enrichment, and attachment mutation are not included. The response is one authoritative attachment object and nullable fields are omitted.")]
+    public async Task<string> GetWorkItemAttachment(
+        [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
+        [Description("Positive internal attachment ID, not a work-item or displayed #ref ID.")] int attachmentId,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _attachments.GetAsync(kind, attachmentId, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
     [McpServerTool(Name = "list_work_item_attachments")]
     [Description("List one page of file attachments for an epic, user story, or task. The kind is closed to epic, user_story, and task; issue attachments, all-page export, file-content download, parent-detail fan-out, and attachment mutation are not included. The result always uses the items/page/total/next_page/has_more envelope and preserves unknown pagination values as null.")]
     public async Task<string> ListWorkItemAttachments(
