@@ -2185,6 +2185,63 @@ public sealed class McpIntegrationTests
     }
 
     [Fact]
+    public async Task ProductionServer_GetWorkItemAttachment_InspectsEverySupportedKindWithoutDownloadOrParentReads()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        var tool = Assert.Single(tools, candidate => candidate.Name == "get_work_item_attachment");
+        Assert.Equal(
+            new[] { "kind", "attachmentId" },
+            tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+
+        foreach (var kind in new[] { "epic", "user_story", "task" })
+        {
+            var result = await client.CallToolAsync(
+                "get_work_item_attachment",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = kind,
+                    ["attachmentId"] = 901
+                },
+                cancellationToken: timeout.Token);
+
+            Assert.False(result.IsError == true, GetText(result));
+            var json = JsonSerializer.Deserialize<JsonElement>(GetText(result));
+            Assert.Equal(901, json.GetProperty("id").GetInt32());
+            Assert.Equal("résumé & 檔案.txt", json.GetProperty("name").GetString());
+            Assert.Equal("https://files.example/901#token", json.GetProperty("url").GetString());
+            Assert.False(json.TryGetProperty("preview_url", out _));
+        }
+
+        Assert.Equal(
+            new[]
+            {
+                "/api/v1/epics/attachments/901",
+                "/api/v1/userstories/attachments/901",
+                "/api/v1/tasks/attachments/901"
+            },
+            taiga.Requests
+                .Where(request => request.Method == "GET" && request.PathAndQuery.Contains("/attachments/901", StringComparison.Ordinal))
+                .Select(request => request.PathAndQuery));
+        Assert.DoesNotContain(taiga.Requests, request =>
+            request.Method == "GET" &&
+            (request.PathAndQuery.Contains("/epics/301", StringComparison.Ordinal) ||
+             request.PathAndQuery.Contains("/userstories/102", StringComparison.Ordinal) ||
+             request.PathAndQuery.Contains("/tasks/203", StringComparison.Ordinal) ||
+             request.PathAndQuery.Contains("/media/", StringComparison.Ordinal) ||
+             request.PathAndQuery.Contains("/_protected/", StringComparison.Ordinal)));
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
+    [Fact]
     public async Task ProductionServer_UpdateTask_CoversProgressAssignmentBlockingCommentsAndFailures()
     {
         await using var taiga = FakeTaigaHttpServer.Start();

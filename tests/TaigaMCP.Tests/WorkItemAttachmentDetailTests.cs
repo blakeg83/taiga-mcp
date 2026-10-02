@@ -25,7 +25,7 @@ public sealed class WorkItemAttachmentDetailTests
             Assert.Equal(123, attachment.Project);
             Assert.Equal(42, attachment.ObjectId);
             Assert.Equal(7, attachment.Owner);
-            Assert.Equal("spec & notes.txt", attachment.Name);
+            Assert.Equal("résumé & 檔案.txt", attachment.Name);
             Assert.Equal("A useful description", attachment.Description);
             Assert.Equal(3, attachment.Order);
             Assert.Equal(2048, attachment.Size);
@@ -66,6 +66,7 @@ public sealed class WorkItemAttachmentDetailTests
             Assert.False(result.TryGetProperty("preview_url", out _));
             Assert.False(result.TryGetProperty("thumbnail_card_url", out _));
             Assert.False(result.TryGetProperty("content_type", out _));
+            Assert.False(result.TryGetProperty("unknown_field", out _));
         }
     }
 
@@ -132,6 +133,40 @@ public sealed class WorkItemAttachmentDetailTests
     }
 
     [Theory]
+    [InlineData("[]")]
+    [InlineData("{not-json")]
+    [InlineData("{\"id\":901,\"project\":123,\"object_id\":42,\"name\":17}")]
+    public async Task GetAsync_RejectsMalformedResponse(string response)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", response);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).GetAsync("task", 901));
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_PropagatesCancellationBeforeHttp()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/attachments/901", AttachmentDetailFixtures.Detail);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                NewApi(handler, auth).GetAsync("epic", 901, cancellation.Token));
+
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath != "/api/v1/auth");
+        }
+    }
+
+    [Theory]
     [InlineData(HttpStatusCode.Forbidden, "permission denied")]
     [InlineData(HttpStatusCode.NotFound, "resource not found")]
     public async Task GetTool_ReportsSafeHttpFailures(HttpStatusCode statusCode, string category)
@@ -155,6 +190,26 @@ public sealed class WorkItemAttachmentDetailTests
         }
     }
 
+    [Fact]
+    public async Task GetTool_ReportsSafeTransportFailure()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Get,
+                "/api/v1/tasks/attachments/901",
+                new HttpRequestException("transport secret"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<ModelContextProtocol.McpException>(() =>
+                new WorkItemAttachmentTools(NewApi(handler, auth))
+                    .GetWorkItemAttachment("task", 901));
+
+            Assert.Contains("transport failure", error.Message);
+            Assert.DoesNotContain("transport secret", error.Message);
+        }
+    }
+
     private static WorkItemAttachmentApi NewApi(FakeHttpMessageHandler handler, AuthClient auth)
         => new(new TaigaTransport(new TestHttpClientFactory(handler), auth));
 }
@@ -167,7 +222,7 @@ internal static class AttachmentDetailFixtures
           "project":123,
           "object_id":42,
           "owner":7,
-          "name":"spec & notes.txt",
+          "name":"résumé & 檔案.txt",
           "description":"A useful description",
           "order":3,
           "size":2048,
@@ -190,6 +245,7 @@ internal static class AttachmentDetailFixtures
           "object_id":42,
           "name":"empty-description.txt",
           "description":"",
+          "unknown_field":"ignored",
           "order":0,
           "size":0,
           "attached_file":"attachments/empty-description.txt",
