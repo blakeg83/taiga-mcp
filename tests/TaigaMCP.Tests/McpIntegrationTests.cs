@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(37, tools.Count);
+            Assert.Equal(38, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -835,7 +835,8 @@ public sealed class McpIntegrationTests
                 "update_epic",
                 "update_issue",
                 "update_task",
-                "update_user_story"
+                "update_user_story",
+                "upload_work_item_attachment"
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
 
@@ -2235,6 +2236,63 @@ public sealed class McpIntegrationTests
              request.PathAndQuery.Contains("/tasks/203", StringComparison.Ordinal) ||
              request.PathAndQuery.Contains("/media/", StringComparison.Ordinal) ||
              request.PathAndQuery.Contains("/_protected/", StringComparison.Ordinal)));
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
+    [Fact]
+    public async Task ProductionServer_UploadWorkItemAttachment_BindsLocalFileAndReturnsReceipt()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        var tool = Assert.Single(tools, candidate => candidate.Name == "upload_work_item_attachment");
+        Assert.Equal(
+            new[] { "kind", "id", "projectId", "file", "description" },
+            tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        Assert.Equal(
+            new[] { "kind", "id", "projectId", "file" },
+            tool.JsonSchema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+        Assert.Contains("absolute path", tool.Description, StringComparison.OrdinalIgnoreCase);
+
+        var file = Path.Combine(Path.GetTempPath(), $"taiga-mcp-upload-{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(file, "mcp synthetic upload");
+        try
+        {
+            var result = await client.CallToolAsync(
+                "upload_work_item_attachment",
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = "task",
+                    ["id"] = 42,
+                    ["projectId"] = 123,
+                    ["file"] = file,
+                    ["description"] = "Uploaded"
+                },
+                cancellationToken: timeout.Token);
+
+            Assert.False(result.IsError == true, GetText(result));
+            var receipt = JsonSerializer.Deserialize<JsonElement>(GetText(result));
+            Assert.Equal(901, receipt.GetProperty("id").GetInt32());
+            Assert.Equal(123, receipt.GetProperty("project").GetInt32());
+            Assert.Equal(42, receipt.GetProperty("object_id").GetInt32());
+
+            var request = Assert.Single(taiga.Requests, candidate =>
+                candidate.Method == "POST" && candidate.PathAndQuery == "/api/v1/tasks/attachments");
+            Assert.Contains("name=object_id", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\r\n42\r\n", request.Body, StringComparison.Ordinal);
+            Assert.Contains("name=project", request.Body, StringComparison.Ordinal);
+            Assert.Contains("\r\n123\r\n", request.Body, StringComparison.Ordinal);
+            Assert.Contains("name=description", request.Body, StringComparison.Ordinal);
+            Assert.Contains("mcp synthetic upload", request.Body, StringComparison.Ordinal);
+        }
+        finally { File.Delete(file); }
 
         await process.DisposeAsync();
         await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));

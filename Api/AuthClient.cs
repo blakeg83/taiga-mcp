@@ -8,6 +8,11 @@ using TaigaMCP.Config;
 
 namespace TaigaMCP.Api;
 
+internal interface IReplayableHttpContent
+{
+    HttpContent CreateReplay();
+}
+
 public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClient> log) : IDisposable
 {
     private sealed record TokenState(string Token, string? Refresh);
@@ -91,8 +96,12 @@ public sealed class AuthClient(IOptions<TaigaOptions> options, ILogger<AuthClien
             foreach (var option in request.Options) clone.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
             if (request.Content is not null)
             {
-                clone.Content = new ByteArrayContent(await request.Content.ReadAsByteArrayAsync(cancellationToken));
-                foreach (var header in request.Content.Headers) clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                clone.Content = request.Content is IReplayableHttpContent replayable
+                    ? replayable.CreateReplay()
+                    : new ByteArrayContent(await request.Content.ReadAsByteArrayAsync(cancellationToken));
+                foreach (var header in request.Content.Headers)
+                    if (!clone.Content.Headers.Contains(header.Key))
+                        clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
             return clone;
         }

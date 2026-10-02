@@ -22,6 +22,7 @@ public static class ServiceCollectionExtensions
             .Validate(o => TaigaOptions.IsValidBaseUrl(o.BaseUrl), "Taiga base URL must be absolute HTTP/HTTPS without credentials, query or fragment")
             .PostConfigure(o => { if (TaigaOptions.IsValidBaseUrl(o.BaseUrl)) o.BaseUrl = o.BaseUrl.TrimEnd('/') + "/"; })
             .Validate(o => o.MetadataTtlSeconds > 0, "Taiga metadata TTL must be positive")
+            .Validate(o => o.MaxAttachmentBytes > 0, "Taiga maximum attachment size must be positive")
             .ValidateOnStart();
 
         services.AddHttpClient("taiga", (sp, client) =>

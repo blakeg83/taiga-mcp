@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using TaigaMCP.Config;
 using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
@@ -8,10 +10,54 @@ namespace TaigaMCP.Api;
 public sealed class WorkItemAttachmentApi
 {
     private readonly TaigaTransport _transport;
+    private readonly IOptions<TaigaOptions> _options;
 
     public WorkItemAttachmentApi(TaigaTransport transport)
+        : this(transport, Options.Create(new TaigaOptions()))
+    {
+    }
+
+    public WorkItemAttachmentApi(TaigaTransport transport, IOptions<TaigaOptions> options)
     {
         _transport = transport;
+        _options = options;
+    }
+
+    internal async Task<WorkItemAttachmentDto> UploadAsync(
+        string kind,
+        int id,
+        int projectId,
+        string file,
+        string? description = null,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Required(kind, nameof(kind));
+        InputValidation.Positive(id, nameof(id));
+        InputValidation.Positive(projectId, nameof(projectId));
+
+        var route = WorkItemAttachmentRoutes.GetRoute(kind);
+        var source = AttachmentFileContract.Validate(file, _options);
+        using var content = new AttachmentMultipartContent(
+            source,
+            id,
+            projectId,
+            description,
+            _options.Value.MaxAttachmentBytes);
+        using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = content };
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            var attachment = MapAttachment(document.RootElement);
+            if (attachment.Project != projectId || attachment.ObjectId != id)
+                throw new TaigaRequestException("Taiga returned an attachment for an unexpected project or work item.");
+            return attachment;
+        }
+        catch (TaigaRequestException exception)
+        {
+            throw new TaigaRequestException(
+                $"{exception.Message.TrimEnd('.')} The upload may already have applied; read the attachment list before retrying.",
+                exception.StatusCode);
+        }
     }
 
     internal async Task<WorkItemAttachmentDto> GetAsync(
