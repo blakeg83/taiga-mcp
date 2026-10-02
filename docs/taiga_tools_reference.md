@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 35 tools:
+The current server exposes 36 tools:
 
 - 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
@@ -22,8 +22,8 @@ The current server exposes 35 tools:
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
   `unlink_user_story_from_epic`.
-- 4 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
-  `get_work_item_history`, and `resolve_work_item`.
+- 5 shared work-item tools: `add_work_item_comment`, `list_work_item_comments`,
+  `get_work_item_history`, `resolve_work_item`, and `list_work_item_attachments`.
 
 All 15 selected first-batch functions are implemented within their defined
 scope: three existing tools were expanded and twelve were added, bringing the
@@ -47,6 +47,55 @@ failures are not replayed.
 
 The shared comment command is implemented for all four work-item kinds and is
 documented below.
+
+### `list_work_item_attachments` contract
+
+The signature is `list_work_item_attachments(kind, id, projectId, page=1)`.
+The supported kinds are exactly `epic`, `user_story`, and `task`; `id` is the
+positive internal parent ID, `projectId` is the positive internal project ID,
+and `page` is positive and defaults to 1. The tool requests exactly one page
+from the kind-specific route:
+
+| kind | upstream route | query |
+| --- | --- | --- |
+| `epic` | `/api/v1/epics/attachments` | `object_id={id}&project={projectId}&page={page}` |
+| `user_story` | `/api/v1/userstories/attachments` | `object_id={id}&project={projectId}&page={page}` |
+| `task` | `/api/v1/tasks/attachments` | `object_id={id}&project={projectId}&page={page}` |
+
+The response is always the standard `{ items, page, total, next_page,
+has_more }` envelope. Each item can expose verified attachment metadata and
+locations: `id`, `project`, `object_id`, `owner`, `name`, `description`,
+`order`, `size`, `attached_file`, `url`, `preview_url`, `thumbnail_card_url`,
+`sha1`, `is_deprecated`, `from_comment`, `created_date`, and `modified_date`.
+Null item properties are omitted; unknown or unavailable pagination values are
+explicit `null`. No MIME/type field is invented because the verified Taiga
+serializer does not expose one.
+
+For example:
+
+```json
+{"kind":"task","id":42,"projectId":123,"page":1}
+```
+
+```json
+{"items":[{"id":901,"project":123,"object_id":42,"name":"spec.txt","description":"Attachment","order":1,"size":2048,"url":"https://files.example/901"}],"page":1,"total":1,"next_page":null,"has_more":false}
+```
+
+Invalid kinds, nonpositive IDs/pages, malformed required attachment identities,
+malformed list data, permission failures, and transport failures become safe
+MCP errors. The command does not read parent details, fetch later pages,
+download file content, or mutate attachments. Issue attachments and attachment
+detail/upload/update/delete/download commands remain outside this goal.
+
+This contract was checked on 2026-10-02 against the official [epic](https://github.com/taigaio/taiga-doc/blob/main/api/epics/list-attachments.adoc),
+[user-story](https://github.com/taigaio/taiga-doc/blob/main/api/user-stories/list-attachments.adoc),
+and [task](https://github.com/taigaio/taiga-doc/blob/main/api/tasks/list-attachments.adoc)
+attachment-list documentation and pinned taiga-back revision
+`4d11baef9027f5598f6341d6eb4261de2840688e`: the [shared attachment view set](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/api.py)
+defines the project/object filters and resource content types, while the
+[attachment serializer](https://raw.githubusercontent.com/taigaio/taiga-back/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/serializers.py)
+defines the mapped fields and generated URLs. This is pinned source evidence,
+not a deployed-version claim.
 
 ### `list_work_item_comments` contract
 

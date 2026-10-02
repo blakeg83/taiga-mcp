@@ -117,6 +117,98 @@ public sealed class WorkItemAttachmentListTests
         }
     }
 
+    [Fact]
+    public async Task ListPage_EmptyPagePreservesMissingAndMalformedPaginationAsNull()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/attachments",
+                "[]",
+                headers: new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "true",
+                    ["x-pagination-count"] = "not-a-number",
+                    ["x-pagination-next"] = "https://evil.example/attachments?page=8"
+                });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListPageAsync("user_story", 42, 123, page: 4);
+
+            Assert.Empty(page.Items);
+            Assert.Equal(4, page.Page);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListPage_MissingPaginationHeadersRemainNull()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/attachments", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var page = await NewApi(handler, auth).ListPageAsync("epic", 42, 123);
+
+            Assert.Empty(page.Items);
+            Assert.Null(page.Total);
+            Assert.Null(page.NextPage);
+            Assert.Null(page.HasMore);
+        }
+    }
+
+    [Fact]
+    public async Task ListPage_RejectsNonpositivePageBeforeHttp()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                NewApi(handler, auth).ListPageAsync("task", 42, 123, page: 0));
+
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath != "/api/v1/auth");
+        }
+    }
+
+    [Fact]
+    public async Task ListPage_PropagatesCancellationThroughFakeHttpBoundary()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/epics/attachments", "[]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var cancellation = new CancellationTokenSource())
+        {
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                NewApi(handler, auth).ListPageAsync("epic", 42, 123, cancellationToken: cancellation.Token));
+
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath != "/api/v1/auth");
+        }
+    }
+
+    [Fact]
+    public async Task ListPage_RejectsNonArrayResponse()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments", "{\"items\":[]}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).ListPageAsync("task", 42, 123));
+
+            Assert.Contains("invalid work-item attachment list", error.Message);
+        }
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Forbidden, "permission denied")]
     [InlineData(HttpStatusCode.NotFound, "resource not found")]

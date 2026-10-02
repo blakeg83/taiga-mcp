@@ -47,6 +47,11 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode CurrentUserStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode AttachmentStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public string AttachmentResponseBody { get; set; } =
+        "[{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"spec.txt\",\"description\":\"Attachment\",\"order\":1,\"size\":2048,\"url\":\"https://files.example/901\"}]";
+
     public string CurrentUserResponseBody { get; set; } =
         "{\"id\":42,\"username\":\"integration-user\",\"full_name\":\"Integration User\",\"is_active\":true,\"email\":\"private@example.test\",\"auth_token\":\"must-not-escape\",\"roles\":[\"admin\"]}";
 
@@ -158,6 +163,27 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         if (request.HttpMethod == HttpMethod.Post.Method && path.EndsWith("/auth", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(context.Response, HttpStatusCode.OK, "{\"auth_token\":\"integration-token\",\"refresh\":\"integration-refresh\"}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method &&
+            path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments")
+        {
+            if (AttachmentStatusCode != HttpStatusCode.OK)
+            {
+                await RespondAsync(context.Response, AttachmentStatusCode, "{\"detail\":\"synthetic attachment secret\"}");
+                return;
+            }
+
+            await RespondAsync(
+                context.Response,
+                HttpStatusCode.OK,
+                AttachmentResponseBody,
+                new Dictionary<string, string>
+                {
+                    ["x-paginated"] = "false",
+                    ["x-pagination-count"] = "1"
+                });
             return;
         }
 
