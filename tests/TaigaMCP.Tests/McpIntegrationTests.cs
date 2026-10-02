@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(37, tools.Count);
+            Assert.Equal(38, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -835,7 +835,8 @@ public sealed class McpIntegrationTests
                 "update_epic",
                 "update_issue",
                 "update_task",
-                "update_user_story"
+                "update_user_story",
+                "upload_work_item_attachment"
             };
             Assert.Equal(expectedNames, tools.Select(tool => tool.Name).OrderBy(name => name));
 

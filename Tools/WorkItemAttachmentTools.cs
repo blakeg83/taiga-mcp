@@ -44,4 +44,19 @@ public sealed class WorkItemAttachmentTools
             result.NextPage,
             result.HasMore);
     });
+
+    [McpServerTool(Name = "upload_work_item_attachment")]
+    [Description("Upload one explicitly selected local file as a multipart attachment to an epic, user story, or task. The file must be an absolute path visible to the stdio server and must be within the configured maximum size; URLs, directories, bulk upload, and issue attachments are not supported. The response is authoritative attachment metadata.")]
+    public async Task<string> UploadWorkItemAttachment(
+        [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
+        [Description("Positive internal work-item ID, not the displayed #ref.")] int id,
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Absolute local file path selected by the caller; the server derives the filename and media type from this path.")] string file,
+        [Description("Optional attachment description; omitted when absent and empty text is preserved.")] string? description = null,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _attachments.UploadAsync(kind, id, projectId, file, description, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
 }
