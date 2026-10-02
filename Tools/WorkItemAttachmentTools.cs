@@ -26,6 +26,19 @@ public sealed class WorkItemAttachmentTools
         return ToolResponseJson.Serialize(result);
     });
 
+    [McpServerTool(Name = "download_work_item_attachment")]
+    [Description("Download one epic, user story, or task attachment to an explicit absolute local destination. The server retrieves authoritative metadata first, applies the configured attachment size limit, never overwrites an existing file, keeps bearer authentication on the configured Taiga origin, and does not include binary data or secrets in the receipt.")]
+    public async Task<string> DownloadWorkItemAttachment(
+        [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
+        [Description("Positive internal attachment ID, not a work-item or displayed #ref ID.")] int attachmentId,
+        [Description("Absolute local destination file path; the server never derives or accepts a destination from the upstream filename and never overwrites an existing file.")] string destination,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _attachments.DownloadAsync(kind, attachmentId, destination, cancellationToken);
+        return ToolResponseJson.Serialize(result);
+    });
+
     [McpServerTool(Name = "list_work_item_attachments")]
     [Description("List one page of file attachments for an epic, user story, or task. The kind is closed to epic, user_story, and task; issue attachments, all-page export, file-content download, parent-detail fan-out, and attachment mutation are not included. The result always uses the items/page/total/next_page/has_more envelope and preserves unknown pagination values as null.")]
     public async Task<string> ListWorkItemAttachments(

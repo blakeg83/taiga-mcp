@@ -74,6 +74,30 @@ public sealed class WorkItemAttachmentApi
         return MapAttachment(document.RootElement, attachmentId);
     }
 
+    internal async Task<WorkItemAttachmentDownloadDto> DownloadAsync(
+        string kind,
+        int attachmentId,
+        string destination,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Required(kind, nameof(kind));
+        InputValidation.Positive(attachmentId, nameof(attachmentId));
+        InputValidation.Required(destination, nameof(destination));
+
+        var attachment = await GetAsync(kind, attachmentId, cancellationToken);
+        if (attachment.Size is > 0 && attachment.Size.Value > _options.Value.MaxAttachmentBytes)
+            throw new TaigaRequestException($"attachment exceeds the configured maximum size of {_options.Value.MaxAttachmentBytes} bytes.");
+
+        var plan = AttachmentDownloadContract.CreatePlan(attachment, destination, _options);
+        var result = await _transport.DownloadAsync(plan, cancellationToken);
+        return new WorkItemAttachmentDownloadDto
+        {
+            Destination = result.DestinationPath,
+            Bytes = result.BytesWritten,
+            Attachment = attachment
+        };
+    }
+
     internal async Task<WorkItemAttachmentListPage> ListPageAsync(
         string kind,
         int id,

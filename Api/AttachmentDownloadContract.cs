@@ -8,6 +8,7 @@ namespace TaigaMCP.Api;
 internal sealed record AttachmentDownloadPlan(
     Uri SourceUri,
     bool RequiresAuthentication,
+    Uri? AuthenticationOrigin,
     string DestinationPath,
     long MaximumBytes);
 
@@ -30,6 +31,7 @@ internal static class AttachmentDownloadContract
         return new AttachmentDownloadPlan(
             sourceUri,
             IsSameOrigin(sourceUri, baseUri),
+            IsSameOrigin(sourceUri, baseUri) ? baseUri : null,
             destinationPath,
             options.Value.MaxAttachmentBytes);
     }
@@ -79,7 +81,7 @@ internal static class AttachmentDownloadContract
             absolute = new Uri(baseUri, relative);
         }
 
-        if (!IsHttpScheme(absolute) || string.IsNullOrEmpty(absolute.Host))
+        if (!IsHttpScheme(absolute) || string.IsNullOrEmpty(absolute.Host) || !string.IsNullOrEmpty(absolute.UserInfo))
             throw new TaigaRequestException("Taiga attachment returned an unsupported download URL.");
 
         return absolute;

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security;
 using System.Text.Json;
 
 namespace TaigaMCP.Api;
@@ -81,6 +82,69 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
         }
     }
 
+    internal async Task<TaigaDownloadResult> DownloadAsync(
+        AttachmentDownloadPlan plan,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        InputValidation.Positive(plan.MaximumBytes, nameof(plan.MaximumBytes));
+
+        var temporaryPath = CreateTemporaryPath(plan.DestinationPath);
+        var completed = false;
+        try
+        {
+            var currentUri = plan.SourceUri;
+            var authenticationOrigin = plan.AuthenticationOrigin;
+            for (var redirect = 0; ; redirect++)
+            {
+                using var http = clients.CreateClient("taiga");
+                using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+                using var response = await SendDownloadRequestAsync(
+                    http,
+                    request,
+                    authenticationOrigin is not null && IsSameOrigin(currentUri, authenticationOrigin),
+                    cancellationToken);
+
+                if (IsRedirect(response.StatusCode))
+                {
+                    if (redirect >= 5 || response.Headers.Location is null)
+                        throw new TaigaRequestException("Taiga attachment returned too many or invalid redirects.");
+
+                    currentUri = ResolveRedirect(currentUri, response.Headers.Location);
+                    continue;
+                }
+
+                await EnsureSuccessAsync(response, cancellationToken);
+                var contentLength = response.Content.Headers.ContentLength;
+                if (contentLength.HasValue && contentLength.Value > plan.MaximumBytes)
+                    throw new TaigaRequestException($"attachment exceeds the configured maximum size of {plan.MaximumBytes} bytes.");
+
+                var bytesWritten = await WriteDownloadAsync(response, temporaryPath, plan.MaximumBytes, cancellationToken);
+                try
+                {
+                    File.Move(temporaryPath, plan.DestinationPath);
+                    completed = true;
+                    return new TaigaDownloadResult(plan.DestinationPath, bytesWritten);
+                }
+                catch (IOException)
+                {
+                    throw new TaigaRequestException("attachment download could not be placed at the requested destination; an existing file was not overwritten.");
+                }
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (TaigaRequestException) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or SecurityException)
+        {
+            throw new TaigaRequestException("Taiga attachment download failed while accessing the network or local destination.");
+        }
+        finally
+        {
+            if (!completed)
+                TryDelete(temporaryPath);
+        }
+    }
+
     internal async Task<TaigaReadResult> ReadWithHeadersAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken = default)
@@ -136,6 +200,98 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
         => !cancellationToken.IsCancellationRequested &&
            exception is TaskCanceledException &&
            exception.InnerException is TimeoutException;
+
+    private async Task<HttpResponseMessage> SendDownloadRequestAsync(
+        HttpClient http,
+        HttpRequestMessage request,
+        bool useAuthentication,
+        CancellationToken cancellationToken)
+        => useAuthentication
+            ? await auth.SendAsync(http, request, cancellationToken)
+            : await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+    private static async Task<long> WriteDownloadAsync(
+        HttpResponseMessage response,
+        string temporaryPath,
+        long maximumBytes,
+        CancellationToken cancellationToken)
+    {
+        await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await using var target = new FileStream(
+            temporaryPath,
+            FileMode.Open,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 64 * 1024,
+            options: FileOptions.SequentialScan);
+
+        var buffer = new byte[64 * 1024];
+        long total = 0;
+        while (true)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(), cancellationToken);
+            if (read == 0) break;
+            total = checked(total + read);
+            if (total > maximumBytes)
+                throw new TaigaRequestException($"attachment exceeds the configured maximum size of {maximumBytes} bytes.");
+            await target.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+
+        await target.FlushAsync(cancellationToken);
+        return total;
+    }
+
+    private static string CreateTemporaryPath(string destinationPath)
+    {
+        var directory = Path.GetDirectoryName(destinationPath);
+        var fileName = Path.GetFileName(destinationPath);
+        if (string.IsNullOrWhiteSpace(directory) || string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("destination must identify a file in an existing directory.", nameof(destinationPath));
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var candidate = Path.Combine(directory, $".{fileName}.{Guid.NewGuid():N}.download");
+            try
+            {
+                using var reservation = new FileStream(candidate, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                return candidate;
+            }
+            catch (IOException) when (attempt < 9) { }
+        }
+
+        throw new TaigaRequestException("attachment download could not create a temporary destination file.");
+    }
+
+    private static Uri ResolveRedirect(Uri currentUri, Uri location)
+    {
+        var nextUri = location.IsAbsoluteUri ? location : new Uri(currentUri, location);
+        if (!IsHttpScheme(nextUri) || string.IsNullOrEmpty(nextUri.Host) || !string.IsNullOrEmpty(nextUri.UserInfo))
+            throw new TaigaRequestException("Taiga attachment returned an unsupported redirect URL.");
+
+        return nextUri;
+    }
+
+    private static bool IsRedirect(HttpStatusCode statusCode)
+        => statusCode is HttpStatusCode.Moved or
+            HttpStatusCode.Redirect or
+            HttpStatusCode.SeeOther or
+            HttpStatusCode.TemporaryRedirect or
+            HttpStatusCode.PermanentRedirect;
+
+    private static bool IsSameOrigin(Uri source, Uri origin)
+        => string.Equals(source.Scheme, origin.Scheme, StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(source.Host, origin.Host, StringComparison.OrdinalIgnoreCase) &&
+           source.Port == origin.Port;
+
+    private static bool IsHttpScheme(Uri uri)
+        => string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception) { }
+    }
 
     internal static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
@@ -219,3 +375,5 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
             value.Contains("already linked", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("already related", StringComparison.OrdinalIgnoreCase));
 }
+
+internal sealed record TaigaDownloadResult(string DestinationPath, long BytesWritten);

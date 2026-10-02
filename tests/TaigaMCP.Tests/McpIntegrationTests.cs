@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(38, tools.Count);
+            Assert.Equal(39, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -804,6 +804,7 @@ public sealed class McpIntegrationTests
                 "create_issue",
                 "create_task",
                 "create_user_story",
+                "download_work_item_attachment",
                 "get_current_user",
                 "get_epic",
                 "get_issue",
@@ -851,6 +852,18 @@ public sealed class McpIntegrationTests
             Assert.Equal(new[] { "kind", "id", "projectId" }, attachmentRequired);
             Assert.Contains("one page", listWorkItemAttachments.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("cancellationToken", attachmentProperties);
+
+            var downloadWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "download_work_item_attachment");
+            var downloadProperties = downloadWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId", "destination" }, downloadProperties);
+            var downloadRequired = downloadWorkItemAttachment.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId", "destination" }, downloadRequired);
+            Assert.Contains("never overwrites", downloadWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cancellationToken", downloadProperties);
 
             var getWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "get_work_item_attachment");
             var getAttachmentProperties = getWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()

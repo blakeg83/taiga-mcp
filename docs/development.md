@@ -3,7 +3,7 @@
 ## Current state (2026-10-02)
 
 All 15 selected first-batch functions are implemented within their documented
-scope. The server exposes 38 tools; see the [tool reference](taiga_tools_reference.md)
+scope. The server exposes 39 tools; see the [tool reference](taiga_tools_reference.md)
 for exact contracts and the [completed-batch summary](goals/first-batch/README.md)
 for source/test pointers. The [second batch](goals/second-batch/README.md) has
 delivered `get_current_user`, `list_project_members`, `resolve_work_item`,
