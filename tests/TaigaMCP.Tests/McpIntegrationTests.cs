@@ -796,7 +796,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(36, tools.Count);
+            Assert.Equal(37, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -809,6 +809,7 @@ public sealed class McpIntegrationTests
                 "get_issue",
                 "get_task",
                 "get_user_story",
+                "get_work_item_attachment",
                 "get_work_item_history",
                 "link_user_story_to_epic",
                 "list_epic_statuses",
@@ -849,6 +850,18 @@ public sealed class McpIntegrationTests
             Assert.Equal(new[] { "kind", "id", "projectId" }, attachmentRequired);
             Assert.Contains("one page", listWorkItemAttachments.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("cancellationToken", attachmentProperties);
+
+            var getWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "get_work_item_attachment");
+            var getAttachmentProperties = getWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
+                .Select(property => property.Name)
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId" }, getAttachmentProperties);
+            var getAttachmentRequired = getWorkItemAttachment.JsonSchema.GetProperty("required").EnumerateArray()
+                .Select(value => value.GetString())
+                .ToArray();
+            Assert.Equal(new[] { "kind", "attachmentId" }, getAttachmentRequired);
+            Assert.Contains("metadata", getWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("cancellationToken", getAttachmentProperties);
 
             foreach (var tool in tools)
                 Assert.DoesNotContain("cancellationToken", tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name));
