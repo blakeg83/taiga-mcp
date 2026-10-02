@@ -36,7 +36,8 @@ metadata/mapping digests. Workers emit append-only progress through
 `workflow-progress.ps1`; the checkpoint records the immutable packet binding,
 task IDs, run/action identity, sequences, revisions, criterion evidence, and
 idempotent event IDs. Existing event identities remain stable across checkpoint
-upgrades. A packet may carry `trustedRevisions`; when present, progress outside
+upgrades, and retrying a captured event remains idempotent. A packet may carry
+`trustedRevisions`; when present, progress outside
 that assignment is rejected. The first event uses the packet action and
 corrections form a non-reusable continuation chain; later milestones may remain
 within the active correction action. Progress is

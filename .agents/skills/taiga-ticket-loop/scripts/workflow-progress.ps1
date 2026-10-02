@@ -339,7 +339,8 @@ function Invoke-Record {
         $eventPacket = Get-PacketBinding $InputObject; $statePacket = Get-PacketBinding ([ordered]@{ packetBinding = $state.packetBinding }); Compare-PacketBinding $eventPacket $statePacket
         $migrated = Migrate-LegacyProgressState $state
         Assert-ProgressState $state
-        $existing = @($state.events | Where-Object { [string]$_.eventId -ceq $event.eventId })
+        $eventIds = @([string]$event.eventId, (Hash-String (Get-InterimEventIdentityKey $event)))
+        $existing = @($state.events | Where-Object { $eventIds -contains [string]$_.eventId })
         if ($existing.Count -gt 0) { return [ordered]@{ recorded = $false; idempotent = $true; event = $existing[0]; nextSequence = [long]$state.nextSequence } }
         $continuation = $InputObject.Contains('continuationOfActionId') -and -not [string]::IsNullOrWhiteSpace([string]$InputObject.continuationOfActionId)
         if ($state.events.Count -eq 0) {
