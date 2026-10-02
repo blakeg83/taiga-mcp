@@ -53,7 +53,8 @@ The media type is inferred from a small extension allowlist (`.png`, `.jpg`,
 ## Safety and ownership
 
 Positive kind-specific IDs and the project ID are validated before opening the
-network request. Missing, inaccessible, or over-limit files fail locally.
+network request. Missing, unreadable, inaccessible, or over-limit files fail
+locally before authentication or any upload request is sent.
 The upload is streamed from disk and is never automatically replayed after an
 ambiguous POST. HTTP response disposal, bounded safe errors, authentication,
 and the single received-401 replay remain owned by `TaigaTransport` and

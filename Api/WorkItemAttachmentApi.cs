@@ -45,10 +45,19 @@ public sealed class WorkItemAttachmentApi
             _options.Value.MaxAttachmentBytes);
         using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = content };
         using var document = await _transport.ReadAsync(request, cancellationToken);
-        var attachment = MapAttachment(document.RootElement);
-        if (attachment.Project != projectId || attachment.ObjectId != id)
-            throw new TaigaRequestException("Taiga returned an attachment for an unexpected project or work item.");
-        return attachment;
+        try
+        {
+            var attachment = MapAttachment(document.RootElement);
+            if (attachment.Project != projectId || attachment.ObjectId != id)
+                throw new TaigaRequestException("Taiga returned an attachment for an unexpected project or work item.");
+            return attachment;
+        }
+        catch (TaigaRequestException exception)
+        {
+            throw new TaigaRequestException(
+                $"{exception.Message.TrimEnd('.')} The upload may already have applied; read the attachment list before retrying.",
+                exception.StatusCode);
+        }
     }
 
     internal async Task<WorkItemAttachmentDto> GetAsync(

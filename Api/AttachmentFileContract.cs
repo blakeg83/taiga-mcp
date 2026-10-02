@@ -72,6 +72,21 @@ internal static class AttachmentFileContract
                 $"file exceeds the configured maximum size of {options.Value.MaxAttachmentBytes} bytes.",
                 nameof(file));
 
+        try
+        {
+            using var readable = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 1,
+                options: FileOptions.SequentialScan);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            throw new ArgumentException("file is not readable by the server process.", nameof(file), ex);
+        }
+
         var fileName = Path.GetFileName(fullPath);
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("file must have a filename.", nameof(file));

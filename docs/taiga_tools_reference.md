@@ -182,7 +182,7 @@ For example:
 {"id":901,"project":123,"object_id":42,"name":"notes.txt","description":"Release notes","size":12,"url":"https://files.example/901"}
 ```
 
-Missing/inaccessible/oversize files, invalid kinds or IDs, malformed success
+Missing/unreadable/inaccessible/oversize files, invalid kinds or IDs, malformed success
 responses, association mismatches, permission failures, and transport errors
 become safe MCP errors. The upload is streamed from disk; the one permitted
 401 replay creates a fresh file stream, while ambiguous POST failures are not

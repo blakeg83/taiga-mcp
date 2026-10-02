@@ -65,9 +65,34 @@ public sealed class WorkItemAttachmentUploadTests
                 NewApi(handler, auth).UploadAsync("task", 42, 123, file));
 
             Assert.Contains("unexpected project or work item", error.Message);
+            Assert.Contains("may already have applied", error.Message);
             var request = Assert.Single(handler.Requests, item => item.Uri.AbsolutePath == "/api/v1/tasks/attachments");
             Assert.DoesNotContain("name=description", request.Body, StringComparison.Ordinal);
             Assert.Contains("\0", request.Body, StringComparison.Ordinal);
+        }
+        finally
+        {
+            http.Dispose();
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task UploadAsync_MapsSuccessfulMalformedAttachmentWithWriteUncertainty()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Post, "/api/v1/tasks/attachments", "{}");
+        var file = Path.Combine(Path.GetTempPath(), $"taiga-upload-{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(file, "malformed attachment");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        try
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).UploadAsync("task", 42, 123, file));
+
+            Assert.Contains("invalid work-item attachment id data", error.Message);
+            Assert.Contains("may already have applied", error.Message);
+            Assert.Single(handler.Requests, item => item.Uri.AbsolutePath == "/api/v1/tasks/attachments");
         }
         finally
         {
@@ -92,6 +117,29 @@ public sealed class WorkItemAttachmentUploadTests
             await Assert.ThrowsAsync<ArgumentException>(() =>
                 NewApi(handler, auth).UploadAsync("task", 42, 123, Path.Combine(Path.GetTempPath(), "missing-upload-file")));
 
+            Assert.Empty(handler.Requests);
+        }
+        finally
+        {
+            http.Dispose();
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task UploadAsync_RejectsAnExclusivelyLockedFileBeforeAuthenticationOrUpload()
+    {
+        var handler = new FakeHttpMessageHandler();
+        var file = Path.Combine(Path.GetTempPath(), $"taiga-upload-locked-{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(file, "locked");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        try
+        {
+            using var locked = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None);
+            var error = await Assert.ThrowsAsync<ArgumentException>(() =>
+                NewApi(handler, auth).UploadAsync("task", 42, 123, file));
+
+            Assert.Contains("not readable", error.Message);
             Assert.Empty(handler.Requests);
         }
         finally
