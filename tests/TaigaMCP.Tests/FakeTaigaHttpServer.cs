@@ -62,6 +62,10 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public string AttachmentDetailResponseBody { get; set; } =
         "{\"id\":901,\"project\":123,\"object_id\":42,\"name\":\"résumé & 檔案.txt\",\"description\":\"Attachment detail\",\"size\":2048,\"attached_file\":\"attachments/901.txt\",\"url\":\"https://files.example/901#token\",\"preview_url\":null,\"thumbnail_card_url\":null,\"sha1\":\"abc123\",\"is_deprecated\":false,\"from_comment\":false}";
 
+    public HttpStatusCode AttachmentDownloadStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public byte[] AttachmentDownloadResponseBody { get; set; } = [0, 1, 127, 128, 254, 255];
+
     public string CurrentUserResponseBody { get; set; } =
         "{\"id\":42,\"username\":\"integration-user\",\"full_name\":\"Integration User\",\"is_active\":true,\"email\":\"private@example.test\",\"auth_token\":\"must-not-escape\",\"roles\":[\"admin\"]}";
 
@@ -173,6 +177,12 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         if (request.HttpMethod == HttpMethod.Post.Method && path.EndsWith("/auth", StringComparison.OrdinalIgnoreCase))
         {
             await RespondAsync(context.Response, HttpStatusCode.OK, "{\"auth_token\":\"integration-token\",\"refresh\":\"integration-refresh\"}");
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/media/901.bin")
+        {
+            await RespondBytesAsync(context.Response, AttachmentDownloadStatusCode, AttachmentDownloadResponseBody);
             return;
         }
 
@@ -893,6 +903,19 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
             }
         }
 
+        await response.OutputStream.WriteAsync(bytes);
+        response.Close();
+    }
+
+    private static async Task RespondBytesAsync(
+        HttpListenerResponse response,
+        HttpStatusCode statusCode,
+        IReadOnlyCollection<byte> body)
+    {
+        var bytes = body.ToArray();
+        response.StatusCode = (int)statusCode;
+        response.ContentType = "application/octet-stream";
+        response.ContentLength64 = bytes.Length;
         await response.OutputStream.WriteAsync(bytes);
         response.Close();
     }

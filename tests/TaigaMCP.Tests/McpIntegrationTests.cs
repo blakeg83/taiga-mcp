@@ -865,6 +865,33 @@ public sealed class McpIntegrationTests
             Assert.Contains("never overwrites", downloadWorkItemAttachment.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("cancellationToken", downloadProperties);
 
+            taiga.AttachmentDetailResponseBody =
+                $$"""{"id":901,"project":123,"object_id":42,"name":"upstream-name.bin","size":6,"url":"{{taiga.BaseUrl}}media/901.bin"}""";
+            var downloadDestination = Path.Combine(Path.GetTempPath(), $"taiga-mcp-download-{Guid.NewGuid():N}.bin");
+            try
+            {
+                var downloaded = await Call("download_work_item_attachment", new()
+                {
+                    ["kind"] = "task",
+                    ["attachmentId"] = 901,
+                    ["destination"] = downloadDestination
+                });
+                Assert.False(downloaded.IsError == true, GetText(downloaded));
+                var downloadReceipt = JsonSerializer.Deserialize<JsonElement>(GetText(downloaded));
+                Assert.Equal(Path.GetFullPath(downloadDestination), downloadReceipt.GetProperty("destination").GetString());
+                Assert.Equal(taiga.AttachmentDownloadResponseBody.Length, downloadReceipt.GetProperty("bytes").GetInt64());
+                Assert.Equal(taiga.AttachmentDownloadResponseBody, await File.ReadAllBytesAsync(downloadDestination));
+                Assert.Contains(taiga.Requests, request =>
+                    request.Method == "GET" &&
+                    request.PathAndQuery == "/api/v1/tasks/attachments/901" &&
+                    request.Authorization == "Bearer integration-token");
+                Assert.Contains(taiga.Requests, request =>
+                    request.Method == "GET" &&
+                    request.PathAndQuery == "/api/v1/media/901.bin" &&
+                    request.Authorization == "Bearer integration-token");
+            }
+            finally { File.Delete(downloadDestination); }
+
             var getWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "get_work_item_attachment");
             var getAttachmentProperties = getWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
                 .Select(property => property.Name)
