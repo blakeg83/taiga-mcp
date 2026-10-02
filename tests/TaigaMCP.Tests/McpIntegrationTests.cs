@@ -905,6 +905,32 @@ public sealed class McpIntegrationTests
             }
             finally { File.Delete(downloadDestination); }
 
+            var updatedAttachment = await Call("update_work_item_attachment", new()
+            {
+                ["kind"] = "task",
+                ["attachmentId"] = 901,
+                ["fields"] = new Dictionary<string, object?>
+                {
+                    ["description"] = string.Empty,
+                    ["order"] = 0,
+                    ["is_deprecated"] = false
+                }
+            });
+            Assert.False(updatedAttachment.IsError == true, GetText(updatedAttachment));
+            var updatedAttachmentJson = JsonSerializer.Deserialize<JsonElement>(GetText(updatedAttachment));
+            Assert.Equal(901, updatedAttachmentJson.GetProperty("id").GetInt32());
+            Assert.Equal(123, updatedAttachmentJson.GetProperty("project").GetInt32());
+            Assert.Equal(0, updatedAttachmentJson.GetProperty("order").GetInt32());
+            var updateRequest = Assert.Single(taiga.Requests, request =>
+                request.Method == "PATCH" && request.PathAndQuery == "/api/v1/tasks/attachments/901");
+            Assert.Equal("Bearer integration-token", updateRequest.Authorization);
+            var updatePayload = JsonSerializer.Deserialize<JsonElement>(updateRequest.Body);
+            Assert.Equal(string.Empty, updatePayload.GetProperty("description").GetString());
+            Assert.Equal(0, updatePayload.GetProperty("order").GetInt32());
+            Assert.False(updatePayload.GetProperty("is_deprecated").GetBoolean());
+            Assert.False(updatePayload.TryGetProperty("version", out _));
+            Assert.False(updatePayload.TryGetProperty("attached_file", out _));
+
             var getWorkItemAttachment = Assert.Single(tools, tool => tool.Name == "get_work_item_attachment");
             var getAttachmentProperties = getWorkItemAttachment.JsonSchema.GetProperty("properties").EnumerateObject()
                 .Select(property => property.Name)

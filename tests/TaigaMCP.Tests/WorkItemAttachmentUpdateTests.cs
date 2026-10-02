@@ -124,7 +124,9 @@ public sealed class WorkItemAttachmentUpdateTests
     }
 
     [Theory]
+    [InlineData(HttpStatusCode.BadRequest, "validation failed")]
     [InlineData(HttpStatusCode.Forbidden, "permission denied")]
+    [InlineData(HttpStatusCode.NotFound, "resource not found")]
     [InlineData(HttpStatusCode.Conflict, "conflict")]
     public async Task UpdateTool_ReportsSafeHttpFailures(HttpStatusCode statusCode, string category)
     {
@@ -164,6 +166,56 @@ public sealed class WorkItemAttachmentUpdateTests
                 NewApi(handler, auth).UpdateAsync("task", 901, fields.RootElement, cancellation.Token));
 
             Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath != "/api/v1/auth");
+        }
+    }
+
+    [Fact]
+    public async Task UpdateAsync_ReplaysOnlyAReceivedUnauthorizedResponse()
+    {
+        var patchAttempts = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/auth/refresh",
+                "{\"auth_token\":\"replacement-token\",\"refresh\":\"replacement-refresh\"}")
+            .AddRoute(
+                HttpMethod.Patch,
+                "/api/v1/tasks/attachments/901",
+                _ => Interlocked.Increment(ref patchAttempts) == 1
+                    ? new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                    : new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(AttachmentUpdateFixtures.Updated, System.Text.Encoding.UTF8, "application/json")
+                    });
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var fields = JsonDocument.Parse("""{"order":0}"""))
+        {
+            var attachment = await NewApi(handler, auth).UpdateAsync("task", 901, fields.RootElement);
+
+            Assert.Equal(901, attachment.Id);
+            Assert.Equal(2, patchAttempts);
+            Assert.Equal(2, handler.Requests.Count(request => request.Uri.AbsolutePath == "/api/v1/tasks/attachments/901"));
+        }
+    }
+
+    [Fact]
+    public async Task UpdateAsync_DoesNotRetryAmbiguousTransportFailures()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddExceptionRoute(
+                HttpMethod.Patch,
+                "/api/v1/tasks/attachments/901",
+                new HttpRequestException("synthetic connection drop"));
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        using (var fields = JsonDocument.Parse("""{"order":0}"""))
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).UpdateAsync("task", 901, fields.RootElement));
+
+            Assert.Contains("may already have applied", error.Message);
+            Assert.Single(handler.Requests, request => request.Uri.AbsolutePath == "/api/v1/tasks/attachments/901");
         }
     }
 
