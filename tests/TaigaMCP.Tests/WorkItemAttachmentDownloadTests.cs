@@ -51,7 +51,7 @@ public sealed class WorkItemAttachmentDownloadTests
     public async Task DownloadTool_ReturnsSmallReceiptAndPreservesAttachmentMetadata()
     {
         var handler = new FakeHttpMessageHandler()
-            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.Detail)
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithoutSize)
             .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent([5, 4, 3])
@@ -180,6 +180,31 @@ public sealed class WorkItemAttachmentDownloadTests
                     NewApi(handler, auth).DownloadAsync("task", 901, destination));
 
                 Assert.Contains("declared content length", error.Message);
+                Assert.False(File.Exists(destination));
+            }
+            finally { File.Delete(destination); }
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAsync_RejectsResponseShorterThanAttachmentMetadataSizeWithoutContentLength()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", DownloadFixtures.DetailWithSize)
+            .AddRoute(HttpMethod.Get, "/media/901.bin", _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new UnknownLengthContent([1, 2, 3])
+            });
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            try
+            {
+                var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                    NewApi(handler, auth).DownloadAsync("task", 901, destination));
+
+                Assert.Contains("declared attachment size", error.Message);
                 Assert.False(File.Exists(destination));
             }
             finally { File.Delete(destination); }
@@ -489,6 +514,17 @@ internal static class DownloadFixtures
           "project":123,
           "object_id":42,
           "name":"..\\evil.bin",
+          "url":"https://fake.taiga.test/media/901.bin"
+        }
+        """;
+
+    public const string DetailWithSize = """
+        {
+          "id":901,
+          "project":123,
+          "object_id":42,
+          "name":"metadata-sized.bin",
+          "size":5,
           "url":"https://fake.taiga.test/media/901.bin"
         }
         """;

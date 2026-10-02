@@ -21,6 +21,7 @@ public sealed class AttachmentDownloadContractTests
         Assert.True(plan.RequiresAuthentication);
         Assert.Equal(Path.GetFullPath(destination), plan.DestinationPath);
         Assert.Equal(10 * 1024 * 1024, plan.MaximumBytes);
+        Assert.Null(plan.ExpectedBytes);
     }
 
     [Fact]

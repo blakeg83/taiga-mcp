@@ -153,7 +153,7 @@ public sealed class WorkItemAttachmentApi
             Name = ReadOptionalString(attachment, "name"),
             Description = ReadOptionalString(attachment, "description"),
             Order = ReadOptionalInt(attachment, "order"),
-            Size = ReadOptionalInt(attachment, "size"),
+            Size = ReadOptionalNonnegativeInt(attachment, "size"),
             AttachedFile = ReadOptionalString(attachment, "attached_file"),
             Url = ReadOptionalString(attachment, "url"),
             PreviewUrl = ReadOptionalString(attachment, "preview_url"),
@@ -198,6 +198,20 @@ public sealed class WorkItemAttachmentApi
             return null;
 
         if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
+            throw new TaigaRequestException($"Taiga returned invalid work-item attachment {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? ReadOptionalNonnegativeInt(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number < 0)
             throw new TaigaRequestException($"Taiga returned invalid work-item attachment {propertyName} data.");
 
         return number;

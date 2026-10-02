@@ -10,7 +10,8 @@ internal sealed record AttachmentDownloadPlan(
     bool RequiresAuthentication,
     Uri? AuthenticationOrigin,
     string DestinationPath,
-    long MaximumBytes);
+    long MaximumBytes,
+    long? ExpectedBytes);
 
 internal static class AttachmentDownloadContract
 {
@@ -33,7 +34,8 @@ internal static class AttachmentDownloadContract
             IsSameOrigin(sourceUri, baseUri),
             IsSameOrigin(sourceUri, baseUri) ? baseUri : null,
             destinationPath,
-            options.Value.MaxAttachmentBytes);
+            options.Value.MaxAttachmentBytes,
+            attachment.Size);
     }
 
     private static string ValidateDestination(string destination)
