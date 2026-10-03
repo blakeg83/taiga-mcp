@@ -1,3 +1,9 @@
+# STATIC CONTRACT CHECK ONLY.
+# This file checks documented contract text against a small route matrix. It
+# does not execute the skill, call Taiga/Git/Codex tools, or establish
+# behavioral evidence. See references/synthetic-walkthroughs.md for recorded
+# synthetic walkthrough evidence.
+
 [CmdletBinding()]
 param()
 
@@ -6,8 +12,16 @@ $ErrorActionPreference = 'Stop'
 
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
+$walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
+
+if (-not (Test-Path $walkthroughPath)) {
+    throw 'Missing recorded synthetic walkthrough reference.'
+}
+
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
+$walkthroughText = Get-Content $walkthroughPath -Raw
+$normalizedWalkthrough = [regex]::Replace($walkthroughText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -26,8 +40,29 @@ Assert-DocumentContains 'start gate' 'Reply Start or Cancel.'
 Assert-DocumentContains 'read-only discovery' 'Discovery is read-only.'
 Assert-DocumentContains 'cancel behavior' '`Cancel` leaves the external systems unchanged'
 Assert-DocumentContains 'clarification behavior' 'Ask only for a missing or ambiguous'
+Assert-DocumentContains 'behavioral evidence reference' 'synthetic-walkthroughs.md'
 
-function Invoke-SetupScenario {
+foreach ($recordMarker in @(
+        '## 1. Single-repository story'
+        '## 2. Multi-repository epic'
+        '## 3. Ambiguous scope'
+        '## 4. Valid scope'
+        '## 5. Missing acceptance criteria'
+        'Synthetic user reply and trace:'
+        'Start'
+        'Cancel'
+        'mcp__taiga__resolve_project('
+        'mcp__codex_app__create_worktree('
+        'Mutation calls before Start: []'
+        'Mutation calls after Cancel: []'
+        '`ClarifyRequired(project)`'
+        '`ClarifyRequired(acceptance criteria)`')) {
+    if (-not $normalizedWalkthrough.Contains($recordMarker)) {
+        throw "Walkthrough record assertion failed: $recordMarker"
+    }
+}
+
+function Get-StaticContractOutcome {
     param(
         [Parameter(Mandatory)] [hashtable] $InputData
     )
@@ -56,7 +91,6 @@ function Invoke-SetupScenario {
             Input = $InputData.InputSummary
             Observed = 'Clarify'
             Detail = 'Ask for: ' + ($unresolved -join ', ')
-            WritesBeforeConfirmation = 'None'
         }
     }
 
@@ -66,7 +100,6 @@ function Invoke-SetupScenario {
             Input = $InputData.InputSummary
             Observed = 'Cancelled'
             Detail = 'External systems unchanged'
-            WritesBeforeConfirmation = 'None'
         }
     }
 
@@ -76,7 +109,6 @@ function Invoke-SetupScenario {
             Input = $InputData.InputSummary
             Observed = 'Clarify'
             Detail = 'Reply must be Start or Cancel'
-            WritesBeforeConfirmation = 'None'
         }
     }
 
@@ -85,7 +117,6 @@ function Invoke-SetupScenario {
         Input = $InputData.InputSummary
         Observed = 'SetupReady'
         Detail = "$($InputData.Repositories.Count) repository mapping(s); Start-scoped operations may proceed"
-        WritesBeforeConfirmation = 'None'
     }
 }
 
@@ -156,15 +187,12 @@ $expected = @{
 }
 
 $results = foreach ($scenario in $scenarios) {
-    $result = Invoke-SetupScenario -InputData $scenario
+    $result = Get-StaticContractOutcome -InputData $scenario
     if ($result.Observed -ne $expected[$result.Name]) {
         throw "Scenario '$($result.Name)' expected '$($expected[$result.Name])' but observed '$($result.Observed)'."
-    }
-    if ($result.WritesBeforeConfirmation -ne 'None') {
-        throw "Scenario '$($result.Name)' attempted a pre-confirmation write."
     }
     $result
 }
 
-$results | Format-Table Name, Input, Observed, Detail, WritesBeforeConfirmation -AutoSize | Out-String | Write-Output
-Write-Output "Passed $($results.Count) concrete setup scenarios; all pre-confirmation writes were None."
+$results | Format-Table Name, Input, Observed, Detail -AutoSize | Out-String | Write-Output
+Write-Output "Passed $($results.Count) static contract route assertions and 13 walkthrough-record completeness assertions; this is not behavioral evidence."

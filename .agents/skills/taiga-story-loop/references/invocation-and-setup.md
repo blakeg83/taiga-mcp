@@ -78,7 +78,9 @@ setup. A later worker message is never treated as a substitute for either
 reply. If the user changes the scope, regenerate the summary and obtain a new
 confirmation.
 
-For repeatable read-only validation, run
+For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
-directory. The check prints each concrete input and observed outcome for the
-story, epic, ambiguous-scope, cancelled-setup, and missing-acceptance cases.
+directory. It checks documented terms and expected route labels only; it does
+not execute the skill or call tools. The recorded synthetic walkthroughs in
+[synthetic-walkthroughs.md](synthetic-walkthroughs.md) are the behavioral
+evidence, with concrete prompts, clarification outcomes, and tool-call traces.
