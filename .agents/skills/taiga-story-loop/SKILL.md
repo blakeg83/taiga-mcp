@@ -25,3 +25,8 @@ Before setup, read [contracts](references/contracts.md). Use its story and task
 templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
+
+For the shortest entry, use `Use $taiga-story-loop for <project> story #<ref>`
+or `Use $taiga-story-loop for <project> epic #<ref>`. Read
+[invocation and setup](references/invocation-and-setup.md) before resolving the
+scope and showing the single Start/Cancel gate.
