@@ -44,6 +44,12 @@ for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker
 completion, review acceptance, PR approval, and merge.
 
+The synthetic ordered-task, failed-check, blocker, review-rejection, and
+human-edit scenarios are recorded in
+[task-execution-walkthroughs.md](references/task-execution-walkthroughs.md) and
+exercised by `scripts/validate-task-execution.ps1`. They are offline evidence,
+not a claim of live-provider execution.
+
 For authorized execution, read [branch and continuation](references/branch-and-continuation.md)
 and [minimal continuation note](references/continuation-note.md). They define
 the fresh-base feature branch, per-story managed worktree, PR base, merge gate,

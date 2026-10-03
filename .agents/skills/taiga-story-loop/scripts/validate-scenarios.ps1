@@ -16,9 +16,14 @@ $branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
 $continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
 $branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
+$taskExecutionPath = Join-Path $skillRoot 'references/task-execution-walkthroughs.md'
+$taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
+}
+if (-not (Test-Path $taskExecutionPath) -or -not (Test-Path $taskExecutionScriptPath)) {
+    throw 'Missing ordered task execution scenario evidence.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -31,6 +36,8 @@ $branchScenarioText = Get-Content $branchScenarioPath -Raw
 $normalizedBranchScenario = [regex]::Replace($branchScenarioText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
 $normalizedWalkthrough = [regex]::Replace($walkthroughText, '\s+', ' ')
+$taskExecutionText = Get-Content $taskExecutionPath -Raw
+$normalizedTaskExecution = [regex]::Replace($taskExecutionText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -128,6 +135,20 @@ foreach ($recordMarker in @(
         '`ClarifyRequired(acceptance criteria)`')) {
     if (-not $normalizedWalkthrough.Contains($recordMarker)) {
         throw "Walkthrough record assertion failed: $recordMarker"
+    }
+}
+
+foreach ($recordMarker in @(
+        '## Fixture'
+        '## Ordered execution trace'
+        'failed check'
+        'prerequisite blocker'
+        'reviewer rejects'
+        'human changes the status'
+        'task #902 cannot start'
+        'no dependent task receives a status')) {
+    if (-not $normalizedTaskExecution.Contains($recordMarker)) {
+        throw "Task execution walkthrough assertion failed: $recordMarker"
     }
 }
 
