@@ -83,6 +83,9 @@ Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/cha
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
+if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
+    throw 'Missing disposable branch scenario check.'
+}
 
 foreach ($recordMarker in @(
         '## 1. Single-repository story'
