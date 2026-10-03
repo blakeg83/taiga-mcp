@@ -54,6 +54,13 @@ For each task:
    `ready for review`. Reviewer acceptance and a closed/done transition are
    separate facts and are not implied by this worker result.
 
+Use the task's stable ref and commit SHA as the completion-comment idempotency
+marker. On resume, read the parent-story comments before writing: reuse an
+existing matching record, and create a new comment only for a new revision,
+new evidence, or a correction. For a blocker, comment immediately with the
+obstacle, attempted work, evidence, decision/help needed, and the fact that
+dependent tasks were not started.
+
 Do not start the next task until the current task has its implementation
 evidence, status write, parent-story comment, and commit outcome recorded.
 
