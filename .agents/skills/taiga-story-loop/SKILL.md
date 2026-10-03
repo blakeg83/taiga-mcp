@@ -26,6 +26,14 @@ templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
 
+After `Start`, pass the confirmed values and ordered task list to the Luna
+implementation worker using [the implementation prompt](assets/implementation-prompt.md).
+The worker processes one task at a time in the declared order, records direct
+checklist evidence, commits each task before advancing, and distinguishes
+ready-for-review from reviewer acceptance and merge. A blocked prerequisite or
+ambiguous order stops dependent work and is reported to the coordinator and
+parent story.
+
 For authorized execution, read [branch and continuation](references/branch-and-continuation.md)
 and [minimal continuation note](references/continuation-note.md). They define
 the fresh-base feature branch, per-story managed worktree, PR base, merge gate,
