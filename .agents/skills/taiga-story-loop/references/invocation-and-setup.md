@@ -78,6 +78,17 @@ setup. A later worker message is never treated as a substitute for either
 reply. If the user changes the scope, regenerate the summary and obtain a new
 confirmation.
 
+After `Start`, the coordinator follows
+[branch and continuation](branch-and-continuation.md): it fetches the resolved
+remote, captures a fresh base SHA, creates one uniquely named feature branch in
+a managed worktree, and records that branch and SHA before dispatch. Each
+story then receives a distinct managed worktree and story branch from the
+current feature HEAD. The story PR targets the feature branch, and a later
+story cannot start until the provider confirms the previous PR merged into that
+exact feature branch. A dirty user checkout, unrelated branch, failed merge,
+or uncertain create/write is preserved and reconciled rather than reset or
+replayed.
+
 For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
 directory. It checks documented terms and expected route labels only; it does

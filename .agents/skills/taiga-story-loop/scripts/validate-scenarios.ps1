@@ -41,6 +41,12 @@ Assert-DocumentContains 'read-only discovery' 'Discovery is read-only.'
 Assert-DocumentContains 'cancel behavior' '`Cancel` leaves the external systems unchanged'
 Assert-DocumentContains 'clarification behavior' 'Ask only for a missing or ambiguous'
 Assert-DocumentContains 'behavioral evidence reference' 'synthetic-walkthroughs.md'
+Assert-DocumentContains 'branch contract reference' 'branch and continuation'
+Assert-DocumentContains 'fresh base capture' 'captures a fresh base SHA'
+Assert-DocumentContains 'feature branch gate' 'creates one uniquely named feature branch'
+Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
+Assert-DocumentContains 'merge advancement gate' 'provider confirms the previous PR merged'
+Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
 
 foreach ($recordMarker in @(
         '## 1. Single-repository story'

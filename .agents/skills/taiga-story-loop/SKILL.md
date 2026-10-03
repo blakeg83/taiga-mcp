@@ -26,6 +26,12 @@ templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
 
+For authorized execution, read [branch and continuation](references/branch-and-continuation.md).
+It defines the fresh-base feature branch, per-story managed worktree, PR base,
+merge gate, and compact resume note. The note is deliberately smaller than a
+state registry; existing Git, Taiga, Codex, and pull-request records remain
+authoritative.
+
 For the shortest entry, use `Use $taiga-story-loop for <project> story #<ref>`
 or `Use $taiga-story-loop for <project> epic #<ref>`. Read
 [invocation and setup](references/invocation-and-setup.md) before resolving the

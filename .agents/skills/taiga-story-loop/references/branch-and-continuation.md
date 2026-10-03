@@ -1,0 +1,100 @@
+# Branch, worktree, and continuation contract
+
+This contract keeps the story loop small while making its branch lineage and
+resume point observable. It is a short note, not a registry or a workflow
+state machine. Git, Taiga, Codex, and the pull-request provider remain the
+authoritative systems.
+
+## Facts to retain
+
+After setup is confirmed, retain only the facts needed to continue the selected
+scope:
+
+| Fact | Required value |
+| --- | --- |
+| Scope | project, story/epic ref, ordered task refs, and run identifier |
+| Repository | absolute path, remote name/URL, resolved base ref, and captured base SHA |
+| Feature integration | unique `codex/feature-<slug>-<run-suffix>` branch, worktree path, and current HEAD |
+| Current story | story ref, unique `codex/story-<ref>-<slug>-<run-suffix>` branch, worktree path, and base SHA |
+| Workers | implementer and reviewer chat IDs, when created |
+| Review | PR URL, PR base/head, approval or wait state, and the next required action |
+| Recovery | one recovery automation ID, when authorized and created |
+
+Do not copy a ticket transcript, model output, full diff, or a second state
+registry into the note. A missing value is an unresolved setup fact, not a
+placeholder to guess.
+
+## Fresh feature branch
+
+After the single setup confirmation and before worker dispatch:
+
+1. Resolve the repository root, configured remote, default branch, and existing
+   checkout state. Use `git rev-parse --show-toplevel`,
+   `git remote get-url <remote>`, and `git ls-remote --symref <remote> HEAD`.
+   A dirty user checkout is preserved; do not switch, reset, stash, or clean it
+   to create the run branch.
+2. Fetch the configured remote with `git fetch --prune <remote>` and capture
+   `git rev-parse <remote>/<base-branch>`. The captured SHA is the only base
+   for this run. A fetch failure, missing ref, or changed mapping blocks setup.
+3. Create one managed Codex worktree from that captured SHA. In that worktree,
+   create a unique `codex/feature-<slug>-<run-suffix>` branch with supported
+   Git commands, then verify the absolute path, branch, HEAD, captured base,
+   clean status, and repository identity. Never reuse a path or branch whose
+   ownership cannot be reconciled.
+4. Write the feature branch, worktree, base ref/SHA, and current feature HEAD
+   into the continuation note before creating a story worktree.
+
+The feature worktree is the integration line for this run. It is not the
+user's checkout and it is not a worker's story worktree.
+
+## Story branch and worktree
+
+For each story, after the preceding story is accepted according to its stated
+approval boundary, read the continuation note and re-check the feature branch
+with Git and the provider. Create one managed worktree from the current feature
+HEAD, then create a distinct `codex/story-<ref>-<slug>-<run-suffix>` branch in
+that worktree. Verify the story branch, base SHA, clean status, and absolute
+path before passing the path and branch receipt to the implementer and
+reviewer. The implementer is the only source writer in that checkout;
+reviewers inspect the frozen revision and return findings.
+
+The story pull request targets the feature branch. A later story is based on
+the updated feature HEAD only after the provider confirms that the preceding
+story PR merged into that exact feature branch. A closed-unmerged, conflicting,
+or response-lost merge cannot advance the run. Do not infer merge completion
+from a branch name, a local checkout, a chat message, or a Taiga status alone.
+
+## Resume and preservation
+
+On interruption, read the continuation note first, then reconcile the current
+Git worktrees/branches, Codex chats, PR, and Taiga status before creating
+anything. If an existing object matches the recorded repository, branch, base,
+and scope, reuse it and refresh the note. If a create or write has an unknown
+outcome, inspect the authoritative system before retrying. If ownership or
+lineage is ambiguous, stop for user input.
+
+Resume never resets or deletes unrelated branches, user changes, worktrees, or
+PRs. It never force-pushes. A failed review returns to the same implementer
+checkout; a confirmed merge advances the feature HEAD; an unconfirmed merge
+keeps the run waiting at the current story.
+
+## Compact continuation note
+
+The note can be Markdown or JSON. A Markdown shape is sufficient:
+
+```text
+Run: <run-id> | scope: <project> story/epic #<ref>
+Repository: <absolute path> | remote: <name> (<url>)
+Base: <remote>/<base> @ <base-sha>
+Feature: <feature-branch> | worktree: <absolute path> | HEAD: <sha>
+Current story/task: <story ref> / <task ref or review stage>
+Story branch: <story-branch> | worktree: <absolute path> | base: <sha>
+Workers: implementer <chat-id> | reviewer <chat-id>
+PR: <url or pending> | base <feature-branch> | head <sha>
+Approval: <pending/approved/merged/blocked> | next: <one action>
+Recovery: <automation-id or none>
+```
+
+Update only after an authoritative fact changes. Keep the previous note
+recoverable when editing it, and do not treat the note as evidence that an
+external operation succeeded.
