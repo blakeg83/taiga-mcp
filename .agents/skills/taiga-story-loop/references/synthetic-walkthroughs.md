@@ -98,8 +98,8 @@ mcp__codex_app__create_thread({"title":"story-46 implementation","prompt":"Imple
 [synthetic-impl-46] mcp__codex_app__create_worktree({"name":"story-46-worker","ref":"origin/master","allowAsync":true})
 → {"workspaceDirectory":"C:\\Temp\\story-46-worker"}
 
-mcp__taiga__update_task({"taskId":604,"version":4,"status":57})
-→ {"id":604,"status":"In progress","version":5}
+mcp__taiga__update_task({"taskId":604,"version":2,"status":57})
+→ {"id":604,"status":"In progress","version":3}
 
 mcp__codex_app__automation_update({"kind":"heartbeat","mode":"create","name":"story-46 recovery","prompt":"Check the scoped run every 30 minutes; stay quiet when unchanged and notify only on meaningful progress, failure, completion, or required user action.","rrule":{"intervalMinutes":30},"status":"ACTIVE","destination":"thread","targetThreadId":"synthetic-coordinator-46","notificationPolicy":"failed_runs_only"})
 → {"status":"ACTIVE","targetThreadId":"synthetic-coordinator-46"}
