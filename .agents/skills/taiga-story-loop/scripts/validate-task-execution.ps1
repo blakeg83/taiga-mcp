@@ -29,6 +29,8 @@ function Add-Task {
         version = 1
         isBlocked = $false
         blockedNote = ''
+        reviewableCommit = $null
+        humanEdits = @()
         checklist = [ordered]@{ contract = $false; verification = $false }
         commits = @()
         comments = @()
@@ -90,6 +92,7 @@ function Complete-Task {
     Assert-True $task.checklist.contract "task $TaskId contract checklist is required"
     Assert-True $task.checklist.verification "task $TaskId verification checklist is required"
     $task.commits += $Commit
+    $task.reviewableCommit = $Commit
     $null = Set-Status $TaskId $task.version 'awaiting_review'
     Add-ProgressComment $TaskId 'complete' $Commit 'independent review'
     if ($ReviewRejected) {
@@ -121,10 +124,29 @@ function Accept-Task {
     param([int] $TaskId, [string] $ReviewedCommit)
     $task = Get-Task $TaskId
     Assert-True ($task.status -eq 'awaiting_review') "task $TaskId is not ready for review"
-    Assert-True ($task.commits -contains $ReviewedCommit) "reviewed SHA is not a task commit"
+    Assert-True ($task.reviewableCommit -eq $ReviewedCommit) "reviewed SHA is superseded or is not the current reviewable commit"
     $null = Set-Status $TaskId $task.version 'accepted'
     $task.comments += "Task #$TaskId accepted | reviewed commit: $ReviewedCommit"
+    $task.reviewableCommit = $null
     $script:fixture.activeTaskId = $null
+}
+
+function Apply-HumanEdit {
+    param([int] $TaskId, [string] $Status)
+    $task = Get-Task $TaskId
+    $task.status = $Status
+    $task.version++
+    $task.humanEdits += [ordered]@{ status = $Status; version = $task.version; source = 'human' }
+    $task.comments += "Human edit preserved | status: $Status | version: $($task.version)"
+}
+
+function Reconcile-HumanEdit {
+    param([int] $TaskId)
+    $task = Get-Task $TaskId
+    $edits = @($task.humanEdits)
+    Assert-True ($edits.Count -gt 0) "task $TaskId has no human edit to reconcile"
+    $task.comments += "Human edit preserved during reconciliation | status: $($edits[-1].status) | version: $($edits[-1].version)"
+    $null = Set-Status $TaskId $task.version 'in_progress'
 }
 
 $script:fixture = [ordered]@{
@@ -161,17 +183,20 @@ try {
 
     $task902 = Get-Task 902
     $plannedVersion = $task902.version
-    $task902.status = 'needs_info'
-    $task902.version++
+    Apply-HumanEdit 902 'needs_info'
     Assert-Throws { Set-Status 902 $plannedVersion 'awaiting_review' } 'human edit causes version conflict'
     Assert-True ((Get-Task 902).status -eq 'needs_info') 'human status is preserved after conflict'
-    $null = Set-Status 902 (Get-Task 902).version 'in_progress'
+    Assert-True (@((Get-Task 902).humanEdits | Where-Object { $_.status -eq 'needs_info' }).Count -eq 1) 'human edit is retained as history'
+    Reconcile-HumanEdit 902
+    Assert-True (@((Get-Task 902).humanEdits | Where-Object { $_.status -eq 'needs_info' }).Count -eq 1) 'human edit remains after reconciliation'
+    Assert-True (@((Get-Task 902).comments | Where-Object { $_ -like '*Human edit preserved during reconciliation*' }).Count -eq 1) 'human edit reconciliation is surfaced'
     $task902.checklist.contract = $true
     $task902.checklist.verification = $true
     Complete-Task 902 'a902001' -ReviewRejected
     Assert-True ((Get-Task 902).status -eq 'in_progress') 'review rejection reopens only affected task'
     $task902.checklist.verification = $true
     Complete-Task 902 'a902002'
+    Assert-Throws { Accept-Task 902 'a902001' } 'superseded commit cannot be accepted'
     Assert-Throws { Start-Task 903 } 'task 903 waits for task 902 acceptance'
     Accept-Task 902 'a902002'
 

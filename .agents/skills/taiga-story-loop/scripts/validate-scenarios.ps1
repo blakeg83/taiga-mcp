@@ -14,6 +14,7 @@ $skillRoot = Split-Path -Parent $PSScriptRoot
 $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
 $branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
 $continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
+$promptPath = Join-Path $skillRoot 'assets/implementation-prompt.md'
 $branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
 $taskExecutionPath = Join-Path $skillRoot 'references/task-execution-walkthroughs.md'
@@ -28,6 +29,8 @@ if (-not (Test-Path $taskExecutionPath) -or -not (Test-Path $taskExecutionScript
 
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
+$promptText = Get-Content $promptPath -Raw
+$normalizedPrompt = [regex]::Replace($promptText, '\s+', ' ')
 $branchText = Get-Content $branchPath -Raw
 $normalizedBranch = [regex]::Replace($branchText, '\s+', ' ')
 $continuationText = Get-Content $continuationPath -Raw
@@ -47,6 +50,17 @@ function Assert-DocumentContains {
 
     if (-not $normalizedSetup.Contains($Text)) {
         throw "Document assertion failed: $Label"
+    }
+}
+
+function Assert-PromptContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedPrompt.Contains($Text)) {
+        throw "Prompt assertion failed: $Label"
     }
 }
 
@@ -96,6 +110,8 @@ Assert-DocumentContains 'feature branch gate' 'creates one uniquely named featur
 Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
 Assert-DocumentContains 'merge advancement gate' 'provider confirms the previous PR merged'
 Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
+Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
+Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
 Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
 Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'

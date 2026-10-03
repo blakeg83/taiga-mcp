@@ -59,7 +59,8 @@ evidence, and checked boxes are not reviewer acceptance.
 At implementation completion, update the current version to
 `mapping.awaiting_review` (or the documented in-progress fallback). The worker
 must not write `mapping.accepted`; only an independent reviewer acceptance for
-the same revision allows that transition. After a substantive review rejection,
+the same revision allows that transition or allows the next ordered task to
+start. After a substantive review rejection,
 re-read the task, reopen only that task to `mapping.in_progress`, preserve the
 other tasks and human edits, and add new revision-bound evidence before
 returning it to review.

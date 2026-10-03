@@ -69,4 +69,3 @@ The executable scenario must demonstrate all of the following:
   commit SHA, review state, and next action;
 - no dependent task receives a status, commit, or completion comment before its
   prerequisite is accepted.
-

@@ -52,7 +52,9 @@ For each task:
    comment to the parent story naming the task, checklist outcome, checks and
    exit codes, commit SHA or verified no-change result, and the state
    `ready for review`. Reviewer acceptance and a closed/done transition are
-   separate facts and are not implied by this worker result.
+   separate facts and are not implied by this worker result. Do not advance to
+   the next ordered task until independent reviewer acceptance of this exact
+   current task commit is recorded.
 
 Use the task's stable ref and commit SHA as the completion-comment idempotency
 marker. On resume, read the parent-story comments before writing: reuse an
@@ -62,7 +64,10 @@ obstacle, attempted work, evidence, decision/help needed, and the fact that
 dependent tasks were not started.
 
 Do not start the next task until the current task has its implementation
-evidence, status write, parent-story comment, and commit outcome recorded.
+evidence, status write, parent-story comment, commit outcome, and explicit
+reviewer acceptance of the exact current task commit recorded. A task being
+`Ready for test`, having a completion comment, or having any historical commit
+is not an acceptance gate.
 
 ## Status, conflicts, and blockers
 
