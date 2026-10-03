@@ -18,10 +18,18 @@ $notePath = Join-Path $tempRoot 'continuation-note.json'
 $featureBranch = 'codex/feature-synthetic-run'
 $storyOneBranch = 'codex/story-1-synthetic-run'
 $storyTwoBranch = 'codex/story-2-synthetic-run'
+$storyThreeBranch = 'codex/story-3-synthetic-run'
 
 function Assert-True {
     param([bool] $Condition, [string] $Message)
     if (-not $Condition) { throw "Assertion failed: $Message" }
+}
+
+function Assert-Throws {
+    param([scriptblock] $Action, [string] $Message)
+    $threw = $false
+    try { & $Action } catch { $threw = $true }
+    Assert-True $threw $Message
 }
 
 function Invoke-Git {
@@ -73,6 +81,26 @@ function Assert-WorktreeReceipt {
     Assert-True ((Invoke-Git $Path @('status', '--porcelain')).Output.Count -eq 0) "worktree is clean: $Path"
 }
 
+function Assert-ResumeReceipt {
+    param([psobject] $Note)
+    $repository = [string]$Note.repository
+    $featureWorktree = [string]$Note.featureWorktree
+    $featureBranch = [string]$Note.featureBranch
+    $featureHead = [string]$Note.featureHead
+    $storyWorktree = [string]$Note.storyWorktree
+    $storyBranch = [string]$Note.storyBranch
+    $storyHead = [string]$Note.pr.head
+    $storyBase = [string]$Note.storyBaseSha
+
+    Assert-True ($Note.pr.base -eq $featureBranch) 'resumed PR base matches the resumed feature branch'
+    Assert-WorktreeReceipt $repository $featureWorktree $featureBranch $featureHead
+    Assert-WorktreeReceipt $repository $storyWorktree $storyBranch $storyHead
+    Assert-True ((Get-Head $storyWorktree "$storyBranch^") -eq $storyBase) 'resumed story base matches its recorded starting SHA'
+    $inheritedStoryOne = Join-Path $storyWorktree 'story-one.txt'
+    Assert-True (Test-Path -LiteralPath $inheritedStoryOne) 'resumed story worktree retains story-one content'
+    Assert-True ((Get-Content -Raw -LiteralPath $inheritedStoryOne).Trim() -eq 'story one') 'resumed story-one content is authoritative'
+}
+
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
     Invoke-Git $tempRoot @('init', '--bare', '--initial-branch=master', $remotePath) | Out-Null
@@ -121,6 +149,10 @@ try {
     $featureHeadForStoryTwo = Get-Head $featurePath
     Invoke-Git $userPath @('worktree', 'add', '--detach', $storyTwoPath, $featureHeadForStoryTwo) | Out-Null
     Invoke-Git $storyTwoPath @('switch', '--create', $storyTwoBranch) | Out-Null
+    Assert-True ((Get-Head $storyTwoPath) -eq $featureHeadForStoryTwo) 'story two starts at the current feature HEAD'
+    $inheritedStoryOne = Join-Path $storyTwoPath 'story-one.txt'
+    Assert-True (Test-Path -LiteralPath $inheritedStoryOne) 'story two inherits story-one content from the feature branch'
+    Assert-True ((Get-Content -Raw -LiteralPath $inheritedStoryOne).Trim() -eq 'story one') 'story two inherits the authoritative story-one content'
     Set-Content -LiteralPath (Join-Path $storyTwoPath 'merge-conflict.txt') -Value 'story two' -NoNewline
     Invoke-Git $storyTwoPath @('add', 'merge-conflict.txt') | Out-Null
     Invoke-Git $storyTwoPath @('commit', '-m', 'story two') | Out-Null
@@ -143,23 +175,40 @@ try {
         remote = $remotePath
         baseSha = $baseSha
         featureBranch = $featureBranch
+        featureWorktree = $featurePath
         featureHead = $featureHeadBeforeFailedMerge
         currentStory = 2
         storyBranch = $storyTwoBranch
         storyWorktree = $storyTwoPath
         storyBaseSha = $featureHeadForStoryTwo
+        stories = @(
+            [ordered]@{ ref = 1; branch = $storyOneBranch; state = 'merged' }
+            [ordered]@{ ref = 2; branch = $storyTwoBranch; state = 'current' }
+        )
         pr = [ordered]@{ base = $featureBranch; head = $storyTwoHead; merge = 'unknown' }
         next = 'reconcile story-two merge before creating another story branch'
     }
     $note | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $notePath -NoNewline
     $resumed = Get-Content -Raw -LiteralPath $notePath | ConvertFrom-Json
     Assert-True ($resumed.featureBranch -eq $featureBranch) 'resume note retains feature branch'
+    Assert-True ($resumed.stories.Count -eq 2) 'resume note retains ordered story scope'
+    Assert-True ([int]$resumed.stories[0].ref -eq 1) 'resume note retains first story order'
+    Assert-True ([int]$resumed.stories[1].ref -eq 2) 'resume note retains current story order'
     Assert-True ($resumed.storyWorktree -eq $storyTwoPath) 'resume note retains story worktree'
     Assert-True ($resumed.pr.base -eq $featureBranch) 'PR base is the integration feature branch'
     Assert-True ($resumed.pr.merge -eq 'unknown') 'unconfirmed merge remains unknown'
-    Assert-WorktreeReceipt $userPath $featurePath $featureBranch $featureHeadBeforeFailedMerge
-    Assert-WorktreeReceipt $userPath $storyTwoPath $storyTwoBranch $storyTwoHead
-    Assert-True (Test-Path -LiteralPath (Join-Path $userPath 'unrelated.txt')) 'unrelated user edit survives resume'
+    Assert-True ($resumed.next -like '*reconcile*') 'unknown merge requires reconciliation before advancement'
+    Assert-ResumeReceipt $resumed
+    $resumedRepository = [string]$resumed.repository
+    Assert-True (Test-Path -LiteralPath (Join-Path $resumedRepository 'unrelated.txt')) 'unrelated user edit survives resume'
+    Assert-True ((Invoke-Git $resumedRepository @('branch', '--list', $storyThreeBranch)).Output.Count -eq 0) 'unknown merge does not create the next story branch'
+
+    $mismatchedFeature = Get-Content -Raw -LiteralPath $notePath | ConvertFrom-Json
+    $mismatchedFeature.featureHead = $baseSha
+    Assert-Throws { Assert-ResumeReceipt $mismatchedFeature } 'incorrect saved feature lineage is rejected'
+    $mismatchedStory = Get-Content -Raw -LiteralPath $notePath | ConvertFrom-Json
+    $mismatchedStory.storyWorktree = $featurePath
+    Assert-Throws { Assert-ResumeReceipt $mismatchedStory } 'incorrect saved story worktree lineage is rejected'
 
     Write-Output 'Passed disposable branch isolation, PR base, failed-merge, preservation, and continuation-note resume scenarios.'
     exit 0
