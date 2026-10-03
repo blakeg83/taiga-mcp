@@ -80,6 +80,7 @@ Assert-BranchContractContains 'worker path receipt' 'The coordinator records the
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
 Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
 Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/changes_requested>'
+Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'

@@ -108,7 +108,7 @@ inline for a single story.
 The note can be Markdown or JSON. A Markdown shape is sufficient:
 
 ```text
-Run: <run-id> | scope: <project> story/epic #<ref>
+Run: <run-id> | scope: <project> story/epic #<ref> | stories: <ordered story refs>
 Repository: <absolute path> | remote: <name> (<url>)
 Base: <remote>/<base> @ <base-sha>
 Feature: <feature-branch> | worktree: <absolute path> | HEAD: <sha>

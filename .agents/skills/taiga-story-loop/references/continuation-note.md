@@ -2,14 +2,15 @@
 
 Keep one short note per authorized story-loop run, outside the source
 worktrees. It is a pointer to authoritative systems, not a durable workflow
-engine. Store only the selected scope, branch/worktree lineage, worker chats,
-PR identity, current stage, approval/merge state, and recovery reference.
+engine. Store only the selected scope, ordered story/task sequence,
+branch/worktree lineage, worker chats, PR identity, current stage,
+approval/merge state, and recovery reference.
 
 ## Template
 
 ```text
 Run: <run-id>
-Scope: <project> story/epic #<ref> | tasks: <ordered refs>
+Scope: <project> story/epic #<ref> | stories: <ordered story refs> | tasks: <ordered task refs>
 Repository: <absolute path> | remote: <name> <url>
 Base: <remote>/<base-ref> @ <base-sha>
 Feature: <branch> | worktree: <absolute path> | head: <sha>
