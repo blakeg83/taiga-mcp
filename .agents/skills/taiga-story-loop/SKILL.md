@@ -34,6 +34,11 @@ ready-for-review from reviewer acceptance and merge. A blocked prerequisite or
 ambiguous order stops dependent work and is reported to the coordinator and
 parent story.
 
+Use [ordered task execution and truthful Taiga updates](references/task-execution.md)
+for the project-specific story/task status mapping, Markdown checklist merge,
+current-version writes, uncertain-result reconciliation, selective reopening,
+and blocker evidence protocol.
+
 For authorized execution, read [branch and continuation](references/branch-and-continuation.md)
 and [minimal continuation note](references/continuation-note.md). They define
 the fresh-base feature branch, per-story managed worktree, PR base, merge gate,
