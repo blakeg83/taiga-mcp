@@ -20,3 +20,8 @@ External writes require an explicit confirmation for the resolved scope. Until
 that confirmation, discovery is read-only and the workflow must not create
 worker chats, branches, worktrees, commits, pushes, pull requests, Taiga
 updates, or recovery automations.
+
+Before setup, read [contracts](references/contracts.md). Use its story and task
+templates to preserve the selected requirements, task order, and observable
+completion evidence; ask for clarification when those inputs are missing or
+ambiguous.
