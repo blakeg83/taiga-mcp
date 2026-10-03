@@ -101,6 +101,10 @@ keeps the run waiting at the current story.
 
 ## Compact continuation note
 
+Use the [minimal continuation note](continuation-note.md) template and resume
+decision table for the persisted form. The example below shows the same facts
+inline for a single story.
+
 The note can be Markdown or JSON. A Markdown shape is sufficient:
 
 ```text

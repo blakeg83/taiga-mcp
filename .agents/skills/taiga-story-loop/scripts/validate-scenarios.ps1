@@ -13,6 +13,7 @@ $ErrorActionPreference = 'Stop'
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
 $branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
+$continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
 
 if (-not (Test-Path $walkthroughPath)) {
@@ -23,6 +24,8 @@ $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
 $branchText = Get-Content $branchPath -Raw
 $normalizedBranch = [regex]::Replace($branchText, '\s+', ' ')
+$continuationText = Get-Content $continuationPath -Raw
+$normalizedContinuation = [regex]::Replace($continuationText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
 $normalizedWalkthrough = [regex]::Replace($walkthroughText, '\s+', ' ')
 
@@ -48,6 +51,17 @@ function Assert-BranchContractContains {
     }
 }
 
+function Assert-ContinuationContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedContinuation.Contains($Text)) {
+        throw "Continuation note assertion failed: $Label"
+    }
+}
+
 Assert-DocumentContains 'per-repository mapping' 'one row per resolved repository'
 Assert-DocumentContains 'epic mapping guard' 'An epic setup must not collapse multiple repositories'
 Assert-DocumentContains 'start gate' 'Reply Start or Cancel.'
@@ -65,6 +79,10 @@ Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name
 Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
 Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
+Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/changes_requested>'
+Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
+Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
+Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
 
 foreach ($recordMarker in @(
         '## 1. Single-repository story'

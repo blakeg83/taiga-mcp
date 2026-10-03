@@ -90,6 +90,9 @@ or uncertain create/write is preserved and reconciled rather than reset or
 replayed. The coordinator passes the verified absolute story-worktree path,
 story branch, base SHA, feature branch, and ownership roles to both worker
 chats; only the implementer writes source in that checkout.
+The persisted fields and restart/merge decision table are defined in the
+[minimal continuation note](continuation-note.md); no second state registry is
+created.
 
 For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
