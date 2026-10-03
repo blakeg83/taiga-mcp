@@ -12,6 +12,9 @@ $ErrorActionPreference = 'Stop'
 
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
+$branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
+$continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
+$branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
 
 if (-not (Test-Path $walkthroughPath)) {
@@ -20,6 +23,12 @@ if (-not (Test-Path $walkthroughPath)) {
 
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
+$branchText = Get-Content $branchPath -Raw
+$normalizedBranch = [regex]::Replace($branchText, '\s+', ' ')
+$continuationText = Get-Content $continuationPath -Raw
+$normalizedContinuation = [regex]::Replace($continuationText, '\s+', ' ')
+$branchScenarioText = Get-Content $branchScenarioPath -Raw
+$normalizedBranchScenario = [regex]::Replace($branchScenarioText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
 $normalizedWalkthrough = [regex]::Replace($walkthroughText, '\s+', ' ')
 
@@ -34,6 +43,39 @@ function Assert-DocumentContains {
     }
 }
 
+function Assert-BranchContractContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedBranch.Contains($Text)) {
+        throw "Branch contract assertion failed: $Label"
+    }
+}
+
+function Assert-ContinuationContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedContinuation.Contains($Text)) {
+        throw "Continuation note assertion failed: $Label"
+    }
+}
+
+function Assert-BranchScenarioContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedBranchScenario.Contains($Text)) {
+        throw "Branch scenario assertion failed: $Label"
+    }
+}
+
 Assert-DocumentContains 'per-repository mapping' 'one row per resolved repository'
 Assert-DocumentContains 'epic mapping guard' 'An epic setup must not collapse multiple repositories'
 Assert-DocumentContains 'start gate' 'Reply Start or Cancel.'
@@ -41,6 +83,29 @@ Assert-DocumentContains 'read-only discovery' 'Discovery is read-only.'
 Assert-DocumentContains 'cancel behavior' '`Cancel` leaves the external systems unchanged'
 Assert-DocumentContains 'clarification behavior' 'Ask only for a missing or ambiguous'
 Assert-DocumentContains 'behavioral evidence reference' 'synthetic-walkthroughs.md'
+Assert-DocumentContains 'branch contract reference' 'branch and continuation'
+Assert-DocumentContains 'fresh base capture' 'captures a fresh base SHA'
+Assert-DocumentContains 'feature branch gate' 'creates one uniquely named feature branch'
+Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
+Assert-DocumentContains 'merge advancement gate' 'provider confirms the previous PR merged'
+Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
+Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
+Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
+Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
+Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
+Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/changes_requested>'
+Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
+Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
+Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
+Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
+Assert-BranchScenarioContains 'story-two starting HEAD guard' 'story two starts at the current feature HEAD'
+Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits story-one content'
+Assert-BranchScenarioContains 'reloaded resume receipt' 'Assert-ResumeReceipt $resumed'
+Assert-BranchScenarioContains 'mismatched lineage guard' 'incorrect saved feature lineage is rejected'
+Assert-BranchScenarioContains 'unknown outcome guard' 'unknown merge does not create the next story branch'
+if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
+    throw 'Missing disposable branch scenario check.'
+}
 
 foreach ($recordMarker in @(
         '## 1. Single-repository story'
