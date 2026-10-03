@@ -77,3 +77,8 @@ worker assignment. `Cancel` leaves the external systems unchanged and ends
 setup. A later worker message is never treated as a substitute for either
 reply. If the user changes the scope, regenerate the summary and obtain a new
 confirmation.
+
+For repeatable read-only validation, run
+`powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
+directory. The check prints each concrete input and observed outcome for the
+story, epic, ambiguous-scope, cancelled-setup, and missing-acceptance cases.
