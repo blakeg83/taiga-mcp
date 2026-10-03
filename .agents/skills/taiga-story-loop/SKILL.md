@@ -26,6 +26,30 @@ templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
 
+After `Start`, pass the confirmed values and ordered task list to the Luna
+implementation worker using [the implementation prompt](assets/implementation-prompt.md).
+The worker processes one task at a time in the declared order, records direct
+checklist evidence, commits each task before advancing, and distinguishes
+ready-for-review from reviewer acceptance and merge. A blocked prerequisite or
+ambiguous order stops dependent work and is reported to the coordinator and
+parent story.
+
+Use [ordered task execution and truthful Taiga updates](references/task-execution.md)
+for the project-specific story/task status mapping, Markdown checklist merge,
+current-version writes, uncertain-result reconciliation, selective reopening,
+and blocker evidence protocol.
+
+Use [per-task commits and parent-story progress comments](references/commit-and-progress.md)
+for commit boundaries, exact SHA/no-change evidence, completion and blocker
+comment markers, resume deduplication, and the distinction between worker
+completion, review acceptance, PR approval, and merge.
+
+The synthetic ordered-task, failed-check, blocker, review-rejection, and
+human-edit scenarios are recorded in
+[task-execution-walkthroughs.md](references/task-execution-walkthroughs.md) and
+exercised by `scripts/validate-task-execution.ps1`. They are offline evidence,
+not a claim of live-provider execution.
+
 For authorized execution, read [branch and continuation](references/branch-and-continuation.md)
 and [minimal continuation note](references/continuation-note.md). They define
 the fresh-base feature branch, per-story managed worktree, PR base, merge gate,

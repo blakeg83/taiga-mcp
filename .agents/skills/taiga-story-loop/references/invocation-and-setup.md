@@ -94,6 +94,14 @@ The persisted fields and restart/merge decision table are defined in the
 [minimal continuation note](continuation-note.md); no second state registry is
 created.
 
+For the implementation chat, render the confirmed values into
+[the implementation prompt](../assets/implementation-prompt.md). It is the
+worker's execution contract: it carries the story identity, branch/worktree,
+coordinator and reviewer IDs, exact ordered tasks, status gates, checklist
+evidence requirements, commit boundary, parent-story comment requirements, and
+blocker stop/escalation behavior. A worker must not receive a shortened prompt
+that omits those facts.
+
 For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
 directory. It checks documented terms and expected route labels only; it does
