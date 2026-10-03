@@ -31,9 +31,17 @@ placeholders:
 ```text
 Taiga story loop setup — <project> <story|epic> #<ref>
 Subject: <subject>
-Repository: <absolute workspace path>; remote <remote>; base <verified base ref/SHA>
 Scope: <story tasks in order, or all resolved epic stories in order>
-Branches/worktrees: <coordinator branch and the scoped worker worktrees to create or reuse>
+
+Repositories and branch/worktree mapping (one row per resolved repository;
+required for an epic spanning repositories):
+| Repository/workspace | Remote | Verified base ref/SHA | Coordinator branch | Worker worktrees |
+| <absolute path> | <remote> | <ref/SHA> | <branch> | <paths or “none”> |
+
+An epic setup must not collapse multiple repositories into one Repository or
+Branches/worktrees value. If any linked story is in another repository, add its
+row and map its base, branch, and worker worktrees explicitly. If that mapping
+cannot be resolved, ask for clarification before showing Start/Cancel.
 
 Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
