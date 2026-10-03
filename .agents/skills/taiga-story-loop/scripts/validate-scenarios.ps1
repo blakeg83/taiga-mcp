@@ -21,6 +21,8 @@ $taskExecutionPath = Join-Path $skillRoot 'references/task-execution-walkthrough
 $taskExecutionGuidancePath = Join-Path $skillRoot 'references/task-execution.md'
 $taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
 $workerPairPath = Join-Path $skillRoot 'references/worker-pair.md'
+$handoffPath = Join-Path $skillRoot 'references/worker-handoffs.md'
+$reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -30,6 +32,9 @@ if (-not (Test-Path $taskExecutionPath) -or -not (Test-Path $taskExecutionScript
 }
 if (-not (Test-Path $workerPairPath)) {
     throw 'Missing persistent worker-pair contract.'
+}
+if (-not (Test-Path $handoffPath) -or -not (Test-Path $reviewerPromptPath)) {
+    throw 'Missing direct worker handoff or reviewer prompt contract.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -50,6 +55,10 @@ $taskExecutionGuidanceText = Get-Content $taskExecutionGuidancePath -Raw
 $normalizedTaskExecutionGuidance = [regex]::Replace($taskExecutionGuidanceText, '\s+', ' ')
 $workerPairText = Get-Content $workerPairPath -Raw
 $normalizedWorkerPair = [regex]::Replace($workerPairText, '\s+', ' ')
+$handoffText = Get-Content $handoffPath -Raw
+$normalizedHandoff = [regex]::Replace($handoffText, '\s+', ' ')
+$reviewerPromptText = Get-Content $reviewerPromptPath -Raw
+$normalizedReviewerPrompt = [regex]::Replace($reviewerPromptText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -128,6 +137,17 @@ function Assert-WorkerPairContains {
     }
 }
 
+function Assert-HandoffContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedHandoff.Contains($Text)) {
+        throw "Handoff assertion failed: $Label"
+    }
+}
+
 Assert-DocumentContains 'per-repository mapping' 'one row per resolved repository'
 Assert-DocumentContains 'epic mapping guard' 'An epic setup must not collapse multiple repositories'
 Assert-DocumentContains 'start gate' 'Reply Start or Cancel.'
@@ -149,6 +169,12 @@ Assert-PromptContains 'acceptance before advancement' 'explicit reviewer accepta
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
 Assert-PromptContains 'pair authorization' 'worker-to-worker and worker-to-coordinator messages'
 Assert-PromptContains 'no peer creation' 'Never create another worker'
+if (-not $normalizedReviewerPrompt.Contains('read-only reviewer')) {
+    throw 'Reviewer prompt assertion failed: read-only role'
+}
+if (-not $normalizedReviewerPrompt.Contains('gpt-6.1-sol')) {
+    throw 'Reviewer prompt assertion failed: exact reviewer profile'
+}
 Assert-TaskExecutionContains 'explicit human status decision' 'A human status is never replaced automatically'
 Assert-TaskExecutionContains 'preserve-or-replace decision' 'explicit decision to preserve the human status and stop, or to replace it'
 Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
@@ -169,6 +195,11 @@ Assert-WorkerPairContains 'exact implementer profile' 'gpt-5.6-luna'
 Assert-WorkerPairContains 'exact reviewer profile' 'gpt-6.1-sol'
 Assert-WorkerPairContains 'pending thread guard' 'pending `clientThreadId`'
 Assert-WorkerPairContains 'coordinator-owned pair' 'neither worker creates the other worker'
+Assert-HandoffContains 'task-ready payload' 'Task #<ref> ready for review'
+Assert-HandoffContains 'findings route' 'reviewer sends findings directly to the implementer'
+Assert-HandoffContains 'correction route' 'returns to the same reviewer chat'
+Assert-HandoffContains 'stable branch gate' 'does not start the next ordered task'
+Assert-HandoffContains 'no receipt requirement' 'Do not require a JSON receipt'
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'
 }

@@ -118,6 +118,36 @@ worker pair and both real destinations are connected before the listed scoped
 operations may proceed.
 ```
 
+The same pair carries every task review. A synthetic task handoff sequence is:
+
+```text
+[synthetic-impl-46] → [synthetic-review-46]
+Task #53 ready for review
+Branch: codex/story-46
+Revision: 1111111
+Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; contract routes passed
+Next: reviewer, inspect this exact revision and report findings or acceptance.
+
+[synthetic-review-46] → [synthetic-impl-46]
+Task #53 findings
+Reviewed: 1111111
+Severity: blocking
+Finding: reviewer prompt is missing the exact reviewer host destination
+Evidence: reviewer assignment fixture
+Requested change: include reviewerHostId in the assignment
+Next: implementer, correct the same story branch and return a new revision for review.
+
+[synthetic-impl-46] → [synthetic-review-46]
+Task #53 correction ready
+Previous review: 1111111
+Revision: 2222222
+Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; corrected assignment passed
+Next: reviewer, re-review the new revision; prior acceptance is superseded.
+```
+
+The branch remains stable while the reviewer inspects each named revision; no
+new chat, copied transcript, or mandatory structured receipt is introduced.
+
 ## 2. Multi-repository epic — Start
 
 Synthetic input:

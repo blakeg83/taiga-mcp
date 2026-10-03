@@ -108,6 +108,12 @@ The persisted fields and restart/merge decision table are defined in the
 created.
 
 For the implementation chat, render the confirmed values into
+[the implementation prompt](../assets/implementation-prompt.md). For the
+reviewer chat, render the read-only assignment from
+[the reviewer prompt](../assets/reviewer-prompt.md). Both workers use the
+concise route formats in [worker handoffs](worker-handoffs.md).
+
+For the implementation chat, render the confirmed values into
 [the implementation prompt](../assets/implementation-prompt.md). It is the
 worker's execution contract: it carries the story identity, branch/worktree,
 coordinator and reviewer IDs, exact ordered tasks, status gates, checklist

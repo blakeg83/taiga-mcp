@@ -73,6 +73,13 @@ new evidence, or a correction. For a blocker, comment immediately with the
 obstacle, attempted work, evidence, decision/help needed, and the fact that
 dependent tasks were not started.
 
+For worker communication, use the short task-ready and correction handoff
+formats from `references/worker-handoffs.md`: name the task, branch, stable
+revision, checks with exit codes, and one next action. A task-ready handoff goes
+to the reviewer; a reviewer finding comes back to this same chat; a correction
+returns to that same reviewer. Do not start the next ordered task while a
+per-task review is active, and do not create a new chat for a correction.
+
 Do not start the next task until the current task has its implementation
 evidence, status write, parent-story comment, commit outcome, and explicit
 reviewer acceptance of the exact current task commit recorded. A task being
