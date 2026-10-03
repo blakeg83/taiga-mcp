@@ -84,7 +84,11 @@ outcome as applied, unchanged, human-changed, or unresolved. A matching
 authoritative status/version may confirm an applied write; a different human
 status or changed description must be preserved and surfaced. Stop for a
 decision when the intended checklist merge cannot be made without overwriting
-the human edit.
+the human edit. A human status is never replaced automatically: record an
+explicit decision to preserve the human status and stop, or to replace it with
+the exact intended transition. Include the prior human status/version and the
+decision in the reconciliation evidence; without that decision, leave the
+human status unchanged and unresolved.
 
 The same rule applies to the parent-story comment. Read the current story
 version before writing:

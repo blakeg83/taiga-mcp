@@ -75,8 +75,12 @@ Use the current Taiga version for every write. If a write has an unknown result
 or a version conflict, re-read the task and its history/detail, reconcile what
 actually happened, and preserve a human change. Never blindly retry an
 ambiguous write, refresh a version and overwrite a changed status, or mark a
-task complete from stale data. A review correction reopens only the affected
-task and must use new evidence on the corrected revision.
+task complete from stale data. A human status is never replaced automatically:
+record an explicit decision to preserve it and stop, or to replace it with the
+exact intended transition. Include the prior status/version and decision in the
+reconciliation evidence; without that decision, leave the human status
+unchanged and unresolved. A review correction reopens only the affected task
+and must use new evidence on the corrected revision.
 
 If a prerequisite is blocked, a required capability is missing, the task order
 is ambiguous, or a check fails and cannot be resolved safely:

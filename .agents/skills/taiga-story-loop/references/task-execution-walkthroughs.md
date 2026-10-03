@@ -44,7 +44,7 @@ not a claim that Taiga itself enforces dependencies.
 | 7 | #902 | worker starts, then records a prerequisite blocker | `blocked`, `isBlocked=true`; task #903 cannot start |
 | 8 | #902 | blocker is resolved and task reopens | `in_progress`; blocker evidence is retained |
 | 9 | #902 | human changes the status before the planned write | version conflict; human status is preserved and surfaced |
-| 10 | #902 | worker rereads, reconciles, commits `a902001`, and requests review | current version used; one new story comment |
+| 10 | #902 | worker rereads, records the explicit human-status decision, reconciles, commits `a902001`, and requests review | current version used; prior status/version and decision surfaced in one new story comment |
 | 11 | #902 | reviewer rejects the exact SHA | task reopens to `in_progress`; rejection is not treated as acceptance |
 | 12 | #902 | worker corrects, commits `a902002`, and requests review again | new revision-bound evidence; no duplicate old completion comment |
 | 13 | #902 | reviewer accepts `a902002` | `accepted`; active task is released |
@@ -64,6 +64,8 @@ The executable scenario must demonstrate all of the following:
 - task #903 cannot start while #902 is blocked or review-rejected;
 - `isBlocked` and the blocker note are visible when a blocked status exists;
 - a conflicting human version does not get overwritten by a blind retry;
+- replacing a human status requires an explicit preserve-or-replace decision;
+- a preserve decision leaves the human status unchanged and the replacement decision records the prior status/version;
 - the corrected task uses a new commit and a new evidence comment;
 - completion comments contain task ref, checklist evidence, check exit code,
   commit SHA, review state, and next action;

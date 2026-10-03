@@ -141,11 +141,24 @@ function Apply-HumanEdit {
 }
 
 function Reconcile-HumanEdit {
-    param([int] $TaskId)
+    param([int] $TaskId, [string] $Decision)
     $task = Get-Task $TaskId
     $edits = @($task.humanEdits)
     Assert-True ($edits.Count -gt 0) "task $TaskId has no human edit to reconcile"
-    $task.comments += "Human edit preserved during reconciliation | status: $($edits[-1].status) | version: $($edits[-1].version)"
+    if ([string]::IsNullOrWhiteSpace($Decision)) {
+        throw "task $TaskId requires an explicit human-status reconciliation decision"
+    }
+    if (@('preserve_human_status', 'replace_after_decision') -notcontains $Decision) {
+        throw "task $TaskId has unsupported human-status reconciliation decision: $Decision"
+    }
+
+    $lastEdit = $edits[-1]
+    if ($Decision -eq 'preserve_human_status') {
+        $task.comments += "Human edit preserved; decision: preserve_human_status | status: $($lastEdit.status) | version: $($lastEdit.version)"
+        return
+    }
+
+    $task.comments += "Human edit preserved during reconciliation; decision: replace_after_decision | prior status: $($lastEdit.status) | prior version: $($lastEdit.version)"
     $null = Set-Status $TaskId $task.version 'in_progress'
 }
 
@@ -187,9 +200,14 @@ try {
     Assert-Throws { Set-Status 902 $plannedVersion 'awaiting_review' } 'human edit causes version conflict'
     Assert-True ((Get-Task 902).status -eq 'needs_info') 'human status is preserved after conflict'
     Assert-True (@((Get-Task 902).humanEdits | Where-Object { $_.status -eq 'needs_info' }).Count -eq 1) 'human edit is retained as history'
-    Reconcile-HumanEdit 902
+    Assert-Throws { Reconcile-HumanEdit 902 } 'human status replacement requires explicit decision'
+    Assert-True ((Get-Task 902).status -eq 'needs_info') 'missing decision leaves human status unchanged'
+    Reconcile-HumanEdit 902 'preserve_human_status'
+    Assert-True ((Get-Task 902).status -eq 'needs_info') 'preserve decision leaves human status unchanged'
+    Reconcile-HumanEdit 902 'replace_after_decision'
+    Assert-True ((Get-Task 902).status -eq 'in_progress') 'replace decision records the intended status transition'
     Assert-True (@((Get-Task 902).humanEdits | Where-Object { $_.status -eq 'needs_info' }).Count -eq 1) 'human edit remains after reconciliation'
-    Assert-True (@((Get-Task 902).comments | Where-Object { $_ -like '*Human edit preserved during reconciliation*' }).Count -eq 1) 'human edit reconciliation is surfaced'
+    Assert-True (@((Get-Task 902).comments | Where-Object { $_ -like '*decision: replace_after_decision*' }).Count -eq 1) 'human edit reconciliation decision is surfaced'
     $task902.checklist.contract = $true
     $task902.checklist.verification = $true
     Complete-Task 902 'a902001' -ReviewRejected
