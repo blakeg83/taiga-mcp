@@ -25,8 +25,15 @@ exact revision satisfies the task. In per-task mode, acceptance releases the
 next task; in story-end-only mode, retain task findings and defer acceptance to
 the final story review.
 
+Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
+the implementer to update Taiga with the current version and advance the
+ordered work. After the final task, send one story approval to the coordinator
+with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
+PR. Any later source change invalidates that approval and requires re-review.
+
 If the implementer sends a correction, review the new SHA and treat prior
-acceptance as superseded. The coordinator owns Taiga status writes and branch
-coordination unless the confirmed assignment explicitly says otherwise. Do not
+acceptance as superseded. The coordinator owns final story/branch coordination;
+the implementer owns its authorized Taiga task/checklist update after the
+reviewer acceptance. Do not
 invent a receipt schema, demand the full transcript, create a new chat for a
 correction, or approve a revision you did not inspect.

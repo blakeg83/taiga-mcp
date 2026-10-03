@@ -47,6 +47,7 @@ Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
 - Story/task reviews: gpt-6.1-sol, medium, after each task's implementation evidence
 - Final epic review: gpt-6.1-sol, high, after all scoped stories are ready
+- Review mode: per_task (default); story_end_only is an explicit alternative
 - No silent profile substitution; an unavailable exact profile is a blocker.
 
 The story worker pair is persistent for the whole story: the coordinator
@@ -112,6 +113,9 @@ For the implementation chat, render the confirmed values into
 reviewer chat, render the read-only assignment from
 [the reviewer prompt](../assets/reviewer-prompt.md). Both workers use the
 concise route formats in [worker handoffs](worker-handoffs.md).
+Acceptance rules and review-mode selection are defined in
+[task and story acceptance](acceptance.md); the selected mode is part of the
+scope-bound authorization.
 
 For the implementation chat, render the confirmed values into
 [the implementation prompt](../assets/implementation-prompt.md). It is the

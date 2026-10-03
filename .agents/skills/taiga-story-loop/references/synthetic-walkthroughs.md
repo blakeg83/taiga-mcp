@@ -148,6 +148,30 @@ Next: reviewer, re-review the new revision; prior acceptance is superseded.
 The branch remains stable while the reviewer inspects each named revision; no
 new chat, copied transcript, or mandatory structured receipt is introduced.
 
+After the corrected revision passes review, the reviewer accepts the task and
+later the complete story using the same destinations:
+
+```text
+[synthetic-review-46] → [synthetic-impl-46]
+Task #53 accepted
+Reviewed: 2222222
+Criteria: assignment destinations are explicit — passed
+Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; corrected assignment passed
+Next: implementer, update the task in Taiga and advance to task #54.
+
+[synthetic-review-46] → [synthetic-coordinator-46]
+Story #46 approved
+Reviewed HEAD: 4444444
+Tasks: #53 accepted, #54 accepted, #55 accepted, #56 accepted
+Definition of done: setup, routing, and ordered review gates — passed
+Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; full story contract passed
+Next: coordinator, use this HEAD for the story PR/review decision.
+```
+
+A new source commit after `4444444` makes the story approval stale. The
+`story_end_only` mode may defer task acceptance until this final review, but it
+must be selected in the setup confirmation rather than inferred later.
+
 ## 2. Multi-repository epic — Start
 
 Synthetic input:

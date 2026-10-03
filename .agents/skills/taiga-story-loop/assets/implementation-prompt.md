@@ -18,6 +18,7 @@ worktree:
 | Reviewer profile | `gpt-6.1-sol` / `medium` |
 | Worker-message authorization | `{{authorizationRecord}}` |
 | Allowed destinations | reviewer: `{{reviewerId}}`; coordinator: `{{coordinatorId}}` |
+| Review mode | `{{reviewMode}}` (default `per_task`; optional `story_end_only`) |
 | Scope | `{{scopeSummary}}` |
 
 Before editing, read the complete story goal, definition of done, ordered task list,
@@ -78,7 +79,10 @@ formats from `references/worker-handoffs.md`: name the task, branch, stable
 revision, checks with exit codes, and one next action. A task-ready handoff goes
 to the reviewer; a reviewer finding comes back to this same chat; a correction
 returns to that same reviewer. Do not start the next ordered task while a
-per-task review is active, and do not create a new chat for a correction.
+per-task review is active, and do not create a new chat for a correction. On a
+reviewer acceptance message, update the task in Taiga using its current version
+and advance only when the selected review mode permits it. A final story
+approval belongs to the coordinator and is bound to an exact reviewed HEAD.
 
 Do not start the next task until the current task has its implementation
 evidence, status write, parent-story comment, commit outcome, and explicit

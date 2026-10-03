@@ -23,6 +23,7 @@ $taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
 $workerPairPath = Join-Path $skillRoot 'references/worker-pair.md'
 $handoffPath = Join-Path $skillRoot 'references/worker-handoffs.md'
 $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
+$acceptancePath = Join-Path $skillRoot 'references/acceptance.md'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -35,6 +36,9 @@ if (-not (Test-Path $workerPairPath)) {
 }
 if (-not (Test-Path $handoffPath) -or -not (Test-Path $reviewerPromptPath)) {
     throw 'Missing direct worker handoff or reviewer prompt contract.'
+}
+if (-not (Test-Path $acceptancePath)) {
+    throw 'Missing task/story acceptance contract.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -59,6 +63,8 @@ $handoffText = Get-Content $handoffPath -Raw
 $normalizedHandoff = [regex]::Replace($handoffText, '\s+', ' ')
 $reviewerPromptText = Get-Content $reviewerPromptPath -Raw
 $normalizedReviewerPrompt = [regex]::Replace($reviewerPromptText, '\s+', ' ')
+$acceptanceText = Get-Content $acceptancePath -Raw
+$normalizedAcceptance = [regex]::Replace($acceptanceText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -174,6 +180,14 @@ if (-not $normalizedReviewerPrompt.Contains('read-only reviewer')) {
 }
 if (-not $normalizedReviewerPrompt.Contains('gpt-6.1-sol')) {
     throw 'Reviewer prompt assertion failed: exact reviewer profile'
+}
+if (-not $normalizedAcceptance.Contains('per_task (default)') -or
+    -not $normalizedAcceptance.Contains('story_end_only')) {
+    throw 'Acceptance assertion failed: review mode choices'
+}
+if (-not $normalizedAcceptance.Contains('Story #<ref> approved') -or
+    -not $normalizedAcceptance.Contains('Reviewed HEAD: <exact commit SHA>')) {
+    throw 'Acceptance assertion failed: final story approval binding'
 }
 Assert-TaskExecutionContains 'explicit human status decision' 'A human status is never replaced automatically'
 Assert-TaskExecutionContains 'preserve-or-replace decision' 'explicit decision to preserve the human status and stop, or to replace it'

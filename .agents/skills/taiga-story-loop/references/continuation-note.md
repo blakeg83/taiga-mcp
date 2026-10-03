@@ -18,6 +18,7 @@ Current: story #<ref> | task/stage: <ref or stage>
 Story branch: <branch> | worktree: <absolute path> | base: <sha>
 Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
 Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
+Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
 PR: <url or pending> | base: <feature branch> | head: <sha>
 Review: <pending/approved/changes_requested>
 Merge: <pending/merged/closed_unmerged/unknown>
