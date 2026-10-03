@@ -24,6 +24,8 @@ $workerPairPath = Join-Path $skillRoot 'references/worker-pair.md'
 $handoffPath = Join-Path $skillRoot 'references/worker-handoffs.md'
 $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
 $acceptancePath = Join-Path $skillRoot 'references/acceptance.md'
+$routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
+$routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -39,6 +41,9 @@ if (-not (Test-Path $handoffPath) -or -not (Test-Path $reviewerPromptPath)) {
 }
 if (-not (Test-Path $acceptancePath)) {
     throw 'Missing task/story acceptance contract.'
+}
+if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
+    throw 'Missing routing and escalation fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -65,6 +70,8 @@ $reviewerPromptText = Get-Content $reviewerPromptPath -Raw
 $normalizedReviewerPrompt = [regex]::Replace($reviewerPromptText, '\s+', ' ')
 $acceptanceText = Get-Content $acceptancePath -Raw
 $normalizedAcceptance = [regex]::Replace($acceptanceText, '\s+', ' ')
+$routingText = Get-Content $routingPath -Raw
+$normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -214,6 +221,13 @@ Assert-HandoffContains 'findings route' 'reviewer sends findings directly to the
 Assert-HandoffContains 'correction route' 'returns to the same reviewer chat'
 Assert-HandoffContains 'stable branch gate' 'does not start the next ordered task'
 Assert-HandoffContains 'no receipt requirement' 'Do not require a JSON receipt'
+if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
+    -not $normalizedRouting.Contains('fixed correction-count cutoff')) {
+    throw 'Routing assertion failed: no arbitrary cutoff policy'
+}
+if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections must not create a new chat')) {
+    throw 'Routing assertion failed: controlled fixture coverage'
+}
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'
 }

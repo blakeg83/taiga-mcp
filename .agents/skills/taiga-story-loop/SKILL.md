@@ -39,6 +39,14 @@ for the project-specific story/task status mapping, Markdown checklist merge,
 current-version writes, uncertain-result reconciliation, selective reopening,
 and blocker evidence protocol.
 
+Use [persistent story worker pair](references/worker-pair.md), [direct worker
+handoffs](references/worker-handoffs.md), and [task and story acceptance](references/acceptance.md)
+for coordinator-owned chat creation, concise routing, review-mode gates, and
+exact-revision acceptance. Use [routing and substantive escalation](references/routing-and-escalation.md)
+and `scripts/validate-routing.ps1` for the controlled correction, stale-approval,
+blocker, disagreement, and missing-destination scenarios. These checks do not
+create chats or perform live writes.
+
 Use [per-task commits and parent-story progress comments](references/commit-and-progress.md)
 for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker

@@ -172,6 +172,13 @@ A new source commit after `4444444` makes the story approval stale. The
 `story_end_only` mode may defer task acceptance until this final review, but it
 must be selected in the setup confirmation rather than inferred later.
 
+The dedicated routing fixture (`scripts/validate-routing.ps1`) also exercises
+two task correction rounds with the same implementer/reviewer IDs, then routes
+blocked work, substantive disagreement, stale approval, and an unresolved
+destination to the coordinator. Its messages contain only task/revision/check
+context; it creates no replacement chat and relays no transcript or structured
+receipt. The fixture has no sleep, deadline, or correction-count cutoff.
+
 ## 2. Multi-repository epic — Start
 
 Synthetic input:
