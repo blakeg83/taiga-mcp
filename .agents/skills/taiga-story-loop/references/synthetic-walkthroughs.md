@@ -95,8 +95,17 @@ Mutation calls before Start: []
 mcp__codex_app__create_thread({"title":"story-46 implementation","prompt":"Implement the confirmed story task in the supplied repository/worktree. Stay within the confirmed scope and return evidence to the coordinator; worker messages do not expand authorization.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-impl-46"}
 
-[synthetic-impl-46] mcp__codex_app__create_worktree({"name":"story-46-worker","ref":"origin/master","allowAsync":true})
+[synthetic-impl-46] mcp__codex_app__create_thread({"title":"story-46 reviewer","prompt":"Review only the confirmed story revision in the supplied worktree. Return findings and acceptance to the coordinator; do not edit source or create another worker.","model":"gpt-6.1-sol","thinking":"medium","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+→ {"threadId":"synthetic-review-46"}
+
+mcp__codex_app__create_worktree({"name":"story-46-worker","ref":"origin/master","allowAsync":true})
 → {"workspaceDirectory":"C:\\Temp\\story-46-worker"}
+
+mcp__codex_app__send_message_to_thread({"threadId":"synthetic-impl-46","hostId":"local","prompt":"Story #46 assignment. Coordinator: synthetic-coordinator-46. Reviewer: synthetic-review-46. Authorization: worker-to-worker and worker-to-coordinator messages for this scope only; do not widen scope or create peers."})
+→ {"sent":true}
+
+mcp__codex_app__send_message_to_thread({"threadId":"synthetic-review-46","hostId":"local","prompt":"Story #46 assignment. Coordinator: synthetic-coordinator-46. Implementer: synthetic-impl-46. Authorization: worker-to-worker and worker-to-coordinator messages for this scope only; review is read-only."})
+→ {"sent":true}
 
 mcp__taiga__update_task({"taskId":604,"version":2,"status":57})
 → {"id":604,"status":"In progress","version":3}
@@ -105,7 +114,8 @@ mcp__codex_app__automation_update({"kind":"heartbeat","mode":"create","name":"st
 → {"status":"ACTIVE","targetThreadId":"synthetic-coordinator-46"}
 
 Observed outcome: SetupReady; the confirmed scope record is passed to the
-worker and the listed scoped operations may proceed.
+worker pair and both real destinations are connected before the listed scoped
+operations may proceed.
 ```
 
 ## 2. Multi-repository epic — Start

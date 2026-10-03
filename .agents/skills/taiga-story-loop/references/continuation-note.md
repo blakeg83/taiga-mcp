@@ -16,7 +16,8 @@ Base: <remote>/<base-ref> @ <base-sha>
 Feature: <branch> | worktree: <absolute path> | head: <sha>
 Current: story #<ref> | task/stage: <ref or stage>
 Story branch: <branch> | worktree: <absolute path> | base: <sha>
-Implementer: <chat-id> | reviewer: <chat-id>
+Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
+Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
 PR: <url or pending> | base: <feature branch> | head: <sha>
 Review: <pending/approved/changes_requested>
 Merge: <pending/merged/closed_unmerged/unknown>
@@ -38,8 +39,10 @@ On restart, process the note in this order:
 2. Inspect existing managed worktrees and branches for the recorded feature and
    story identities. If the path, branch, repository, and base match, reuse the
    object. If a create returned an unknown outcome, inspect before retrying.
-3. Inspect the recorded worker chat IDs and PR URL. Reuse matching chats/PRs;
-   do not create duplicates because the note is stale or incomplete.
+3. Inspect the recorded implementer/reviewer thread and host IDs, pair outcome,
+   and PR URL. Reuse matching chats/PRs; do not create duplicates because the
+   note is stale or incomplete. A pending client ID is not a worker ID; resolve
+   it through the authoritative thread inventory before messaging.
 4. Read Taiga status/comments and the provider's PR state, then refresh the
    note with the authoritative result. Conflicting ownership or lineage is a
    blocker for user input.

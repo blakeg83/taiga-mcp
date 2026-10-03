@@ -20,12 +20,16 @@ $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
 $taskExecutionPath = Join-Path $skillRoot 'references/task-execution-walkthroughs.md'
 $taskExecutionGuidancePath = Join-Path $skillRoot 'references/task-execution.md'
 $taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
+$workerPairPath = Join-Path $skillRoot 'references/worker-pair.md'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
 }
 if (-not (Test-Path $taskExecutionPath) -or -not (Test-Path $taskExecutionScriptPath)) {
     throw 'Missing ordered task execution scenario evidence.'
+}
+if (-not (Test-Path $workerPairPath)) {
+    throw 'Missing persistent worker-pair contract.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -44,6 +48,8 @@ $taskExecutionText = Get-Content $taskExecutionPath -Raw
 $normalizedTaskExecution = [regex]::Replace($taskExecutionText, '\s+', ' ')
 $taskExecutionGuidanceText = Get-Content $taskExecutionGuidancePath -Raw
 $normalizedTaskExecutionGuidance = [regex]::Replace($taskExecutionGuidanceText, '\s+', ' ')
+$workerPairText = Get-Content $workerPairPath -Raw
+$normalizedWorkerPair = [regex]::Replace($workerPairText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -111,6 +117,17 @@ function Assert-BranchScenarioContains {
     }
 }
 
+function Assert-WorkerPairContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedWorkerPair.Contains($Text)) {
+        throw "Worker-pair assertion failed: $Label"
+    }
+}
+
 Assert-DocumentContains 'per-repository mapping' 'one row per resolved repository'
 Assert-DocumentContains 'epic mapping guard' 'An epic setup must not collapse multiple repositories'
 Assert-DocumentContains 'start gate' 'Reply Start or Cancel.'
@@ -124,9 +141,14 @@ Assert-DocumentContains 'feature branch gate' 'creates one uniquely named featur
 Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
 Assert-DocumentContains 'merge advancement gate' 'provider confirms the previous PR merged'
 Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
+Assert-DocumentContains 'persistent pair reference' 'persistent story worker pair'
+Assert-DocumentContains 'pair resolution gate' 'resolves both results to usable'
+Assert-DocumentContains 'pending ID guard' 'pending `clientThreadId` is never a message destination'
 Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
 Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
+Assert-PromptContains 'pair authorization' 'worker-to-worker and worker-to-coordinator messages'
+Assert-PromptContains 'no peer creation' 'Never create another worker'
 Assert-TaskExecutionContains 'explicit human status decision' 'A human status is never replaced automatically'
 Assert-TaskExecutionContains 'preserve-or-replace decision' 'explicit decision to preserve the human status and stop, or to replace it'
 Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
@@ -143,6 +165,10 @@ Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits 
 Assert-BranchScenarioContains 'reloaded resume receipt' 'Assert-ResumeReceipt $resumed'
 Assert-BranchScenarioContains 'mismatched lineage guard' 'incorrect saved feature lineage is rejected'
 Assert-BranchScenarioContains 'unknown outcome guard' 'unknown merge does not create the next story branch'
+Assert-WorkerPairContains 'exact implementer profile' 'gpt-5.6-luna'
+Assert-WorkerPairContains 'exact reviewer profile' 'gpt-6.1-sol'
+Assert-WorkerPairContains 'pending thread guard' 'pending `clientThreadId`'
+Assert-WorkerPairContains 'coordinator-owned pair' 'neither worker creates the other worker'
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'
 }
@@ -160,6 +186,9 @@ foreach ($recordMarker in @(
         'mcp__taiga__resolve_project('
         'mcp__taiga__get_task('
         'mcp__codex_app__create_worktree('
+        'mcp__codex_app__create_thread({"title":"story-46 reviewer"'
+        'mcp__codex_app__send_message_to_thread('
+        'synthetic-review-46'
         'mcp__codex_app__automation_update('
         'git ls-remote --symref origin HEAD'
         'Mutation calls before Start: []'
