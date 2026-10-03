@@ -58,6 +58,27 @@ path before passing the path and branch receipt to the implementer and
 reviewer. The implementer is the only source writer in that checkout;
 reviewers inspect the frozen revision and return findings.
 
+The supported handoff is explicit:
+
+```text
+create_worktree({ name: "<run>-story-<ref>", ref: "<feature-head>", allowAsync: true })
+→ wait for the operation to complete and use its returned workspace directory
+git -C <workspace> switch --create <story-branch>
+git -C <workspace> rev-parse --show-toplevel
+git -C <workspace> branch --show-current
+git -C <workspace> rev-parse HEAD
+git -C <workspace> status --porcelain
+```
+
+The coordinator records the returned absolute path and verifies that the
+repository root, story branch, HEAD/base SHA, and clean status match the
+feature-to-story mapping. A pending worktree operation has no usable path;
+wait for its completion rather than inventing one. A path or branch collision
+is reconciled against the recorded scope and ownership, or blocks for user
+input. The same receipt is passed to the implementer and reviewer chat. The
+implementer may write source and commit on the story branch; the reviewer is
+read-only and reviews the frozen commit from that same path/revision.
+
 The story pull request targets the feature branch. A later story is based on
 the updated feature HEAD only after the provider confirms that the preceding
 story PR merged into that exact feature branch. A closed-unmerged, conflicting,

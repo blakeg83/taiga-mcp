@@ -12,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
+$branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
 
 if (-not (Test-Path $walkthroughPath)) {
@@ -20,6 +21,8 @@ if (-not (Test-Path $walkthroughPath)) {
 
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
+$branchText = Get-Content $branchPath -Raw
+$normalizedBranch = [regex]::Replace($branchText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
 $normalizedWalkthrough = [regex]::Replace($walkthroughText, '\s+', ' ')
 
@@ -31,6 +34,17 @@ function Assert-DocumentContains {
 
     if (-not $normalizedSetup.Contains($Text)) {
         throw "Document assertion failed: $Label"
+    }
+}
+
+function Assert-BranchContractContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedBranch.Contains($Text)) {
+        throw "Branch contract assertion failed: $Label"
     }
 }
 
@@ -47,6 +61,10 @@ Assert-DocumentContains 'feature branch gate' 'creates one uniquely named featur
 Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
 Assert-DocumentContains 'merge advancement gate' 'provider confirms the previous PR merged'
 Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
+Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
+Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
+Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
+Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
 
 foreach ($recordMarker in @(
         '## 1. Single-repository story'

@@ -35,8 +35,8 @@ Scope: <story tasks in order, or all resolved epic stories in order>
 
 Repositories and branch/worktree mapping (one row per resolved repository;
 required for an epic spanning repositories):
-| Repository/workspace | Remote | Verified base ref/SHA | Coordinator branch | Worker worktrees |
-| <absolute path> | <remote> | <ref/SHA> | <branch> | <paths or “none”> |
+| Repository/workspace | Remote | Verified base ref/SHA | Feature branch/worktree | Story branch/worktrees |
+| <absolute path> | <remote> | <ref/SHA> | <feature branch and path> | <story branch/path pairs or “none”> |
 
 An epic setup must not collapse multiple repositories into one Repository or
 Branches/worktrees value. If any linked story is in another repository, add its
@@ -87,7 +87,9 @@ current feature HEAD. The story PR targets the feature branch, and a later
 story cannot start until the provider confirms the previous PR merged into that
 exact feature branch. A dirty user checkout, unrelated branch, failed merge,
 or uncertain create/write is preserved and reconciled rather than reset or
-replayed.
+replayed. The coordinator passes the verified absolute story-worktree path,
+story branch, base SHA, feature branch, and ownership roles to both worker
+chats; only the implementer writes source in that checkout.
 
 For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
