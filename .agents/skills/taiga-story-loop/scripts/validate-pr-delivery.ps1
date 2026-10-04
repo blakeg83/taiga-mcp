@@ -81,17 +81,29 @@ function Resolve-Pr {
         [hashtable] $Receipt,
         [string] $PrUrl = 'https://example.invalid/pr/50'
     )
-    $matches = @($Existing | Where-Object {
+    $identityMatches = @($Existing | Where-Object {
         $_.PSObject.Properties['repository'] -and
         $_.PSObject.Properties['headBranch'] -and
         $_.PSObject.Properties['base'] -and
         $_.PSObject.Properties['head'] -and
-        $_.PSObject.Properties['state'] -and
-        $_.PSObject.Properties['isClosed'] -and
         $_.repository -eq $Receipt.repository -and
         $_.headBranch -eq $Receipt.storyBranch -and
         $_.base -eq $Receipt.featureBranch -and
-        $_.head -eq $Receipt.branchHead -and
+        $_.head -eq $Receipt.branchHead
+    })
+
+    $unknownState = @($identityMatches | Where-Object {
+        -not $_.PSObject.Properties['state'] -or
+        -not $_.PSObject.Properties['isClosed'] -or
+        $null -eq $_.state -or
+        $null -eq $_.isClosed
+    })
+    if ($unknownState.Count -gt 0) {
+        $candidate = if ($unknownState.Count -eq 1) { $unknownState[0] } else { $null }
+        return [ordered]@{ state = 'reconcile'; reason = 'provider_state_unknown'; pr = $candidate }
+    }
+
+    $matches = @($identityMatches | Where-Object {
         $_.state -eq 'open' -and
         $_.isClosed -eq $false
     })
@@ -161,6 +173,18 @@ $closed = [pscustomobject]@{
 $closedResult = Resolve-Pr @($closed) $valid 'https://example.invalid/pr/new-closed'
 Assert-True ($closedResult.state -eq 'create') 'closed or unmerged PR must not be reused'
 
+$unknownState = [pscustomobject]@{
+    url = 'https://example.invalid/pr/unknown-state'
+    repository = 'TaigaMCP'
+    headBranch = 'codex/story-50-run1'
+    base = 'codex/feature-taiga-mcp-run1'
+    head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    state = $null
+    isClosed = $null
+}
+$unknownStateResult = Resolve-Pr @($unknownState) $valid 'https://example.invalid/pr/should-not-create'
+Assert-True ($unknownStateResult.state -eq 'reconcile' -and $unknownStateResult.reason -eq 'provider_state_unknown' -and $unknownStateResult.pr.url -eq $unknownState.url) 'matching PR with unknown provider state must reconcile instead of creating a duplicate'
+
 $created = Resolve-Pr @() $valid 'https://example.invalid/pr/new'
 Assert-True ($created.state -eq 'create' -and $created.pr.base -eq $valid.featureBranch -and $created.pr.head -eq $valid.branchHead) 'new PR must target exact feature base and reviewed HEAD'
 
@@ -177,4 +201,4 @@ foreach ($marker in @('pr_ready_for_approval', $created.pr.url, $valid.featureBr
 $wrongBase = New-DeliveryReceipt -FeatureBranch ''
 Assert-True ((Test-DeliveryPreflight $wrongBase) -eq 'missing_feature_base') 'missing feature base must block delivery'
 
-Write-Output 'Passed offline PR delivery fixture: exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, PR create identity, review evidence, and Taiga link evidence.'
+Write-Output 'Passed offline PR delivery fixture: exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, unknown-state reconciliation, PR create identity, review evidence, and Taiga link evidence.'

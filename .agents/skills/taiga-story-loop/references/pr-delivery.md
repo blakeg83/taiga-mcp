@@ -32,7 +32,9 @@ existing PR by repository, exact head branch, recorded feature base, and
 reviewed head commit. Reuse a PR only when all of those identities match and
 the provider reports it open and unclosed. A PR from another branch, a
 closed/unmerged PR, a PR with a changed head, or a response-lost create is not a
-successful delivery; inspect the provider before creating anything else.
+successful delivery; inspect the provider before creating anything else. If an
+exact-match PR has missing or null provider state, return an unknown/reconcile
+outcome and do not create another PR until the provider state is resolved.
 
 The story PR must target the integration feature branch and must include this
 review evidence in its description:
@@ -71,7 +73,7 @@ merge. The coordinator must verify a later user Yes before merging, and must
 verify the merge result before changing Taiga completion state or advancing the
 feature branch.
 
-If PR creation, attachment, or the Taiga link has an unknown result, read the
-provider/chat/story records first. Reuse a confirmed matching object or report
-the unresolved operation; never blindly retry a write or create a duplicate
-PR.
+If PR creation, attachment, the Taiga link, or the state of an exact-match PR
+has an unknown result, read the provider/chat/story records first. Reuse a
+confirmed matching object or report the unresolved operation; never blindly
+retry a write or create a duplicate PR.

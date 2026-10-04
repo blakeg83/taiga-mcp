@@ -266,6 +266,7 @@ foreach ($marker in @(
         'Find an existing PR by repository, exact head branch, recorded feature base, and reviewed head commit'
         'Reuse a PR only when all of those identities match and the provider reports it open and unclosed'
         'A PR from another branch, a closed/unmerged PR'
+        'If an exact-match PR has missing or null provider state, return an unknown/reconcile outcome'
         'state: pr_ready_for_approval'
         'never blindly retry a write or create a duplicate PR')) {
     if (-not $normalizedPrDelivery.Contains($marker)) {
@@ -274,6 +275,11 @@ foreach ($marker in @(
 }
 if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR delivery fixture')) {
     throw 'PR delivery assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('unknownState', 'provider_state_unknown', 'should-not-create', 'unknown-state reconciliation')) {
+    if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains($marker)) {
+        throw "PR delivery assertion failed: unknown-state fixture marker $marker"
+    }
 }
 foreach ($marker in @(
         'Yes — merge and continue to the next ordered story'
