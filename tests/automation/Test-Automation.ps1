@@ -327,6 +327,9 @@ try {
         Assert-Equal 0 @($quiet.data.changedFields).Count 'unchanged wait should not mutate state'
         Assert-True (-not $quiet.data.notifyUser) 'unchanged wait should not notify the user'
         Assert-Equal 'compact_worker_and_wait_state_only' $quiet.data.contextRead 'unchanged wait should read only compact state'
+        Assert-Equal 0 $quiet.data.contextFootprint.heavyweightReads 'healthy ticks should not load heavyweight context'
+        Assert-True (-not $quiet.data.contextFootprint.sourceRead) 'healthy ticks should not reread source'
+        Assert-True (-not $quiet.data.contextFootprint.ticketReread) 'healthy ticks should not reread tickets'
         Assert-True (-not $quiet.data.waitThreadsArguments.targets[0].Contains('hostId')) 'absent native wait host IDs must be omitted rather than null'
         $noTarget = Copy-JsonObject $unchanged; $noTarget.Remove('threadId'); $noTarget.Remove('afterCursor'); $noTarget.Remove('targets'); $noTargetResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $noTarget 'wait-no-target'),'-StateRoot',$waitRoot) $false; Assert-True (-not $noTargetResult.ok) 'a native wait descriptor without targets must fail closed'
         $after = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$waitRoot)
@@ -359,6 +362,11 @@ try {
         Assert-True $manual.data.manual 'manual check-progress should not dispatch work'
         Assert-True ($manual.data.resumeInstruction -like '*resume-session*') 'manual check-progress should expose the resume instruction'
         Assert-True (-not $manual.data.stateMutation) 'manual check-progress should not mutate state'
+        $concurrent = Copy-JsonObject $unchanged; $concurrent.Remove('threadId'); $concurrent.Remove('afterCursor'); $concurrent.targets = @(@{ threadId = 'worker-1'; afterCursor = 'cursor-1' }, @{ threadId = 'worker-2'; hostId = 'local'; afterCursor = 'cursor-2' })
+        $concurrentResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $concurrent 'wait-concurrent'),'-StateRoot',$waitRoot)
+        Assert-Equal 2 @($concurrentResult.data.waitThreadsArguments.targets).Count 'concurrent message and tick waits should preserve both targets'
+        Assert-Equal 'cursor-2' $concurrentResult.data.waitThreadsArguments.targets[1].afterCursor 'concurrent waits should preserve each cursor'
+        Assert-True (-not $concurrentResult.data.stateMutation) 'concurrent waits should not mutate state'
         $completed = Copy-JsonObject $unchanged; $completed.waitStatus = 'completed'
         $detail = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completed 'wait-completed'),'-StateRoot',$waitRoot)
         Assert-Equal 'fetch_result' $detail.data.decision 'completion should trigger one detailed result read'
@@ -389,6 +397,24 @@ try {
         Assert-Equal 30 $bound.data.heartbeatBinding.intervalMinutes 'heartbeat binding should retain the 30-minute cadence'
         $invalidBinding = Copy-JsonObject $boundSet; $invalidBinding.heartbeatBinding.intervalMinutes = 15; $invalid = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $invalidBinding 'heartbeat-invalid-binding'),'-StateRoot',$waitRoot) $false
         Assert-True (-not $invalid.ok) 'non-30-minute heartbeat bindings must fail closed'
+
+        $lifecycleRoot = Join-Path $script:FixtureRoot 'heartbeat-lifecycle-state'
+        $lifecycleInit = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$lifecycleRoot)
+        $lifecycleCreate = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01' } 'heartbeat-lifecycle-create'),'-StateRoot',$lifecycleRoot)
+        $lifecycleSet = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $lifecycleInit.revision; heartbeatId = 'heartbeat-life'; scheduleState = 'ACTIVE' }
+        $lifecycleRecorded = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $lifecycleSet 'heartbeat-lifecycle-set'),'-StateRoot',$lifecycleRoot)
+        $pauseIntent = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $lifecycleRecorded.revision; reason = 'fixture' }
+        $pausedRequest = Invoke-PsJson $script:StateScript @('-Operation','pause-intent','-InputPath',(New-InputPath $pauseIntent 'heartbeat-pause-intent'),'-StateRoot',$lifecycleRoot)
+        $paused = Invoke-PsJson $script:StateScript @('-Operation','reconcile-intent','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $pausedRequest.revision; intent = 'pause'; quiescent = $true } 'heartbeat-pause-reconcile'),'-StateRoot',$lifecycleRoot)
+        $pausedHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01' } 'heartbeat-paused-plan'),'-StateRoot',$lifecycleRoot)
+        Assert-Equal 'disable_heartbeat' $pausedHeartbeat.data.decision 'paused runs should disable the heartbeat'
+        Assert-Equal 'update' $pausedHeartbeat.data.automationRequest.mode 'paused runs should pause the existing automation'
+        Assert-Equal 'PAUSED' $pausedHeartbeat.data.automationRequest.status 'paused runs should pause the existing automation'
+        Assert-True $pausedHeartbeat.data.noTickRestart 'paused runs must not restart on a tick'
+        $clearPaused = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $pausedHeartbeat.data.revision; scheduleState = 'PAUSED' }
+        $pausedCleared = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $clearPaused 'heartbeat-paused-clear'),'-StateRoot',$lifecycleRoot)
+        $pausedAgain = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01' } 'heartbeat-paused-again'),'-StateRoot',$lifecycleRoot)
+        Assert-Equal 'no_heartbeat' $pausedAgain.data.decision 'a paused run without an ID must not recreate a heartbeat'
     }
 
     Test-Case 'preserve sibling dependency epic and pause coordination traces' {

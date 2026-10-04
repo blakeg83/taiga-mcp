@@ -93,6 +93,13 @@ cadence; the full prompt remains in the automation service. The heartbeat never
 schedules a timer per ticket or a nested heartbeat, and normal handoffs do not
 wait for its next tick.
 
+`heartbeat-plan` is lifecycle-aware. A pausing or cancelling session returns
+`wait_for_quiescence` without creating or mutating an automation. A paused run
+returns a `PAUSED` update for the existing ID; a completed run or a run whose
+owned tickets are all complete returns a delete request. After the external
+cleanup is recorded with `set-heartbeat`, later ticks return `no_heartbeat` and
+cannot recreate the schedule.
+
 `record-receipt-repair` is available only while the owned ticket is reviewing.
 It records format/evidence repairs in a per-ticket ledger with remaining
 minutes. The default `limits.maxReceiptRepairAttempts` is two and may be

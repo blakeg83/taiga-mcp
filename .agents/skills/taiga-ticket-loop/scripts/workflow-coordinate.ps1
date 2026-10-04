@@ -502,7 +502,7 @@ function Invoke-ObserveWait {
     $decision = if ($recovery) { 'reconcile_recovery' } elseif ($healthy) { 'continue_wait' } elseif ($awaitingApproval) { 'heartbeat_quiet' } elseif ($status -eq 'completed') { 'fetch_result' } elseif ($status -eq 'changed') { 'inspect_changed_state' } elseif ($status -eq 'blocked') { 'fetch_blocker' } elseif ($status -eq 'user_input') { 'needs_input' } elseif ($status -eq 'paused') { 'heartbeat_quiet' } else { throw 'waitStatus could not be classified.' }
     $nativeOperation = if ($recovery) { 'read_thread' } elseif ($quiet) { 'wait_threads' } elseif ($status -in @('completed','changed','blocked')) { 'read_thread' } elseif ($status -eq 'user_input') { 'surface_user_input' } elseif ($status -eq 'paused') { 'wait_threads' } else { throw 'waitStatus native operation could not be classified.' }
     if ($status -eq 'unchanged' -and $InputObject.Contains('resultReference')) { throw 'Unchanged waits cannot reopen result evidence.' }
-    return [ordered]@{ phase = $null; decision = $decision; reason = if ($recovery) { 'observed_failure_or_missing_handoff_requires_reconciliation' } elseif ($healthy) { 'healthy_or_expected_progress' } elseif ($awaitingApproval) { 'awaiting_user_approval' } elseif ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = $timeout }; detailFetch = ($recovery -or ($status -in @('completed','changed','blocked') -and -not $quiet)); notifyUser = if ($recovery) { $true } else { -not $quiet }; notification = if ($quiet) { 'none' } elseif ($recovery) { 'recovery_requires_attention' } else { 'meaningful_state_change' }; contextRead = 'compact_worker_and_wait_state_only'; compactStatus = [ordered]@{ workerStatus = $workerStatus; waitState = $waitState }; recovery = if ($recovery) { [ordered]@{ required = $true; retryAllowed = $false; reconciliationRequired = $true; checklist = @('read the recent worker/coordinator chat state', 'inspect the actual repository branch/worktree and committed HEAD', 'inspect provider/PR state', 'read current Taiga story/task state', 'reconcile the observed outcome before any authorized retry') } } else { $null } }
+    return [ordered]@{ phase = $null; decision = $decision; reason = if ($recovery) { 'observed_failure_or_missing_handoff_requires_reconciliation' } elseif ($healthy) { 'healthy_or_expected_progress' } elseif ($awaitingApproval) { 'awaiting_user_approval' } elseif ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = $timeout }; detailFetch = ($recovery -or ($status -in @('completed','changed','blocked') -and -not $quiet)); notifyUser = if ($recovery) { $true } else { -not $quiet }; notification = if ($quiet) { 'none' } elseif ($recovery) { 'recovery_requires_attention' } else { 'meaningful_state_change' }; contextRead = 'compact_worker_and_wait_state_only'; contextFootprint = [ordered]@{ fields = @('workerStatus','waitState'); heavyweightReads = 0; sourceRead = $false; ticketReread = $false; diffReview = $false; testRerun = $false }; compactStatus = [ordered]@{ workerStatus = $workerStatus; waitState = $waitState }; recovery = if ($recovery) { [ordered]@{ required = $true; retryAllowed = $false; reconciliationRequired = $true; checklist = @('read the recent worker/coordinator chat state', 'inspect the actual repository branch/worktree and committed HEAD', 'inspect provider/PR state', 'read current Taiga story/task state', 'reconcile the observed outcome before any authorized retry') } } else { $null } }
 }
 
 function Invoke-HeartbeatPlan {
@@ -516,7 +516,10 @@ function Invoke-HeartbeatPlan {
     $targetThreadId = [string]$session.coordinatorThreadId
     $name = "taiga-recovery-$sessionId"
     $prompt = "Recovery-only check for scoped coordinator run $sessionId (scope $scopeHash). Inspect compact worker and continuation status only. Stay quiet when unchanged, active, progressing, or awaiting user approval. Do not treat elapsed time as failure. Investigate only observed interruption, failed action, completed work with a missing handoff, or another meaningful recovery signal; reconcile actual chat, Git, provider, and Taiga state before an authorized retry, and never replay an ambiguous write or create a nested schedule. Normal worker messages and user approvals remain the workflow triggers."
-    $isCreate = [string]::IsNullOrWhiteSpace($existing)
+    $ownedTickets = @($inspection.data.registry.tickets.Values | Where-Object { $_.ownerSessionId -eq $sessionId })
+    $allTicketsComplete = $ownedTickets.Count -gt 0 -and @($ownedTickets | Where-Object { [string]$_.phase -ne 'complete' }).Count -eq 0
+    $lifecycle = if ([string]$session.state -in @('paused','cancelled','completed') -or $allTicketsComplete) { if ([string]$session.state -eq 'paused') { 'paused' } else { 'completed' } } elseif ([string]$session.state -in @('pausing','cancelling')) { 'quiescing' } else { 'active' }
+    $isCreate = [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'active'
     $binding = if ($session.Contains('heartbeatBinding') -and $session.heartbeatBinding -is [System.Collections.IDictionary]) { $session.heartbeatBinding } else { $null }
     $heartbeat = [ordered]@{
         heartbeatId = if ($isCreate) { $null } else { $existing }
@@ -542,10 +545,20 @@ function Invoke-HeartbeatPlan {
     }
     $automationRequest = if ($isCreate) {
         [ordered]@{ kind = 'heartbeat'; mode = 'create'; name = [string]$heartbeat.name; prompt = [string]$heartbeat.prompt; rrule = $heartbeat.rrule; status = 'ACTIVE'; destination = 'thread'; targetThreadId = [string]$heartbeat.targetThreadId; notificationPolicy = $heartbeat.notificationPolicy }
-    } else {
+    } elseif ($lifecycle -eq 'quiescing') {
+        $null
+    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'paused') {
+        [ordered]@{ kind = 'heartbeat'; mode = 'update'; id = $existing; status = 'PAUSED' }
+    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'completed') {
+        [ordered]@{ kind = 'heartbeat'; mode = 'delete'; id = $existing }
+    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'active') {
         [ordered]@{ mode = 'view'; id = $existing }
+    } else {
+        $null
     }
-    return [ordered]@{ phase = [string]$session.state; decision = if ($isCreate) { 'create_heartbeat' } else { 'reuse_heartbeat' }; reason = if ($isCreate) { 'one_scoped_30_minute_heartbeat' } else { 'existing_scoped_heartbeat' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'automation_update'; automationRequest = $automationRequest; heartbeat = $heartbeat }
+    $decision = if ($isCreate) { 'create_heartbeat' } elseif ($lifecycle -eq 'quiescing') { 'wait_for_quiescence' } elseif ($lifecycle -eq 'paused' -and $null -ne $automationRequest) { 'disable_heartbeat' } elseif ($lifecycle -eq 'completed' -and $null -ne $automationRequest) { 'remove_heartbeat' } elseif ($lifecycle -eq 'active' -and -not [string]::IsNullOrWhiteSpace($existing)) { 'reuse_heartbeat' } else { 'no_heartbeat' }
+    $reason = if ($isCreate) { 'one_scoped_30_minute_heartbeat' } elseif ($lifecycle -eq 'quiescing') { 'wait_for_quiescent_pause_or_cancel' } elseif ($lifecycle -eq 'paused') { 'paused_run_does_not_tick' } elseif ($lifecycle -eq 'completed') { 'completed_run_does_not_tick' } elseif ($decision -eq 'reuse_heartbeat') { 'existing_scoped_heartbeat' } else { 'terminal_run_has_no_heartbeat' }
+    return [ordered]@{ phase = [string]$session.state; decision = $decision; reason = $reason; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = if ($null -eq $automationRequest) { 'none' } else { 'automation_update' }; automationRequest = $automationRequest; heartbeat = $heartbeat; lifecycle = $lifecycle; noTickRestart = ($lifecycle -ne 'active') }
 }
 
 function Invoke-RelayTaskProgress {
