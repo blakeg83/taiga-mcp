@@ -200,6 +200,9 @@ if (-not $normalizedAcceptance.Contains('Story #<ref> approved') -or
 }
 Assert-TaskExecutionContains 'explicit human status decision' 'A human status is never replaced automatically'
 Assert-TaskExecutionContains 'preserve-or-replace decision' 'explicit decision to preserve the human status and stop, or to replace it'
+Assert-TaskExecutionContains 'per-task advancement gate' 'In `per_task` mode, only an independent'
+Assert-TaskExecutionContains 'story-end advancement gate' 'In `story_end_only` mode, implementation evidence may release'
+Assert-TaskExecutionContains 'story-end accepted gate' 'cannot become `mapping.accepted`/Done until'
 Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
 Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
