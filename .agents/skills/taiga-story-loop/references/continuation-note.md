@@ -24,6 +24,7 @@ PR delivery: <not_ready/ready/reused/created/unknown> | link evidence: <url or p
 Approval: <pending/yes/no/stale> | prompt: <selectable/plain-text>
 Review: <pending/approved/changes_requested>
 Integrated review: <not_applicable/pending/findings/accepted> | profile: <model/effort> | head: <sha or pending>
+Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha or pending>
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
 Recovery: <automation-id or none>

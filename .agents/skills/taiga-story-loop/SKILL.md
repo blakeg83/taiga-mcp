@@ -70,6 +70,13 @@ review](references/final-epic-review.md). It pins the final review to
 findings through isolated corrections with exact-HEAD re-review. Run
 `scripts/validate-final-epic-review.ps1` for its offline fixture.
 
+Use [final feature-to-master delivery](references/final-delivery.md) after the
+appropriate story or epic review. It keeps single-story and epic paths
+distinct, requires `master` as the final base, and separates final PR creation,
+user approval, merge verification, story integration, epic acceptance, and
+master release. Run `scripts/validate-final-delivery.ps1` for its offline
+fixture.
+
 The synthetic ordered-task, failed-check, blocker, review-rejection, and
 human-edit scenarios are recorded in
 [task-execution-walkthroughs.md](references/task-execution-walkthroughs.md) and

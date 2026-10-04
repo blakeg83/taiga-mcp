@@ -65,6 +65,10 @@ integrated epic review](final-epic-review.md) at `gpt-6.1-sol`/`high` before
 final PR delivery. A single-story scope uses final story acceptance instead;
 the epic review is not added as an unnecessary gate.
 
+Final delivery follows [final feature-to-master delivery](final-delivery.md).
+Opening that PR hands the user a release candidate and never claims epic or
+master completion. Final master merge remains a separate user decision.
+
 ## Mode selection
 
 The setup summary must display `Review mode: per_task (default)` and
