@@ -26,6 +26,14 @@ $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
 $acceptancePath = Join-Path $skillRoot 'references/acceptance.md'
 $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
+$prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
+$prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
+$mergeApprovalPath = Join-Path $skillRoot 'references/merge-approval.md'
+$mergeApprovalScriptPath = Join-Path $PSScriptRoot 'validate-merge-approval.ps1'
+$finalEpicReviewPath = Join-Path $skillRoot 'references/final-epic-review.md'
+$finalEpicReviewScriptPath = Join-Path $PSScriptRoot 'validate-final-epic-review.ps1'
+$finalDeliveryPath = Join-Path $skillRoot 'references/final-delivery.md'
+$finalDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-final-delivery.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -44,6 +52,18 @@ if (-not (Test-Path $acceptancePath)) {
 }
 if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
     throw 'Missing routing and escalation fixture.'
+}
+if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath)) {
+    throw 'Missing reviewed story PR delivery contract or fixture.'
+}
+if (-not (Test-Path $mergeApprovalPath) -or -not (Test-Path $mergeApprovalScriptPath)) {
+    throw 'Missing Yes/No merge approval contract or fixture.'
+}
+if (-not (Test-Path $finalEpicReviewPath) -or -not (Test-Path $finalEpicReviewScriptPath)) {
+    throw 'Missing final integrated epic review contract or fixture.'
+}
+if (-not (Test-Path $finalDeliveryPath) -or -not (Test-Path $finalDeliveryScriptPath)) {
+    throw 'Missing final feature-to-master delivery contract or fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -72,6 +92,14 @@ $acceptanceText = Get-Content $acceptancePath -Raw
 $normalizedAcceptance = [regex]::Replace($acceptanceText, '\s+', ' ')
 $routingText = Get-Content $routingPath -Raw
 $normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
+$prDeliveryText = Get-Content $prDeliveryPath -Raw
+$normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
+$mergeApprovalText = Get-Content $mergeApprovalPath -Raw
+$normalizedMergeApproval = [regex]::Replace($mergeApprovalText, '\s+', ' ')
+$finalEpicReviewText = Get-Content $finalEpicReviewPath -Raw
+$normalizedFinalEpicReview = [regex]::Replace($finalEpicReviewText, '\s+', ' ')
+$finalDeliveryText = Get-Content $finalDeliveryPath -Raw
+$normalizedFinalDelivery = [regex]::Replace($finalDeliveryText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -232,6 +260,73 @@ if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
 }
 if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections must not create a new chat')) {
     throw 'Routing assertion failed: controlled fixture coverage'
+}
+foreach ($marker in @(
+        'exact current HEAD'
+        'Find an existing PR by repository, exact head branch, recorded feature base, and reviewed head commit'
+        'Reuse a PR only when all of those identities match and the provider reports it open and unclosed'
+        'A PR from another branch, a closed/unmerged PR'
+        'If an exact-match PR has missing or null provider state, return an unknown/reconcile outcome'
+        'state: pr_ready_for_approval'
+        'never blindly retry a write or create a duplicate PR')) {
+    if (-not $normalizedPrDelivery.Contains($marker)) {
+        throw "PR delivery assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR delivery fixture')) {
+    throw 'PR delivery assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('unknownState', 'provider_state_unknown', 'should-not-create', 'unknown-state reconciliation')) {
+    if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains($marker)) {
+        throw "PR delivery assertion failed: unknown-state fixture marker $marker"
+    }
+}
+foreach ($marker in @(
+        'Yes — merge and continue to the next ordered story'
+        'No — hold for feedback'
+        'Yes`, PR URL/repository/base/scope/head still match, provider confirms merged'
+        'An empty response, timeout, unrelated text, or a worker message is `no_response`'
+        'Only a verified provider merge unlocks the next story'
+        'Do not dispatch workers or send repeated notifications'
+        'An approval is bound to the PR URL, repository, base branch, reviewed head, and story scope shown in the prompt.')) {
+    if (-not $normalizedMergeApproval.Contains($marker)) {
+        throw "Merge approval assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains('Passed offline merge-gate fixture')) {
+    throw 'Merge approval assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('CurrentPrUrl', 'CurrentRepository', 'CurrentBase', 'CurrentScope', 'changed PR URL', 'changed repository', 'changed base', 'changed story scope')) {
+    if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains($marker)) {
+        throw "Merge approval assertion failed: identity fixture marker $marker"
+    }
+}
+foreach ($marker in @(
+        '`gpt-6.1-sol` with `high` effort'
+        'every linked story in authoritative order'
+        'combined behavior across stories'
+        'cross-story state transitions'
+        'routes it to an appropriate implementer on an isolated integration-correction branch'
+        'resulting exact feature HEAD again')) {
+    if (-not $normalizedFinalEpicReview.Contains($marker)) {
+        throw "Final epic review assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains('Passed offline final epic review fixture')) {
+    throw 'Final epic review assertion failed: offline fixture coverage'
+}
+foreach ($marker in @(
+        'a single-story run requires final story approval'
+        'an epic run requires the integrated epic acceptance'
+        'creates or reuses one final PR with the feature branch as head and `master` as base'
+        'Final master merge: pending separate user approval; not automatic'
+        'Story integration, epic acceptance, final PR creation, and master release remain distinct facts')) {
+    if (-not $normalizedFinalDelivery.Contains($marker)) {
+        throw "Final delivery assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $finalDeliveryScriptPath -Raw).Contains('Passed offline final delivery fixture')) {
+    throw 'Final delivery assertion failed: offline fixture coverage'
 }
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'

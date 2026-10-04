@@ -50,6 +50,25 @@ approval stale; the affected work returns through the same implementer/reviewer
 pair. A comment, timeout, or unchanged Taiga status cannot substitute for the
 reviewer's exact HEAD approval.
 
+The coordinator follows [reviewed story PR delivery](pr-delivery.md) after this
+approval. The resulting PR is a delivery artifact targeting the integration
+feature branch, not a merge. Its base, head, checks, review profile, and exact
+URL are recorded before asking for the separate merge decision.
+
+The merge decision follows [the Yes/No story merge gate](merge-approval.md).
+Only an explicit Yes for the exact displayed PR authorizes an attempt. No,
+silence, stale approval, failed merge, or unknown provider result leaves the
+story waiting and cannot release the next ordered story.
+
+When the scope is an epic, all story merges are followed by the [final
+integrated epic review](final-epic-review.md) at `gpt-6.1-sol`/`high` before
+final PR delivery. A single-story scope uses final story acceptance instead;
+the epic review is not added as an unnecessary gate.
+
+Final delivery follows [final feature-to-master delivery](final-delivery.md).
+Opening that PR hands the user a release candidate and never claims epic or
+master completion. Final master merge remains a separate user decision.
+
 ## Mode selection
 
 The setup summary must display `Review mode: per_task (default)` and
