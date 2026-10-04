@@ -278,15 +278,22 @@ if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR de
 foreach ($marker in @(
         'Yes — merge and continue to the next ordered story'
         'No — hold for feedback'
+        'Yes`, PR URL/repository/base/scope/head still match, provider confirms merged'
         'An empty response, timeout, unrelated text, or a worker message is `no_response`'
         'Only a verified provider merge unlocks the next story'
-        'Do not dispatch workers or send repeated notifications')) {
+        'Do not dispatch workers or send repeated notifications'
+        'An approval is bound to the PR URL, repository, base branch, reviewed head, and story scope shown in the prompt.')) {
     if (-not $normalizedMergeApproval.Contains($marker)) {
         throw "Merge approval assertion failed: $marker"
     }
 }
 if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains('Passed offline merge-gate fixture')) {
     throw 'Merge approval assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('CurrentPrUrl', 'CurrentRepository', 'CurrentBase', 'CurrentScope', 'changed PR URL', 'changed repository', 'changed base', 'changed story scope')) {
+    if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains($marker)) {
+        throw "Merge approval assertion failed: identity fixture marker $marker"
+    }
 }
 foreach ($marker in @(
         '`gpt-6.1-sol` with `high` effort'

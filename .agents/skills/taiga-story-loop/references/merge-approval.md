@@ -5,6 +5,8 @@ user decision. The prompt is a real approval boundary, not a status update:
 
 ```text
 Story #<ref> PR ready: <url>
+Repository: <repository>
+Scope: <story scope>
 Base: <integration feature branch>
 Head: <reviewed commit SHA>
 
@@ -22,10 +24,10 @@ text, or a worker message is `no_response`; it is never approval.
 
 | Observed input/state | Merge action | Story/next-story action |
 | --- | --- | --- |
-| `Yes`, PR URL/base/head still match, provider confirms merged | authorized merge result is verified | update truthful Taiga state, refresh feature HEAD, then begin the next ordered story |
+| `Yes`, PR URL/repository/base/scope/head still match, provider confirms merged | authorized merge result is verified | update truthful Taiga state, refresh feature HEAD, then begin the next ordered story |
 | `No` | none | retain the current PR and hold for feedback |
 | no response or invalid response | none | retain the current PR and wait silently for a user decision |
-| `Yes` but PR/head/base changed | none | mark approval stale and return the same story pair for fresh review/user approval |
+| `Yes` but PR URL, repository, head, base, or story scope changed | none | mark approval stale and return the same story pair for fresh review/user approval |
 | `Yes` but merge fails, conflicts, closes unmerged, or is unknown | none beyond the provider attempt | keep the story waiting; reconcile before retrying and do not start another story |
 | requested changes after review | no merge | route the same story branch to the existing implementer/reviewer pair; a new reviewed HEAD needs a new prompt |
 
