@@ -58,9 +58,14 @@ evidence, and checked boxes are not reviewer acceptance.
 
 At implementation completion, update the current version to
 `mapping.awaiting_review` (or the documented in-progress fallback). The worker
-must not write `mapping.accepted`; only an independent reviewer acceptance for
-the same revision allows that transition or allows the next ordered task to
-start. After a substantive review rejection,
+must not write `mapping.accepted`. In `per_task` mode, only an independent
+reviewer acceptance for the same revision allows the current task to become
+`mapping.accepted`/Done or releases the next ordered task. In
+`story_end_only` mode, implementation evidence may release the next ordered
+task after the current task's status, checklist, comment, and commit evidence
+are recorded, but the current task cannot become `mapping.accepted`/Done until
+an independent reviewer accepts that exact revision. After a substantive
+review rejection,
 re-read the task, reopen only that task to `mapping.in_progress`, preserve the
 other tasks and human edits, and add new revision-bound evidence before
 returning it to review.

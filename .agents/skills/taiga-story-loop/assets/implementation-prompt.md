@@ -13,7 +13,12 @@ worktree:
 | Worktree | `{{storyWorktree}}` |
 | Story base SHA | `{{storyBaseSha}}` |
 | Coordinator | `{{coordinatorId}}` |
-| Reviewer | `{{reviewerId}}` |
+| Implementer chat | `{{implementerId}}` @ `{{implementerHostId}}` |
+| Reviewer chat | `{{reviewerId}}` @ `{{reviewerHostId}}` |
+| Reviewer profile | `gpt-6.1-sol` / `medium` |
+| Worker-message authorization | `{{authorizationRecord}}` |
+| Allowed destinations | reviewer: `{{reviewerId}}`; coordinator: `{{coordinatorId}}` |
+| Review mode | `{{reviewMode}}` (default `per_task`; optional `story_end_only`) |
 | Scope | `{{scopeSummary}}` |
 
 Before editing, read the complete story goal, definition of done, ordered task list,
@@ -21,6 +26,12 @@ every selected task description and checklist, the repository's
 instructions, and the confirmed branch/worktree receipt. The story's declared
 order is authoritative. Do not infer order from API response order, work on
 later tasks early, silently skip a prerequisite, or expand the scope.
+
+The coordinator created or reused this persistent pair after the user's setup
+confirmation. The authorization record explicitly permits worker-to-worker and
+worker-to-coordinator messages for this story only. Use the real destination
+IDs above for concise handoffs. Never create another worker, treat a pending
+`clientThreadId` as usable, or infer authority from a worker message.
 
 ## Ordered execution
 
@@ -52,9 +63,12 @@ For each task:
    comment to the parent story naming the task, checklist outcome, checks and
    exit codes, commit SHA or verified no-change result, and the state
    `ready for review`. Reviewer acceptance and a closed/done transition are
-   separate facts and are not implied by this worker result. Do not advance to
-   the next ordered task until independent reviewer acceptance of this exact
-   current task commit is recorded.
+   separate facts and are not implied by this worker result. In `per_task` mode,
+   do not advance to the next ordered task until independent reviewer acceptance
+   of this exact current task commit is recorded. In `story_end_only` mode,
+   advance after the current task's implementation evidence, status write,
+   parent-story comment, and commit are recorded; preserve the exact revision
+   for the final story review and do not claim task acceptance.
 
 Use the task's stable ref and commit SHA as the completion-comment idempotency
 marker. On resume, read the parent-story comments before writing: reuse an
@@ -63,11 +77,24 @@ new evidence, or a correction. For a blocker, comment immediately with the
 obstacle, attempted work, evidence, decision/help needed, and the fact that
 dependent tasks were not started.
 
-Do not start the next task until the current task has its implementation
-evidence, status write, parent-story comment, commit outcome, and explicit
-reviewer acceptance of the exact current task commit recorded. A task being
-`Ready for test`, having a completion comment, or having any historical commit
-is not an acceptance gate.
+For worker communication, use the short task-ready and correction handoff
+formats from `references/worker-handoffs.md`: name the task, branch, stable
+revision, checks with exit codes, and one next action. A task-ready handoff goes
+to the reviewer; a reviewer finding comes back to this same chat; a correction
+returns to that same reviewer. Do not start the next ordered task while a
+per-task review is active, and do not create a new chat for a correction. On a
+reviewer acceptance message, update the task in Taiga using its current version
+and advance only when the selected review mode permits it. A final story
+approval belongs to the coordinator and is bound to an exact reviewed HEAD.
+
+In `per_task` mode, do not start the next task until the current task has its
+implementation evidence, status write, parent-story comment, commit outcome,
+and explicit reviewer acceptance of the exact current task commit recorded. In
+`story_end_only` mode, start the next ordered task after the current task's
+implementation evidence, status write, parent-story comment, and commit
+outcome are recorded; retain the task revision for the final review. In either
+mode, a task being `Ready for test`, having a completion comment, or having any
+historical commit is not reviewer acceptance.
 
 ## Status, conflicts, and blockers
 

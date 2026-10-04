@@ -47,11 +47,22 @@ Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
 - Story/task reviews: gpt-6.1-sol, medium, after each task's implementation evidence
 - Final epic review: gpt-6.1-sol, high, after all scoped stories are ready
+- Review mode: per_task (default); story_end_only is an explicit alternative
 - No silent profile substitution; an unavailable exact profile is a blocker.
+
+The story worker pair is persistent for the whole story: the coordinator
+creates or reuses one ordinary implementer chat and one ordinary reviewer chat
+after `Start`, using the verified story worktree/branch receipt. The
+implementer is `gpt-5.6-luna`/`xhigh`; the reviewer is
+`gpt-6.1-sol`/`medium`. The coordinator resolves both results to usable
+`threadId`/`hostId` values before sending full assignments or starting a task;
+a pending `clientThreadId` is never a message destination. See
+[persistent story worker pair](worker-pair.md).
 
 Start authorizes, for this scope only:
 - creating or reusing the scoped worker chats and their worktrees/branches;
-- worker messages to one another and to the coordinator;
+- worker-to-worker and worker-to-coordinator messages, with the coordinator as
+  the owner of the destination table;
 - commits and pushes on the owned branch;
 - Taiga task/story status updates and story comments;
 - pull-request creation or update and recovery automation on the 30-minute heartbeat.
@@ -88,19 +99,31 @@ story cannot start until the provider confirms the previous PR merged into that
 exact feature branch. A dirty user checkout, unrelated branch, failed merge,
 or uncertain create/write is preserved and reconciled rather than reset or
 replayed. The coordinator passes the verified absolute story-worktree path,
-story branch, base SHA, feature branch, and ownership roles to both worker
-chats; only the implementer writes source in that checkout.
+  story branch, base SHA, feature branch, and ownership roles to both worker
+  chats; only the implementer writes source in that checkout. It then creates
+  or reuses the persistent pair, resolves usable IDs, and sends each worker the
+  same scope-bound authorization record plus the other worker's real ID. A
+  worker is never instructed to create its peer.
 The persisted fields and restart/merge decision table are defined in the
 [minimal continuation note](continuation-note.md); no second state registry is
 created.
 
 For the implementation chat, render the confirmed values into
+[the implementation prompt](../assets/implementation-prompt.md). For the
+reviewer chat, render the read-only assignment from
+[the reviewer prompt](../assets/reviewer-prompt.md). Both workers use the
+concise route formats in [worker handoffs](worker-handoffs.md).
+Acceptance rules and review-mode selection are defined in
+[task and story acceptance](acceptance.md); the selected mode is part of the
+scope-bound authorization.
+
+For the implementation chat, render the confirmed values into
 [the implementation prompt](../assets/implementation-prompt.md). It is the
 worker's execution contract: it carries the story identity, branch/worktree,
 coordinator and reviewer IDs, exact ordered tasks, status gates, checklist
-evidence requirements, commit boundary, parent-story comment requirements, and
-blocker stop/escalation behavior. A worker must not receive a shortened prompt
-that omits those facts.
+evidence requirements, commit boundary, parent-story comment requirements,
+destination table, authorization record, and blocker stop/escalation behavior.
+A worker must not receive a shortened prompt that omits those facts.
 
 For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
