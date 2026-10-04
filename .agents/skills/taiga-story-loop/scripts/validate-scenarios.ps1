@@ -30,6 +30,8 @@ $prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
 $prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
 $mergeApprovalPath = Join-Path $skillRoot 'references/merge-approval.md'
 $mergeApprovalScriptPath = Join-Path $PSScriptRoot 'validate-merge-approval.ps1'
+$finalEpicReviewPath = Join-Path $skillRoot 'references/final-epic-review.md'
+$finalEpicReviewScriptPath = Join-Path $PSScriptRoot 'validate-final-epic-review.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -54,6 +56,9 @@ if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath))
 }
 if (-not (Test-Path $mergeApprovalPath) -or -not (Test-Path $mergeApprovalScriptPath)) {
     throw 'Missing Yes/No merge approval contract or fixture.'
+}
+if (-not (Test-Path $finalEpicReviewPath) -or -not (Test-Path $finalEpicReviewScriptPath)) {
+    throw 'Missing final integrated epic review contract or fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -86,6 +91,8 @@ $prDeliveryText = Get-Content $prDeliveryPath -Raw
 $normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
 $mergeApprovalText = Get-Content $mergeApprovalPath -Raw
 $normalizedMergeApproval = [regex]::Replace($mergeApprovalText, '\s+', ' ')
+$finalEpicReviewText = Get-Content $finalEpicReviewPath -Raw
+$normalizedFinalEpicReview = [regex]::Replace($finalEpicReviewText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -272,6 +279,20 @@ foreach ($marker in @(
 }
 if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains('Passed offline merge-gate fixture')) {
     throw 'Merge approval assertion failed: offline fixture coverage'
+}
+foreach ($marker in @(
+        '`gpt-6.1-sol` with `high` effort'
+        'every linked story in authoritative order'
+        'combined behavior across stories'
+        'cross-story state transitions'
+        'routes it to an appropriate implementer on an isolated integration-correction branch'
+        'resulting exact feature HEAD again')) {
+    if (-not $normalizedFinalEpicReview.Contains($marker)) {
+        throw "Final epic review assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains('Passed offline final epic review fixture')) {
+    throw 'Final epic review assertion failed: offline fixture coverage'
 }
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'

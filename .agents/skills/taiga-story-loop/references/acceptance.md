@@ -60,6 +60,11 @@ Only an explicit Yes for the exact displayed PR authorizes an attempt. No,
 silence, stale approval, failed merge, or unknown provider result leaves the
 story waiting and cannot release the next ordered story.
 
+When the scope is an epic, all story merges are followed by the [final
+integrated epic review](final-epic-review.md) at `gpt-6.1-sol`/`high` before
+final PR delivery. A single-story scope uses final story acceptance instead;
+the epic review is not added as an unnecessary gate.
+
 ## Mode selection
 
 The setup summary must display `Review mode: per_task (default)` and

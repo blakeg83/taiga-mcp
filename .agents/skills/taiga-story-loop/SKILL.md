@@ -64,6 +64,12 @@ verification, preserves quiet waits, routes changes back to the same worker
 pair, and blocks next-story dispatch until the provider confirms the merge.
 Run `scripts/validate-merge-approval.ps1` for its offline decision fixture.
 
+For an epic run after all stories are integrated, use [the final integrated epic
+review](references/final-epic-review.md). It pins the final review to
+`gpt-6.1-sol`/`high`, covers cross-story behavior and regressions, and routes
+findings through isolated corrections with exact-HEAD re-review. Run
+`scripts/validate-final-epic-review.ps1` for its offline fixture.
+
 The synthetic ordered-task, failed-check, blocker, review-rejection, and
 human-edit scenarios are recorded in
 [task-execution-walkthroughs.md](references/task-execution-walkthroughs.md) and
