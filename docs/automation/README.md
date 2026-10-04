@@ -154,6 +154,15 @@ Resume revalidates chat, checkout, source, scope, and pending actions. Waiting
 for a dependency or merge releases execution capacity but retains ownership.
 Duplicate ticks and stale revisions are rejected.
 
+For a manual recovery check, run `workflow-coordinate.ps1 -Operation
+check-progress` with the session (and optional ticket) key. This is an
+inspection-only command: it returns the compact registry state, unresolved
+action IDs, and the required chat, repository/branch, provider/PR, and Taiga
+reconciliation checklist. After those observations are reconciled, use the
+current `workflow-state.ps1 -Operation resume-session` inputs. Do not replay a
+pending or uncertain external action from a timeout, commentary message, or
+client ID alone.
+
 ## Branch, review, and PR evidence
 
 Each executable ticket fetches its configured remote and records a fresh base

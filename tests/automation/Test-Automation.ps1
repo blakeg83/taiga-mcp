@@ -343,6 +343,22 @@ try {
         Assert-Equal 'wait_threads' $approvalResult.data.nativeOperation 'pending approval should not trigger a detailed read'
         Assert-True (-not $approvalResult.data.notifyUser) 'pending approval should not duplicate notifications'
         Assert-True (-not $approvalResult.data.detailFetch) 'pending approval should not fetch heavyweight detail'
+        $interrupted = Copy-JsonObject $unchanged; $interrupted.waitStatus = 'interrupted'; $interrupted.compactStatus = @{ workerStatus = 'interrupted'; waitState = 'unknown' }
+        $interruptedResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $interrupted 'wait-interrupted'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_recovery' $interruptedResult.data.decision 'interrupted work should require evidence-based recovery'
+        Assert-Equal 'read_thread' $interruptedResult.data.nativeOperation 'interrupted work should fetch the recent worker result'
+        Assert-True $interruptedResult.data.notifyUser 'meaningful recovery should notify the user'
+        Assert-True $interruptedResult.data.recovery.reconciliationRequired 'interrupted work should require external reconciliation'
+        Assert-True (-not $interruptedResult.data.recovery.retryAllowed) 'interrupted work must not replay an ambiguous action'
+        $missingHandoff = Copy-JsonObject $unchanged; $missingHandoff.waitStatus = 'completed'; $missingHandoff.compactStatus = @{ workerStatus = 'completed'; waitState = 'missing_handoff' }
+        $missingHandoffResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $missingHandoff 'wait-missing-handoff'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_recovery' $missingHandoffResult.data.decision 'a completed worker with a missing handoff should require recovery'
+        Assert-True $missingHandoffResult.data.notifyUser 'a missing handoff should notify the user'
+        $manual = Invoke-PsJson $script:CoordinateScript @('-Operation','check-progress','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; ticketKey = 'project:123:issue:801' } 'manual-check-progress'),'-StateRoot',$waitRoot)
+        Assert-Equal 'check_progress' $manual.data.decision 'manual check-progress should inspect the existing run'
+        Assert-True $manual.data.manual 'manual check-progress should not dispatch work'
+        Assert-True ($manual.data.resumeInstruction -like '*resume-session*') 'manual check-progress should expose the resume instruction'
+        Assert-True (-not $manual.data.stateMutation) 'manual check-progress should not mutate state'
         $completed = Copy-JsonObject $unchanged; $completed.waitStatus = 'completed'
         $detail = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completed 'wait-completed'),'-StateRoot',$waitRoot)
         Assert-Equal 'fetch_result' $detail.data.decision 'completion should trigger one detailed result read'

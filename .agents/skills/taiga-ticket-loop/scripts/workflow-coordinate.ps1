@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','status','relay-task-progress','ack-task-progress')]
+    [ValidateSet('accept-result','prepare-dispatch','prepare-publication','record-external','reconcile-external','observe-wait','heartbeat-plan','check-progress','status','relay-task-progress','ack-task-progress')]
     [string] $Operation,
     [Parameter(Mandatory = $true)]
     [string] $InputPath,
@@ -449,10 +449,30 @@ function Invoke-Status {
     return [ordered]@{ phase = if ($tickets.Count -eq 1) { [string]$tickets[0].phase } else { $null }; decision = 'status'; reason = 'local_registry_snapshot'; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; tickets = @($tickets | ForEach-Object { [ordered]@{ ticketKey = $_.ticketKey; phase = $_.phase; controlState = $_.controlState; correctionRound = $_.correctionRound } }); actions = @($actions | ForEach-Object { [ordered]@{ actionId = $_.actionId; kind = $_.kind; status = $_.status; reconcileRequired = $_.reconcileRequired } }) }
 }
 
+function Invoke-CheckProgress {
+    param([System.Collections.IDictionary] $InputObject)
+    $inspection = Get-Inspection; $sessionId = Need $InputObject 'sessionId'; $registry = $inspection.data.registry; $session = $registry.sessions[$sessionId]
+    if ($null -eq $session) { throw "Session was not found: $sessionId" }
+    $ticketKey = if ($InputObject.Contains('ticketKey')) { [string]$InputObject.ticketKey } else { $null }
+    $tickets = @($registry.tickets.Values | Where-Object { $_.ownerSessionId -eq $sessionId -and ($null -eq $ticketKey -or [string]$_.ticketKey -eq $ticketKey) })
+    $actions = @($registry.actions.Values | Where-Object { $_.sessionId -eq $sessionId -and ($null -eq $ticketKey -or [string]$_.ticketKey -eq $ticketKey) })
+    $unresolved = @($actions | Where-Object { $_.status -in @('pending','uncertain') -or $_.reconcileRequired -eq $true })
+    $resumeInstruction = "After reconciling the observed chat, checkout/branch, provider PR, and Taiga state, run workflow-state.ps1 -Operation resume-session with the current expectedRevision and ownerGeneration. Do not retry an unresolved or ambiguous external action."
+    return [ordered]@{
+        phase = [string]$session.state
+        decision = if ($unresolved.Count -gt 0) { 'reconcile_external_state' } else { 'check_progress' }
+        reason = if ($unresolved.Count -gt 0) { 'unresolved_actions_require_reconciliation' } else { 'manual_progress_check' }
+        actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'inspect_compact_registry'
+        notifyUser = $false; manual = $true; sessionId = $sessionId; tickets = @($tickets | ForEach-Object { [ordered]@{ ticketKey = $_.ticketKey; phase = $_.phase; controlState = $_.controlState } }); actions = @($actions | ForEach-Object { [ordered]@{ actionId = $_.actionId; kind = $_.kind; status = $_.status; reconcileRequired = $_.reconcileRequired } }); unresolvedActionIds = @($unresolved | ForEach-Object { [string]$_.actionId })
+        recoveryChecklist = @('read compact recent worker/coordinator chat status', 'inspect the actual repository branch/worktree and committed HEAD', 'inspect provider/PR state', 'read current Taiga story/task state', 'reconcile every pending or uncertain action before retrying')
+        resumeInstruction = $resumeInstruction
+    }
+}
+
 function Invoke-ObserveWait {
     param([System.Collections.IDictionary] $InputObject)
     $status = Need $InputObject 'waitStatus'
-    if ($status -notin @('unchanged','active','progressing','awaiting_approval','waiting_user','pending_approval','changed','completed','blocked','user_input','paused')) { throw 'waitStatus is not supported.' }
+    if ($status -notin @('unchanged','active','progressing','awaiting_approval','waiting_user','pending_approval','changed','completed','blocked','interrupted','failed','missing_handoff','user_input','paused')) { throw 'waitStatus is not supported.' }
     $compactStatus = if ($InputObject.Contains('compactStatus')) { $InputObject.compactStatus } else { $null }
     if ($null -ne $compactStatus -and $compactStatus -isnot [System.Collections.IDictionary]) { throw 'compactStatus must be an object.' }
     $workerStatus = if ($null -ne $compactStatus -and $compactStatus.Contains('workerStatus')) { [string]$compactStatus.workerStatus } elseif ($InputObject.Contains('workerStatus')) { [string]$InputObject.workerStatus } else { $null }
@@ -475,28 +495,14 @@ function Invoke-ObserveWait {
         $targetValue = [ordered]@{ threadId = Need $InputObject 'threadId' }; if ($InputObject.Contains('hostId')) { $targetValue.hostId = Need $InputObject 'hostId' }; if ($InputObject.Contains('afterCursor')) { $targetValue.afterCursor = Need $InputObject 'afterCursor' }; $targets += $targetValue
     }
     if ($targets.Count -lt 1) { throw 'A native wait descriptor must contain at least one target thread.' }
-    $healthy = $status -in @('unchanged','active','progressing') -or $workerStatus -in @('active','progressing') -or $waitState -eq 'expected_progress'
-    $awaitingApproval = $status -in @('awaiting_approval','waiting_user','pending_approval') -or $waitState -in @('user_approval','pending_approval') -or ($status -eq 'user_input' -and $waitState -eq 'user_approval')
+    $recovery = $status -in @('interrupted','failed','missing_handoff') -or $workerStatus -in @('interrupted','failed') -or $waitState -eq 'missing_handoff'
+    $healthy = -not $recovery -and ($status -in @('unchanged','active','progressing') -or $workerStatus -in @('active','progressing') -or $waitState -eq 'expected_progress')
+    $awaitingApproval = -not $recovery -and ($status -in @('awaiting_approval','waiting_user','pending_approval') -or $waitState -in @('user_approval','pending_approval') -or ($status -eq 'user_input' -and $waitState -eq 'user_approval'))
     $quiet = $healthy -or $awaitingApproval -or $status -eq 'paused'
-    $decision = switch ($status) {
-        { $healthy } { 'continue_wait' }
-        { $awaitingApproval } { 'heartbeat_quiet' }
-        'completed' { 'fetch_result' }
-        'changed' { 'inspect_changed_state' }
-        'blocked' { 'fetch_blocker' }
-        'user_input' { 'needs_input' }
-        'paused' { 'heartbeat_quiet' }
-    }
-    $nativeOperation = switch ($status) {
-        { $quiet } { 'wait_threads' }
-        'completed' { 'read_thread' }
-        'changed' { 'read_thread' }
-        'blocked' { 'read_thread' }
-        'user_input' { 'surface_user_input' }
-        'paused' { 'wait_threads' }
-    }
+    $decision = if ($recovery) { 'reconcile_recovery' } elseif ($healthy) { 'continue_wait' } elseif ($awaitingApproval) { 'heartbeat_quiet' } elseif ($status -eq 'completed') { 'fetch_result' } elseif ($status -eq 'changed') { 'inspect_changed_state' } elseif ($status -eq 'blocked') { 'fetch_blocker' } elseif ($status -eq 'user_input') { 'needs_input' } elseif ($status -eq 'paused') { 'heartbeat_quiet' } else { throw 'waitStatus could not be classified.' }
+    $nativeOperation = if ($recovery) { 'read_thread' } elseif ($quiet) { 'wait_threads' } elseif ($status -in @('completed','changed','blocked')) { 'read_thread' } elseif ($status -eq 'user_input') { 'surface_user_input' } elseif ($status -eq 'paused') { 'wait_threads' } else { throw 'waitStatus native operation could not be classified.' }
     if ($status -eq 'unchanged' -and $InputObject.Contains('resultReference')) { throw 'Unchanged waits cannot reopen result evidence.' }
-    return [ordered]@{ phase = $null; decision = $decision; reason = if ($healthy) { 'healthy_or_expected_progress' } elseif ($awaitingApproval) { 'awaiting_user_approval' } elseif ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = $timeout }; detailFetch = ($status -in @('completed','changed','blocked') -and -not $quiet); notifyUser = -not $quiet; notification = if ($quiet) { 'none' } else { 'meaningful_state_change'; }; contextRead = 'compact_worker_and_wait_state_only'; compactStatus = [ordered]@{ workerStatus = $workerStatus; waitState = $waitState } }
+    return [ordered]@{ phase = $null; decision = $decision; reason = if ($recovery) { 'observed_failure_or_missing_handoff_requires_reconciliation' } elseif ($healthy) { 'healthy_or_expected_progress' } elseif ($awaitingApproval) { 'awaiting_user_approval' } elseif ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = $timeout }; detailFetch = ($recovery -or ($status -in @('completed','changed','blocked') -and -not $quiet)); notifyUser = if ($recovery) { $true } else { -not $quiet }; notification = if ($quiet) { 'none' } elseif ($recovery) { 'recovery_requires_attention' } else { 'meaningful_state_change' }; contextRead = 'compact_worker_and_wait_state_only'; compactStatus = [ordered]@{ workerStatus = $workerStatus; waitState = $waitState }; recovery = if ($recovery) { [ordered]@{ required = $true; retryAllowed = $false; reconciliationRequired = $true; checklist = @('read the recent worker/coordinator chat state', 'inspect the actual repository branch/worktree and committed HEAD', 'inspect provider/PR state', 'read current Taiga story/task state', 'reconcile the observed outcome before any authorized retry') } } else { $null } }
 }
 
 function Invoke-HeartbeatPlan {
@@ -590,6 +596,7 @@ try {
         'reconcile-external' { Invoke-RecordExternal $inputObject }
         'observe-wait' { Invoke-ObserveWait $inputObject }
         'heartbeat-plan' { Invoke-HeartbeatPlan $inputObject }
+        'check-progress' { Invoke-CheckProgress $inputObject }
         'status' { Invoke-Status $inputObject }
         'relay-task-progress' { Invoke-RelayTaskProgress $inputObject }
         'ack-task-progress' { Invoke-AcknowledgeTaskProgress $inputObject }

@@ -73,7 +73,13 @@ descriptor with `notifyUser=false`; `awaiting_approval`, `waiting_user`, and
 These paths read only compact status, do not reopen evidence, message a worker,
 or mutate the registry, and never infer failure from an elapsed field. Only
 completion, changed state, and blockers request one detailed `read_thread`;
-approval waiting remains quiet until the user acts.
+approval waiting remains quiet until the user acts. An observed `interrupted`,
+`failed`, or `missing_handoff` state returns `reconcile_recovery`, not a retry;
+it includes a recovery checklist, sets `reconciliationRequired=true`, and
+notifies only because meaningful attention is required. Use `check-progress` for
+a compact manual registry check. It never dispatches or mutates state and
+returns the exact `resume-session` instruction only after recent chat,
+repository/branch, provider/PR, and Taiga state have been reconciled.
 `heartbeat-plan` describes creation or reuse of one scoped coordinator
 heartbeat. A new plan returns the supported `automation_update` create request
 with `rrule.intervalMinutes=30`, `destination=thread`, the coordinator thread,
