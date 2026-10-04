@@ -567,7 +567,7 @@ function Invoke-HeartbeatPlan {
         }
     }
     $hasFreshCreationReconciliation = $null -ne $creationReconciliation
-    $creationCleanupReconciliationRequired = [string]::IsNullOrWhiteSpace($existing) -and $continuationState -in @('create_reserved','create_pending') -and $lifecycle -in @('pausing','cancelling','cancelled','completed')
+    $creationCleanupReconciliationRequired = [string]::IsNullOrWhiteSpace($existing) -and $continuationState -in @('create_reserved','create_pending') -and $lifecycle -in @('pausing','cancelling','cancelled','completed') -and -not ($hasFreshCreationReconciliation -and [string]$creationReconciliation.outcome -eq 'not_found')
     $scheduleConfirmation = $null
     $scheduleConfirmed = $false
     $scheduleConfirmationOutcome = 'applied'

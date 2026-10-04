@@ -434,6 +434,15 @@ try {
         $cancelFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelFoundInput 'heartbeat-cancel-found'),'-StateRoot',$waitRoot)
         Assert-Equal 'remove_heartbeat' $cancelFound.data.decision 'cancellation should delete a heartbeat found during creation reconciliation'
         Assert-Equal 'late-heartbeat' $cancelFound.data.automationRequest.id 'cleanup must use the reconciled heartbeat ID'
+        $cancelNotFoundInput = Copy-JsonObject $cancelPendingInput; $cancelNotFoundInput.creationReconciliation = @{ reservationId = [string]$cancelPending.data.continuation.reservationId; outcome = 'not_found'; checkedAtUtc = '2026-10-04T00:02:00Z' }
+        $cancelNotFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelNotFoundInput 'heartbeat-cancel-not-found'),'-StateRoot',$waitRoot)
+        Assert-Equal 'no_heartbeat' $cancelNotFound.data.decision 'definitive cancellation reconciliation should finish cleanup'
+        Assert-Equal 'absent' $cancelNotFound.data.continuation.state 'definitive cancellation reconciliation should clear the creation continuation'
+        Assert-True ($null -eq $cancelNotFound.data.reservation) 'definitive cancellation reconciliation should release its reservation'
+        $completedNotFoundInput = Copy-JsonObject $cancelNotFoundInput; $completedNotFoundInput.lifecycle = 'completed'
+        $completedNotFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $completedNotFoundInput 'heartbeat-completed-not-found'),'-StateRoot',$waitRoot)
+        Assert-Equal 'no_heartbeat' $completedNotFound.data.decision 'definitive completion reconciliation should finish cleanup'
+        Assert-Equal 'absent' $completedNotFound.data.continuation.state 'definitive completion reconciliation should clear the creation continuation'
         $activeContinuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE'; runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash }
         $activeInput = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; continuation = $activeContinuation; notificationPolicy = 'failed_runs_only' }
         $wrongRun = Copy-JsonObject $activeInput; $wrongRun.runId = 'synthetic-session-02'
