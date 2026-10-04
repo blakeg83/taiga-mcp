@@ -469,6 +469,22 @@ try {
         Assert-Equal 'remove_heartbeat' $completedHeartbeat.data.decision 'completed runs should remove the existing heartbeat'
     }
 
+    Test-Case 'keep heartbeat lifecycle verification self-contained' {
+        $continuation = @{ state = 'active'; runId = 'isolated-run'; coordinatorThreadId = 'isolated-coordinator'; scopeHash = 'isolated-scope'; heartbeatId = 'isolated-heartbeat'; scheduleState = 'ACTIVE' }
+        $pausedInput = @{ runId = 'isolated-run'; coordinatorThreadId = 'isolated-coordinator'; scopeHash = 'isolated-scope'; lifecycle = 'paused'; continuation = $continuation }
+        $paused = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pausedInput 'heartbeat-isolated-pause'))
+        Assert-Equal 'disable_heartbeat' $paused.data.decision 'isolated lifecycle fixture should plan a pause'
+        Assert-Equal 'ACTIVE' $paused.data.continuation.scheduleState 'isolated pause should retain confirmed state'
+        Assert-Equal 'PAUSED' $paused.data.continuation.pendingScheduleState 'isolated pause should expose pending state'
+        $retryInput = Copy-JsonObject $pausedInput; $retryInput.continuation = $paused.data.continuation
+        $retry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $retryInput 'heartbeat-isolated-reconcile'))
+        Assert-Equal 'reconcile_heartbeat_schedule' $retry.data.decision 'isolated pause retry should reconcile before another update'
+        $confirmInput = Copy-JsonObject $retryInput; $confirmInput.scheduleConfirmation = @{ confirmed = $true; status = 'PAUSED' }
+        $confirmed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $confirmInput 'heartbeat-isolated-confirm'))
+        Assert-Equal 'PAUSED' $confirmed.data.continuation.scheduleState 'isolated confirmation should advance the schedule state'
+        Assert-True (-not $confirmed.data.continuation.Contains('pendingScheduleState')) 'isolated confirmation should clear pending state'
+    }
+
     Test-Case 'preserve sibling dependency epic and pause coordination traces' {
         $traces = ConvertFrom-Json -InputObject (Get-Content -Raw -LiteralPath $script:CoordinationTracePath) -AsHashtable -Depth 100
         Assert-Equal 1 $traces.schemaVersion 'coordination trace schema version'
