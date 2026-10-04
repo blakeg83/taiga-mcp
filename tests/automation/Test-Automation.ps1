@@ -340,6 +340,16 @@ try {
         Assert-Equal 'wait_threads' $activeResult.data.nativeOperation 'active work should not trigger a detailed read'
         Assert-True (-not $activeResult.data.notifyUser) 'active work should not notify the user'
         Assert-True (-not $activeResult.data.detailFetch) 'active work should not fetch heavyweight detail'
+        $blocked = Copy-JsonObject $unchanged; $blocked.waitStatus = 'blocked'; $blocked.compactStatus = @{ workerStatus = 'active'; waitState = 'expected_progress' }
+        $blockedResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $blocked 'wait-blocked-active-worker'),'-StateRoot',$waitRoot)
+        Assert-Equal 'fetch_blocker' $blockedResult.data.decision 'a blocked event must outrank a healthy worker observation'
+        Assert-Equal 'read_thread' $blockedResult.data.nativeOperation 'a blocked event should fetch the blocker detail'
+        Assert-True $blockedResult.data.notifyUser 'a blocked event should notify the user'
+        Assert-True $blockedResult.data.detailFetch 'a blocked event should request detail'
+        $completedActive = Copy-JsonObject $unchanged; $completedActive.waitStatus = 'completed'; $completedActive.compactStatus = @{ workerStatus = 'active'; waitState = 'expected_progress' }
+        $completedActiveResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completedActive 'wait-completed-active-worker'),'-StateRoot',$waitRoot)
+        Assert-Equal 'fetch_result' $completedActiveResult.data.decision 'a completed event must outrank a healthy worker observation'
+        Assert-True $completedActiveResult.data.notifyUser 'a completed event should notify the user'
         $approval = Copy-JsonObject $unchanged; $approval.waitStatus = 'awaiting_approval'; $approval.compactStatus = @{ workerStatus = 'waiting_user'; waitState = 'user_approval'; elapsedMinutes = 999 }
         $approvalResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $approval 'wait-approval'),'-StateRoot',$waitRoot)
         Assert-Equal 'heartbeat_quiet' $approvalResult.data.decision 'pending user approval should remain quiet'
