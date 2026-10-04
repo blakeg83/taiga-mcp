@@ -26,6 +26,8 @@ $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
 $acceptancePath = Join-Path $skillRoot 'references/acceptance.md'
 $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
+$prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
+$prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -44,6 +46,9 @@ if (-not (Test-Path $acceptancePath)) {
 }
 if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
     throw 'Missing routing and escalation fixture.'
+}
+if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath)) {
+    throw 'Missing reviewed story PR delivery contract or fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -72,6 +77,8 @@ $acceptanceText = Get-Content $acceptancePath -Raw
 $normalizedAcceptance = [regex]::Replace($acceptanceText, '\s+', ' ')
 $routingText = Get-Content $routingPath -Raw
 $normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
+$prDeliveryText = Get-Content $prDeliveryPath -Raw
+$normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -232,6 +239,19 @@ if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
 }
 if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections must not create a new chat')) {
     throw 'Routing assertion failed: controlled fixture coverage'
+}
+foreach ($marker in @(
+        'exact current HEAD'
+        'Find an existing PR by repository, head branch, and the recorded feature base'
+        'Reuse a PR only when its base branch and head commit match'
+        'state: pr_ready_for_approval'
+        'never blindly retry a write or create a duplicate PR')) {
+    if (-not $normalizedPrDelivery.Contains($marker)) {
+        throw "PR delivery assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR delivery fixture')) {
+    throw 'PR delivery assertion failed: offline fixture coverage'
 }
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'

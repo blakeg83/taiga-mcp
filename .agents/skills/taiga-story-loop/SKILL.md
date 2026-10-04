@@ -52,6 +52,12 @@ for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker
 completion, review acceptance, PR approval, and merge.
 
+Use [reviewed story PR delivery](references/pr-delivery.md) when the complete
+story is approved. It defines the coordinator's exact-HEAD preflight, PR
+reuse/create identity, review evidence, Taiga/chat linkage, and the pending
+approval state. Run `scripts/validate-pr-delivery.ps1` for its offline fixture;
+it never performs provider writes.
+
 The synthetic ordered-task, failed-check, blocker, review-rejection, and
 human-edit scenarios are recorded in
 [task-execution-walkthroughs.md](references/task-execution-walkthroughs.md) and

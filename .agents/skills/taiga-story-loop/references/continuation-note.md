@@ -20,6 +20,7 @@ Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
 Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
 Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
 PR: <url or pending> | base: <feature branch> | head: <sha>
+PR delivery: <not_ready/ready/reused/created/unknown> | link evidence: <url or pending>
 Review: <pending/approved/changes_requested>
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>

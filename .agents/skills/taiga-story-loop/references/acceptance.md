@@ -50,6 +50,11 @@ approval stale; the affected work returns through the same implementer/reviewer
 pair. A comment, timeout, or unchanged Taiga status cannot substitute for the
 reviewer's exact HEAD approval.
 
+The coordinator follows [reviewed story PR delivery](pr-delivery.md) after this
+approval. The resulting PR is a delivery artifact targeting the integration
+feature branch, not a merge. Its base, head, checks, review profile, and exact
+URL are recorded before asking for the separate merge decision.
+
 ## Mode selection
 
 The setup summary must display `Review mode: per_task (default)` and
