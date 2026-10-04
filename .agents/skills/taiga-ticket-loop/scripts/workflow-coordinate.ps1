@@ -493,9 +493,43 @@ function Invoke-HeartbeatPlan {
     param([System.Collections.IDictionary] $InputObject)
     $inspection = Get-Inspection; $sessionId = Need $InputObject 'sessionId'; $session = $inspection.data.registry.sessions[$sessionId]
     if ($null -eq $session) { throw "Session was not found: $sessionId" }
-    $requestedPolicy = if ($InputObject.Contains('notificationPolicy')) { [string]$InputObject.notificationPolicy } else { $null }
+    $requestedPolicy = if ($InputObject.Contains('notificationPolicy')) { [string]$InputObject.notificationPolicy } else { 'failed_runs_only' }
+    if ($requestedPolicy -notin @('failed_runs_only','')) { throw 'notificationPolicy must be failed_runs_only or null.' }
     $existing = if ($session.Contains('heartbeatId')) { [string]$session.heartbeatId } else { '' }
-    return [ordered]@{ phase = [string]$session.state; decision = if ([string]::IsNullOrWhiteSpace($existing)) { 'create_heartbeat' } else { 'reuse_heartbeat' }; reason = if ([string]::IsNullOrWhiteSpace($existing)) { 'one_session_heartbeat' } else { 'existing_session_heartbeat' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'automation_update'; heartbeat = [ordered]@{ heartbeatId = if ([string]::IsNullOrWhiteSpace($existing)) { $null } else { $existing }; notificationPolicy = $requestedPolicy; nestedSchedules = $false; quietWhenUnchanged = $true } }
+    $scopeHash = Hash-Object @($session.scope)
+    $targetThreadId = [string]$session.coordinatorThreadId
+    $name = "taiga-recovery-$sessionId"
+    $prompt = "Recovery-only check for scoped coordinator run $sessionId (scope $scopeHash). Inspect compact worker and continuation status only. Stay quiet when unchanged, active, progressing, or awaiting user approval. Do not treat elapsed time as failure. Investigate only observed interruption, failed action, completed work with a missing handoff, or another meaningful recovery signal; reconcile actual chat, Git, provider, and Taiga state before an authorized retry, and never replay an ambiguous write or create a nested schedule. Normal worker messages and user approvals remain the workflow triggers."
+    $isCreate = [string]::IsNullOrWhiteSpace($existing)
+    $binding = if ($session.Contains('heartbeatBinding') -and $session.heartbeatBinding -is [System.Collections.IDictionary]) { $session.heartbeatBinding } else { $null }
+    $heartbeat = [ordered]@{
+        heartbeatId = if ($isCreate) { $null } else { $existing }
+        runId = $sessionId
+        coordinatorThreadId = $targetThreadId
+        scopeHash = $scopeHash
+        name = $name
+        intervalMinutes = 30
+        rrule = [ordered]@{ intervalMinutes = 30 }
+        prompt = $prompt
+        notificationPolicy = if ([string]::IsNullOrWhiteSpace($requestedPolicy)) { $null } else { $requestedPolicy }
+        destination = 'thread'
+        targetThreadId = $targetThreadId
+        nestedSchedules = $false
+        quietWhenUnchanged = $true
+    }
+    if ($null -ne $binding) {
+        if ($binding.Contains('runId') -and [string]$binding.runId -cne $sessionId) { throw 'Saved heartbeat binding belongs to a different run.' }
+        if ($binding.Contains('coordinatorThreadId') -and [string]$binding.coordinatorThreadId -cne $targetThreadId) { throw 'Saved heartbeat binding targets a different coordinator.' }
+        if ($binding.Contains('intervalMinutes') -and [int]$binding.intervalMinutes -ne 30) { throw 'Saved heartbeat binding is not a 30-minute schedule.' }
+        if ($binding.Contains('scopeHash') -and [string]$binding.scopeHash -cne $scopeHash) { throw 'Saved heartbeat binding is for a different scope.' }
+        foreach ($key in @('name','notificationPolicy','targetThreadId')) { if ($binding.Contains($key)) { $heartbeat[$key] = $binding[$key] } }
+    }
+    $automationRequest = if ($isCreate) {
+        [ordered]@{ kind = 'heartbeat'; mode = 'create'; name = [string]$heartbeat.name; prompt = [string]$heartbeat.prompt; rrule = $heartbeat.rrule; status = 'ACTIVE'; destination = 'thread'; targetThreadId = [string]$heartbeat.targetThreadId; notificationPolicy = $heartbeat.notificationPolicy }
+    } else {
+        [ordered]@{ mode = 'view'; id = $existing }
+    }
+    return [ordered]@{ phase = [string]$session.state; decision = if ($isCreate) { 'create_heartbeat' } else { 'reuse_heartbeat' }; reason = if ($isCreate) { 'one_scoped_30_minute_heartbeat' } else { 'existing_scoped_heartbeat' }; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'automation_update'; automationRequest = $automationRequest; heartbeat = $heartbeat }
 }
 
 function Invoke-RelayTaskProgress {

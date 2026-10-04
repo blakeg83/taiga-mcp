@@ -467,7 +467,7 @@ function Invoke-Initialize {
     $scope = if ($InputObject.ContainsKey('scope')) { @($InputObject.scope) } else { @() }
     $deps = if ($InputObject.ContainsKey('dependencies')) { @($InputObject.dependencies) } else { @() }
     $session = [ordered]@{
-        sessionId = $sessionId; coordinatorThreadId = $threadId; coordinatorHostId = $hostId; ownerGeneration = 1; state = 'running'; controlState = $null; createdAt = New-UtcStamp; updatedAt = New-UtcStamp; config = $config; authorization = if ($InputObject.ContainsKey('authorization')) { $InputObject.authorization } else { [ordered]@{} }; scope = $scope; dependencies = $deps; statusMappings = if ($InputObject.ContainsKey('statusMappings')) { $InputObject.statusMappings } else { [ordered]@{} }; heartbeatId = $null; pauseIntent = $null; cancelIntent = $null
+        sessionId = $sessionId; coordinatorThreadId = $threadId; coordinatorHostId = $hostId; ownerGeneration = 1; state = 'running'; controlState = $null; createdAt = New-UtcStamp; updatedAt = New-UtcStamp; config = $config; authorization = if ($InputObject.ContainsKey('authorization')) { $InputObject.authorization } else { [ordered]@{} }; scope = $scope; dependencies = $deps; statusMappings = if ($InputObject.ContainsKey('statusMappings')) { $InputObject.statusMappings } else { [ordered]@{} }; heartbeatId = $null; heartbeatState = $null; heartbeatBinding = $null; heartbeatUpdatedAt = $null; pauseIntent = $null; cancelIntent = $null
     }
     $state.sessions[$sessionId] = $session
     Add-Event $state 'session_initialized' @{ sessionId = $sessionId }
@@ -824,10 +824,21 @@ function Invoke-Resume {
 
 function Invoke-Heartbeat {
     param([hashtable] $State, [hashtable] $InputObject)
-    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','heartbeatId','scheduleState','reason') 'set-heartbeat'; Assert-Revision $State $InputObject
-    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $id = if ($InputObject.ContainsKey('heartbeatId')) { Require-String $InputObject 'heartbeatId' } else { $null }; $session.heartbeatId = $id; $session.heartbeatState = if ($InputObject.ContainsKey('scheduleState')) { $InputObject.scheduleState } else { $null }; $session.heartbeatUpdatedAt = New-UtcStamp
-    Add-Event $State 'heartbeat_recorded' @{ sessionId = $session.sessionId; heartbeatId = $id; scheduleState = $session.heartbeatState }
-    return @{ Data = @{ heartbeatId = $id; scheduleState = $session.heartbeatState } }
+    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','heartbeatId','scheduleState','heartbeatBinding','reason') 'set-heartbeat'; Assert-Revision $State $InputObject
+    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $id = if ($InputObject.ContainsKey('heartbeatId')) { Require-String $InputObject 'heartbeatId' } else { $null }
+    $binding = if ($InputObject.ContainsKey('heartbeatBinding')) { $InputObject.heartbeatBinding } else { $null }
+    if ($null -ne $binding) {
+        if ($binding -isnot [System.Collections.IDictionary]) { throw 'heartbeatBinding must be an object.' }
+        foreach ($name in @('runId','coordinatorThreadId','scopeHash','intervalMinutes','name','notificationPolicy','targetThreadId')) { if (-not $binding.Contains($name)) { throw "heartbeatBinding.$name is required." } }
+        if ([string]$binding.runId -cne [string]$session.sessionId -or [string]$binding.coordinatorThreadId -cne [string]$session.coordinatorThreadId -or [string]$binding.targetThreadId -cne [string]$session.coordinatorThreadId) { throw 'heartbeatBinding is not bound to this coordinator run.' }
+        if ([int]$binding.intervalMinutes -ne 30) { throw 'heartbeatBinding.intervalMinutes must be 30.' }
+        if ([string]::IsNullOrWhiteSpace([string]$binding.scopeHash) -or [string]::IsNullOrWhiteSpace([string]$binding.name)) { throw 'heartbeatBinding scopeHash and name must be nonblank.' }
+        if ([string]$binding.notificationPolicy -notin @('failed_runs_only','')) { throw 'heartbeatBinding.notificationPolicy must be failed_runs_only or null.' }
+        $binding = [ordered]@{ runId = [string]$binding.runId; coordinatorThreadId = [string]$binding.coordinatorThreadId; targetThreadId = [string]$binding.targetThreadId; scopeHash = [string]$binding.scopeHash; intervalMinutes = 30; name = [string]$binding.name; notificationPolicy = if ([string]::IsNullOrWhiteSpace([string]$binding.notificationPolicy)) { $null } else { [string]$binding.notificationPolicy } }
+    }
+    $session.heartbeatId = $id; $session.heartbeatState = if ($InputObject.ContainsKey('scheduleState')) { $InputObject.scheduleState } else { $null }; $session.heartbeatBinding = $binding; $session.heartbeatUpdatedAt = New-UtcStamp
+    Add-Event $State 'heartbeat_recorded' @{ sessionId = $session.sessionId; heartbeatId = $id; scheduleState = $session.heartbeatState; heartbeatBinding = $binding }
+    return @{ Data = @{ heartbeatId = $id; scheduleState = $session.heartbeatState; heartbeatBinding = $binding } }
 }
 
 function Validate-ImplementationReceipt {

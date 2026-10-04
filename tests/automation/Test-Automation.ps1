@@ -335,12 +335,30 @@ try {
         Assert-Equal 'read_thread' $detail.data.nativeOperation 'completion should use read_thread only after a wake'
         $heartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-create'),'-StateRoot',$waitRoot)
         Assert-Equal 'create_heartbeat' $heartbeat.data.decision 'first heartbeat plan should create one session heartbeat'
+        Assert-Equal 30 $heartbeat.data.heartbeat.intervalMinutes 'heartbeat should use a 30-minute interval'
+        Assert-Equal 30 $heartbeat.data.heartbeat.rrule.intervalMinutes 'heartbeat should expose the supported interval rule'
+        Assert-Equal 'coordinator-thread' $heartbeat.data.heartbeat.targetThreadId 'heartbeat should target the coordinator thread'
+        Assert-Equal 'synthetic-session-01' $heartbeat.data.heartbeat.runId 'heartbeat should bind to the coordinator run'
+        Assert-True ($heartbeat.data.heartbeat.prompt -like '*Recovery-only check*') 'heartbeat prompt should be recovery-only'
+        Assert-True ($heartbeat.data.heartbeat.prompt -like '*Do not treat elapsed time as failure*') 'heartbeat prompt should reject elapsed-time failure'
+        Assert-Equal 'create' $heartbeat.data.automationRequest.mode 'first heartbeat should use the create automation operation'
+        Assert-Equal 'thread' $heartbeat.data.automationRequest.destination 'heartbeat should be thread-scoped'
         $set = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $after.revision; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' }
         $setResult = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $set 'heartbeat-set'),'-StateRoot',$waitRoot)
         $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-reuse'),'-StateRoot',$waitRoot)
         Assert-Equal 'reuse_heartbeat' $reuse.data.decision 'later plans should reuse the existing session heartbeat'
+        Assert-Equal 'view' $reuse.data.automationRequest.mode 'duplicate heartbeat plans should view and reuse the existing automation'
+        Assert-Equal 'heartbeat-1' $reuse.data.automationRequest.id 'duplicate heartbeat plans should retain the existing automation ID'
         Assert-True $reuse.data.heartbeat.quietWhenUnchanged 'heartbeat should stay quiet when no worker state changed'
         Assert-True (-not $reuse.data.heartbeat.nestedSchedules) 'heartbeat plan must not create nested schedules'
+
+        $binding = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; targetThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; intervalMinutes = 30; name = [string]$heartbeat.data.heartbeat.name; notificationPolicy = 'failed_runs_only' }
+        $boundSet = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $setResult.revision; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE'; heartbeatBinding = $binding }
+        $bound = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $boundSet 'heartbeat-binding'),'-StateRoot',$waitRoot)
+        Assert-Equal 'heartbeat-1' $bound.data.heartbeatId 'heartbeat binding should retain the automation ID'
+        Assert-Equal 30 $bound.data.heartbeatBinding.intervalMinutes 'heartbeat binding should retain the 30-minute cadence'
+        $invalidBinding = Copy-JsonObject $boundSet; $invalidBinding.heartbeatBinding.intervalMinutes = 15; $invalid = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $invalidBinding 'heartbeat-invalid-binding'),'-StateRoot',$waitRoot) $false
+        Assert-True (-not $invalid.ok) 'non-30-minute heartbeat bindings must fail closed'
     }
 
     Test-Case 'preserve sibling dependency epic and pause coordination traces' {

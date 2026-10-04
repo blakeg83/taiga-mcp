@@ -69,8 +69,18 @@ ticket waits retain their host IDs and cursors. An unchanged timeout returns a q
 source, reopen evidence, message a worker, or mutate the registry. Completion,
 changed state, and blockers are the only ordinary reasons to request one
 detailed `read_thread`; user input remains visible as a separate decision.
-`heartbeat-plan` describes creation or reuse of one coordinator heartbeat and
-never schedules a timer per ticket or a nested heartbeat.
+`heartbeat-plan` describes creation or reuse of one scoped coordinator
+heartbeat. A new plan returns the supported `automation_update` create request
+with `rrule.intervalMinutes=30`, `destination=thread`, the coordinator thread,
+the session/run binding, and a concise recovery-only prompt. The prompt stays
+quiet for unchanged, active, progressing, or user-approval waits and does not
+treat elapsed time as failure. After the returned ID is recorded with
+`set-heartbeat`, duplicate starts and resumes return an automation view request
+for that ID instead of creating another schedule. The persisted continuation
+binding contains only the run/coordinator/scope identity, name, policy, and
+cadence; the full prompt remains in the automation service. The heartbeat never
+schedules a timer per ticket or a nested heartbeat, and normal handoffs do not
+wait for its next tick.
 
 `record-receipt-repair` is available only while the owned ticket is reviewing.
 It records format/evidence repairs in a per-ticket ledger with remaining
