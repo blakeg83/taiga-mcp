@@ -82,9 +82,18 @@ function Resolve-Pr {
         [string] $PrUrl = 'https://example.invalid/pr/50'
     )
     $matches = @($Existing | Where-Object {
+        $_.PSObject.Properties['repository'] -and
+        $_.PSObject.Properties['headBranch'] -and
+        $_.PSObject.Properties['base'] -and
+        $_.PSObject.Properties['head'] -and
+        $_.PSObject.Properties['state'] -and
+        $_.PSObject.Properties['isClosed'] -and
         $_.repository -eq $Receipt.repository -and
+        $_.headBranch -eq $Receipt.storyBranch -and
         $_.base -eq $Receipt.featureBranch -and
-        $_.head -eq $Receipt.branchHead
+        $_.head -eq $Receipt.branchHead -and
+        $_.state -eq 'open' -and
+        $_.isClosed -eq $false
     })
     if ($matches.Count -gt 1) { return [ordered]@{ state = 'ambiguous'; pr = $null } }
     if ($matches.Count -eq 1) { return [ordered]@{ state = 'reused'; pr = $matches[0] } }
@@ -119,11 +128,38 @@ Assert-True ((Test-DeliveryPreflight $oldChecks) -eq 'stale_checks') 'checks for
 $existing = [pscustomobject]@{
     url = 'https://example.invalid/pr/existing'
     repository = 'TaigaMCP'
+    headBranch = 'codex/story-50-run1'
     base = 'codex/feature-taiga-mcp-run1'
     head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    state = 'open'
+    isClosed = $false
 }
 $reused = Resolve-Pr @($existing) $valid
 Assert-True ($reused.state -eq 'reused' -and $reused.pr.url -eq $existing.url) 'matching PR must be reused'
+
+$wrongBranch = [pscustomobject]@{
+    url = 'https://example.invalid/pr/wrong-branch'
+    repository = 'TaigaMCP'
+    headBranch = 'codex/other-story'
+    base = 'codex/feature-taiga-mcp-run1'
+    head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    state = 'open'
+    isClosed = $false
+}
+$wrongBranchResult = Resolve-Pr @($wrongBranch) $valid 'https://example.invalid/pr/new-branch'
+Assert-True ($wrongBranchResult.state -eq 'create') 'PR from another head branch must not be reused'
+
+$closed = [pscustomobject]@{
+    url = 'https://example.invalid/pr/closed'
+    repository = 'TaigaMCP'
+    headBranch = 'codex/story-50-run1'
+    base = 'codex/feature-taiga-mcp-run1'
+    head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    state = 'closed'
+    isClosed = $true
+}
+$closedResult = Resolve-Pr @($closed) $valid 'https://example.invalid/pr/new-closed'
+Assert-True ($closedResult.state -eq 'create') 'closed or unmerged PR must not be reused'
 
 $created = Resolve-Pr @() $valid 'https://example.invalid/pr/new'
 Assert-True ($created.state -eq 'create' -and $created.pr.base -eq $valid.featureBranch -and $created.pr.head -eq $valid.branchHead) 'new PR must target exact feature base and reviewed HEAD'
@@ -141,4 +177,4 @@ foreach ($marker in @('pr_ready_for_approval', $created.pr.url, $valid.featureBr
 $wrongBase = New-DeliveryReceipt -FeatureBranch ''
 Assert-True ((Test-DeliveryPreflight $wrongBase) -eq 'missing_feature_base') 'missing feature base must block delivery'
 
-Write-Output 'Passed offline PR delivery fixture: exact-head preflight, stale/dirty/check guards, PR reuse/create identity, review evidence, and Taiga link evidence.'
+Write-Output 'Passed offline PR delivery fixture: exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, PR create identity, review evidence, and Taiga link evidence.'

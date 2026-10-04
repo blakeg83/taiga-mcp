@@ -263,8 +263,9 @@ if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections mu
 }
 foreach ($marker in @(
         'exact current HEAD'
-        'Find an existing PR by repository, head branch, and the recorded feature base'
-        'Reuse a PR only when its base branch and head commit match'
+        'Find an existing PR by repository, exact head branch, recorded feature base, and reviewed head commit'
+        'Reuse a PR only when all of those identities match and the provider reports it open and unclosed'
+        'A PR from another branch, a closed/unmerged PR'
         'state: pr_ready_for_approval'
         'never blindly retry a write or create a duplicate PR')) {
     if (-not $normalizedPrDelivery.Contains($marker)) {

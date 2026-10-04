@@ -28,11 +28,11 @@ pair.
 ## Push and PR identity
 
 After preflight succeeds, push only the authorized story branch. Find an
-existing PR by repository, head branch, and the recorded feature base. Reuse a
-PR only when its base branch and head commit match the current delivery
-receipt. A closed-unmerged PR, a PR with a changed head, or a response-lost
-create is not a successful delivery; inspect the provider before creating
-anything else.
+existing PR by repository, exact head branch, recorded feature base, and
+reviewed head commit. Reuse a PR only when all of those identities match and
+the provider reports it open and unclosed. A PR from another branch, a
+closed/unmerged PR, a PR with a changed head, or a response-lost create is not a
+successful delivery; inspect the provider before creating anything else.
 
 The story PR must target the integration feature branch and must include this
 review evidence in its description:
