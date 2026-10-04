@@ -55,6 +55,11 @@ approval. The resulting PR is a delivery artifact targeting the integration
 feature branch, not a merge. Its base, head, checks, review profile, and exact
 URL are recorded before asking for the separate merge decision.
 
+The merge decision follows [the Yes/No story merge gate](merge-approval.md).
+Only an explicit Yes for the exact displayed PR authorizes an attempt. No,
+silence, stale approval, failed merge, or unknown provider result leaves the
+story waiting and cannot release the next ordered story.
+
 ## Mode selection
 
 The setup summary must display `Review mode: per_task (default)` and

@@ -28,6 +28,8 @@ $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
 $prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
 $prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
+$mergeApprovalPath = Join-Path $skillRoot 'references/merge-approval.md'
+$mergeApprovalScriptPath = Join-Path $PSScriptRoot 'validate-merge-approval.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -49,6 +51,9 @@ if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
 }
 if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath)) {
     throw 'Missing reviewed story PR delivery contract or fixture.'
+}
+if (-not (Test-Path $mergeApprovalPath) -or -not (Test-Path $mergeApprovalScriptPath)) {
+    throw 'Missing Yes/No merge approval contract or fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -79,6 +84,8 @@ $routingText = Get-Content $routingPath -Raw
 $normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
 $prDeliveryText = Get-Content $prDeliveryPath -Raw
 $normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
+$mergeApprovalText = Get-Content $mergeApprovalPath -Raw
+$normalizedMergeApproval = [regex]::Replace($mergeApprovalText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -252,6 +259,19 @@ foreach ($marker in @(
 }
 if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR delivery fixture')) {
     throw 'PR delivery assertion failed: offline fixture coverage'
+}
+foreach ($marker in @(
+        'Yes — merge and continue to the next ordered story'
+        'No — hold for feedback'
+        'An empty response, timeout, unrelated text, or a worker message is `no_response`'
+        'Only a verified provider merge unlocks the next story'
+        'Do not dispatch workers or send repeated notifications')) {
+    if (-not $normalizedMergeApproval.Contains($marker)) {
+        throw "Merge approval assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains('Passed offline merge-gate fixture')) {
+    throw 'Merge approval assertion failed: offline fixture coverage'
 }
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'

@@ -21,6 +21,7 @@ Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
 Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
 PR: <url or pending> | base: <feature branch> | head: <sha>
 PR delivery: <not_ready/ready/reused/created/unknown> | link evidence: <url or pending>
+Approval: <pending/yes/no/stale> | prompt: <selectable/plain-text>
 Review: <pending/approved/changes_requested>
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>

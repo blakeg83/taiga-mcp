@@ -58,6 +58,12 @@ reuse/create identity, review evidence, Taiga/chat linkage, and the pending
 approval state. Run `scripts/validate-pr-delivery.ps1` for its offline fixture;
 it never performs provider writes.
 
+Use [the Yes/No story merge gate](references/merge-approval.md) after a PR is
+ready. It keeps explicit user authorization separate from PR review and merge
+verification, preserves quiet waits, routes changes back to the same worker
+pair, and blocks next-story dispatch until the provider confirms the merge.
+Run `scripts/validate-merge-approval.ps1` for its offline decision fixture.
+
 The synthetic ordered-task, failed-check, blocker, review-rejection, and
 human-edit scenarios are recorded in
 [task-execution-walkthroughs.md](references/task-execution-walkthroughs.md) and
