@@ -622,7 +622,7 @@ function Invoke-AcknowledgeTaskProgress {
 
 try {
     $inputObject = Read-Object
-    if ([string]::IsNullOrWhiteSpace($StateRoot)) { throw 'StateRoot is required.' }
+    if ([string]::IsNullOrWhiteSpace($StateRoot) -and $Operation -notin @('observe-wait','heartbeat-plan','check-progress')) { throw 'StateRoot is required for this operation.' }
     $data = switch ($Operation) {
         'accept-result' { Invoke-AcceptResult $inputObject }
         'prepare-dispatch' { Invoke-PrepareExternal $inputObject 'worker_dispatch' 'create_or_message_worker' }

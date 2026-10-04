@@ -377,6 +377,8 @@ try {
         Assert-True ($manual.data.resumeInstruction -notlike '*workflow-state.ps1*') 'manual check-progress should not require the custom workflow-state application'
         Assert-Equal 'wait_threads' $manual.data.nativeOperation 'healthy manual check-progress should use native waiting'
         Assert-True (-not $manual.data.stateMutation) 'manual check-progress should not mutate state'
+        $manualNativeOnly = Invoke-PsJson $script:CoordinateScript @('-Operation','check-progress','-InputPath',(New-InputPath @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; continuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' } } 'manual-check-progress-native-only'))
+        Assert-Equal 'check_progress' $manualNativeOnly.data.decision 'manual check-progress must work without a workflow-state registry'
         $concurrent = Copy-JsonObject $unchanged; $concurrent.Remove('threadId'); $concurrent.Remove('afterCursor'); $concurrent.targets = @(@{ threadId = 'worker-1'; afterCursor = 'cursor-1' }, @{ threadId = 'worker-2'; hostId = 'local'; afterCursor = 'cursor-2' })
         $concurrentResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $concurrent 'wait-concurrent'),'-StateRoot',$waitRoot)
         Assert-Equal 2 @($concurrentResult.data.waitThreadsArguments.targets).Count 'concurrent message and tick waits should preserve both targets'
@@ -391,6 +393,8 @@ try {
         Assert-Equal 'reserve_heartbeat' $heartbeat.data.decision 'first heartbeat plan should reserve before external creation'
         Assert-True ($null -eq $heartbeat.data.automationRequest) 'reservation must not issue an external create request'
         Assert-Equal 'create_reserved' $heartbeat.data.continuation.state 'reservation should be persisted as continuation context'
+        $nativeOnlyHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-native-only'))
+        Assert-Equal 'reserve_heartbeat' $nativeOnlyHeartbeat.data.decision 'heartbeat setup must work without a workflow-state registry'
         $repeatReservation = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-repeat-reserve'),'-StateRoot',$waitRoot)
         Assert-Equal 'reserve_heartbeat' $repeatReservation.data.decision 'a second uncommitted plan must remain a reservation'
         Assert-True ($null -eq $repeatReservation.data.automationRequest) 'duplicate plans must not create before the reservation is recorded'
