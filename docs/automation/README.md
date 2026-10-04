@@ -149,9 +149,12 @@ instead of creating another one.
 Schedule changes use the same confirmation rule. A pause or reactivation plan
 returns a pending target while retaining the last confirmed `scheduleState`.
 Persist that continuation, reconcile the provider result, and pass an explicit
-confirmation before planning the next lifecycle step. Failed or interrupted
-updates therefore remain retryable and cannot make a paused or active result
-look confirmed.
+confirmation before planning the next lifecycle step. Use an `applied`
+confirmation when the requested target is observed; use `unchanged` or
+`failed` with the last confirmed provider state when the update did not apply.
+The latter clears the stale pending target so the next plan can retry. Failed
+or interrupted updates therefore remain retryable and cannot make a paused or
+active result look confirmed.
 
 For a manual recovery check, read the recent coordinator/worker chat, inspect
 the actual checkout and branch, provider/PR state, and current Taiga state,
