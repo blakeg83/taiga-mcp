@@ -371,50 +371,52 @@ try {
         $detail = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completed 'wait-completed'),'-StateRoot',$waitRoot)
         Assert-Equal 'fetch_result' $detail.data.decision 'completion should trigger one detailed result read'
         Assert-Equal 'read_thread' $detail.data.nativeOperation 'completion should use read_thread only after a wake'
-        $heartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-create'),'-StateRoot',$waitRoot)
-        Assert-Equal 'create_heartbeat' $heartbeat.data.decision 'first heartbeat plan should create one session heartbeat'
+        $heartbeatInput = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scope = @{ story = 51; tasks = @(73,74,75,76) }; notificationPolicy = 'failed_runs_only' }
+        $heartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-reserve'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reserve_heartbeat' $heartbeat.data.decision 'first heartbeat plan should reserve before external creation'
+        Assert-True ($null -eq $heartbeat.data.automationRequest) 'reservation must not issue an external create request'
+        Assert-Equal 'create_reserved' $heartbeat.data.continuation.state 'reservation should be persisted as continuation context'
+        $repeatReservation = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-repeat-reserve'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reserve_heartbeat' $repeatReservation.data.decision 'a second uncommitted plan must remain a reservation'
+        Assert-True ($null -eq $repeatReservation.data.automationRequest) 'duplicate plans must not create before the reservation is recorded'
         Assert-Equal 30 $heartbeat.data.heartbeat.intervalMinutes 'heartbeat should use a 30-minute interval'
         Assert-Equal 30 $heartbeat.data.heartbeat.rrule.intervalMinutes 'heartbeat should expose the supported interval rule'
         Assert-Equal 'coordinator-thread' $heartbeat.data.heartbeat.targetThreadId 'heartbeat should target the coordinator thread'
         Assert-Equal 'synthetic-session-01' $heartbeat.data.heartbeat.runId 'heartbeat should bind to the coordinator run'
         Assert-True ($heartbeat.data.heartbeat.prompt -like '*Recovery-only check*') 'heartbeat prompt should be recovery-only'
         Assert-True ($heartbeat.data.heartbeat.prompt -like '*Do not treat elapsed time as failure*') 'heartbeat prompt should reject elapsed-time failure'
-        Assert-Equal 'create' $heartbeat.data.automationRequest.mode 'first heartbeat should use the create automation operation'
-        Assert-Equal 'thread' $heartbeat.data.automationRequest.destination 'heartbeat should be thread-scoped'
-        $set = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $after.revision; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' }
-        $setResult = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $set 'heartbeat-set'),'-StateRoot',$waitRoot)
-        $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-reuse'),'-StateRoot',$waitRoot)
+        $reservedInput = Copy-JsonObject $heartbeatInput; $reservedInput.continuation = $heartbeat.data.continuation
+        $reconcile = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $reservedInput 'heartbeat-reconcile'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_creation' $reconcile.data.decision 'a recorded reservation must reconcile before any create retry'
+        Assert-True ($null -eq $reconcile.data.automationRequest) 'unresolved creation must not issue a duplicate create request'
+        Assert-True (-not $reconcile.data.reservation.createAllowed) 'reconciliation must explicitly prohibit creation'
+        $createInput = Copy-JsonObject $reservedInput; $createInput.creationReconciled = $true
+        $create = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $createInput 'heartbeat-create'),'-StateRoot',$waitRoot)
+        Assert-Equal 'create_heartbeat' $create.data.decision 'creation should require an explicit no-existing-monitor reconciliation'
+        Assert-Equal 'create' $create.data.automationRequest.mode 'reconciled reservation should issue one create operation'
+        Assert-Equal $heartbeat.data.continuation.reservationId $create.data.automationRequest.reservationId 'create must retain the reservation identity'
+        Assert-Equal 'thread' $create.data.automationRequest.destination 'heartbeat should be thread-scoped'
+        $activeContinuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE'; runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash }
+        $activeInput = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; continuation = $activeContinuation; notificationPolicy = 'failed_runs_only' }
+        $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $activeInput 'heartbeat-reuse'),'-StateRoot',$waitRoot)
         Assert-Equal 'reuse_heartbeat' $reuse.data.decision 'later plans should reuse the existing session heartbeat'
         Assert-Equal 'view' $reuse.data.automationRequest.mode 'duplicate heartbeat plans should view and reuse the existing automation'
         Assert-Equal 'heartbeat-1' $reuse.data.automationRequest.id 'duplicate heartbeat plans should retain the existing automation ID'
         Assert-True $reuse.data.heartbeat.quietWhenUnchanged 'heartbeat should stay quiet when no worker state changed'
         Assert-True (-not $reuse.data.heartbeat.nestedSchedules) 'heartbeat plan must not create nested schedules'
-
-        $binding = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; targetThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; intervalMinutes = 30; name = [string]$heartbeat.data.heartbeat.name; notificationPolicy = 'failed_runs_only' }
-        $boundSet = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $setResult.revision; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE'; heartbeatBinding = $binding }
-        $bound = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $boundSet 'heartbeat-binding'),'-StateRoot',$waitRoot)
-        Assert-Equal 'heartbeat-1' $bound.data.heartbeatId 'heartbeat binding should retain the automation ID'
-        Assert-Equal 30 $bound.data.heartbeatBinding.intervalMinutes 'heartbeat binding should retain the 30-minute cadence'
-        $invalidBinding = Copy-JsonObject $boundSet; $invalidBinding.heartbeatBinding.intervalMinutes = 15; $invalid = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $invalidBinding 'heartbeat-invalid-binding'),'-StateRoot',$waitRoot) $false
-        Assert-True (-not $invalid.ok) 'non-30-minute heartbeat bindings must fail closed'
-
-        $lifecycleRoot = Join-Path $script:FixtureRoot 'heartbeat-lifecycle-state'
-        $lifecycleInit = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$lifecycleRoot)
-        $lifecycleCreate = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01' } 'heartbeat-lifecycle-create'),'-StateRoot',$lifecycleRoot)
-        $lifecycleSet = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $lifecycleInit.revision; heartbeatId = 'heartbeat-life'; scheduleState = 'ACTIVE' }
-        $lifecycleRecorded = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $lifecycleSet 'heartbeat-lifecycle-set'),'-StateRoot',$lifecycleRoot)
-        $pauseIntent = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $lifecycleRecorded.revision; reason = 'fixture' }
-        $pausedRequest = Invoke-PsJson $script:StateScript @('-Operation','pause-intent','-InputPath',(New-InputPath $pauseIntent 'heartbeat-pause-intent'),'-StateRoot',$lifecycleRoot)
-        $paused = Invoke-PsJson $script:StateScript @('-Operation','reconcile-intent','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $pausedRequest.revision; intent = 'pause'; quiescent = $true } 'heartbeat-pause-reconcile'),'-StateRoot',$lifecycleRoot)
-        $pausedHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01' } 'heartbeat-paused-plan'),'-StateRoot',$lifecycleRoot)
+        $pausedInput = Copy-JsonObject $activeInput; $pausedInput.lifecycle = 'paused'
+        $pausedHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pausedInput 'heartbeat-paused-plan'),'-StateRoot',$waitRoot)
         Assert-Equal 'disable_heartbeat' $pausedHeartbeat.data.decision 'paused runs should disable the heartbeat'
         Assert-Equal 'update' $pausedHeartbeat.data.automationRequest.mode 'paused runs should pause the existing automation'
         Assert-Equal 'PAUSED' $pausedHeartbeat.data.automationRequest.status 'paused runs should pause the existing automation'
         Assert-True $pausedHeartbeat.data.noTickRestart 'paused runs must not restart on a tick'
-        $clearPaused = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $pausedHeartbeat.data.revision; scheduleState = 'PAUSED' }
-        $pausedCleared = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $clearPaused 'heartbeat-paused-clear'),'-StateRoot',$lifecycleRoot)
-        $pausedAgain = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01' } 'heartbeat-paused-again'),'-StateRoot',$lifecycleRoot)
-        Assert-Equal 'no_heartbeat' $pausedAgain.data.decision 'a paused run without an ID must not recreate a heartbeat'
+        $resumedInput = Copy-JsonObject $activeInput; $resumedInput.continuation.scheduleState = 'PAUSED'; $resumedInput.lifecycle = 'active'
+        $resumed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $resumedInput 'heartbeat-resume'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reactivate_heartbeat' $resumed.data.decision 'resuming a run should reactivate the existing paused heartbeat'
+        Assert-Equal 'ACTIVE' $resumed.data.automationRequest.status 'resume should issue an ACTIVE update'
+        $completedInput = Copy-JsonObject $activeInput; $completedInput.lifecycle = 'completed'
+        $completedHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $completedInput 'heartbeat-completed'),'-StateRoot',$waitRoot)
+        Assert-Equal 'remove_heartbeat' $completedHeartbeat.data.decision 'completed runs should remove the existing heartbeat'
     }
 
     Test-Case 'preserve sibling dependency epic and pause coordination traces' {

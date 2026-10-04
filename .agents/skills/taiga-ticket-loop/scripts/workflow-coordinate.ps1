@@ -507,23 +507,33 @@ function Invoke-ObserveWait {
 
 function Invoke-HeartbeatPlan {
     param([System.Collections.IDictionary] $InputObject)
-    $inspection = Get-Inspection; $sessionId = Need $InputObject 'sessionId'; $session = $inspection.data.registry.sessions[$sessionId]
-    if ($null -eq $session) { throw "Session was not found: $sessionId" }
+    # Heartbeat planning is deliberately stateless. The caller persists only this
+    # small continuation record; the workflow-state registry is not part of the
+    # heartbeat's setup, recovery, or idempotency protocol.
+    $runId = if ($InputObject.Contains('runId')) { Need $InputObject 'runId' } elseif ($InputObject.Contains('sessionId')) { Need $InputObject 'sessionId' } else { throw 'runId is required.' }
+    $targetThreadId = if ($InputObject.Contains('coordinatorThreadId')) { Need $InputObject 'coordinatorThreadId' } elseif ($InputObject.Contains('targetThreadId')) { Need $InputObject 'targetThreadId' } else { throw 'coordinatorThreadId is required.' }
+    $scopeHash = if ($InputObject.Contains('scopeHash')) { Need $InputObject 'scopeHash' } elseif ($InputObject.Contains('scope') -and $null -ne $InputObject.scope) { Hash-Object $InputObject.scope } else { Hash-Object @($runId,$targetThreadId) }
+    $lifecycle = if ($InputObject.Contains('lifecycle')) { [string]$InputObject.lifecycle } else { 'active' }
+    if ($lifecycle -notin @('active','pausing','paused','cancelling','cancelled','completed')) { throw 'lifecycle is not supported.' }
     $requestedPolicy = if ($InputObject.Contains('notificationPolicy')) { [string]$InputObject.notificationPolicy } else { 'failed_runs_only' }
     if ($requestedPolicy -notin @('failed_runs_only','')) { throw 'notificationPolicy must be failed_runs_only or null.' }
-    $existing = if ($session.Contains('heartbeatId')) { [string]$session.heartbeatId } else { '' }
-    $scopeHash = Hash-Object @($session.scope)
-    $targetThreadId = [string]$session.coordinatorThreadId
-    $name = "taiga-recovery-$sessionId"
-    $prompt = "Recovery-only check for scoped coordinator run $sessionId (scope $scopeHash). Inspect compact worker and continuation status only. Stay quiet when unchanged, active, progressing, or awaiting user approval. Do not treat elapsed time as failure. Investigate only observed interruption, failed action, completed work with a missing handoff, or another meaningful recovery signal; reconcile actual chat, Git, provider, and Taiga state before an authorized retry, and never replay an ambiguous write or create a nested schedule. Normal worker messages and user approvals remain the workflow triggers."
-    $ownedTickets = @($inspection.data.registry.tickets.Values | Where-Object { $_.ownerSessionId -eq $sessionId })
-    $allTicketsComplete = $ownedTickets.Count -gt 0 -and @($ownedTickets | Where-Object { [string]$_.phase -ne 'complete' }).Count -eq 0
-    $lifecycle = if ([string]$session.state -in @('paused','cancelled','completed') -or $allTicketsComplete) { if ([string]$session.state -eq 'paused') { 'paused' } else { 'completed' } } elseif ([string]$session.state -in @('pausing','cancelling')) { 'quiescing' } else { 'active' }
-    $isCreate = [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'active'
-    $binding = if ($session.Contains('heartbeatBinding') -and $session.heartbeatBinding -is [System.Collections.IDictionary]) { $session.heartbeatBinding } else { $null }
+    $continuation = if ($InputObject.Contains('continuation')) { $InputObject.continuation } elseif ($InputObject.Contains('continuationContext')) { $InputObject.continuationContext } else { [ordered]@{ state = 'absent' } }
+    if ($continuation -isnot [System.Collections.IDictionary]) { throw 'continuation must be an object.' }
+    $continuationState = if ($continuation.Contains('state')) { [string]$continuation.state } else { 'absent' }
+    if ($continuationState -notin @('absent','create_reserved','active')) { throw 'continuation.state is not supported.' }
+    $existing = if ($continuation.Contains('heartbeatId')) { [string]$continuation.heartbeatId } elseif ($InputObject.Contains('heartbeatId')) { [string]$InputObject.heartbeatId } else { '' }
+    $creationReconciled = $InputObject.Contains('creationReconciled') -and [bool]$InputObject.creationReconciled
+    $scheduleState = if ($continuation.Contains('scheduleState')) { [string]$continuation.scheduleState } elseif ($InputObject.Contains('scheduleState')) { [string]$InputObject.scheduleState } elseif (-not [string]::IsNullOrWhiteSpace($existing)) { 'ACTIVE' } else { $null }
+    if ($scheduleState -is [string] -and $scheduleState -notin @('ACTIVE','PAUSED','UNKNOWN')) { throw 'scheduleState is not supported.' }
+    if ($continuationState -eq 'active' -and [string]::IsNullOrWhiteSpace($existing)) { throw 'An active heartbeat continuation requires heartbeatId.' }
+    if ($continuationState -eq 'create_reserved' -and $continuation.Contains('heartbeatId') -and -not [string]::IsNullOrWhiteSpace([string]$continuation.heartbeatId)) { throw 'A create reservation cannot already contain heartbeatId.' }
+    $name = if ($continuation.Contains('name')) { Need $continuation 'name' } else { "taiga-recovery-$runId" }
+    $prompt = "Recovery-only check for scoped coordinator run $runId (scope $scopeHash). Inspect compact worker and continuation status only. Stay quiet when unchanged, active, progressing, or awaiting user approval. Do not treat elapsed time as failure. Investigate only observed interruption, failed action, completed work with a missing handoff, or another meaningful recovery signal; reconcile actual chat, Git, provider, and Taiga state before an authorized retry, and never replay an ambiguous write or create a nested schedule. Normal worker messages and user approvals remain the workflow triggers."
+    $reservationId = if ($continuation.Contains('reservationId')) { Need $continuation 'reservationId' } else { "heartbeat-reservation-$((Hash-Object @($runId,$scopeHash)).Substring(0,16))" }
+    $baseContinuation = [ordered]@{ runId = $runId; coordinatorThreadId = $targetThreadId; scopeHash = $scopeHash; name = $name }
     $heartbeat = [ordered]@{
-        heartbeatId = if ($isCreate) { $null } else { $existing }
-        runId = $sessionId
+        heartbeatId = if ([string]::IsNullOrWhiteSpace($existing)) { $null } else { $existing }
+        runId = $runId
         coordinatorThreadId = $targetThreadId
         scopeHash = $scopeHash
         name = $name
@@ -536,29 +546,31 @@ function Invoke-HeartbeatPlan {
         nestedSchedules = $false
         quietWhenUnchanged = $true
     }
-    if ($null -ne $binding) {
-        if ($binding.Contains('runId') -and [string]$binding.runId -cne $sessionId) { throw 'Saved heartbeat binding belongs to a different run.' }
-        if ($binding.Contains('coordinatorThreadId') -and [string]$binding.coordinatorThreadId -cne $targetThreadId) { throw 'Saved heartbeat binding targets a different coordinator.' }
-        if ($binding.Contains('intervalMinutes') -and [int]$binding.intervalMinutes -ne 30) { throw 'Saved heartbeat binding is not a 30-minute schedule.' }
-        if ($binding.Contains('scopeHash') -and [string]$binding.scopeHash -cne $scopeHash) { throw 'Saved heartbeat binding is for a different scope.' }
-        foreach ($key in @('name','notificationPolicy','targetThreadId')) { if ($binding.Contains($key)) { $heartbeat[$key] = $binding[$key] } }
+    foreach ($key in @('name','notificationPolicy','targetThreadId')) {
+        if ($continuation.Contains($key)) { $heartbeat[$key] = $continuation[$key] }
     }
-    $automationRequest = if ($isCreate) {
-        [ordered]@{ kind = 'heartbeat'; mode = 'create'; name = [string]$heartbeat.name; prompt = [string]$heartbeat.prompt; rrule = $heartbeat.rrule; status = 'ACTIVE'; destination = 'thread'; targetThreadId = [string]$heartbeat.targetThreadId; notificationPolicy = $heartbeat.notificationPolicy }
-    } elseif ($lifecycle -eq 'quiescing') {
+    $automationRequest = if ($lifecycle -eq 'active' -and $continuationState -eq 'create_reserved' -and $creationReconciled) {
+        [ordered]@{ kind = 'heartbeat'; mode = 'create'; reservationId = $reservationId; idempotencyKey = $reservationId; name = [string]$heartbeat.name; prompt = [string]$heartbeat.prompt; rrule = $heartbeat.rrule; status = 'ACTIVE'; destination = 'thread'; targetThreadId = [string]$heartbeat.targetThreadId; notificationPolicy = $heartbeat.notificationPolicy }
+    } elseif ($lifecycle -in @('pausing','cancelling')) {
         $null
-    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'paused') {
+    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'paused' -and $scheduleState -ne 'PAUSED') {
         [ordered]@{ kind = 'heartbeat'; mode = 'update'; id = $existing; status = 'PAUSED' }
-    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'completed') {
+    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -in @('cancelled','completed')) {
         [ordered]@{ kind = 'heartbeat'; mode = 'delete'; id = $existing }
+    } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'active' -and $scheduleState -eq 'PAUSED') {
+        [ordered]@{ kind = 'heartbeat'; mode = 'update'; id = $existing; status = 'ACTIVE' }
     } elseif (-not [string]::IsNullOrWhiteSpace($existing) -and $lifecycle -eq 'active') {
         [ordered]@{ mode = 'view'; id = $existing }
     } else {
         $null
     }
-    $decision = if ($isCreate) { 'create_heartbeat' } elseif ($lifecycle -eq 'quiescing') { 'wait_for_quiescence' } elseif ($lifecycle -eq 'paused' -and $null -ne $automationRequest) { 'disable_heartbeat' } elseif ($lifecycle -eq 'completed' -and $null -ne $automationRequest) { 'remove_heartbeat' } elseif ($lifecycle -eq 'active' -and -not [string]::IsNullOrWhiteSpace($existing)) { 'reuse_heartbeat' } else { 'no_heartbeat' }
-    $reason = if ($isCreate) { 'one_scoped_30_minute_heartbeat' } elseif ($lifecycle -eq 'quiescing') { 'wait_for_quiescent_pause_or_cancel' } elseif ($lifecycle -eq 'paused') { 'paused_run_does_not_tick' } elseif ($lifecycle -eq 'completed') { 'completed_run_does_not_tick' } elseif ($decision -eq 'reuse_heartbeat') { 'existing_scoped_heartbeat' } else { 'terminal_run_has_no_heartbeat' }
-    return [ordered]@{ phase = [string]$session.state; decision = $decision; reason = $reason; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = if ($null -eq $automationRequest) { 'none' } else { 'automation_update' }; automationRequest = $automationRequest; heartbeat = $heartbeat; lifecycle = $lifecycle; noTickRestart = ($lifecycle -ne 'active') }
+    $decision = if ($lifecycle -eq 'active' -and $continuationState -eq 'absent') { 'reserve_heartbeat' } elseif ($lifecycle -eq 'active' -and $continuationState -eq 'create_reserved' -and -not $creationReconciled) { 'reconcile_heartbeat_creation' } elseif ($lifecycle -eq 'active' -and $continuationState -eq 'create_reserved') { 'create_heartbeat' } elseif ($lifecycle -in @('pausing','cancelling')) { 'wait_for_quiescence' } elseif ($lifecycle -eq 'paused' -and $null -ne $automationRequest) { 'disable_heartbeat' } elseif ($lifecycle -eq 'paused' -and -not [string]::IsNullOrWhiteSpace($existing)) { 'heartbeat_paused' } elseif ($lifecycle -in @('cancelled','completed') -and $null -ne $automationRequest) { 'remove_heartbeat' } elseif ($lifecycle -eq 'active' -and $scheduleState -eq 'PAUSED' -and $null -ne $automationRequest) { 'reactivate_heartbeat' } elseif ($lifecycle -eq 'active' -and -not [string]::IsNullOrWhiteSpace($existing)) { 'reuse_heartbeat' } else { 'no_heartbeat' }
+    $nextContinuation = $baseContinuation
+    if ($decision -in @('reserve_heartbeat','reconcile_heartbeat_creation','create_heartbeat')) { $nextContinuation.state = 'create_reserved'; $nextContinuation.reservationId = $reservationId }
+    elseif (-not [string]::IsNullOrWhiteSpace($existing)) { $nextContinuation.state = 'active'; $nextContinuation.heartbeatId = $existing; $nextContinuation.scheduleState = if ($null -eq $automationRequest) { $scheduleState } elseif ($automationRequest.Contains('status')) { [string]$automationRequest.status } else { $scheduleState } }
+    else { $nextContinuation.state = 'absent' }
+    $reason = if ($decision -eq 'reserve_heartbeat') { 'reserve_before_external_creation' } elseif ($decision -eq 'reconcile_heartbeat_creation') { 'creation_reserved_reconcile_before_retry' } elseif ($decision -eq 'create_heartbeat') { 'reserved_creation_request' } elseif ($lifecycle -in @('pausing','cancelling')) { 'wait_for_quiescent_pause_or_cancel' } elseif ($lifecycle -eq 'paused') { 'paused_run_does_not_tick' } elseif ($lifecycle -in @('cancelled','completed')) { 'terminal_run_does_not_tick' } elseif ($decision -eq 'reactivate_heartbeat') { 'resume_existing_paused_heartbeat' } elseif ($decision -eq 'reuse_heartbeat') { 'existing_scoped_heartbeat' } else { 'no_heartbeat_required' }
+    return [ordered]@{ phase = $lifecycle; decision = $decision; reason = $reason; actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = $null; stateMutation = $false; nativeOperation = if ($decision -eq 'reconcile_heartbeat_creation') { 'reconcile_automation' } elseif ($null -eq $automationRequest) { 'none' } else { 'automation_update' }; automationRequest = $automationRequest; heartbeat = $heartbeat; lifecycle = $lifecycle; continuation = $nextContinuation; reservation = if ($decision -eq 'reconcile_heartbeat_creation') { [ordered]@{ id = $reservationId; action = 'find_existing_by_reservation_or_scope'; createAllowed = $false } } else { $null }; noTickRestart = ($lifecycle -ne 'active') }
 }
 
 function Invoke-RelayTaskProgress {
