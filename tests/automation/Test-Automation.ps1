@@ -325,10 +325,24 @@ try {
         Assert-Equal 'continue_wait' $quiet.data.decision 'unchanged wait should continue the bounded native wait'
         Assert-Equal 'wait_threads' $quiet.data.nativeOperation 'unchanged wait should use wait_threads'
         Assert-Equal 0 @($quiet.data.changedFields).Count 'unchanged wait should not mutate state'
+        Assert-True (-not $quiet.data.notifyUser) 'unchanged wait should not notify the user'
+        Assert-Equal 'compact_worker_and_wait_state_only' $quiet.data.contextRead 'unchanged wait should read only compact state'
         Assert-True (-not $quiet.data.waitThreadsArguments.targets[0].Contains('hostId')) 'absent native wait host IDs must be omitted rather than null'
         $noTarget = Copy-JsonObject $unchanged; $noTarget.Remove('threadId'); $noTarget.Remove('afterCursor'); $noTarget.Remove('targets'); $noTargetResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $noTarget 'wait-no-target'),'-StateRoot',$waitRoot) $false; Assert-True (-not $noTargetResult.ok) 'a native wait descriptor without targets must fail closed'
         $after = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$waitRoot)
         Assert-Equal $before.revision $after.revision 'unchanged wait must not advance the registry revision'
+        $active = Copy-JsonObject $unchanged; $active.waitStatus = 'active'; $active.compactStatus = @{ workerStatus = 'active'; waitState = 'expected_progress'; elapsedMinutes = 999 }
+        $activeResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $active 'wait-active'),'-StateRoot',$waitRoot)
+        Assert-Equal 'continue_wait' $activeResult.data.decision 'active work should remain a quiet wait'
+        Assert-Equal 'wait_threads' $activeResult.data.nativeOperation 'active work should not trigger a detailed read'
+        Assert-True (-not $activeResult.data.notifyUser) 'active work should not notify the user'
+        Assert-True (-not $activeResult.data.detailFetch) 'active work should not fetch heavyweight detail'
+        $approval = Copy-JsonObject $unchanged; $approval.waitStatus = 'awaiting_approval'; $approval.compactStatus = @{ workerStatus = 'waiting_user'; waitState = 'user_approval'; elapsedMinutes = 999 }
+        $approvalResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $approval 'wait-approval'),'-StateRoot',$waitRoot)
+        Assert-Equal 'heartbeat_quiet' $approvalResult.data.decision 'pending user approval should remain quiet'
+        Assert-Equal 'wait_threads' $approvalResult.data.nativeOperation 'pending approval should not trigger a detailed read'
+        Assert-True (-not $approvalResult.data.notifyUser) 'pending approval should not duplicate notifications'
+        Assert-True (-not $approvalResult.data.detailFetch) 'pending approval should not fetch heavyweight detail'
         $completed = Copy-JsonObject $unchanged; $completed.waitStatus = 'completed'
         $detail = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completed 'wait-completed'),'-StateRoot',$waitRoot)
         Assert-Equal 'fetch_result' $detail.data.decision 'completion should trigger one detailed result read'

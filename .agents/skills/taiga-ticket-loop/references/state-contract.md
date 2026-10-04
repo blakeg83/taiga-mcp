@@ -62,13 +62,18 @@ completed worker. The facade blocks new dispatch/publication when the supplied
 remaining budget is exhausted, while already-running actions remain available
 for bounded observation and reconciliation.
 
-For observation, use `observe-wait` with one or more native wait targets. The
+For observation, use `observe-wait` with one or more native wait targets and,
+when available, a compact `{ workerStatus, waitState }` observation. The
 returned `waitThreadsArguments` preserves the native shape
 `{ targets: [{ threadId, hostId?, afterCursor? }], timeoutMs }`, so concurrent
-ticket waits retain their host IDs and cursors. An unchanged timeout returns a quiet continuation descriptor and does not read
-source, reopen evidence, message a worker, or mutate the registry. Completion,
-changed state, and blockers are the only ordinary reasons to request one
-detailed `read_thread`; user input remains visible as a separate decision.
+ticket waits retain their host IDs and cursors. `unchanged`, `active`, and
+`progressing` states, plus `expected_progress`, return a quiet continuation
+descriptor with `notifyUser=false`; `awaiting_approval`, `waiting_user`, and
+`user_approval` return `heartbeat_quiet` with the same no-notification behavior.
+These paths read only compact status, do not reopen evidence, message a worker,
+or mutate the registry, and never infer failure from an elapsed field. Only
+completion, changed state, and blockers request one detailed `read_thread`;
+approval waiting remains quiet until the user acts.
 `heartbeat-plan` describes creation or reuse of one scoped coordinator
 heartbeat. A new plan returns the supported `automation_update` create request
 with `rrule.intervalMinutes=30`, `destination=thread`, the coordinator thread,

@@ -452,7 +452,13 @@ function Invoke-Status {
 function Invoke-ObserveWait {
     param([System.Collections.IDictionary] $InputObject)
     $status = Need $InputObject 'waitStatus'
-    if ($status -notin @('unchanged','changed','completed','blocked','user_input','paused')) { throw 'waitStatus is not supported.' }
+    if ($status -notin @('unchanged','active','progressing','awaiting_approval','waiting_user','pending_approval','changed','completed','blocked','user_input','paused')) { throw 'waitStatus is not supported.' }
+    $compactStatus = if ($InputObject.Contains('compactStatus')) { $InputObject.compactStatus } else { $null }
+    if ($null -ne $compactStatus -and $compactStatus -isnot [System.Collections.IDictionary]) { throw 'compactStatus must be an object.' }
+    $workerStatus = if ($null -ne $compactStatus -and $compactStatus.Contains('workerStatus')) { [string]$compactStatus.workerStatus } elseif ($InputObject.Contains('workerStatus')) { [string]$InputObject.workerStatus } else { $null }
+    $waitState = if ($null -ne $compactStatus -and $compactStatus.Contains('waitState')) { [string]$compactStatus.waitState } elseif ($InputObject.Contains('waitState')) { [string]$InputObject.waitState } else { $null }
+    if ($null -ne $workerStatus -and $workerStatus -notin @('active','progressing','completed','interrupted','failed','blocked','waiting_user','unknown')) { throw 'workerStatus is not supported.' }
+    if ($null -ne $waitState -and $waitState -notin @('none','expected_progress','user_approval','pending_approval','missing_handoff','unknown')) { throw 'waitState is not supported.' }
     $timeout = if ($InputObject.Contains('timeoutMs')) { [int]$InputObject.timeoutMs } else { 30000 }
     if ($timeout -lt 0 -or $timeout -gt 60000) { throw 'timeoutMs must be between 0 and 60000.' }
     $targets = @()
@@ -469,8 +475,12 @@ function Invoke-ObserveWait {
         $targetValue = [ordered]@{ threadId = Need $InputObject 'threadId' }; if ($InputObject.Contains('hostId')) { $targetValue.hostId = Need $InputObject 'hostId' }; if ($InputObject.Contains('afterCursor')) { $targetValue.afterCursor = Need $InputObject 'afterCursor' }; $targets += $targetValue
     }
     if ($targets.Count -lt 1) { throw 'A native wait descriptor must contain at least one target thread.' }
+    $healthy = $status -in @('unchanged','active','progressing') -or $workerStatus -in @('active','progressing') -or $waitState -eq 'expected_progress'
+    $awaitingApproval = $status -in @('awaiting_approval','waiting_user','pending_approval') -or $waitState -in @('user_approval','pending_approval') -or ($status -eq 'user_input' -and $waitState -eq 'user_approval')
+    $quiet = $healthy -or $awaitingApproval -or $status -eq 'paused'
     $decision = switch ($status) {
-        'unchanged' { 'continue_wait' }
+        { $healthy } { 'continue_wait' }
+        { $awaitingApproval } { 'heartbeat_quiet' }
         'completed' { 'fetch_result' }
         'changed' { 'inspect_changed_state' }
         'blocked' { 'fetch_blocker' }
@@ -478,7 +488,7 @@ function Invoke-ObserveWait {
         'paused' { 'heartbeat_quiet' }
     }
     $nativeOperation = switch ($status) {
-        'unchanged' { 'wait_threads' }
+        { $quiet } { 'wait_threads' }
         'completed' { 'read_thread' }
         'changed' { 'read_thread' }
         'blocked' { 'read_thread' }
@@ -486,7 +496,7 @@ function Invoke-ObserveWait {
         'paused' { 'wait_threads' }
     }
     if ($status -eq 'unchanged' -and $InputObject.Contains('resultReference')) { throw 'Unchanged waits cannot reopen result evidence.' }
-    return [ordered]@{ phase = $null; decision = $decision; reason = if ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); revision = $null; stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = $timeout }; detailFetch = ($status -in @('completed','changed','blocked')) }
+    return [ordered]@{ phase = $null; decision = $decision; reason = if ($healthy) { 'healthy_or_expected_progress' } elseif ($awaitingApproval) { 'awaiting_user_approval' } elseif ($status -eq 'unchanged') { 'no_state_change' } else { "wait_$status" }; actionId = $null; workerId = if ($InputObject.Contains('workerId')) { [string]$InputObject.workerId } else { $null }; requiredReferences = @(); changedFields = @(); stateMutation = $false; nativeOperation = $nativeOperation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = $timeout }; detailFetch = ($status -in @('completed','changed','blocked') -and -not $quiet); notifyUser = -not $quiet; notification = if ($quiet) { 'none' } else { 'meaningful_state_change'; }; contextRead = 'compact_worker_and_wait_state_only'; compactStatus = [ordered]@{ workerStatus = $workerStatus; waitState = $waitState } }
 }
 
 function Invoke-HeartbeatPlan {
