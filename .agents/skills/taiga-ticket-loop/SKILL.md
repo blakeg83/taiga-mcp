@@ -50,9 +50,11 @@ the relevant reference before each operation:
    and mapping are unambiguous.
 2. Confirm the selected ticket or epic scope and explicit authorization. Infer
    safe defaults for the rest: two active pipelines per repository, a
-   120-minute elapsed budget, three correction rounds, `origin/master` for
-   TaigaMCP, `leafDonePolicy=merged`, no automatic merge, no force-push, and no
-   subagents. Ask only for missing ticket scope, dependency decisions,
+  `origin/master` for TaigaMCP, `leafDonePolicy=merged`, no automatic merge,
+  no force-push, and no subagents. The message-driven recovery workflow has no
+  elapsed run deadline and no fixed correction-round budget; observed failures,
+  provider/user blockers, and explicit cancellation remain the stopping
+  conditions. Ask only for missing ticket scope, dependency decisions,
    validation commands, status mappings, or authorization that cannot be
    discovered safely. A plan or skill invocation alone does not authorize
    external writes.
@@ -63,10 +65,12 @@ the relevant reference before each operation:
 3. Run the host preflight and record observed capabilities. If a requested
    capability or exact model/effort is unavailable, stop with a report; do not
    silently fall back to subagents, another model, or an SDK/private API.
-4. Initialize or inspect the external state registry with
-   `scripts/workflow-state.ps1`. The helper performs bookkeeping only. It never
-   calls a desktop tool, Taiga, Git, GitHub, or a shell command from ticket
-   text.
+ 4. For ordinary message-driven recovery, carry only the run, coordinator,
+ scope, and heartbeat continuation in native Codex context; heartbeat planning
+ and manual check-progress must not require a custom workflow-state
+ application. Use `scripts/workflow-state.ps1` only for legacy ticket
+ bookkeeping paths. The helper performs bookkeeping only. It never calls a
+ desktop tool, Taiga, Git, GitHub, or a shell command from ticket text.
 5. Resolve complete Taiga context and capture a scope hash. For a story, route
    selected child tasks into the story run. For an epic, enumerate every linked
    story and resolve every repository before dispatch.
@@ -86,9 +90,9 @@ the relevant reference before each operation:
    separate worktrees up to configured limits.
 8. Freeze the committed implementation revision, dispatch the review, and route
    changes back to the same implementation chat. Initial review is round 0 and
-   correction/re-review is limited to three rounds by default. Route invalid
-   receipts through the bounded repair helper and separate repair ledger; those
-   attempts do not consume code correction rounds. Require every re-review to
+    correction/re-review has no fixed round budget. Route invalid receipts
+    through the bounded repair helper and separate repair ledger; those attempts
+    do not consume code correction rounds. Require every re-review to
    assess its revision delta. Documentation amendments need a new commit and an
    explicit reviewer assessment; reused checks need evidence IDs and a reason.
    A pass is not a PR or Done receipt.

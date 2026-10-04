@@ -225,6 +225,9 @@ try {
         $packetRequest = @{ packetId = 'packet-coordinate'; sessionId = 'synthetic-session-01'; runId = 'coordinate-run'; ticket = @{ ticketKey = 'project:123:issue:800'; projectId = 123; kind = 'issue'; id = 800; ref = 800; title = 'Coordinate fixture' }; contextPath = $packetContextPath; criteria = @(@{ id = 'criterion-1'; text = 'Dispatch from a durable packet.' }); repository = @{ identity = 'coordinate-repo'; repositoryPath = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; worktreePath = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; branch = $fixtureBranch; baseSha = $fixtureHead }; requiredCommands = @('synthetic-check'); unresolvedRequirements = @(); authority = @{ authorizedActions = @('dispatch'); excludedActions = @() }; deadline = @{ startedAtUtc = '2026-09-30T00:00:00Z'; deadlineUtc = '2099-09-30T00:00:00Z'; elapsedBudgetMinutes = 120 }; profiles = @{ coordinator = @{ model = 'gpt-6.1-sol'; effort = 'high' }; implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } } }
         $packetCreated = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $packetRequest 'coordinate-packet-request'),'-StateRoot',$coordRoot)
         $packetPath = [string]$packetCreated.data.packetPath
+        $noDeadlinePacketRequest = Copy-JsonObject $packetRequest; $noDeadlinePacketRequest.packetId = 'packet-coordinate-no-deadline'; $noDeadlinePacketRequest.Remove('deadline')
+        $noDeadlinePacket = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $noDeadlinePacketRequest 'coordinate-no-deadline-packet-request'),'-StateRoot',$coordRoot)
+        Assert-True (-not [string]::IsNullOrWhiteSpace([string]$noDeadlinePacket.data.packetPath)) 'assignment packets must not require an elapsed deadline'
         $promptPath = Join-Path $script:FixtureRoot 'coordinate-prompt.md'; [IO.File]::WriteAllText($promptPath, 'Use packet {{packetPath}} with hash {{packetHash}} for {{workerId}}.', [Text.UTF8Encoding]::new($false))
         $dispatch = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; actionId = 'dispatch-1'; workerId = 'worker-1'; packetReference = @{ path = $packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $packetPath).Hash.ToLowerInvariant() }; promptReference = @{ path = $promptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $promptPath).Hash.ToLowerInvariant() } }
         $prepared = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $dispatch 'coordinate-dispatch'),'-StateRoot',$coordRoot)
@@ -236,12 +239,12 @@ try {
         Assert-Equal 'reconcile' $duplicate.data.decision 'duplicate preparation must reconcile instead of redispatching'
         $expired = Copy-JsonObject $dispatch; $expired.actionId = 'dispatch-expired'; $expired.remainingMinutes = 0
         $expiredResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expired 'coordinate-expired-dispatch'),'-StateRoot',$coordRoot)
-        Assert-Equal 'needs_input' $expiredResult.data.decision 'wall-clock expiry must block new external work'
+        Assert-Equal 'dispatch' $expiredResult.data.decision 'wall-clock expiry must not block new external work'
         $expiredPacketRequest = Copy-JsonObject $packetRequest; $expiredPacketRequest.packetId = 'packet-coordinate-expired'; $expiredPacketRequest.deadline.startedAtUtc = '1999-01-01T00:00:00Z'; $expiredPacketRequest.deadline.deadlineUtc = '2000-01-01T02:00:00Z'
         $expiredPacket = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $expiredPacketRequest 'coordinate-expired-packet-request'),'-StateRoot',$coordRoot)
         $expiredPacketDispatch = Copy-JsonObject $dispatch; $expiredPacketDispatch.actionId = 'dispatch-packet-expired'; $expiredPacketDispatch.packetReference = @{ path = $expiredPacket.data.packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $expiredPacket.data.packetPath).Hash.ToLowerInvariant() }; $expiredPacketDispatch.Remove('remainingMinutes')
         $expiredPacketResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expiredPacketDispatch 'coordinate-packet-expired-dispatch'),'-StateRoot',$coordRoot)
-        Assert-Equal 'needs_input' $expiredPacketResult.data.decision 'an expired packet must block dispatch even without a caller-supplied remainingMinutes'
+        Assert-Equal 'dispatch' $expiredPacketResult.data.decision 'an expired packet must not impose a wall-clock dispatch deadline'
         $allPlaceholderPrompt = Join-Path $script:FixtureRoot 'coordinate-all-placeholders.md'; [IO.File]::WriteAllText($allPlaceholderPrompt, '{{packetId}} {{reviewedSha}} {{repositoryPath}} {{schemaPath}} {{packetHash}}', [Text.UTF8Encoding]::new($false))
         $renderedDispatch = Copy-JsonObject $dispatch; $renderedDispatch.actionId = 'dispatch-rendered'; $renderedDispatch.workerId = 'reviewer-1'; $renderedDispatch.reviewedSha = $fixtureHead; $renderedDispatch.promptReference = @{ path = $allPlaceholderPrompt; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $allPlaceholderPrompt).Hash.ToLowerInvariant() }
         $rendered = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $renderedDispatch 'coordinate-rendered-dispatch'),'-StateRoot',$coordRoot)
@@ -367,10 +370,12 @@ try {
         $missingHandoffResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $missingHandoff 'wait-missing-handoff'),'-StateRoot',$waitRoot)
         Assert-Equal 'reconcile_recovery' $missingHandoffResult.data.decision 'a completed worker with a missing handoff should require recovery'
         Assert-True $missingHandoffResult.data.notifyUser 'a missing handoff should notify the user'
-        $manual = Invoke-PsJson $script:CoordinateScript @('-Operation','check-progress','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; ticketKey = 'project:123:issue:801' } 'manual-check-progress'),'-StateRoot',$waitRoot)
+        $manual = Invoke-PsJson $script:CoordinateScript @('-Operation','check-progress','-InputPath',(New-InputPath @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; continuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' } } 'manual-check-progress'),'-StateRoot',$waitRoot)
         Assert-Equal 'check_progress' $manual.data.decision 'manual check-progress should inspect the existing run'
         Assert-True $manual.data.manual 'manual check-progress should not dispatch work'
-        Assert-True ($manual.data.resumeInstruction -like '*resume-session*') 'manual check-progress should expose the resume instruction'
+        Assert-True ($manual.data.resumeInstruction -like '*heartbeat-plan*') 'manual check-progress should expose the native resume instruction'
+        Assert-True ($manual.data.resumeInstruction -notlike '*workflow-state.ps1*') 'manual check-progress should not require the custom workflow-state application'
+        Assert-Equal 'wait_threads' $manual.data.nativeOperation 'healthy manual check-progress should use native waiting'
         Assert-True (-not $manual.data.stateMutation) 'manual check-progress should not mutate state'
         $concurrent = Copy-JsonObject $unchanged; $concurrent.Remove('threadId'); $concurrent.Remove('afterCursor'); $concurrent.targets = @(@{ threadId = 'worker-1'; afterCursor = 'cursor-1' }, @{ threadId = 'worker-2'; hostId = 'local'; afterCursor = 'cursor-2' })
         $concurrentResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $concurrent 'wait-concurrent'),'-StateRoot',$waitRoot)
@@ -1079,8 +1084,8 @@ try {
         $correct = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $request 'review-correct'))
         Assert-Equal 'correct' $correct.data.decision 'changes requested should route to same worker'
         $exhausted = $request.Clone(); $exhausted.correctionRound = 3
-        $stop = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $exhausted 'review-exhausted'))
-        Assert-Equal 'needs_input' $stop.data.decision 'round limit should escalate'
+        $stop = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $exhausted 'review-unbounded-correction'))
+        Assert-Equal 'correct' $stop.data.decision 'correction rounds must not be capped at a fixed budget'
         $stale = $request.Clone(); $stale.currentSha = 'new-head'
         $staleResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $stale 'review-stale'))
         Assert-Equal 'needs_input' $staleResult.data.decision 'stale approval must not publish'
@@ -1112,8 +1117,8 @@ try {
         Assert-Equal 'publish' $docDecision.data.decision 'a newly committed documentation delta must be assessed before publish'
         $expiredPass = Copy-JsonObject $request; $expiredPass.receipt = New-ReviewReceipt; $expiredPass.remainingMinutes = 0
         $expiredPassResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $expiredPass 'review-pass-after-deadline'))
-        Assert-Equal 'needs_input' $expiredPassResult.data.decision 'a passing receipt must not bypass an exhausted wall-clock budget'
-        Assert-Equal 'elapsed_budget' $expiredPassResult.data.reason 'deadline gate should be explicit'
+        Assert-Equal 'needs_input' $expiredPassResult.data.decision 'a passing receipt may still require durable evidence, but not an elapsed-time gate'
+        Assert-Equal 'durable_evidence_required_for_publication' $expiredPassResult.data.reason 'an exhausted wall-clock budget must not be the review reason'
         $missingDocAssessment = Copy-JsonObject $docRequest; $missingDocAssessment.receipt.reviewDelta.documentationAssessment = ''
         $missingDocAssessmentResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $missingDocAssessment 'review-documentation-unassessed')) $false
         Assert-True (-not $missingDocAssessmentResult.ok) 'documentation delta without reviewer assessment must not pass'
@@ -1159,7 +1164,7 @@ try {
         Assert-True $authorRoute.data.requiresIndependentReview 'evidence repair must return through independent review'
         $budgetExpired = Copy-JsonObject $contradictionRequest; $budgetExpired.remainingMinutes = 0
         $budgetResult = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $budgetExpired 'repair-budget-expired'))
-        Assert-Equal 'needs_input' $budgetResult.data.decision 'repair must stop when the wall-clock budget is exhausted'
+        Assert-Equal 'repair' $budgetResult.data.decision 'receipt repair must not stop solely because a wall-clock budget elapsed'
 
         $repairRoot = Join-Path $script:FixtureRoot 'receipt-repair-state'
         $repairInit = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$repairRoot)

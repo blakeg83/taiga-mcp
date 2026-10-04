@@ -24,7 +24,7 @@ also require a fresh independent reviewer decision after correction. Persist
 each dispatched repair with `workflow-state.ps1 -Operation record-receipt-repair`.
 Its default limit is two attempts per result and its
 counter is separate from the production `correctionRound`. Repairs stop with
-`needs_input` when that limit or the existing elapsed budget is exhausted.
+`needs_input` when that repair-attempt limit is exhausted.
 
 Pass the prior reviewed SHA to `workflow-review.ps1 -Operation decide` on every
 re-review. The receipt's `reviewDelta` must bind the prior and current SHA. A
@@ -33,7 +33,7 @@ reviewer's documentation assessment. Reuse unchanged checks only by naming
 their evidence IDs and giving an explicit reuse justification. Receipt-only
 format repair does not create a production correction round; documentation or
 source changes remain engineering changes and follow the ordinary correction
-and review limits.
+and review evidence requirements.
 
 Use the shared [review receipt contract](review-receipts.md) and its
 versioned JSON Schema. Findings have stable IDs, one of the canonical

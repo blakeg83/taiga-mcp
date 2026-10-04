@@ -58,6 +58,7 @@ work resumes.
 Compact result acceptance is one fenced local mutation: the cursor, prepared
 action/worker binding, and any phase transition are validated before the
 registry is written. A failed transition therefore remains retryable without
-redispatching. New external dispatch also validates the immutable packet's
-session/ticket/worktree, authority, and deadline; after expiry, observation and
-reconciliation remain possible but new work does not.
+redispatching. New external dispatch validates the immutable packet's
+session/ticket/worktree and authority. Recovery does not infer failure or stop
+dispatch solely from elapsed time; observed external ambiguity still requires
+reconciliation before a retry.

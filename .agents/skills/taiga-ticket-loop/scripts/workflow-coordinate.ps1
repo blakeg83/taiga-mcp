@@ -186,9 +186,7 @@ function Read-ValidatedPacket {
     if ($exitCode -ne 0 -or $validated.ok -ne $true) { throw [string]$validated.error.message }
     if ([string]$packet.sessionId -cne [string]$Owner.sessionId) { throw 'Packet sessionId is not bound to the owned session.' }
     if ([string]$packet.ticket.ticketKey -cne [string]$Owner.ticketKey) { throw 'Packet ticketKey is not bound to the owned ticket.' }
-    $now = if ($InputObject.Contains('nowUtc')) { [DateTimeOffset]::Parse((Need $InputObject 'nowUtc'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) } else { [DateTimeOffset]::UtcNow }
-    $deadline = [DateTimeOffset]::Parse([string]$packet.deadline.deadlineUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-    return [ordered]@{ reference = $read.reference; value = $packet; validation = $validated.data; expired = ($now -ge $deadline); nowUtc = $now.ToString('o') }
+    return [ordered]@{ reference = $read.reference; value = $packet; validation = $validated.data }
 }
 
 function Get-TrustedEvidenceBindings {
@@ -230,11 +228,6 @@ function Invoke-ReviewDecision {
     $inspection = Get-Inspection
     $ticket = $inspection.data.registry.tickets[[string]$Owner.ticketKey]
     if ($null -eq $ticket) { throw 'The owned ticket was not found in the trusted registry.' }
-    $session = $inspection.data.registry.sessions[[string]$Owner.sessionId]
-    $deadline = [DateTimeOffset]::Parse([string]$PacketInfo.value.deadline.deadlineUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-    $now = [DateTimeOffset]::Parse([string]$PacketInfo.nowUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-    $remainingMinutes = [Math]::Max(0, [int][Math]::Ceiling(($deadline - $now).TotalMinutes))
-    $maxRounds = if ($session.config.limits.Contains('maxCorrectionRounds')) { [int]$session.config.limits.maxCorrectionRounds } else { 3 }
     $targetPacketBindings = [ordered]@{ packetId = [string]$PacketInfo.value.packetId; packetHash = [string]$PacketInfo.value.packetHash; scopeHash = [string]$PacketInfo.value.scopeHash; baseSha = [string]$PacketInfo.value.repository.baseSha }
     foreach ($name in @('packetId','packetHash','scopeHash','baseSha')) { if ($Action.target -isnot [System.Collections.IDictionary] -or -not $Action.target.Contains($name) -or [string]$Action.target[$name] -cne [string]$targetPacketBindings[$name]) { throw "The prepared reviewer action is not bound to the supplied packet $name." } }
     $evidenceBindings = Get-TrustedEvidenceBindings $Action $inspection $Owner $PacketInfo.value $Result
@@ -249,7 +242,7 @@ function Invoke-ReviewDecision {
         if ($currentCoverage.changedKind -eq 'documentation_only' -and $coveragePaths.Count -eq 0) { throw 'documentation_only currentCoverage must identify changed paths.' }
         if ([string]::IsNullOrWhiteSpace([string]$currentCoverage.environmentHash) -or [string]::IsNullOrWhiteSpace([string]$currentCoverage.dependenciesHash)) { throw 'currentCoverage environment and dependency hashes must be nonblank.' }
     }
-    $review = [ordered]@{ receiptPath = $receipt.path; receiptSha256 = $receipt.sha256; expectedCriteria = @($PacketInfo.value.criteria); requiredCommands = @($PacketInfo.value.requiredCommands); unresolvedRequirements = @($PacketInfo.value.unresolvedRequirements); packetHash = [string]$PacketInfo.value.packetHash; allowedEvidenceActions = $evidenceBindings; currentSha = [string]$trustedRepository.currentSha; currentScopeHash = [string]$PacketInfo.value.scopeHash; currentBaseSha = [string]$trustedRepository.baseSha; expectedRunId = [string]$PacketInfo.value.runId; expectedActionId = [string]$Result.actionId; expectedTicketKey = [string]$Owner.ticketKey; repositoryPath = [string]$trustedRepository.repository; correctionRound = [int]$ticket.correctionRound; remainingMinutes = $remainingMinutes; maxCorrectionRounds = $maxRounds }
+    $review = [ordered]@{ receiptPath = $receipt.path; receiptSha256 = $receipt.sha256; expectedCriteria = @($PacketInfo.value.criteria); requiredCommands = @($PacketInfo.value.requiredCommands); unresolvedRequirements = @($PacketInfo.value.unresolvedRequirements); packetHash = [string]$PacketInfo.value.packetHash; allowedEvidenceActions = $evidenceBindings; currentSha = [string]$trustedRepository.currentSha; currentScopeHash = [string]$PacketInfo.value.scopeHash; currentBaseSha = [string]$trustedRepository.baseSha; expectedRunId = [string]$PacketInfo.value.runId; expectedActionId = [string]$Result.actionId; expectedTicketKey = [string]$Owner.ticketKey; repositoryPath = [string]$trustedRepository.repository; correctionRound = [int]$ticket.correctionRound }
     if ($null -ne $currentCoverage) { $review.currentCoverage = $currentCoverage }
     if ($Action.target.Contains('previousReviewedSha') -and -not [string]::IsNullOrWhiteSpace([string]$Action.target.previousReviewedSha)) { $review.previousReviewedSha = [string]$Action.target.previousReviewedSha }
     if ($Result.Contains('previousReviewedSha') -and $Action.target.Contains('previousReviewedSha') -and [string]$Result.previousReviewedSha -cne [string]$Action.target.previousReviewedSha) { throw 'Worker previousReviewedSha does not match the frozen reviewer action.' }
@@ -347,12 +340,7 @@ function Invoke-PrepareExternal {
     param([System.Collections.IDictionary] $InputObject, [string] $ActionKind, [string] $ExternalOperation)
     $owner = Get-OwnerValues $InputObject
     $actionId = Need $InputObject 'actionId'; $workerId = Need $InputObject 'workerId'
-    if ($InputObject.Contains('remainingMinutes') -and [int]$InputObject.remainingMinutes -le 0) {
-        $packet = Resolve-Reference $InputObject.packetReference 'packet'
-        return [ordered]@{ phase = 'needs_input'; decision = 'needs_input'; reason = 'elapsed_budget'; actionId = $actionId; workerId = $workerId; requiredReferences = @($packet); changedFields = @(); revision = [long](Get-Inspection).revision }
-    }
     $packetRead = Read-ValidatedPacket $InputObject $owner; $packet = $packetRead.reference; $packetValue = $packetRead.value
-    if ($packetRead.expired) { return [ordered]@{ phase = 'needs_input'; decision = 'needs_input'; reason = 'elapsed_budget'; actionId = $actionId; workerId = $workerId; requiredReferences = @($packet); changedFields = @(); revision = [long](Get-Inspection).revision } }
     $authorized = @($packetValue.authority.authorizedActions); $excluded = @($packetValue.authority.excludedActions); $authorityAlternatives = if ($ActionKind -eq 'publication') { @($ExternalOperation,'publish') } else { @($ExternalOperation,'dispatch') }
     if ($excluded -contains $ExternalOperation -or @($authorityAlternatives | Where-Object { $authorized -contains $_ }).Count -eq 0) { throw "Packet authority does not authorize $ExternalOperation." }
     $existingInspection = Get-Inspection
@@ -417,7 +405,7 @@ function Invoke-PrepareExternal {
     $inspection = Get-Inspection
     $payload = [ordered]@{ packetReference = [ordered]@{ path = $packet.path; sha256 = $packet.sha256; packetHash = [string]$packetValue.packetHash; packetId = [string]$packetValue.packetId }; promptReference = if ($promptReference) { [ordered]@{ path = $promptPath; sha256 = Get-FileSha256 $promptPath } } else { $null }; workerId = $workerId; operation = $ExternalOperation; reviewedSha = $reviewedSha; previousReviewedSha = $previousReviewedSha; reviewCheckActionIds = $reviewCheckActionIds; scopeHash = [string]$packetValue.scopeHash; baseSha = [string]$packetValue.repository.baseSha; approvedReviewActionId = if ($InputObject.Contains('approvedReviewActionId')) { [string]$InputObject.approvedReviewActionId } else { $null } }
     $target = [ordered]@{ workerId = $workerId; operation = $ExternalOperation; reviewedSha = $reviewedSha; previousReviewedSha = $previousReviewedSha; reviewCheckActionIds = $reviewCheckActionIds; packetId = [string]$packetValue.packetId; packetHash = [string]$packetValue.packetHash; scopeHash = [string]$packetValue.scopeHash; baseSha = [string]$packetValue.repository.baseSha }
-    $request = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = [long]$inspection.revision; actionId = $actionId; ticketKey = $owner.ticketKey; actionKind = $ActionKind; target = $target; input = $payload; inputDigest = [string]$packetValue.packetHash; packetDeadlineUtc = [string]$packetValue.deadline.deadlineUtc; packetNowUtc = [string]$packetRead.nowUtc }
+    $request = [ordered]@{ sessionId = $owner.sessionId; ownerGeneration = $owner.ownerGeneration; expectedRevision = [long]$inspection.revision; actionId = $actionId; ticketKey = $owner.ticketKey; actionKind = $ActionKind; target = $target; input = $payload; inputDigest = [string]$packetValue.packetHash }
     $prepared = Invoke-State 'prepare-action' $request
     return [ordered]@{ phase = if ($ActionKind -eq 'publication') { 'publishing' } else { 'preparing' }; decision = 'dispatch'; reason = 'prepared_external_action'; actionId = $actionId; workerId = $workerId; requiredReferences = @($packet) + @($payload.promptReference); changedFields = @('actions'); revision = [long]$prepared.revision; action = [ordered]@{ operation = $ExternalOperation; actionId = $actionId; workerId = $workerId; packet = $payload.packetReference; prompt = $payload.promptReference; reviewedSha = $payload.reviewedSha; previousReviewedSha = $payload.previousReviewedSha; reviewCheckActionIds = $payload.reviewCheckActionIds; approvedReviewActionId = $payload.approvedReviewActionId } }
 }
@@ -451,19 +439,38 @@ function Invoke-Status {
 
 function Invoke-CheckProgress {
     param([System.Collections.IDictionary] $InputObject)
-    $inspection = Get-Inspection; $sessionId = Need $InputObject 'sessionId'; $registry = $inspection.data.registry; $session = $registry.sessions[$sessionId]
-    if ($null -eq $session) { throw "Session was not found: $sessionId" }
-    $ticketKey = if ($InputObject.Contains('ticketKey')) { [string]$InputObject.ticketKey } else { $null }
-    $tickets = @($registry.tickets.Values | Where-Object { $_.ownerSessionId -eq $sessionId -and ($null -eq $ticketKey -or [string]$_.ticketKey -eq $ticketKey) })
-    $actions = @($registry.actions.Values | Where-Object { $_.sessionId -eq $sessionId -and ($null -eq $ticketKey -or [string]$_.ticketKey -eq $ticketKey) })
-    $unresolved = @($actions | Where-Object { $_.status -in @('pending','uncertain') -or $_.reconcileRequired -eq $true })
-    $resumeInstruction = "After reconciling the observed chat, checkout/branch, provider PR, and Taiga state, run workflow-state.ps1 -Operation resume-session with the current expectedRevision and ownerGeneration. Do not retry an unresolved or ambiguous external action."
+    $runId = if ($InputObject.Contains('runId')) { Need $InputObject 'runId' } elseif ($InputObject.Contains('sessionId')) { Need $InputObject 'sessionId' } else { throw 'runId is required.' }
+    $coordinatorThreadId = if ($InputObject.Contains('coordinatorThreadId')) { Need $InputObject 'coordinatorThreadId' } elseif ($InputObject.Contains('targetThreadId')) { Need $InputObject 'targetThreadId' } else { $null }
+    $continuation = if ($InputObject.Contains('continuation')) { $InputObject.continuation } elseif ($InputObject.Contains('continuationContext')) { $InputObject.continuationContext } else { [ordered]@{ state = 'absent' } }
+    if ($continuation -isnot [System.Collections.IDictionary]) { throw 'continuation must be an object.' }
+    $waitStatus = if ($InputObject.Contains('waitStatus')) { [string]$InputObject.waitStatus } else { 'unchanged' }
+    $workerStatus = if ($InputObject.Contains('workerStatus')) { [string]$InputObject.workerStatus } else { $null }
+    $waitState = if ($InputObject.Contains('waitState')) { [string]$InputObject.waitState } else { $null }
+    $recovery = $waitStatus -in @('interrupted','failed','missing_handoff','blocked') -or $workerStatus -in @('interrupted','failed','blocked') -or $waitState -eq 'missing_handoff'
+    $targets = @()
+    if ($InputObject.Contains('targets')) {
+        if ($InputObject.targets -is [string] -or $InputObject.targets -isnot [System.Collections.IEnumerable]) { throw 'targets must be an array.' }
+        foreach ($target in @($InputObject.targets)) {
+            if ($target -isnot [System.Collections.IDictionary]) { throw 'Each progress target must be an object.' }
+            $targetValue = [ordered]@{ threadId = Need $target 'threadId' }
+            foreach ($name in @('hostId','afterCursor')) { if ($target.Contains($name)) { $targetValue[$name] = Need $target $name } }
+            $targets += $targetValue
+        }
+    } elseif ($null -ne $coordinatorThreadId) {
+        $targetValue = [ordered]@{ threadId = $coordinatorThreadId }
+        foreach ($name in @('hostId','afterCursor')) { if ($InputObject.Contains($name)) { $targetValue[$name] = Need $InputObject $name } }
+        $targets += $targetValue
+    }
+    if ($targets.Count -lt 1) { throw 'A native progress check must contain at least one target thread.' }
+    $unresolved = @()
+    if ($continuation.Contains('state') -and [string]$continuation.state -eq 'create_reserved') { $unresolved += [string]$continuation.reservationId }
+    $resumeInstruction = "After reconciling the observed chat, checkout/branch, provider PR, and Taiga state, rerun heartbeat-plan with runId '$runId', the same coordinator thread, and the saved continuation context. Use native automation lookup to reconcile any reserved creation before retrying; do not create a second monitor or replay an ambiguous external action."
     return [ordered]@{
-        phase = [string]$session.state
-        decision = if ($unresolved.Count -gt 0) { 'reconcile_external_state' } else { 'check_progress' }
-        reason = if ($unresolved.Count -gt 0) { 'unresolved_actions_require_reconciliation' } else { 'manual_progress_check' }
-        actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = [long]$inspection.revision; stateMutation = $false; nativeOperation = 'inspect_compact_registry'
-        notifyUser = $false; manual = $true; sessionId = $sessionId; tickets = @($tickets | ForEach-Object { [ordered]@{ ticketKey = $_.ticketKey; phase = $_.phase; controlState = $_.controlState } }); actions = @($actions | ForEach-Object { [ordered]@{ actionId = $_.actionId; kind = $_.kind; status = $_.status; reconcileRequired = $_.reconcileRequired } }); unresolvedActionIds = @($unresolved | ForEach-Object { [string]$_.actionId })
+        phase = if ($recovery) { 'recovery_required' } else { 'observing' }
+        decision = if ($recovery -or $unresolved.Count -gt 0) { 'reconcile_external_state' } else { 'check_progress' }
+        reason = if ($recovery) { 'observed_failure_or_missing_handoff' } elseif ($unresolved.Count -gt 0) { 'heartbeat_creation_requires_reconciliation' } else { 'manual_progress_check' }
+        actionId = $null; workerId = $null; requiredReferences = @(); changedFields = @(); revision = $null; stateMutation = $false; nativeOperation = if ($recovery) { 'read_thread' } else { 'wait_threads' }
+        notifyUser = $recovery; manual = $true; runId = $runId; continuation = $continuation; waitThreadsArguments = [ordered]@{ targets = $targets; timeoutMs = 0 }; unresolvedActionIds = @($unresolved)
         recoveryChecklist = @('read compact recent worker/coordinator chat status', 'inspect the actual repository branch/worktree and committed HEAD', 'inspect provider/PR state', 'read current Taiga story/task state', 'reconcile every pending or uncertain action before retrying')
         resumeInstruction = $resumeInstruction
     }
