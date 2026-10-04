@@ -63,9 +63,12 @@ For each task:
    comment to the parent story naming the task, checklist outcome, checks and
    exit codes, commit SHA or verified no-change result, and the state
    `ready for review`. Reviewer acceptance and a closed/done transition are
-   separate facts and are not implied by this worker result. Do not advance to
-   the next ordered task until independent reviewer acceptance of this exact
-   current task commit is recorded.
+   separate facts and are not implied by this worker result. In `per_task` mode,
+   do not advance to the next ordered task until independent reviewer acceptance
+   of this exact current task commit is recorded. In `story_end_only` mode,
+   advance after the current task's implementation evidence, status write,
+   parent-story comment, and commit are recorded; preserve the exact revision
+   for the final story review and do not claim task acceptance.
 
 Use the task's stable ref and commit SHA as the completion-comment idempotency
 marker. On resume, read the parent-story comments before writing: reuse an
@@ -84,11 +87,14 @@ reviewer acceptance message, update the task in Taiga using its current version
 and advance only when the selected review mode permits it. A final story
 approval belongs to the coordinator and is bound to an exact reviewed HEAD.
 
-Do not start the next task until the current task has its implementation
-evidence, status write, parent-story comment, commit outcome, and explicit
-reviewer acceptance of the exact current task commit recorded. A task being
-`Ready for test`, having a completion comment, or having any historical commit
-is not an acceptance gate.
+In `per_task` mode, do not start the next task until the current task has its
+implementation evidence, status write, parent-story comment, commit outcome,
+and explicit reviewer acceptance of the exact current task commit recorded. In
+`story_end_only` mode, start the next ordered task after the current task's
+implementation evidence, status write, parent-story comment, and commit
+outcome are recorded; retain the task revision for the final review. In either
+mode, a task being `Ready for test`, having a completion comment, or having any
+historical commit is not reviewer acceptance.
 
 ## Status, conflicts, and blockers
 

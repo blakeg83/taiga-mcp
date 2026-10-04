@@ -182,6 +182,8 @@ Assert-PromptContains 'acceptance before advancement' 'explicit reviewer accepta
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
 Assert-PromptContains 'pair authorization' 'worker-to-worker and worker-to-coordinator messages'
 Assert-PromptContains 'no peer creation' 'Never create another worker'
+Assert-PromptContains 'per-task conditional gate' 'In `per_task` mode, do not start the next task'
+Assert-PromptContains 'story-end conditional gate' 'In `story_end_only` mode, start the next ordered task'
 if (-not $normalizedReviewerPrompt.Contains('read-only reviewer')) {
     throw 'Reviewer prompt assertion failed: read-only role'
 }
@@ -257,6 +259,17 @@ foreach ($recordMarker in @(
     if (-not $normalizedWalkthrough.Contains($recordMarker)) {
         throw "Walkthrough record assertion failed: $recordMarker"
     }
+}
+
+$worktreeMarker = 'mcp__codex_app__create_worktree({"name":"story-46-worker"'
+$implementationThreadMarker = 'mcp__codex_app__create_thread({"title":"story-46 implementation"'
+$worktreeIndex = $normalizedWalkthrough.IndexOf($worktreeMarker, [StringComparison]::Ordinal)
+$implementationThreadIndex = $normalizedWalkthrough.IndexOf($implementationThreadMarker, [StringComparison]::Ordinal)
+if ($worktreeIndex -lt 0 -or $implementationThreadIndex -lt 0 -or $worktreeIndex -gt $implementationThreadIndex) {
+    throw 'Walkthrough order assertion failed: worktree must be created before worker chats.'
+}
+if ($normalizedWalkthrough.Contains('[synthetic-impl-46] mcp__codex_app__create_thread')) {
+    throw 'Walkthrough ownership assertion failed: implementer must not create reviewer chat.'
 }
 
 foreach ($recordMarker in @(
