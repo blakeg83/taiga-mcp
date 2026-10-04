@@ -425,11 +425,23 @@ try {
         $createRetry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $createRetryInput 'heartbeat-create-retry'),'-StateRoot',$waitRoot)
         Assert-Equal 'reconcile_heartbeat_creation' $createRetry.data.decision 'an interrupted create must require fresh reconciliation before another attempt'
         Assert-True ($null -eq $createRetry.data.automationRequest) 'an interrupted create must not immediately issue a second create'
+        $cancelPendingInput = Copy-JsonObject $createRetryInput; $cancelPendingInput.lifecycle = 'cancelled'
+        $cancelPending = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelPendingInput 'heartbeat-cancel-pending'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_creation' $cancelPending.data.decision 'cancellation must reconcile an unresolved creation before cleanup'
+        Assert-Equal 'create_pending' $cancelPending.data.continuation.state 'cancellation must retain the unresolved creation continuation'
+        Assert-True ($null -eq $cancelPending.data.automationRequest) 'cancellation must not forget a possibly-created heartbeat'
+        $cancelFoundInput = Copy-JsonObject $cancelPendingInput; $cancelFoundInput.creationReconciliation = @{ reservationId = [string]$cancelPending.data.continuation.reservationId; outcome = 'found'; heartbeatId = 'late-heartbeat'; checkedAtUtc = '2026-10-04T00:01:00Z' }
+        $cancelFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelFoundInput 'heartbeat-cancel-found'),'-StateRoot',$waitRoot)
+        Assert-Equal 'remove_heartbeat' $cancelFound.data.decision 'cancellation should delete a heartbeat found during creation reconciliation'
+        Assert-Equal 'late-heartbeat' $cancelFound.data.automationRequest.id 'cleanup must use the reconciled heartbeat ID'
         $activeContinuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE'; runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash }
         $activeInput = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; continuation = $activeContinuation; notificationPolicy = 'failed_runs_only' }
         $wrongRun = Copy-JsonObject $activeInput; $wrongRun.runId = 'synthetic-session-02'
         $wrongRunResult = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $wrongRun 'heartbeat-wrong-run'),'-StateRoot',$waitRoot) $false
         Assert-True (-not $wrongRunResult.ok) 'a continuation from another run must be rejected before using its heartbeat ID'
+        $absentHeartbeat = @{ runId = 'synthetic-session-02'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; lifecycle = 'cancelled'; continuation = @{ state = 'absent'; heartbeatId = 'heartbeat-1' } }
+        $absentHeartbeatResult = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $absentHeartbeat 'heartbeat-absent-id'),'-StateRoot',$waitRoot) $false
+        Assert-True (-not $absentHeartbeatResult.ok) 'an absent continuation must not carry a heartbeat ID across runs'
         $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $activeInput 'heartbeat-reuse'),'-StateRoot',$waitRoot)
         Assert-Equal 'reuse_heartbeat' $reuse.data.decision 'later plans should reuse the existing session heartbeat'
         Assert-Equal 'view' $reuse.data.automationRequest.mode 'duplicate heartbeat plans should view and reuse the existing automation'
@@ -448,6 +460,15 @@ try {
         $pauseRetry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseRetryInput 'heartbeat-paused-reconcile'),'-StateRoot',$waitRoot)
         Assert-Equal 'reconcile_heartbeat_schedule' $pauseRetry.data.decision 'an unconfirmed pause must reconcile before planning again'
         Assert-True ($null -eq $pauseRetry.data.automationRequest) 'an unconfirmed pause must not be treated as already paused'
+        $pauseUnchangedInput = Copy-JsonObject $pauseRetryInput; $pauseUnchangedInput.scheduleConfirmation = @{ confirmed = $true; status = 'ACTIVE'; outcome = 'unchanged' }
+        $pauseUnchanged = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseUnchangedInput 'heartbeat-paused-unchanged'),'-StateRoot',$waitRoot)
+        Assert-Equal 'confirm_heartbeat_schedule' $pauseUnchanged.data.decision 'a confirmed unchanged pause must clear the pending transition'
+        Assert-Equal 'ACTIVE' $pauseUnchanged.data.continuation.scheduleState 'an unchanged pause must retain the provider state'
+        Assert-True (-not $pauseUnchanged.data.continuation.Contains('pendingScheduleState')) 'an unchanged pause must clear the stale pending transition'
+        Assert-True ($null -eq $pauseUnchanged.data.automationRequest) 'a confirmed failed pause must not replay the update in the confirmation plan'
+        $pauseRetryAfterUnchangedInput = Copy-JsonObject $pausedInput; $pauseRetryAfterUnchangedInput.continuation = $pauseUnchanged.data.continuation
+        $pauseRetryAfterUnchanged = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseRetryAfterUnchangedInput 'heartbeat-paused-retry-after-unchanged'),'-StateRoot',$waitRoot)
+        Assert-Equal 'disable_heartbeat' $pauseRetryAfterUnchanged.data.decision 'a failed pause must be retryable from the confirmed provider state'
         $pauseConfirmInput = Copy-JsonObject $pauseRetryInput; $pauseConfirmInput.scheduleConfirmation = @{ confirmed = $true; status = 'PAUSED' }
         $pauseConfirmed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseConfirmInput 'heartbeat-paused-confirm'),'-StateRoot',$waitRoot)
         Assert-Equal 'PAUSED' $pauseConfirmed.data.continuation.scheduleState 'a confirmed pause must advance the saved schedule state'
