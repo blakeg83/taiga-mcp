@@ -274,6 +274,7 @@ Assert-BranchContractContains 'implementer ownership' 'implementer may write sou
 Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
 Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/changes_requested>'
 Assert-ContinuationContains 'legacy final review state' 'Final review: <not_applicable/pending/findings/accepted>'
+Assert-ContinuationContains 'legacy snapshot compatibility' 'optional when reading or replacing an older snapshot'
 Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'

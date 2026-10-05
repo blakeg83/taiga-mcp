@@ -16,7 +16,7 @@ $fields = @(
 )
 $required = @(
     'Run', 'Scope', 'Repository', 'Base', 'Feature', 'Current', 'Story branch',
-    'Implementer', 'Pair', 'Review mode', 'PR', 'Approval', 'Review', 'Final review', 'Merge',
+    'Implementer', 'Pair', 'Review mode', 'PR', 'Approval', 'Review', 'Merge',
     'Next', 'Recovery', 'Worker cursors', 'Task state', 'Gate', 'Pending action', 'Evidence'
 )
 foreach ($key in $Snapshot.Keys) {

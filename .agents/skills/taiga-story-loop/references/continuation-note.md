@@ -79,9 +79,12 @@ Use `scripts/write-continuation-note.ps1 -NotePath <absolute note path>
 replace the note. It writes a complete UTF-8 snapshot atomically, keeps one
 `.previous` backup, and leaves identical snapshots untouched. It rejects unknown
 fields, missing core fields, multiline values, values over 1024 characters,
-and snapshots over 16 KiB before changing the existing note. These are context
-bounds, not permission to truncate unresolved facts: shorten evidence to
-references, and stop for reconciliation if a required fact cannot be retained.
+and snapshots over 16 KiB before changing the existing note. `Final review` is
+optional when reading or replacing an older snapshot that predates the legacy
+final-review field; new or refreshed snapshots should include it whenever the
+run has a final-review state. These are context bounds, not permission to
+truncate unresolved facts: shorten evidence to references, and stop for
+reconciliation if a required fact cannot be retained.
 The helper only persists supplied observations; it does not verify their truth
 or infer task acceptance, approval, or merge.
 

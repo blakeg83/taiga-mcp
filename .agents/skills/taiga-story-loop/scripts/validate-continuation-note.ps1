@@ -71,6 +71,17 @@ try {
     Assert-True $created.Changed 'creates initial complete snapshot'
     Assert-True (-not [IO.File]::Exists($path + '.previous')) 'initial creation has no invented previous snapshot'
 
+    # Existing snapshots predate the optional legacy final-review field and
+    # must remain writable while the coordinator reconciles them.
+    $compatSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) {
+        if ($key -cne 'Final review') { $compatSnapshot[$key] = $snapshot[$key] }
+    }
+    $compatResult = & $writer -NotePath $path -Snapshot $compatSnapshot
+    Assert-True $compatResult.Changed 'older snapshot without Final review remains writable'
+    Assert-True (-not [IO.File]::ReadAllText($path).Contains('Final review:')) 'compatibility write does not invent an unobserved final-review state'
+    & $writer -NotePath $path -Snapshot $snapshot | Out-Null
+
     # Existing active runs may omit Topology. Resolve the recorded scope before
     # interpreting their shared feature fields.
     $legacySnapshot = [ordered]@{}
