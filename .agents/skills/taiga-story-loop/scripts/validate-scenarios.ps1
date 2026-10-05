@@ -15,6 +15,7 @@ $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
 $topologyPath = Join-Path $skillRoot 'references/branch-topology.md'
 $branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
 $continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
+$continuationScriptPath = Join-Path $PSScriptRoot 'validate-continuation-note.ps1'
 $promptPath = Join-Path $skillRoot 'assets/implementation-prompt.md'
 $branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
@@ -255,8 +256,11 @@ Assert-TaskExecutionContains 'story-end accepted gate' 'cannot become `mapping.a
 Assert-TopologyContains 'standalone direct branch' 'A standalone story has one managed story branch'
 Assert-TopologyContains 'standalone master PR' 'its story PR targets `master`'
 Assert-TopologyContains 'epic shared feature branch' 'An epic has one shared feature branch'
-Assert-TopologyContains 'active-run migration' 'preserve its recorded branch, worktree, PR, worker, and recovery identities exactly'
+Assert-TopologyContains 'active-run migration' 'Preserve its recorded feature/story branches, worktrees, PR, worker, and recovery identities'
 Assert-TopologyContains 'legacy resume delivery' 'continue to the legacy final feature-to-`master` delivery'
+Assert-TopologyContains 'epic migration classification' 'If `Scope` identifies an epic or a set of ordered stories'
+Assert-TopologyContains 'standalone migration classification' 'If `Scope` identifies one standalone story'
+Assert-TopologyContains 'ambiguous migration guard' 'Feature fields alone are insufficient evidence for the legacy exception'
 Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
 Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
@@ -266,6 +270,9 @@ Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
+Assert-ContinuationContains 'epic migration classification' 'If the scope identifies an epic or multiple ordered stories'
+Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
+Assert-ContinuationContains 'ambiguous migration guard' 'feature fields alone do not select the legacy exception'
 Assert-BranchScenarioContains 'story-two starting HEAD guard' 'story two starts at the current feature HEAD'
 Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits story-one content'
 Assert-BranchScenarioContains 'reloaded resume receipt' 'Assert-ResumeReceipt $resumed'
@@ -309,6 +316,11 @@ if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR de
 foreach ($marker in @('unknownState', 'provider_state_unknown', 'should-not-create', 'unknown-state reconciliation')) {
     if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains($marker)) {
         throw "PR delivery assertion failed: unknown-state fixture marker $marker"
+    }
+}
+foreach ($marker in @('Resolve-MigrationTopology', 'resolvedLegacyTopology', 'resolvedEpicTopology', 'needs-reconciliation', 'epic scope preserves the epic feature topology')) {
+    if (-not (Get-Content $continuationScriptPath -Raw).Contains($marker)) {
+        throw "Continuation migration fixture assertion failed: $marker"
     }
 }
 foreach ($marker in @(

@@ -74,11 +74,21 @@ master`. For an epic snapshot, `Feature` identifies the shared branch and
 worktree and `PR` names that feature branch until final delivery.
 
 The `Topology` field is optional only when reading an older active snapshot.
-If an existing snapshot has a nonempty feature branch and a story PR base,
-classify it as `legacy-standalone-feature`: preserve its recorded branch,
-worktree, PR, worker, and recovery identities exactly and resume that run
-under its recorded lineage. Never reinterpret or rewrite an active run as
-standalone merely because the new contract has a different default. New runs
-must write either `standalone-story-direct-master` or `epic-shared-feature`
-before worker dispatch; `legacy-standalone-feature` is never selected for a
-new run.
+Determine the missing topology from the recorded `Scope` before considering
+branch fields:
+
+- If `Scope` identifies an epic or a set of ordered stories, classify the run
+  as `epic-shared-feature`. Preserve its recorded feature/story branches,
+  worktrees, PR, worker, and recovery identities; continue the next-story
+  merge gates and the integrated epic review.
+- If `Scope` identifies one standalone story, and the old note has a nonempty
+  feature branch and story PR base, classify it as
+  `legacy-standalone-feature`. Preserve the same identities and resume the old
+  story-to-feature then final feature-to-`master` path.
+- If the recorded scope is missing or ambiguous, stop for reconciliation.
+  Feature fields alone are insufficient evidence for the legacy exception.
+
+Never reinterpret an epic as standalone merely because the new contract has a
+different default. New runs must write either
+`standalone-story-direct-master` or `epic-shared-feature` before worker
+dispatch; `legacy-standalone-feature` is never selected for a new run.

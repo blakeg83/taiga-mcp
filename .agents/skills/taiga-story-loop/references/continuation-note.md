@@ -58,12 +58,17 @@ Keep authorization boundaries, topology, PR/base/head approval identity, worker
 hosts and cursors, automation identity, and unresolved trial inputs in the
 current note. For a newly created standalone run, `Topology` is
 `standalone-story-direct-master`; for an epic it is `epic-shared-feature`.
-Older active notes may omit `Topology`: when they contain a nonempty feature
-branch and a story PR base, classify them as `legacy-standalone-feature`,
-preserve their existing feature/story branch, worktree, PR, worker, cursor,
-and recovery identities exactly, and resume the old story-to-feature then
-feature-to-`master` path. Do not rewrite those identities during migration or
-use the legacy value for a new run.
+Older active notes may omit `Topology`: determine it from the recorded
+`Scope` before using the branch fields. If the scope identifies an epic or
+multiple ordered stories, write/interpret `epic-shared-feature` and preserve
+the existing feature/story branch, worktree, PR, worker, cursor, and recovery
+identities while continuing the next-story gates and integrated epic review.
+If the scope identifies one standalone story and the old note has a nonempty
+feature branch and story PR base, write/interpret
+`legacy-standalone-feature` and resume the old story-to-feature then
+feature-to-`master` path. Missing or ambiguous scope requires reconciliation;
+feature fields alone do not select the legacy exception. Do not rewrite those
+identities during migration or use the legacy value for a new run.
 Use explicit `pending`, `unknown`, `none`, or `not_applicable` values rather than
 dropping a safety-relevant fact. Completed tasks need only ordered refs and a
 concise evidence pointer, not a per-task account of every correction.

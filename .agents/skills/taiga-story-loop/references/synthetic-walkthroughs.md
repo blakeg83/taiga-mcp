@@ -28,9 +28,11 @@ The walkthroughs use two different branch paths:
   reach the separate final feature-to-`master` PR. It does not dispatch a next
   story or require an integrated epic review.
 
-An existing active continuation note that predates this distinction keeps its
-recorded feature/story branches, PR base, worker IDs, and recovery identity;
-the migration does not reinterpret that run.
+An existing active continuation note that predates this distinction is
+classified from its recorded scope before its feature fields are interpreted:
+an epic keeps `epic-shared-feature`, while a standalone story may use
+`legacy-standalone-feature`. In either case the migration preserves the
+recorded feature/story branches, PR base, worker IDs, and recovery identity.
 
 ## Summary
 
