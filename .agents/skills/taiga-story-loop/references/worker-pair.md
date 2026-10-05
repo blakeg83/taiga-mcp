@@ -27,9 +27,10 @@ After the story branch/worktree receipt is verified, the coordinator:
 The initial creation prompt may be a short bootstrap that identifies the story,
 role, exact profile, and coordinator ID. It must not ask a worker to create a
 peer. The full assignment names the coordinator, both worker IDs, the absolute
-story worktree/branch, the ordered task scope, and the user-confirmed
-authorization record. The reviewer receives the implementer ID and the
-implementer receives the reviewer ID before task work begins.
+story worktree/branch, the scope topology, the story PR base, the ordered task
+scope, and the user-confirmed authorization record. The reviewer receives the
+implementer ID and the implementer receives the reviewer ID before task work
+begins.
 
 ## Pending creation and reuse
 

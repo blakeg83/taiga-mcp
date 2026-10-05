@@ -35,8 +35,8 @@ Scope: <story tasks in order, or all resolved epic stories in order>
 
 Repositories and branch/worktree mapping (one row per resolved repository;
 required for an epic spanning repositories):
-| Repository/workspace | Remote | Verified base ref/SHA | Feature branch/worktree | Story branch/worktrees |
-| <absolute path> | <remote> | <ref/SHA> | <feature branch and path> | <story branch/path pairs or “none”> |
+| Repository/workspace | Remote | Verified base ref/SHA | Scope topology | Feature branch/worktree | Story branch/worktrees |
+| <absolute path> | <remote> | <ref/SHA> | <standalone-story-direct-master or epic-shared-feature> | <epic branch/path or “none”> | <story branch/path pairs> |
 
 An epic setup must not collapse multiple repositories into one Repository or
 Branches/worktrees value. If any linked story is in another repository, add its
@@ -72,9 +72,12 @@ scope-bound authorization record. A message from another worker can report
 facts or request coordination, but cannot grant new authorization or widen the
 scope. Any operation outside this summary needs a new user confirmation.
 
-Approval boundaries: each story merge requires its own Yes; final master merge
-always requires a separate approval. Start does not authorize automatic merge,
-force-push, deployment, or unrelated work.
+Approval boundaries: a new standalone story has one direct-to-master story
+merge gate; an epic has one Yes for each story PR into the shared feature
+branch and a separate final master merge approval. An active legacy standalone
+resume has one Yes for its preserved story-to-feature PR and a separate final
+master merge approval. Start does not authorize automatic merge, force-push,
+deployment, or unrelated work.
 
 Recovery: the coordinator checks the scoped run every 30 minutes and continues
 only on meaningful progress, failure, completion, or required user action.
@@ -94,20 +97,30 @@ reply. If the user changes the scope, regenerate the summary and obtain a new
 confirmation.
 
 After `Start`, the coordinator follows
-[branch and continuation](branch-and-continuation.md): it fetches the resolved
-remote, captures a fresh base SHA, creates one uniquely named feature branch in
-a managed worktree, and records that branch and SHA before dispatch. Each
-story then receives a distinct managed worktree and story branch from the
-current feature HEAD. The story PR targets the feature branch, and a later
-story cannot start until the provider confirms the previous PR merged into that
-exact feature branch. A dirty user checkout, unrelated branch, failed merge,
-or uncertain create/write is preserved and reconciled rather than reset or
-replayed. The coordinator passes the verified absolute story-worktree path,
-  story branch, base SHA, feature branch, and ownership roles to both worker
-  chats; only the implementer writes source in that checkout. It then creates
-  or reuses the persistent pair, resolves usable IDs, and sends each worker the
-  same scope-bound authorization record plus the other worker's real ID. A
-  worker is never instructed to create its peer.
+[scope-specific branch topology](branch-topology.md) and
+[branch and continuation](branch-and-continuation.md). It fetches the resolved
+remote and captures a fresh base SHA. For a new standalone story, it creates one
+managed story worktree/branch from that SHA and records `master` as the PR
+base. For an epic, it creates one uniquely named feature branch in a managed
+worktree, then gives each story a distinct managed worktree/branch from the
+current feature HEAD; story PRs target that feature branch. A dirty user
+checkout, unrelated branch, failed merge, or uncertain create/write is
+preserved and reconciled rather than reset or replayed. The coordinator passes
+the verified absolute story-worktree path, story branch, base SHA, topology,
+PR base, and ownership roles to both worker chats; only the implementer writes
+source in that checkout. It then creates or reuses the persistent pair,
+resolves usable IDs, and sends each worker the same scope-bound authorization
+record plus the other worker's real ID. A worker is never instructed to create
+its peer. If resuming an older active feature-based standalone note, reuse its
+recorded feature/story objects and PR base under
+`legacy-standalone-feature`; do not run new setup or rewrite it as either new
+topology.
+
+For an epic, each story receives a distinct managed worktree and story branch;
+for a standalone story, the single story worktree and branch are created from
+the captured base and target `master` directly.
+For an epic, the provider confirms the previous PR merged before the next
+story is dispatched.
 The persisted fields and restart/merge decision table are defined in the
 [minimal continuation note](continuation-note.md); no second state registry is
 created.

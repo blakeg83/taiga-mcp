@@ -1,12 +1,20 @@
 # Final feature-to-master delivery
 
-The final delivery is a release handoff, not an automatic merge. It is
-available only after the current feature HEAD has passed the correct final
+This contract applies to an epic or to an active legacy standalone run. The
+final delivery is a release handoff, not an automatic merge. For an epic it is
+available only after every story PR has been verified merged into the shared
+feature branch and the current feature HEAD has passed the integrated epic
 review:
 
-- a single-story run requires final story approval at the exact feature HEAD;
 - an epic run requires the integrated epic acceptance from
   [the final epic review](final-epic-review.md) at the exact feature HEAD.
+
+An active `legacy-standalone-feature` run is the compatibility exception. It
+does not require an integrated epic review or another story. It becomes
+eligible only after its preserved story-to-feature PR has passed the exact
+story review, received the separate story merge approval, and been verified
+merged into the recorded feature branch. Refresh that exact feature HEAD
+before preparing the final PR.
 
 The coordinator verifies the configured default branch is `master` for this
 repository, then creates or reuses one final PR with the feature branch as
@@ -14,19 +22,38 @@ head and `master` as base. Reuse is valid only when the repository, base, head,
 scope, and review evidence still match. A final PR is never treated as a
 successful release merely because it was opened.
 
+## Legacy standalone delivery
+
+For an active `legacy-standalone-feature` run, create or reuse the final PR
+with the preserved feature branch as head and `master` as base. Bind it to the
+refreshed exact feature HEAD and require a separate final user approval. Do
+not dispatch another story, substitute a new feature branch, or claim that
+the story-to-feature merge released `master`; only the provider-confirmed
+final merge releases `master`. New standalone runs never use this exception.
+
+## New standalone story delivery
+
+A new standalone story does not use this final feature-to-master PR. Its final
+story approval is bound to the exact current story HEAD, and
+[reviewed story PR delivery](pr-delivery.md) creates or reuses one story PR
+with the story branch as head and `master` as base. The [story merge gate](merge-approval.md)
+presents that direct PR for the user's explicit approval.
+After the provider confirms the direct merge, the story is released and the
+run ends. There is no feature branch, integrated epic review, or second PR.
+
 ## Final PR evidence
 
 The description identifies the path that produced it:
 
 ```markdown
 ## Release
-- Run: <single-story or epic>
+- Run: <epic or legacy-standalone-feature>
 - Feature branch: `<branch>`
 - Base: `master`
 - Head: `<exact feature SHA>`
 
 ## Integrated evidence
-- Story integration: <ordered story refs and verified feature merges>
+- Story integration: <ordered story refs and verified feature merges, including the preserved legacy story merge when applicable>
 - Final review: <story review or Sol 6.1 high epic review and exact SHA>
 - Checks: `<command>` — exit <code>; <result>
 
@@ -47,8 +74,10 @@ and master release remain distinct facts.
 For an epic, story `n + 1` starts only after story `n`'s PR is confirmed
 merged into the feature branch and the feature HEAD is refreshed. The final
 PR cannot be opened until every ordered story is integrated and the final epic
-review is accepted. For a single-story run, omit the epic review but retain the
-same final master approval boundary.
+review is accepted. A new standalone story follows the direct story PR and
+merge gate described above and never enters this sequence. A legacy standalone
+run has no story `n + 1`; its final PR may open only after the preserved story
+merge and refreshed feature HEAD.
 
 Any correction after final review or any material requirement change invalidates
 the final PR evidence. Return to the appropriate existing worker/reviewer

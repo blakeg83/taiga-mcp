@@ -12,8 +12,10 @@ $ErrorActionPreference = 'Stop'
 
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $setupPath = Join-Path $skillRoot 'references/invocation-and-setup.md'
+$topologyPath = Join-Path $skillRoot 'references/branch-topology.md'
 $branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
 $continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
+$continuationScriptPath = Join-Path $PSScriptRoot 'validate-continuation-note.ps1'
 $promptPath = Join-Path $skillRoot 'assets/implementation-prompt.md'
 $branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
@@ -37,6 +39,9 @@ $finalDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-final-delivery.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
+}
+if (-not (Test-Path $topologyPath)) {
+    throw 'Missing scope-specific branch topology contract.'
 }
 if (-not (Test-Path $taskExecutionPath) -or -not (Test-Path $taskExecutionScriptPath)) {
     throw 'Missing ordered task execution scenario evidence.'
@@ -68,6 +73,8 @@ if (-not (Test-Path $finalDeliveryPath) -or -not (Test-Path $finalDeliveryScript
 
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
+$topologyText = Get-Content $topologyPath -Raw
+$normalizedTopology = [regex]::Replace($topologyText, '\s+', ' ')
 $promptText = Get-Content $promptPath -Raw
 $normalizedPrompt = [regex]::Replace($promptText, '\s+', ' ')
 $branchText = Get-Content $branchPath -Raw
@@ -109,6 +116,17 @@ function Assert-DocumentContains {
 
     if (-not $normalizedSetup.Contains($Text)) {
         throw "Document assertion failed: $Label"
+    }
+}
+
+function Assert-TopologyContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedTopology.Contains($Text)) {
+        throw "Topology assertion failed: $Label"
     }
 }
 
@@ -205,6 +223,9 @@ Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
 Assert-DocumentContains 'persistent pair reference' 'persistent story worker pair'
 Assert-DocumentContains 'pair resolution gate' 'resolves both results to usable'
 Assert-DocumentContains 'pending ID guard' 'pending `clientThreadId` is never a message destination'
+Assert-DocumentContains 'standalone topology setup' 'standalone-story-direct-master'
+Assert-DocumentContains 'epic topology setup' 'epic-shared-feature'
+Assert-DocumentContains 'legacy topology setup' 'legacy-standalone-feature'
 Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
 Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
@@ -212,6 +233,7 @@ Assert-PromptContains 'pair authorization' 'worker-to-worker and worker-to-coord
 Assert-PromptContains 'no peer creation' 'Never create another worker'
 Assert-PromptContains 'per-task conditional gate' 'In `per_task` mode, do not start the next task'
 Assert-PromptContains 'story-end conditional gate' 'In `story_end_only` mode, start the next ordered task'
+Assert-PromptContains 'legacy resume route' 'For `legacy-standalone-feature`'
 if (-not $normalizedReviewerPrompt.Contains('read-only reviewer')) {
     throw 'Reviewer prompt assertion failed: read-only role'
 }
@@ -231,6 +253,14 @@ Assert-TaskExecutionContains 'preserve-or-replace decision' 'explicit decision t
 Assert-TaskExecutionContains 'per-task advancement gate' 'In `per_task` mode, only an independent'
 Assert-TaskExecutionContains 'story-end advancement gate' 'In `story_end_only` mode, implementation evidence may release'
 Assert-TaskExecutionContains 'story-end accepted gate' 'cannot become `mapping.accepted`/Done until'
+Assert-TopologyContains 'standalone direct branch' 'A standalone story has one managed story branch'
+Assert-TopologyContains 'standalone master PR' 'its story PR targets `master`'
+Assert-TopologyContains 'epic shared feature branch' 'An epic has one shared feature branch'
+Assert-TopologyContains 'active-run migration' 'Preserve its recorded feature/story branches, worktrees, PR, worker, and recovery identities'
+Assert-TopologyContains 'legacy resume delivery' 'continue to the legacy final feature-to-`master` delivery'
+Assert-TopologyContains 'epic migration classification' 'If `Scope` identifies an epic or a set of ordered stories'
+Assert-TopologyContains 'standalone migration classification' 'If `Scope` identifies one standalone story'
+Assert-TopologyContains 'ambiguous migration guard' 'Feature fields alone are insufficient evidence for the legacy exception'
 Assert-BranchContractContains 'managed worktree handoff' 'create_worktree({ name:'
 Assert-BranchContractContains 'worker path receipt' 'The coordinator records the returned absolute path'
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
@@ -240,11 +270,16 @@ Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
+Assert-ContinuationContains 'epic migration classification' 'If the scope identifies an epic or multiple ordered stories'
+Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
+Assert-ContinuationContains 'ambiguous migration guard' 'feature fields alone do not select the legacy exception'
 Assert-BranchScenarioContains 'story-two starting HEAD guard' 'story two starts at the current feature HEAD'
 Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits story-one content'
 Assert-BranchScenarioContains 'reloaded resume receipt' 'Assert-ResumeReceipt $resumed'
 Assert-BranchScenarioContains 'mismatched lineage guard' 'incorrect saved feature lineage is rejected'
 Assert-BranchScenarioContains 'unknown outcome guard' 'unknown merge does not create the next story branch'
+Assert-BranchScenarioContains 'standalone branch fixture' 'standalone story starts at the captured master base'
+Assert-BranchScenarioContains 'standalone PR fixture' 'standalone PR targets master'
 Assert-WorkerPairContains 'exact implementer profile' 'gpt-5.6-luna'
 Assert-WorkerPairContains 'exact reviewer profile' 'gpt-6.1-sol'
 Assert-WorkerPairContains 'pending thread guard' 'pending `clientThreadId`'
@@ -263,10 +298,12 @@ if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections mu
 }
 foreach ($marker in @(
         'exact current HEAD'
-        'Find an existing PR by repository, exact head branch, recorded feature base, and reviewed head commit'
+        'Find an existing PR by repository, exact head branch, topology-specific base, and reviewed head commit'
         'Reuse a PR only when all of those identities match and the provider reports it open and unclosed'
-        'A PR from another branch, a closed/unmerged PR'
+        'A PR from another branch, an incorrect base, a closed/unmerged PR'
         'If an exact-match PR has missing or null provider state, return an unknown/reconcile outcome'
+        'The story PR must target the topology-specific base'
+        'active `legacy-standalone-feature` run is the explicit compatibility exception'
         'state: pr_ready_for_approval'
         'never blindly retry a write or create a duplicate PR')) {
     if (-not $normalizedPrDelivery.Contains($marker)) {
@@ -281,12 +318,19 @@ foreach ($marker in @('unknownState', 'provider_state_unknown', 'should-not-crea
         throw "PR delivery assertion failed: unknown-state fixture marker $marker"
     }
 }
+foreach ($marker in @('Resolve-MigrationTopology', 'resolvedLegacyTopology', 'resolvedEpicTopology', 'needs-reconciliation', 'epic scope preserves the epic feature topology')) {
+    if (-not (Get-Content $continuationScriptPath -Raw).Contains($marker)) {
+        throw "Continuation migration fixture assertion failed: $marker"
+    }
+}
 foreach ($marker in @(
         'Yes — merge and continue to the next ordered story'
         'No — hold for feedback'
         'Yes`, PR URL/repository/base/scope/head still match, provider confirms merged'
         'An empty response, timeout, unrelated text, or a worker message is `no_response`'
-        'Only a verified provider merge unlocks the next story'
+        'Only a verified provider merge unlocks the next epic story'
+        'Legacy standalone: Yes — merge this exact PR and continue to final release'
+        'legacy standalone run has no next-story dispatch'
         'Do not dispatch workers or send repeated notifications'
         'An approval is bound to the PR URL, repository, base branch, reviewed head, and story scope shown in the prompt.')) {
     if (-not $normalizedMergeApproval.Contains($marker)) {
@@ -316,9 +360,11 @@ if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains('Passed offline 
     throw 'Final epic review assertion failed: offline fixture coverage'
 }
 foreach ($marker in @(
-        'a single-story run requires final story approval'
+        'This contract applies to an epic or to an active legacy standalone run'
         'an epic run requires the integrated epic acceptance'
         'creates or reuses one final PR with the feature branch as head and `master` as base'
+        'An active `legacy-standalone-feature` run is the compatibility exception'
+        'New standalone runs never use this exception'
         'Final master merge: pending separate user approval; not automatic'
         'Story integration, epic acceptance, final PR creation, and master release remain distinct facts')) {
     if (-not $normalizedFinalDelivery.Contains($marker)) {

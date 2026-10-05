@@ -12,6 +12,9 @@ worktree:
 | Branch | `{{storyBranch}}` |
 | Worktree | `{{storyWorktree}}` |
 | Story base SHA | `{{storyBaseSha}}` |
+| Scope topology | `{{topology}}` |
+| PR base | `{{prBase}}` (`master` for new standalone stories; shared or preserved feature branch for epics/legacy resumes) |
+| Feature integration | `{{featureBranch}}` / `{{featureWorktree}}` or `none (standalone direct-to-master)` |
 | Coordinator | `{{coordinatorId}}` |
 | Implementer chat | `{{implementerId}}` @ `{{implementerHostId}}` |
 | Reviewer chat | `{{reviewerId}}` @ `{{reviewerHostId}}` |
@@ -26,6 +29,23 @@ every selected task description and checklist, the repository's
 instructions, and the confirmed branch/worktree receipt. The story's declared
 order is authoritative. Do not infer order from API response order, work on
 later tasks early, silently skip a prerequisite, or expand the scope.
+
+## Branch and delivery boundary
+
+Follow the supplied topology exactly. For `standalone-story-direct-master`,
+this story branch is the only run branch, its PR base is `master`, and the
+final story review must bind to the exact current story HEAD before the direct
+PR is presented for the user's merge approval. Do not create or expect a
+feature branch, story-to-feature PR, integrated epic review, or second final
+PR. For `epic-shared-feature`, work only on the supplied story branch from the
+current feature HEAD; the coordinator owns the feature branch, the story PR
+targets it, and only a verified story merge advances the next story. Never
+change the branch base or infer a merge from a local checkout or chat message.
+For `legacy-standalone-feature`, preserve the supplied feature branch,
+worktree, and story-to-feature PR base exactly; after the verified story merge,
+the coordinator continues to the legacy final feature-to-`master` delivery
+without dispatching another story. Never convert that resume path to either a
+new standalone or epic topology.
 
 The coordinator created or reused this persistent pair after the user's setup
 confirmation. The authorization record explicitly permits worker-to-worker and

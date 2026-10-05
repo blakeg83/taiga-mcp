@@ -24,13 +24,29 @@ function Assert-Rejected([System.Collections.IDictionary] $Candidate, [string] $
     Assert-True ([IO.File]::ReadAllText($path + '.previous') -ceq $backup) "$Message preserves backup"
 }
 
+function Resolve-MigrationTopology([System.Collections.IDictionary] $Snapshot) {
+    if ($Snapshot.Contains('Topology') -and -not [string]::IsNullOrWhiteSpace([string]$Snapshot['Topology'])) {
+        return [string]$Snapshot['Topology']
+    }
+
+    $scope = [string]$Snapshot['Scope']
+    if ($scope -match '(?i)\bepic\b' -or $scope -match '(?i)\bstories?\b[^|]*(?:[,;]|\band\b)') {
+        return 'epic-shared-feature'
+    }
+    if ($scope -match '(?i)\bstory\b') {
+        return 'legacy-standalone-feature'
+    }
+    'needs-reconciliation'
+}
+
 try {
     [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
     $snapshot = [ordered]@{
         'Run' = 'synthetic-story-52'
-        'Scope' = 'project 12 story #52 | tasks: #77, #78'
+        'Scope' = 'project 12 epic #45 | stories: #52, #53 | tasks: #77, #78'
         'Repository' = 'C:\Synthetic\TaigaMCP | remote: origin https://example.invalid/repo'
         'Base' = 'origin/master @ base-sha'
+        'Topology' = 'epic-shared-feature'
         'Feature' = 'codex/feature-synthetic | worktree: C:\Synthetic\feature | head: feature-sha'
         'Current' = 'story #52 | task #77'
         'Story branch' = 'codex/story-52-synthetic | worktree: C:\Synthetic\story | base: feature-sha'
@@ -53,6 +69,58 @@ try {
     $created = & $writer -NotePath $path -Snapshot $snapshot
     Assert-True $created.Changed 'creates initial complete snapshot'
     Assert-True (-not [IO.File]::Exists($path + '.previous')) 'initial creation has no invented previous snapshot'
+
+    # Existing active runs may omit Topology. Resolve the recorded scope before
+    # interpreting their shared feature fields.
+    $legacySnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) {
+        if ($key -cne 'Topology') { $legacySnapshot[$key] = $snapshot[$key] }
+    }
+    $legacySnapshot['Scope'] = 'project 12 story #52 | tasks: #77, #78'
+    $resolvedLegacyTopology = Resolve-MigrationTopology $legacySnapshot
+    Assert-True ($resolvedLegacyTopology -eq 'legacy-standalone-feature') 'standalone scope selects the legacy feature-based topology'
+    $legacySnapshot['Topology'] = $resolvedLegacyTopology
+    $legacySnapshot['PR'] = 'pending | base: codex/feature-synthetic | head: revision-000'
+    $legacyResult = & $writer -NotePath $path -Snapshot $legacySnapshot
+    Assert-True $legacyResult.Changed 'standalone legacy snapshot without topology remains writable'
+    $legacyText = [IO.File]::ReadAllText($path)
+    Assert-True ($legacyText.Contains('legacy-standalone-feature') -and
+        $legacyText.Contains('codex/feature-synthetic') -and
+        $legacyText.Contains('base: codex/feature-synthetic')) 'standalone legacy topology and feature PR base are recorded'
+
+    $epicResumeSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) {
+        if ($key -cne 'Topology') { $epicResumeSnapshot[$key] = $snapshot[$key] }
+    }
+    $resolvedEpicTopology = Resolve-MigrationTopology $epicResumeSnapshot
+    Assert-True ($resolvedEpicTopology -eq 'epic-shared-feature') 'epic scope preserves the epic feature topology'
+    $epicResumeSnapshot['Topology'] = $resolvedEpicTopology
+    $epicResumeResult = & $writer -NotePath $path -Snapshot $epicResumeSnapshot
+    Assert-True $epicResumeResult.Changed 'epic legacy snapshot without topology remains writable'
+    $epicResumeText = [IO.File]::ReadAllText($path)
+    Assert-True ($epicResumeText.Contains('epic-shared-feature') -and
+        $epicResumeText.Contains('codex/feature-synthetic') -and
+        $epicResumeText.Contains('stories: #52, #53')) 'epic topology and feature lineage are preserved during migration'
+
+    $ambiguousSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) {
+        if ($key -cne 'Topology') { $ambiguousSnapshot[$key] = $snapshot[$key] }
+    }
+    $ambiguousSnapshot['Scope'] = 'project 12 | active run without declared scope'
+    Assert-True ((Resolve-MigrationTopology $ambiguousSnapshot) -eq 'needs-reconciliation') 'feature fields without recorded scope require reconciliation'
+
+    $standaloneSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $standaloneSnapshot[$key] = $snapshot[$key] }
+    $standaloneSnapshot['Scope'] = 'project 12 story #52 | tasks: #77, #78'
+    $standaloneSnapshot['Topology'] = 'standalone-story-direct-master'
+    $standaloneSnapshot['Feature'] = 'none (standalone direct-to-master)'
+    $standaloneSnapshot['PR'] = 'pending | base: master | head: revision-000'
+    $standaloneResult = & $writer -NotePath $path -Snapshot $standaloneSnapshot
+    Assert-True $standaloneResult.Changed 'standalone snapshot is writable'
+    $standaloneText = [IO.File]::ReadAllText($path)
+    Assert-True ($standaloneText.Contains('standalone-story-direct-master') -and $standaloneText.Contains('base: master')) 'standalone topology and direct PR base are preserved'
+
+    & $writer -NotePath $path -Snapshot $snapshot | Out-Null
 
     # Reproduce accumulation, then migrate it without throwing away history.
     $legacy = "Run: synthetic-story-52`n" + ((1..40 | ForEach-Object {

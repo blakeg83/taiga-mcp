@@ -11,11 +11,13 @@ $ErrorActionPreference = 'Stop'
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('taiga-story-loop-' + [Guid]::NewGuid().ToString('N'))
 $remotePath = Join-Path $tempRoot 'remote.git'
 $userPath = Join-Path $tempRoot 'user'
+$standalonePath = Join-Path $tempRoot 'standalone-story-worktree'
 $featurePath = Join-Path $tempRoot 'feature-worktree'
 $storyOnePath = Join-Path $tempRoot 'story-one-worktree'
 $storyTwoPath = Join-Path $tempRoot 'story-two-worktree'
 $notePath = Join-Path $tempRoot 'continuation-note.json'
 $featureBranch = 'codex/feature-synthetic-run'
+$standaloneBranch = 'codex/story-standalone-synthetic-run'
 $storyOneBranch = 'codex/story-1-synthetic-run'
 $storyTwoBranch = 'codex/story-2-synthetic-run'
 $storyThreeBranch = 'codex/story-3-synthetic-run'
@@ -119,7 +121,30 @@ try {
     Invoke-Git $userPath @('fetch', '--prune', 'origin') | Out-Null
     $baseSha = Get-Head $userPath 'origin/master'
 
-    # Feature branch starts at the freshly captured base, in its own worktree.
+    # A standalone story has exactly one branch from the captured base and a
+    # direct-to-master PR. It must not create an integration feature branch.
+    Invoke-Git $userPath @('worktree', 'add', '--detach', $standalonePath, $baseSha) | Out-Null
+    Invoke-Git $standalonePath @('switch', '--create', $standaloneBranch) | Out-Null
+    Set-Content -LiteralPath (Join-Path $standalonePath 'standalone.txt') -Value 'standalone story' -NoNewline
+    Invoke-Git $standalonePath @('add', 'standalone.txt') | Out-Null
+    Invoke-Git $standalonePath @('commit', '-m', 'standalone story') | Out-Null
+    $standaloneHead = Get-Head $standalonePath
+    Assert-WorktreeReceipt $userPath $standalonePath $standaloneBranch $standaloneHead
+    Assert-True ((Get-Head $standalonePath "$standaloneBranch^") -eq $baseSha) 'standalone story starts at the captured master base'
+    $standaloneNote = [ordered]@{
+        topology = 'standalone-story-direct-master'
+        featureBranch = 'none (standalone direct-to-master)'
+        storyBranch = $standaloneBranch
+        storyBaseSha = $baseSha
+        pr = [ordered]@{ base = 'master'; head = $standaloneHead }
+        finalReviewHead = $standaloneHead
+    }
+    Assert-True ($standaloneNote.topology -eq 'standalone-story-direct-master') 'standalone note records its topology'
+    Assert-True ($standaloneNote.featureBranch -like 'none*') 'standalone note has no feature branch'
+    Assert-True ($standaloneNote.pr.base -eq 'master') 'standalone PR targets master'
+    Assert-True ($standaloneNote.finalReviewHead -eq $standaloneNote.pr.head) 'standalone direct PR uses the exact final reviewed HEAD'
+
+    # Epic feature branch starts at the freshly captured base, in its own worktree.
     Invoke-Git $userPath @('worktree', 'add', '--detach', $featurePath, $baseSha) | Out-Null
     Invoke-Git $featurePath @('switch', '--create', $featureBranch) | Out-Null
     Assert-WorktreeReceipt $userPath $featurePath $featureBranch $baseSha
@@ -214,7 +239,7 @@ try {
     exit 0
 }
 finally {
-    foreach ($worktree in @($storyTwoPath, $storyOnePath, $featurePath)) {
+    foreach ($worktree in @($storyTwoPath, $storyOnePath, $featurePath, $standalonePath)) {
         if (Test-Path -LiteralPath $worktree -PathType Container) {
             & git -C $userPath worktree remove --force $worktree 2>$null
         }

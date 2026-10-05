@@ -17,8 +17,13 @@ Before pushing or creating/reusing a PR, reconcile the authoritative records:
    approved HEAD.
 3. Re-run the required repository checks or verify their recorded results are
    for that same HEAD. A missing, failed, or stale check blocks delivery.
-4. Verify the integration feature branch still exists and is the intended PR
-   base. Do not substitute the default branch or a similarly named branch.
+4. Verify the topology-specific PR base: `master` for a new
+   `standalone-story-direct-master` run, or the recorded integration feature
+   branch for an `epic-shared-feature` run. An active
+   `legacy-standalone-feature` run is the explicit compatibility exception:
+   retain and verify its recorded feature branch as the story PR base. A new
+   standalone delivery must not invent or substitute a feature branch; an
+   epic must not substitute `master` or a similarly named branch.
 
 If any preflight result is unknown, preserve the state and reconcile it before
 retrying. A changed HEAD, story requirement, branch base, or check result makes
@@ -28,15 +33,16 @@ pair.
 ## Push and PR identity
 
 After preflight succeeds, push only the authorized story branch. Find an
-existing PR by repository, exact head branch, recorded feature base, and
+existing PR by repository, exact head branch, topology-specific base, and
 reviewed head commit. Reuse a PR only when all of those identities match and
-the provider reports it open and unclosed. A PR from another branch, a
-closed/unmerged PR, a PR with a changed head, or a response-lost create is not a
-successful delivery; inspect the provider before creating anything else. If an
-exact-match PR has missing or null provider state, return an unknown/reconcile
-outcome and do not create another PR until the provider state is resolved.
+the provider reports it open and unclosed. A PR from another branch, an
+incorrect base, a closed/unmerged PR, a PR with a changed head, or a
+response-lost create is not a successful delivery; inspect the provider before
+creating anything else. If an exact-match PR has missing or null provider
+state, return an unknown/reconcile outcome and do not create another PR until
+the provider state is resolved.
 
-The story PR must target the integration feature branch and must include this
+The story PR must target the topology-specific base and must include this
 review evidence in its description:
 
 ```markdown
@@ -56,14 +62,20 @@ review evidence in its description:
 
 ## Scope
 - Story: #<ref>
-- Base: `<feature branch>`
+- Base: `<master for new standalone, feature branch for epic or legacy active standalone>`
 - Head: `<exact commit SHA>`
 ```
 
+For a legacy active standalone run, this is still the old story-to-feature PR;
+after its separate merge approval and provider-confirmed merge, follow
+[final feature-to-master delivery](final-delivery.md) for the preserved feature
+branch. The exception never authorizes a new story or changes the recorded
+lineage.
+
 The coordinator attaches the resulting PR to the current chat and links the
-exact PR URL, base, head, and checks in the parent Taiga story comment. The
-comment records `state: pr_ready_for_approval`; it does not mark the story
-Done, claim a merge, or authorize the next story.
+exact PR URL, topology, base, head, and checks in the parent Taiga story
+comment. The comment records `state: pr_ready_for_approval`; it does not mark
+the story Done, claim a merge, or authorize the next epic story.
 
 ## Delivery result and recovery
 

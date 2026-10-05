@@ -15,9 +15,11 @@ function Assert-True {
 
 function New-DeliveryReceipt {
     param(
+        [ValidateSet('standalone','legacy-standalone-feature','epic')] [string] $RunKind = 'epic',
         [string] $Repository = 'TaigaMCP',
         [string] $StoryBranch = 'codex/story-50-run1',
         [string] $FeatureBranch = 'codex/feature-taiga-mcp-run1',
+        [string] $PrBase = 'codex/feature-taiga-mcp-run1',
         [string] $ApprovedHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $BranchHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [bool] $Clean = $true,
@@ -25,9 +27,11 @@ function New-DeliveryReceipt {
         [string] $ChecksHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     )
     [ordered]@{
+        runKind = $RunKind
         repository = $Repository
         storyBranch = $StoryBranch
         featureBranch = $FeatureBranch
+        prBase = $PrBase
         approvedHead = $ApprovedHead
         branchHead = $BranchHead
         clean = $Clean
@@ -42,20 +46,27 @@ function Test-DeliveryPreflight {
     if ($Receipt.approvedHead -ne $Receipt.branchHead) { return 'stale_review' }
     if (-not $Receipt.checksPassed) { return 'failed_checks' }
     if ($Receipt.checksHead -ne $Receipt.branchHead) { return 'stale_checks' }
-    if ([string]::IsNullOrWhiteSpace($Receipt.featureBranch)) { return 'missing_feature_base' }
+    if ($Receipt.runKind -eq 'standalone') {
+        if (-not [string]::IsNullOrWhiteSpace($Receipt.featureBranch)) { return 'unexpected_feature_base' }
+        if ($Receipt.prBase -ne 'master') { return 'wrong_standalone_base' }
+    }
+    elseif ([string]::IsNullOrWhiteSpace($Receipt.featureBranch) -or
+        $Receipt.prBase -ne $Receipt.featureBranch) {
+        return 'missing_feature_base'
+    }
     'ready'
 }
 
 function New-PrBody {
     param(
         [string] $StoryRef,
-        [string] $FeatureBranch,
+        [string] $PrBase,
         [string] $Head,
         [string[]] $Checks
     )
     @(
         '## Problem'
-        "Deliver story #$StoryRef into the integration feature branch."
+        "Deliver story #$StoryRef through the $PrBase branch topology."
         ''
         '## Changes'
         'Reviewed story implementation.'
@@ -70,7 +81,7 @@ function New-PrBody {
         ''
         '## Scope'
         "- Story: #$StoryRef"
-        "- Base: ``$FeatureBranch``"
+        "- Base: ``$PrBase``"
         "- Head: ``$Head``"
     ) -join "`n"
 }
@@ -88,7 +99,7 @@ function Resolve-Pr {
         $_.PSObject.Properties['head'] -and
         $_.repository -eq $Receipt.repository -and
         $_.headBranch -eq $Receipt.storyBranch -and
-        $_.base -eq $Receipt.featureBranch -and
+        $_.base -eq $Receipt.prBase -and
         $_.head -eq $Receipt.branchHead
     })
 
@@ -114,7 +125,7 @@ function Resolve-Pr {
         pr = [pscustomobject]@{
             url = $PrUrl
             repository = $Receipt.repository
-            base = $Receipt.featureBranch
+            base = $Receipt.prBase
             head = $Receipt.branchHead
         }
     }
@@ -122,11 +133,17 @@ function Resolve-Pr {
 
 function New-StoryLink {
     param([psobject] $Pr, [hashtable] $Receipt, [string[]] $Checks)
-    "Task-independent story delivery | state: pr_ready_for_approval | PR: $($Pr.url) | base: $($Receipt.featureBranch) | head: $($Receipt.branchHead) | checks: $($Checks -join '; ')"
+    "Task-independent story delivery | state: pr_ready_for_approval | PR: $($Pr.url) | base: $($Receipt.prBase) | head: $($Receipt.branchHead) | checks: $($Checks -join '; ')"
 }
 
 $valid = New-DeliveryReceipt
 Assert-True ((Test-DeliveryPreflight $valid) -eq 'ready') 'matching clean approved HEAD should be deliverable'
+
+$standalone = New-DeliveryReceipt -RunKind standalone -FeatureBranch '' -PrBase 'master'
+Assert-True ((Test-DeliveryPreflight $standalone) -eq 'ready') 'standalone story should deliver directly to master without a feature branch'
+
+$legacy = New-DeliveryReceipt -RunKind legacy-standalone-feature
+Assert-True ((Test-DeliveryPreflight $legacy) -eq 'ready') 'legacy standalone resume should preserve its recorded feature PR base'
 
 $stale = New-DeliveryReceipt -BranchHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 Assert-True ((Test-DeliveryPreflight $stale) -eq 'stale_review') 'changed branch HEAD must invalidate review approval'
@@ -188,7 +205,13 @@ Assert-True ($unknownStateResult.state -eq 'reconcile' -and $unknownStateResult.
 $created = Resolve-Pr @() $valid 'https://example.invalid/pr/new'
 Assert-True ($created.state -eq 'create' -and $created.pr.base -eq $valid.featureBranch -and $created.pr.head -eq $valid.branchHead) 'new PR must target exact feature base and reviewed HEAD'
 
-$body = New-PrBody '50' $valid.featureBranch $valid.branchHead @('- `dotnet test` — exit 0; passed', '- `validate-pr-delivery.ps1` — exit 0; passed')
+$standalonePr = Resolve-Pr @() $standalone 'https://example.invalid/pr/standalone'
+Assert-True ($standalonePr.state -eq 'create' -and $standalonePr.pr.base -eq 'master' -and $standalonePr.pr.head -eq $standalone.branchHead) 'standalone PR must target master and the reviewed HEAD'
+
+$legacyPr = Resolve-Pr @() $legacy 'https://example.invalid/pr/legacy'
+Assert-True ($legacyPr.state -eq 'create' -and $legacyPr.pr.base -eq $legacy.featureBranch -and $legacyPr.pr.head -eq $legacy.branchHead) 'legacy standalone PR must target the preserved feature branch and reviewed HEAD'
+
+$body = New-PrBody '50' $valid.prBase $valid.branchHead @('- `dotnet test` — exit 0; passed', '- `validate-pr-delivery.ps1` — exit 0; passed')
 foreach ($marker in @('## Problem', '## Changes', '## Validation', '## Review', '## Scope', $valid.featureBranch, $valid.branchHead)) {
     Assert-True $body.Contains($marker) "PR body must include $marker"
 }
@@ -198,7 +221,13 @@ foreach ($marker in @('pr_ready_for_approval', $created.pr.url, $valid.featureBr
     Assert-True $link.Contains($marker) "story link must include $marker"
 }
 
-$wrongBase = New-DeliveryReceipt -FeatureBranch ''
+$wrongBase = New-DeliveryReceipt -FeatureBranch '' -PrBase 'master'
 Assert-True ((Test-DeliveryPreflight $wrongBase) -eq 'missing_feature_base') 'missing feature base must block delivery'
 
-Write-Output 'Passed offline PR delivery fixture: exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, unknown-state reconciliation, PR create identity, review evidence, and Taiga link evidence.'
+$standaloneWrongBase = New-DeliveryReceipt -RunKind standalone -FeatureBranch '' -PrBase 'codex/feature-taiga-mcp-run1'
+Assert-True ((Test-DeliveryPreflight $standaloneWrongBase) -eq 'wrong_standalone_base') 'standalone story must not target a feature branch'
+
+$legacyWrongBase = New-DeliveryReceipt -RunKind legacy-standalone-feature -PrBase 'master'
+Assert-True ((Test-DeliveryPreflight $legacyWrongBase) -eq 'missing_feature_base') 'legacy standalone resume must not be converted to a direct master story PR'
+
+Write-Output 'Passed offline PR delivery fixture: standalone direct-master, legacy preserved-feature, and epic feature-base topologies, exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, unknown-state reconciliation, PR create identity, review evidence, and Taiga link evidence.'

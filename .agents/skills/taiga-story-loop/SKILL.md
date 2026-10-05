@@ -57,11 +57,21 @@ for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker
 completion, review acceptance, PR approval, and merge.
 
+Use [scope-specific branch topology](references/branch-topology.md) when
+creating branches or deciding a PR base. A new standalone story has one story
+branch and a direct-to-`master` PR. An epic has one shared feature branch,
+per-story branches/PRs targeting that feature, and a final integrated review.
+An active standalone run from the older feature-based workflow uses the
+documented `legacy-standalone-feature` compatibility path and preserves its
+feature branch through final delivery; that value is never selected for a new
+run.
+
 Use [reviewed story PR delivery](references/pr-delivery.md) when the complete
-story is approved. It defines the coordinator's exact-HEAD preflight, PR
-reuse/create identity, review evidence, Taiga/chat linkage, and the pending
-approval state. Run `scripts/validate-pr-delivery.ps1` for its offline fixture;
-it never performs provider writes.
+story is approved. It defines the coordinator's exact-HEAD preflight, the
+topology-specific PR reuse/create identity, review evidence, Taiga/chat
+linkage, and the pending approval state. Run
+`scripts/validate-pr-delivery.ps1` for its offline fixture; it never performs
+provider writes.
 
 Use [the Yes/No story merge gate](references/merge-approval.md) after a PR is
 ready. It keeps explicit user authorization separate from PR review and merge
@@ -75,12 +85,12 @@ review](references/final-epic-review.md). It pins the final review to
 findings through isolated corrections with exact-HEAD re-review. Run
 `scripts/validate-final-epic-review.ps1` for its offline fixture.
 
-Use [final feature-to-master delivery](references/final-delivery.md) after the
-appropriate story or epic review. It keeps single-story and epic paths
-distinct, requires `master` as the final base, and separates final PR creation,
-user approval, merge verification, story integration, epic acceptance, and
-master release. Run `scripts/validate-final-delivery.ps1` for its offline
-fixture.
+Use [final feature-to-master delivery](references/final-delivery.md) for an
+epic after its integrated review or for an active legacy standalone resume
+after its preserved story merge. A new standalone story merges its reviewed
+story PR directly to `master` through the story merge gate. The contract keeps
+the approval paths distinct and preserves the exact reviewed HEAD in each.
+Run `scripts/validate-final-delivery.ps1` for its offline fixture.
 
 The synthetic ordered-task, failed-check, blocker, review-rejection, and
 human-edit scenarios are recorded in
@@ -88,12 +98,13 @@ human-edit scenarios are recorded in
 exercised by `scripts/validate-task-execution.ps1`. They are offline evidence,
 not a claim of live-provider execution.
 
-For authorized execution, read [branch and continuation](references/branch-and-continuation.md)
-and [minimal continuation note](references/continuation-note.md). They define
-the fresh-base feature branch, per-story managed worktree, PR base, merge gate,
-and compact resume note. The note is deliberately smaller than a state
-registry; existing Git, Taiga, Codex, and pull-request records remain
-authoritative.
+For authorized execution, read [scope-specific branch topology](references/branch-topology.md),
+[branch and continuation](references/branch-and-continuation.md), and
+[minimal continuation note](references/continuation-note.md). They define the
+fresh-base standalone story branch or epic feature branch, per-story managed
+worktrees, topology-specific PR base, merge gates, and compact resume note.
+The note is deliberately smaller than a state registry; existing Git, Taiga,
+Codex, and pull-request records remain authoritative.
 
 Persist current state by replacing the continuation snapshot, not appending
 milestones. Healthy recovery ticks read that snapshot and at most one compact

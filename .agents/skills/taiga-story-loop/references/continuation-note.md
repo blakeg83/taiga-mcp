@@ -13,13 +13,14 @@ Run: <run-id>
 Scope: <project> story/epic #<ref> | stories: <ordered story refs> | tasks: <ordered task refs>
 Repository: <absolute path> | remote: <name> <url>
 Base: <remote>/<base-ref> @ <base-sha>
-Feature: <branch> | worktree: <absolute path> | head: <sha>
+Topology: <standalone-story-direct-master, epic-shared-feature, or legacy-standalone-feature>
+Feature: <branch/worktree/head for epic or legacy resume, or none (standalone direct-to-master)>
 Current: story #<ref> | task/stage: <ref or stage>
 Story branch: <branch> | worktree: <absolute path> | base: <sha>
 Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
 Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
 Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
-PR: <url or pending> | base: <feature branch> | head: <sha>
+PR: <url or pending> | base: <master or feature branch> | head: <sha>
 PR delivery: <not_ready/ready/reused/created/unknown> | link evidence: <url or pending>
 Approval: <pending/yes/no/stale> | prompt: <selectable/plain-text>
 Review: <pending/approved/changes_requested>
@@ -53,8 +54,21 @@ Pending action: <none or external operation identity and unknown outcome>
 Evidence: <current handoff/review/check references; no copied findings>
 ```
 
-Keep authorization boundaries, PR/base/head approval identity, worker hosts and
-cursors, automation identity, and unresolved trial inputs in the current note.
+Keep authorization boundaries, topology, PR/base/head approval identity, worker
+hosts and cursors, automation identity, and unresolved trial inputs in the
+current note. For a newly created standalone run, `Topology` is
+`standalone-story-direct-master`; for an epic it is `epic-shared-feature`.
+Older active notes may omit `Topology`: determine it from the recorded
+`Scope` before using the branch fields. If the scope identifies an epic or
+multiple ordered stories, write/interpret `epic-shared-feature` and preserve
+the existing feature/story branch, worktree, PR, worker, cursor, and recovery
+identities while continuing the next-story gates and integrated epic review.
+If the scope identifies one standalone story and the old note has a nonempty
+feature branch and story PR base, write/interpret
+`legacy-standalone-feature` and resume the old story-to-feature then
+feature-to-`master` path. Missing or ambiguous scope requires reconciliation;
+feature fields alone do not select the legacy exception. Do not rewrite those
+identities during migration or use the legacy value for a new run.
 Use explicit `pending`, `unknown`, `none`, or `not_applicable` values rather than
 dropping a safety-relevant fact. Completed tasks need only ordered refs and a
 concise evidence pointer, not a per-task account of every correction.
@@ -119,12 +133,14 @@ attribution require separately authorized host evidence.
 
 On restart, process the note in this order:
 
-1. Verify the repository path, remote URL, base mapping, feature branch, and
-   recorded HEAD with Git. Fetch only after the run is authorized. A dirty user
-   checkout remains untouched.
-2. Inspect existing managed worktrees and branches for the recorded feature and
-   story identities. If the path, branch, repository, and base match, reuse the
-   object. If a create returned an unknown outcome, inspect before retrying.
+1. Verify the repository path, remote URL, base mapping, recorded topology,
+   and recorded HEAD with Git. Fetch only after the run is authorized. A dirty
+   user checkout remains untouched.
+2. Inspect existing managed worktrees and branches for the recorded feature
+   and story identities. A new standalone run has no feature object to create
+   or infer; a `legacy-standalone-feature` run must reuse its recorded feature
+   object. If the path, branch, repository, and base match, reuse the object.
+   If a create returned an unknown outcome, inspect before retrying.
 3. Inspect the recorded implementer/reviewer thread and host IDs, pair outcome,
    and PR URL. Reuse matching chats/PRs; do not create duplicates because the
    note is stale or incomplete. A pending client ID is not a worker ID; resolve
@@ -139,7 +155,11 @@ unknown; it is never treated as success by timeout.
 
 ## Approved-merge advancement
 
-The next story branch may be created only when all of these are observed:
+For an epic, the next story branch may be created only when all of these are
+observed:
+
+The provider confirms the previous PR merged into the recorded feature branch
+before the next story is dispatched.
 
 - the current PR's base is the recorded feature branch;
 - the provider reports the PR merged, not merely approved or closed;
@@ -153,3 +173,10 @@ waiting and ask for reconciliation or user input. Do not create the next story
 branch from a stale local feature checkout, the story head, or the default
 branch. Once a merge is confirmed, capture the updated feature HEAD and use
 that SHA as the next story's base.
+
+A new standalone story has no next-story gate: its direct-to-`master` story PR
+uses the exact reviewed story HEAD, and the run ends only after the provider
+confirms that explicit merge. A legacy standalone run also has no next-story
+gate; after its preserved story PR is confirmed merged into the feature branch,
+refresh that feature HEAD and continue to the separate final
+feature-to-`master` approval and merge.
