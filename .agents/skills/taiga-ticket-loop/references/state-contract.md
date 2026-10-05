@@ -62,21 +62,50 @@ completed worker. The facade blocks new dispatch/publication when the supplied
 remaining budget is exhausted, while already-running actions remain available
 for bounded observation and reconciliation.
 
-For observation, use `observe-wait` with one or more native wait targets. The
+For observation, use `observe-wait` with one or more native wait targets and,
+when available, a compact `{ workerStatus, waitState }` observation. The
 returned `waitThreadsArguments` preserves the native shape
 `{ targets: [{ threadId, hostId?, afterCursor? }], timeoutMs }`, so concurrent
-ticket waits retain their host IDs and cursors. An unchanged timeout returns a quiet continuation descriptor and does not read
-source, reopen evidence, message a worker, or mutate the registry. Completion,
-changed state, and blockers are the only ordinary reasons to request one
-detailed `read_thread`; user input remains visible as a separate decision.
-`heartbeat-plan` describes creation or reuse of one coordinator heartbeat and
-never schedules a timer per ticket or a nested heartbeat.
+ticket waits retain their host IDs and cursors. `unchanged`, `active`, and
+`progressing` states, plus `expected_progress`, return a quiet continuation
+descriptor with `notifyUser=false`; `awaiting_approval`, `waiting_user`, and
+`user_approval` return `heartbeat_quiet` with the same no-notification behavior.
+These paths read only compact status, do not reopen evidence, message a worker,
+or mutate the registry, and never infer failure from an elapsed field. Only
+completion, changed state, and blockers request one detailed `read_thread`;
+approval waiting remains quiet until the user acts. An observed `interrupted`,
+`failed`, or `missing_handoff` state returns `reconcile_recovery`, not a retry;
+it includes a recovery checklist, sets `reconciliationRequired=true`, and
+ notifies only because meaningful attention is required. Use `check-progress` for
+ a compact native chat/automation check. It never dispatches or mutates state
+ and returns a `heartbeat-plan` continuation instruction only after recent chat,
+ repository/branch, provider/PR, and Taiga state have been reconciled.
+ `heartbeat-plan` describes creation or reuse of one scoped coordinator
+ heartbeat without reading the registry. The first plan returns a reservation
+ continuation and no external create request. A subsequent plan must reconcile
+ that reservation through the native automation service before a create request
+ is allowed; an interrupted create therefore cannot create a duplicate monitor.
+ The supported request uses `rrule.intervalMinutes=30`, `destination=thread`,
+ the coordinator thread, the run binding, and a concise recovery-only prompt.
+ The prompt stays quiet for unchanged, active, progressing, or user-approval
+ waits and does not treat elapsed time as failure. The persisted continuation
+ binding contains only the run/coordinator/scope identity, name, policy,
+ cadence, and heartbeat ID. A paused existing heartbeat is reactivated when
+ its run resumes. The heartbeat never schedules a timer per ticket or a nested
+ heartbeat, and normal handoffs do not wait for its next tick.
+
+`heartbeat-plan` is lifecycle-aware. A pausing or cancelling run returns
+`wait_for_quiescence` without creating or mutating an automation. A paused run
+returns a `PAUSED` update for the existing ID, and an active resumed run
+returns an `ACTIVE` update when that saved schedule is paused. A completed or
+cancelled run returns a delete request; a terminal run with no recorded ID
+cannot create a new schedule.
 
 `record-receipt-repair` is available only while the owned ticket is reviewing.
-It records format/evidence repairs in a per-ticket ledger with remaining
-minutes. The default `limits.maxReceiptRepairAttempts` is two and may be
-reduced to one. Its counter is independent of `correctionRound`; exhaustion or
-no remaining time returns `needs_input` and does not create another attempt.
+ It records format/evidence repairs in a per-ticket ledger. The default
+ `limits.maxReceiptRepairAttempts` is two and may be reduced to one. Its counter
+ is independent of `correctionRound`; exhaustion returns `needs_input` and does
+ not create another attempt.
 Existing schema-2 tickets acquire an empty repair ledger on first use.
 
 Waiting for a dependency or merge releases an execution slot but retains the

@@ -113,7 +113,7 @@
       "setup": "expired-dispatch",
       "usesStateRoot": true,
       "input": {},
-      "expect": { "ok": true, "decision": "needs_input", "reason": "elapsed_budget" }
+      "expect": { "ok": true, "decision": "dispatch" }
     }
   ]
 }

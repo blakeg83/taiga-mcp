@@ -183,11 +183,6 @@ function Assert-PacketSemantics {
     $authority = Require-Map $Packet 'authority'; Assert-AllowedKeys $authority @('authorizedActions', 'excludedActions') 'authority'
     $null = Get-StringArray $authority 'authorizedActions' 'authority'
     $null = Get-StringArray $authority 'excludedActions' 'authority' -AllowEmpty
-    $deadline = Require-Map $Packet 'deadline'; Assert-AllowedKeys $deadline @('startedAtUtc', 'deadlineUtc', 'elapsedBudgetMinutes') 'deadline'
-    $startedAt = [DateTimeOffset]::MinValue; $deadlineAt = [DateTimeOffset]::MinValue
-    if (-not [DateTimeOffset]::TryParse((Require-String $deadline 'startedAtUtc' 'deadline'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$startedAt)) { throw 'deadline.startedAtUtc is invalid.' }
-    if (-not [DateTimeOffset]::TryParse((Require-String $deadline 'deadlineUtc' 'deadline'), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$deadlineAt) -or $deadlineAt -le $startedAt) { throw 'deadline.deadlineUtc must be after startedAtUtc.' }
-    Require-PositiveInt $deadline 'elapsedBudgetMinutes' 'deadline' | Out-Null
     $profiles = Require-Map $Packet 'profiles'; Assert-AllowedKeys $profiles @('coordinator', 'implementer', 'reviewer') 'profiles'
     $coordinator = Normalize-Profile $profiles 'coordinator'; $implementer = Normalize-Profile $profiles 'implementer'; $reviewer = Normalize-Profile $profiles 'reviewer'
     if ($implementer.model -ne 'gpt-5.6-luna' -or $implementer.effort -ne 'xhigh') { throw 'The packet implementation profile must be gpt-5.6-luna/xhigh.' }
@@ -215,8 +210,6 @@ function New-Packet {
     $unresolved = Get-StringArray $unresolvedInput 'unresolvedRequirements' 'create request' -AllowEmpty
     $authorityInput = Require-Map $InputObject 'authority'; Assert-AllowedKeys $authorityInput @('authorizedActions', 'excludedActions') 'authority'
     $authority = [ordered]@{ authorizedActions = Get-StringArray $authorityInput 'authorizedActions' 'authority'; excludedActions = Get-StringArray $authorityInput 'excludedActions' 'authority' -AllowEmpty }
-    $deadlineInput = Require-Map $InputObject 'deadline'; Assert-AllowedKeys $deadlineInput @('startedAtUtc', 'deadlineUtc', 'elapsedBudgetMinutes') 'deadline'
-    $deadline = [ordered]@{ startedAtUtc = Require-String $deadlineInput 'startedAtUtc' 'deadline'; deadlineUtc = Require-String $deadlineInput 'deadlineUtc' 'deadline'; elapsedBudgetMinutes = Require-PositiveInt $deadlineInput 'elapsedBudgetMinutes' 'deadline' }
     $profileInput = Require-Map $InputObject 'profiles'
     Assert-AllowedKeys $profileInput @('coordinator', 'implementer', 'reviewer') 'profiles'
     $profiles = [ordered]@{ coordinator = Normalize-Profile $profileInput 'coordinator'; implementer = Normalize-Profile $profileInput 'implementer'; reviewer = Normalize-Profile $profileInput 'reviewer' }
@@ -256,7 +249,6 @@ function New-Packet {
         requiredCommands = $commands
         unresolvedRequirements = $unresolved
         authority = $authority
-        deadline = $deadline
         profiles = $profiles
     }
     $packet.packetHash = Get-JsonSha256 $packet

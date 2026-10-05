@@ -27,13 +27,13 @@ The packet contains:
 - repository identity/path, worker worktree, branch, and captured base SHA;
 - required repository commands and unresolved product requirements;
 - explicitly authorized and excluded actions;
-- UTC start/deadline, elapsed-time budget, and coordinator/worker profiles.
+- coordinator/worker profiles and the immutable repository binding.
 
 The worker profiles are currently `gpt-5.6-luna`/`xhigh` and
 `gpt-6.1-sol`/`high`. The selected coordinator profile is captured as supplied.
 The packet builder rejects other worker profiles, incomplete ticket/repository
-bindings, inaccessible context/worktrees, malformed criteria, and invalid
-deadlines. A nonempty `unresolvedRequirements` list is a clarification blocker:
+bindings, inaccessible context/worktrees, and malformed criteria. A nonempty
+`unresolvedRequirements` list is a clarification blocker:
 resolve it with the user and issue a new packet before dispatch.
 
 ## Create and verify
@@ -57,7 +57,7 @@ pwsh -NoProfile -File .agents/skills/taiga-ticket-loop/scripts/workflow-packet.p
 ```
 
 Validation checks the packet hash, current context-file hash, stable criterion
-ordering, profiles, deadline, repository binding, and any supplied expected
+ordering, profiles, repository binding, and any supplied expected
 identity. Packet files are immutable: create a new `packetId` after a scope
 change and retain the prior artifact for audit. Do not paste the full packet or
 full ticket history into the worker prompt.

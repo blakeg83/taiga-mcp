@@ -18,7 +18,7 @@ disagreements to the reviewer before escalating unresolved decisions. The
 
 Pass workers the packet's absolute path and hash. The packet carries stable
 criteria, complete-context reference/hash, checkout/base, required commands,
-authority, deadline, and exact profiles. This short prompt is only a file
+authority and exact profiles. This short prompt is only a file
 reference; it does not remove any requirement. See
 [assignment-packets.md](assignment-packets.md) for packet creation and
 validation.

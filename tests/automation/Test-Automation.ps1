@@ -225,6 +225,9 @@ try {
         $packetRequest = @{ packetId = 'packet-coordinate'; sessionId = 'synthetic-session-01'; runId = 'coordinate-run'; ticket = @{ ticketKey = 'project:123:issue:800'; projectId = 123; kind = 'issue'; id = 800; ref = 800; title = 'Coordinate fixture' }; contextPath = $packetContextPath; criteria = @(@{ id = 'criterion-1'; text = 'Dispatch from a durable packet.' }); repository = @{ identity = 'coordinate-repo'; repositoryPath = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; worktreePath = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path; branch = $fixtureBranch; baseSha = $fixtureHead }; requiredCommands = @('synthetic-check'); unresolvedRequirements = @(); authority = @{ authorizedActions = @('dispatch'); excludedActions = @() }; deadline = @{ startedAtUtc = '2026-09-30T00:00:00Z'; deadlineUtc = '2099-09-30T00:00:00Z'; elapsedBudgetMinutes = 120 }; profiles = @{ coordinator = @{ model = 'gpt-6.1-sol'; effort = 'high' }; implementer = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }; reviewer = @{ model = 'gpt-6.1-sol'; effort = 'high' } } }
         $packetCreated = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $packetRequest 'coordinate-packet-request'),'-StateRoot',$coordRoot)
         $packetPath = [string]$packetCreated.data.packetPath
+        $noDeadlinePacketRequest = Copy-JsonObject $packetRequest; $noDeadlinePacketRequest.packetId = 'packet-coordinate-no-deadline'; $noDeadlinePacketRequest.Remove('deadline')
+        $noDeadlinePacket = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $noDeadlinePacketRequest 'coordinate-no-deadline-packet-request'),'-StateRoot',$coordRoot)
+        Assert-True (-not [string]::IsNullOrWhiteSpace([string]$noDeadlinePacket.data.packetPath)) 'assignment packets must not require an elapsed deadline'
         $promptPath = Join-Path $script:FixtureRoot 'coordinate-prompt.md'; [IO.File]::WriteAllText($promptPath, 'Use packet {{packetPath}} with hash {{packetHash}} for {{workerId}}.', [Text.UTF8Encoding]::new($false))
         $dispatch = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; ticketKey = 'project:123:issue:800'; actionId = 'dispatch-1'; workerId = 'worker-1'; packetReference = @{ path = $packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $packetPath).Hash.ToLowerInvariant() }; promptReference = @{ path = $promptPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $promptPath).Hash.ToLowerInvariant() } }
         $prepared = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $dispatch 'coordinate-dispatch'),'-StateRoot',$coordRoot)
@@ -236,12 +239,12 @@ try {
         Assert-Equal 'reconcile' $duplicate.data.decision 'duplicate preparation must reconcile instead of redispatching'
         $expired = Copy-JsonObject $dispatch; $expired.actionId = 'dispatch-expired'; $expired.remainingMinutes = 0
         $expiredResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expired 'coordinate-expired-dispatch'),'-StateRoot',$coordRoot)
-        Assert-Equal 'needs_input' $expiredResult.data.decision 'wall-clock expiry must block new external work'
+        Assert-Equal 'dispatch' $expiredResult.data.decision 'wall-clock expiry must not block new external work'
         $expiredPacketRequest = Copy-JsonObject $packetRequest; $expiredPacketRequest.packetId = 'packet-coordinate-expired'; $expiredPacketRequest.deadline.startedAtUtc = '1999-01-01T00:00:00Z'; $expiredPacketRequest.deadline.deadlineUtc = '2000-01-01T02:00:00Z'
         $expiredPacket = Invoke-PsJson $script:PacketScript @('-Operation','create','-InputPath',(New-InputPath $expiredPacketRequest 'coordinate-expired-packet-request'),'-StateRoot',$coordRoot)
         $expiredPacketDispatch = Copy-JsonObject $dispatch; $expiredPacketDispatch.actionId = 'dispatch-packet-expired'; $expiredPacketDispatch.packetReference = @{ path = $expiredPacket.data.packetPath; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $expiredPacket.data.packetPath).Hash.ToLowerInvariant() }; $expiredPacketDispatch.Remove('remainingMinutes')
         $expiredPacketResult = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $expiredPacketDispatch 'coordinate-packet-expired-dispatch'),'-StateRoot',$coordRoot)
-        Assert-Equal 'needs_input' $expiredPacketResult.data.decision 'an expired packet must block dispatch even without a caller-supplied remainingMinutes'
+        Assert-Equal 'dispatch' $expiredPacketResult.data.decision 'an expired packet must not impose a wall-clock dispatch deadline'
         $allPlaceholderPrompt = Join-Path $script:FixtureRoot 'coordinate-all-placeholders.md'; [IO.File]::WriteAllText($allPlaceholderPrompt, '{{packetId}} {{reviewedSha}} {{repositoryPath}} {{schemaPath}} {{packetHash}}', [Text.UTF8Encoding]::new($false))
         $renderedDispatch = Copy-JsonObject $dispatch; $renderedDispatch.actionId = 'dispatch-rendered'; $renderedDispatch.workerId = 'reviewer-1'; $renderedDispatch.reviewedSha = $fixtureHead; $renderedDispatch.promptReference = @{ path = $allPlaceholderPrompt; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $allPlaceholderPrompt).Hash.ToLowerInvariant() }
         $rendered = Invoke-PsJson $script:CoordinateScript @('-Operation','prepare-dispatch','-InputPath',(New-InputPath $renderedDispatch 'coordinate-rendered-dispatch'),'-StateRoot',$coordRoot)
@@ -325,22 +328,191 @@ try {
         Assert-Equal 'continue_wait' $quiet.data.decision 'unchanged wait should continue the bounded native wait'
         Assert-Equal 'wait_threads' $quiet.data.nativeOperation 'unchanged wait should use wait_threads'
         Assert-Equal 0 @($quiet.data.changedFields).Count 'unchanged wait should not mutate state'
+        Assert-True (-not $quiet.data.notifyUser) 'unchanged wait should not notify the user'
+        Assert-Equal 'compact_worker_and_wait_state_only' $quiet.data.contextRead 'unchanged wait should read only compact state'
+        Assert-Equal 0 $quiet.data.contextFootprint.heavyweightReads 'healthy ticks should not load heavyweight context'
+        Assert-True (-not $quiet.data.contextFootprint.sourceRead) 'healthy ticks should not reread source'
+        Assert-True (-not $quiet.data.contextFootprint.ticketReread) 'healthy ticks should not reread tickets'
         Assert-True (-not $quiet.data.waitThreadsArguments.targets[0].Contains('hostId')) 'absent native wait host IDs must be omitted rather than null'
         $noTarget = Copy-JsonObject $unchanged; $noTarget.Remove('threadId'); $noTarget.Remove('afterCursor'); $noTarget.Remove('targets'); $noTargetResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $noTarget 'wait-no-target'),'-StateRoot',$waitRoot) $false; Assert-True (-not $noTargetResult.ok) 'a native wait descriptor without targets must fail closed'
         $after = Invoke-PsJson $script:StateScript @('-Operation','inspect','-StateRoot',$waitRoot)
         Assert-Equal $before.revision $after.revision 'unchanged wait must not advance the registry revision'
+        $active = Copy-JsonObject $unchanged; $active.waitStatus = 'active'; $active.compactStatus = @{ workerStatus = 'active'; waitState = 'expected_progress'; elapsedMinutes = 999 }
+        $activeResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $active 'wait-active'),'-StateRoot',$waitRoot)
+        Assert-Equal 'continue_wait' $activeResult.data.decision 'active work should remain a quiet wait'
+        Assert-Equal 'wait_threads' $activeResult.data.nativeOperation 'active work should not trigger a detailed read'
+        Assert-True (-not $activeResult.data.notifyUser) 'active work should not notify the user'
+        Assert-True (-not $activeResult.data.detailFetch) 'active work should not fetch heavyweight detail'
+        $blocked = Copy-JsonObject $unchanged; $blocked.waitStatus = 'blocked'; $blocked.compactStatus = @{ workerStatus = 'active'; waitState = 'expected_progress' }
+        $blockedResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $blocked 'wait-blocked-active-worker'),'-StateRoot',$waitRoot)
+        Assert-Equal 'fetch_blocker' $blockedResult.data.decision 'a blocked event must outrank a healthy worker observation'
+        Assert-Equal 'read_thread' $blockedResult.data.nativeOperation 'a blocked event should fetch the blocker detail'
+        Assert-True $blockedResult.data.notifyUser 'a blocked event should notify the user'
+        Assert-True $blockedResult.data.detailFetch 'a blocked event should request detail'
+        $completedActive = Copy-JsonObject $unchanged; $completedActive.waitStatus = 'completed'; $completedActive.compactStatus = @{ workerStatus = 'active'; waitState = 'expected_progress' }
+        $completedActiveResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completedActive 'wait-completed-active-worker'),'-StateRoot',$waitRoot)
+        Assert-Equal 'fetch_result' $completedActiveResult.data.decision 'a completed event must outrank a healthy worker observation'
+        Assert-True $completedActiveResult.data.notifyUser 'a completed event should notify the user'
+        $approval = Copy-JsonObject $unchanged; $approval.waitStatus = 'awaiting_approval'; $approval.compactStatus = @{ workerStatus = 'waiting_user'; waitState = 'user_approval'; elapsedMinutes = 999 }
+        $approvalResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $approval 'wait-approval'),'-StateRoot',$waitRoot)
+        Assert-Equal 'heartbeat_quiet' $approvalResult.data.decision 'pending user approval should remain quiet'
+        Assert-Equal 'wait_threads' $approvalResult.data.nativeOperation 'pending approval should not trigger a detailed read'
+        Assert-True (-not $approvalResult.data.notifyUser) 'pending approval should not duplicate notifications'
+        Assert-True (-not $approvalResult.data.detailFetch) 'pending approval should not fetch heavyweight detail'
+        $interrupted = Copy-JsonObject $unchanged; $interrupted.waitStatus = 'interrupted'; $interrupted.compactStatus = @{ workerStatus = 'interrupted'; waitState = 'unknown' }
+        $interruptedResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $interrupted 'wait-interrupted'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_recovery' $interruptedResult.data.decision 'interrupted work should require evidence-based recovery'
+        Assert-Equal 'read_thread' $interruptedResult.data.nativeOperation 'interrupted work should fetch the recent worker result'
+        Assert-True $interruptedResult.data.notifyUser 'meaningful recovery should notify the user'
+        Assert-True $interruptedResult.data.recovery.reconciliationRequired 'interrupted work should require external reconciliation'
+        Assert-True (-not $interruptedResult.data.recovery.retryAllowed) 'interrupted work must not replay an ambiguous action'
+        $missingHandoff = Copy-JsonObject $unchanged; $missingHandoff.waitStatus = 'completed'; $missingHandoff.compactStatus = @{ workerStatus = 'completed'; waitState = 'missing_handoff' }
+        $missingHandoffResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $missingHandoff 'wait-missing-handoff'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_recovery' $missingHandoffResult.data.decision 'a completed worker with a missing handoff should require recovery'
+        Assert-True $missingHandoffResult.data.notifyUser 'a missing handoff should notify the user'
+        $manual = Invoke-PsJson $script:CoordinateScript @('-Operation','check-progress','-InputPath',(New-InputPath @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; continuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' } } 'manual-check-progress'),'-StateRoot',$waitRoot)
+        Assert-Equal 'check_progress' $manual.data.decision 'manual check-progress should inspect the existing run'
+        Assert-True $manual.data.manual 'manual check-progress should not dispatch work'
+        Assert-True ($manual.data.resumeInstruction -like '*heartbeat-plan*') 'manual check-progress should expose the native resume instruction'
+        Assert-True ($manual.data.resumeInstruction -notlike '*workflow-state.ps1*') 'manual check-progress should not require the custom workflow-state application'
+        Assert-Equal 'wait_threads' $manual.data.nativeOperation 'healthy manual check-progress should use native waiting'
+        Assert-True (-not $manual.data.stateMutation) 'manual check-progress should not mutate state'
+        $manualNativeOnly = Invoke-PsJson $script:CoordinateScript @('-Operation','check-progress','-InputPath',(New-InputPath @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; continuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' } } 'manual-check-progress-native-only'))
+        Assert-Equal 'check_progress' $manualNativeOnly.data.decision 'manual check-progress must work without a workflow-state registry'
+        $concurrent = Copy-JsonObject $unchanged; $concurrent.Remove('threadId'); $concurrent.Remove('afterCursor'); $concurrent.targets = @(@{ threadId = 'worker-1'; afterCursor = 'cursor-1' }, @{ threadId = 'worker-2'; hostId = 'local'; afterCursor = 'cursor-2' })
+        $concurrentResult = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $concurrent 'wait-concurrent'),'-StateRoot',$waitRoot)
+        Assert-Equal 2 @($concurrentResult.data.waitThreadsArguments.targets).Count 'concurrent message and tick waits should preserve both targets'
+        Assert-Equal 'cursor-2' $concurrentResult.data.waitThreadsArguments.targets[1].afterCursor 'concurrent waits should preserve each cursor'
+        Assert-True (-not $concurrentResult.data.stateMutation) 'concurrent waits should not mutate state'
         $completed = Copy-JsonObject $unchanged; $completed.waitStatus = 'completed'
         $detail = Invoke-PsJson $script:CoordinateScript @('-Operation','observe-wait','-InputPath',(New-InputPath $completed 'wait-completed'),'-StateRoot',$waitRoot)
         Assert-Equal 'fetch_result' $detail.data.decision 'completion should trigger one detailed result read'
         Assert-Equal 'read_thread' $detail.data.nativeOperation 'completion should use read_thread only after a wake'
-        $heartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-create'),'-StateRoot',$waitRoot)
-        Assert-Equal 'create_heartbeat' $heartbeat.data.decision 'first heartbeat plan should create one session heartbeat'
-        $set = @{ sessionId = 'synthetic-session-01'; ownerGeneration = 1; expectedRevision = $after.revision; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE' }
-        $setResult = Invoke-PsJson $script:StateScript @('-Operation','set-heartbeat','-InputPath',(New-InputPath $set 'heartbeat-set'),'-StateRoot',$waitRoot)
-        $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath @{ sessionId = 'synthetic-session-01'; notificationPolicy = 'failed_runs_only' } 'heartbeat-reuse'),'-StateRoot',$waitRoot)
+        $heartbeatInput = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scope = @{ story = 51; tasks = @(73,74,75,76) }; notificationPolicy = 'failed_runs_only' }
+        $heartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-reserve'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reserve_heartbeat' $heartbeat.data.decision 'first heartbeat plan should reserve before external creation'
+        Assert-True ($null -eq $heartbeat.data.automationRequest) 'reservation must not issue an external create request'
+        Assert-Equal 'create_reserved' $heartbeat.data.continuation.state 'reservation should be persisted as continuation context'
+        $nativeOnlyHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-native-only'))
+        Assert-Equal 'reserve_heartbeat' $nativeOnlyHeartbeat.data.decision 'heartbeat setup must work without a workflow-state registry'
+        $repeatReservation = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $heartbeatInput 'heartbeat-repeat-reserve'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reserve_heartbeat' $repeatReservation.data.decision 'a second uncommitted plan must remain a reservation'
+        Assert-True ($null -eq $repeatReservation.data.automationRequest) 'duplicate plans must not create before the reservation is recorded'
+        Assert-Equal 30 $heartbeat.data.heartbeat.intervalMinutes 'heartbeat should use a 30-minute interval'
+        Assert-Equal 30 $heartbeat.data.heartbeat.rrule.intervalMinutes 'heartbeat should expose the supported interval rule'
+        Assert-Equal 'coordinator-thread' $heartbeat.data.heartbeat.targetThreadId 'heartbeat should target the coordinator thread'
+        Assert-Equal 'synthetic-session-01' $heartbeat.data.heartbeat.runId 'heartbeat should bind to the coordinator run'
+        Assert-True ($heartbeat.data.heartbeat.prompt -like '*Recovery-only check*') 'heartbeat prompt should be recovery-only'
+        Assert-True ($heartbeat.data.heartbeat.prompt -like '*Do not treat elapsed time as failure*') 'heartbeat prompt should reject elapsed-time failure'
+        $reservedInput = Copy-JsonObject $heartbeatInput; $reservedInput.continuation = $heartbeat.data.continuation
+        $reconcile = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $reservedInput 'heartbeat-reconcile'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_creation' $reconcile.data.decision 'a recorded reservation must reconcile before any create retry'
+        Assert-True ($null -eq $reconcile.data.automationRequest) 'unresolved creation must not issue a duplicate create request'
+        Assert-True (-not $reconcile.data.reservation.createAllowed) 'reconciliation must explicitly prohibit creation'
+        $legacyReconciled = Copy-JsonObject $reservedInput; $legacyReconciled.creationReconciled = $true
+        $legacyCreate = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $legacyReconciled 'heartbeat-legacy-reconciled'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_creation' $legacyCreate.data.decision 'the obsolete boolean reconciliation flag must not authorize creation'
+        Assert-True ($null -eq $legacyCreate.data.automationRequest) 'the obsolete reconciliation flag must not issue a create request'
+        $createInput = Copy-JsonObject $reservedInput; $createInput.creationReconciliation = @{ reservationId = [string]$heartbeat.data.continuation.reservationId; outcome = 'not_found'; checkedAtUtc = '2026-10-04T00:00:00Z' }
+        $create = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $createInput 'heartbeat-create'),'-StateRoot',$waitRoot)
+        Assert-Equal 'create_heartbeat' $create.data.decision 'creation should require an explicit fresh no-existing-monitor reconciliation'
+        Assert-Equal 'create' $create.data.automationRequest.mode 'reconciled reservation should issue one create operation'
+        Assert-True (-not $create.data.automationRequest.Contains('reservationId')) 'unsupported reservation fields must not be sent to the automation provider'
+        Assert-True (-not $create.data.automationRequest.Contains('idempotencyKey')) 'unsupported idempotency fields must not be sent to the automation provider'
+        Assert-Equal 'create_pending' $create.data.continuation.state 'a create request must be persisted as pending before the external call'
+        Assert-Equal 'thread' $create.data.automationRequest.destination 'heartbeat should be thread-scoped'
+        $createRetryInput = Copy-JsonObject $createInput; $createRetryInput.continuation = $create.data.continuation; $createRetryInput.Remove('creationReconciliation')
+        $createRetry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $createRetryInput 'heartbeat-create-retry'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_creation' $createRetry.data.decision 'an interrupted create must require fresh reconciliation before another attempt'
+        Assert-True ($null -eq $createRetry.data.automationRequest) 'an interrupted create must not immediately issue a second create'
+        $cancelPendingInput = Copy-JsonObject $createRetryInput; $cancelPendingInput.lifecycle = 'cancelled'
+        $cancelPending = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelPendingInput 'heartbeat-cancel-pending'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_creation' $cancelPending.data.decision 'cancellation must reconcile an unresolved creation before cleanup'
+        Assert-Equal 'create_pending' $cancelPending.data.continuation.state 'cancellation must retain the unresolved creation continuation'
+        Assert-True ($null -eq $cancelPending.data.automationRequest) 'cancellation must not forget a possibly-created heartbeat'
+        $cancelFoundInput = Copy-JsonObject $cancelPendingInput; $cancelFoundInput.creationReconciliation = @{ reservationId = [string]$cancelPending.data.continuation.reservationId; outcome = 'found'; heartbeatId = 'late-heartbeat'; checkedAtUtc = '2026-10-04T00:01:00Z' }
+        $cancelFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelFoundInput 'heartbeat-cancel-found'),'-StateRoot',$waitRoot)
+        Assert-Equal 'remove_heartbeat' $cancelFound.data.decision 'cancellation should delete a heartbeat found during creation reconciliation'
+        Assert-Equal 'late-heartbeat' $cancelFound.data.automationRequest.id 'cleanup must use the reconciled heartbeat ID'
+        $cancelNotFoundInput = Copy-JsonObject $cancelPendingInput; $cancelNotFoundInput.creationReconciliation = @{ reservationId = [string]$cancelPending.data.continuation.reservationId; outcome = 'not_found'; checkedAtUtc = '2026-10-04T00:02:00Z' }
+        $cancelNotFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $cancelNotFoundInput 'heartbeat-cancel-not-found'),'-StateRoot',$waitRoot)
+        Assert-Equal 'no_heartbeat' $cancelNotFound.data.decision 'definitive cancellation reconciliation should finish cleanup'
+        Assert-Equal 'absent' $cancelNotFound.data.continuation.state 'definitive cancellation reconciliation should clear the creation continuation'
+        Assert-True ($null -eq $cancelNotFound.data.reservation) 'definitive cancellation reconciliation should release its reservation'
+        $completedNotFoundInput = Copy-JsonObject $cancelNotFoundInput; $completedNotFoundInput.lifecycle = 'completed'
+        $completedNotFound = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $completedNotFoundInput 'heartbeat-completed-not-found'),'-StateRoot',$waitRoot)
+        Assert-Equal 'no_heartbeat' $completedNotFound.data.decision 'definitive completion reconciliation should finish cleanup'
+        Assert-Equal 'absent' $completedNotFound.data.continuation.state 'definitive completion reconciliation should clear the creation continuation'
+        $activeContinuation = @{ state = 'active'; heartbeatId = 'heartbeat-1'; scheduleState = 'ACTIVE'; runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash }
+        $activeInput = @{ runId = 'synthetic-session-01'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; continuation = $activeContinuation; notificationPolicy = 'failed_runs_only' }
+        $wrongRun = Copy-JsonObject $activeInput; $wrongRun.runId = 'synthetic-session-02'
+        $wrongRunResult = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $wrongRun 'heartbeat-wrong-run'),'-StateRoot',$waitRoot) $false
+        Assert-True (-not $wrongRunResult.ok) 'a continuation from another run must be rejected before using its heartbeat ID'
+        $absentHeartbeat = @{ runId = 'synthetic-session-02'; coordinatorThreadId = 'coordinator-thread'; scopeHash = [string]$heartbeat.data.heartbeat.scopeHash; lifecycle = 'cancelled'; continuation = @{ state = 'absent'; heartbeatId = 'heartbeat-1' } }
+        $absentHeartbeatResult = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $absentHeartbeat 'heartbeat-absent-id'),'-StateRoot',$waitRoot) $false
+        Assert-True (-not $absentHeartbeatResult.ok) 'an absent continuation must not carry a heartbeat ID across runs'
+        $reuse = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $activeInput 'heartbeat-reuse'),'-StateRoot',$waitRoot)
         Assert-Equal 'reuse_heartbeat' $reuse.data.decision 'later plans should reuse the existing session heartbeat'
+        Assert-Equal 'view' $reuse.data.automationRequest.mode 'duplicate heartbeat plans should view and reuse the existing automation'
+        Assert-Equal 'heartbeat-1' $reuse.data.automationRequest.id 'duplicate heartbeat plans should retain the existing automation ID'
         Assert-True $reuse.data.heartbeat.quietWhenUnchanged 'heartbeat should stay quiet when no worker state changed'
         Assert-True (-not $reuse.data.heartbeat.nestedSchedules) 'heartbeat plan must not create nested schedules'
+        $pausedInput = Copy-JsonObject $activeInput; $pausedInput.lifecycle = 'paused'
+        $pausedHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pausedInput 'heartbeat-paused-plan'),'-StateRoot',$waitRoot)
+        Assert-Equal 'disable_heartbeat' $pausedHeartbeat.data.decision 'paused runs should disable the heartbeat'
+        Assert-Equal 'update' $pausedHeartbeat.data.automationRequest.mode 'paused runs should pause the existing automation'
+        Assert-Equal 'PAUSED' $pausedHeartbeat.data.automationRequest.status 'paused runs should pause the existing automation'
+        Assert-True $pausedHeartbeat.data.noTickRestart 'paused runs must not restart on a tick'
+        Assert-Equal 'ACTIVE' $pausedHeartbeat.data.continuation.scheduleState 'a pause request must retain the last confirmed schedule state'
+        Assert-Equal 'PAUSED' $pausedHeartbeat.data.continuation.pendingScheduleState 'a pause request must record its unconfirmed target separately'
+        $pauseRetryInput = Copy-JsonObject $pausedInput; $pauseRetryInput.continuation = $pausedHeartbeat.data.continuation
+        $pauseRetry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseRetryInput 'heartbeat-paused-reconcile'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_schedule' $pauseRetry.data.decision 'an unconfirmed pause must reconcile before planning again'
+        Assert-True ($null -eq $pauseRetry.data.automationRequest) 'an unconfirmed pause must not be treated as already paused'
+        $pauseUnchangedInput = Copy-JsonObject $pauseRetryInput; $pauseUnchangedInput.scheduleConfirmation = @{ confirmed = $true; status = 'ACTIVE'; outcome = 'unchanged' }
+        $pauseUnchanged = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseUnchangedInput 'heartbeat-paused-unchanged'),'-StateRoot',$waitRoot)
+        Assert-Equal 'confirm_heartbeat_schedule' $pauseUnchanged.data.decision 'a confirmed unchanged pause must clear the pending transition'
+        Assert-Equal 'ACTIVE' $pauseUnchanged.data.continuation.scheduleState 'an unchanged pause must retain the provider state'
+        Assert-True (-not $pauseUnchanged.data.continuation.Contains('pendingScheduleState')) 'an unchanged pause must clear the stale pending transition'
+        Assert-True ($null -eq $pauseUnchanged.data.automationRequest) 'a confirmed failed pause must not replay the update in the confirmation plan'
+        $pauseRetryAfterUnchangedInput = Copy-JsonObject $pausedInput; $pauseRetryAfterUnchangedInput.continuation = $pauseUnchanged.data.continuation
+        $pauseRetryAfterUnchanged = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseRetryAfterUnchangedInput 'heartbeat-paused-retry-after-unchanged'),'-StateRoot',$waitRoot)
+        Assert-Equal 'disable_heartbeat' $pauseRetryAfterUnchanged.data.decision 'a failed pause must be retryable from the confirmed provider state'
+        $pauseConfirmInput = Copy-JsonObject $pauseRetryInput; $pauseConfirmInput.scheduleConfirmation = @{ confirmed = $true; status = 'PAUSED' }
+        $pauseConfirmed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pauseConfirmInput 'heartbeat-paused-confirm'),'-StateRoot',$waitRoot)
+        Assert-Equal 'PAUSED' $pauseConfirmed.data.continuation.scheduleState 'a confirmed pause must advance the saved schedule state'
+        Assert-True (-not $pauseConfirmed.data.continuation.Contains('pendingScheduleState')) 'a confirmed pause must clear the pending transition'
+        $resumedInput = Copy-JsonObject $activeInput; $resumedInput.continuation = $pauseConfirmed.data.continuation; $resumedInput.lifecycle = 'active'
+        $resumed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $resumedInput 'heartbeat-resume'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reactivate_heartbeat' $resumed.data.decision 'resuming a run should reactivate the existing paused heartbeat'
+        Assert-Equal 'ACTIVE' $resumed.data.automationRequest.status 'resume should issue an ACTIVE update'
+        Assert-Equal 'PAUSED' $resumed.data.continuation.scheduleState 'a resume request must retain the last confirmed paused state'
+        Assert-Equal 'ACTIVE' $resumed.data.continuation.pendingScheduleState 'a resume request must record its unconfirmed target separately'
+        $resumeRetryInput = Copy-JsonObject $resumedInput; $resumeRetryInput.continuation = $resumed.data.continuation
+        $resumeRetry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $resumeRetryInput 'heartbeat-resume-reconcile'),'-StateRoot',$waitRoot)
+        Assert-Equal 'reconcile_heartbeat_schedule' $resumeRetry.data.decision 'an unconfirmed resume must reconcile before planning again'
+        $resumeConfirmInput = Copy-JsonObject $resumeRetryInput; $resumeConfirmInput.scheduleConfirmation = @{ confirmed = $true; status = 'ACTIVE' }
+        $resumeConfirmed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $resumeConfirmInput 'heartbeat-resume-confirm'),'-StateRoot',$waitRoot)
+        Assert-Equal 'ACTIVE' $resumeConfirmed.data.continuation.scheduleState 'a confirmed resume must advance the saved schedule state'
+        $completedInput = Copy-JsonObject $activeInput; $completedInput.lifecycle = 'completed'
+        $completedHeartbeat = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $completedInput 'heartbeat-completed'),'-StateRoot',$waitRoot)
+        Assert-Equal 'remove_heartbeat' $completedHeartbeat.data.decision 'completed runs should remove the existing heartbeat'
+    }
+
+    Test-Case 'keep heartbeat lifecycle verification self-contained' {
+        $continuation = @{ state = 'active'; runId = 'isolated-run'; coordinatorThreadId = 'isolated-coordinator'; scopeHash = 'isolated-scope'; heartbeatId = 'isolated-heartbeat'; scheduleState = 'ACTIVE' }
+        $pausedInput = @{ runId = 'isolated-run'; coordinatorThreadId = 'isolated-coordinator'; scopeHash = 'isolated-scope'; lifecycle = 'paused'; continuation = $continuation }
+        $paused = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $pausedInput 'heartbeat-isolated-pause'))
+        Assert-Equal 'disable_heartbeat' $paused.data.decision 'isolated lifecycle fixture should plan a pause'
+        Assert-Equal 'ACTIVE' $paused.data.continuation.scheduleState 'isolated pause should retain confirmed state'
+        Assert-Equal 'PAUSED' $paused.data.continuation.pendingScheduleState 'isolated pause should expose pending state'
+        $retryInput = Copy-JsonObject $pausedInput; $retryInput.continuation = $paused.data.continuation
+        $retry = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $retryInput 'heartbeat-isolated-reconcile'))
+        Assert-Equal 'reconcile_heartbeat_schedule' $retry.data.decision 'isolated pause retry should reconcile before another update'
+        $confirmInput = Copy-JsonObject $retryInput; $confirmInput.scheduleConfirmation = @{ confirmed = $true; status = 'PAUSED' }
+        $confirmed = Invoke-PsJson $script:CoordinateScript @('-Operation','heartbeat-plan','-InputPath',(New-InputPath $confirmInput 'heartbeat-isolated-confirm'))
+        Assert-Equal 'PAUSED' $confirmed.data.continuation.scheduleState 'isolated confirmation should advance the schedule state'
+        Assert-True (-not $confirmed.data.continuation.Contains('pendingScheduleState')) 'isolated confirmation should clear pending state'
     }
 
     Test-Case 'preserve sibling dependency epic and pause coordination traces' {
@@ -993,8 +1165,8 @@ try {
         $correct = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $request 'review-correct'))
         Assert-Equal 'correct' $correct.data.decision 'changes requested should route to same worker'
         $exhausted = $request.Clone(); $exhausted.correctionRound = 3
-        $stop = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $exhausted 'review-exhausted'))
-        Assert-Equal 'needs_input' $stop.data.decision 'round limit should escalate'
+        $stop = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $exhausted 'review-unbounded-correction'))
+        Assert-Equal 'correct' $stop.data.decision 'correction rounds must not be capped at a fixed budget'
         $stale = $request.Clone(); $stale.currentSha = 'new-head'
         $staleResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $stale 'review-stale'))
         Assert-Equal 'needs_input' $staleResult.data.decision 'stale approval must not publish'
@@ -1026,8 +1198,8 @@ try {
         Assert-Equal 'publish' $docDecision.data.decision 'a newly committed documentation delta must be assessed before publish'
         $expiredPass = Copy-JsonObject $request; $expiredPass.receipt = New-ReviewReceipt; $expiredPass.remainingMinutes = 0
         $expiredPassResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $expiredPass 'review-pass-after-deadline'))
-        Assert-Equal 'needs_input' $expiredPassResult.data.decision 'a passing receipt must not bypass an exhausted wall-clock budget'
-        Assert-Equal 'elapsed_budget' $expiredPassResult.data.reason 'deadline gate should be explicit'
+        Assert-Equal 'needs_input' $expiredPassResult.data.decision 'a passing receipt may still require durable evidence, but not an elapsed-time gate'
+        Assert-Equal 'durable_evidence_required_for_publication' $expiredPassResult.data.reason 'an exhausted wall-clock budget must not be the review reason'
         $missingDocAssessment = Copy-JsonObject $docRequest; $missingDocAssessment.receipt.reviewDelta.documentationAssessment = ''
         $missingDocAssessmentResult = Invoke-PsJson $script:ReviewScript @('-Operation','decide','-InputPath',(New-InputPath $missingDocAssessment 'review-documentation-unassessed')) $false
         Assert-True (-not $missingDocAssessmentResult.ok) 'documentation delta without reviewer assessment must not pass'
@@ -1073,7 +1245,7 @@ try {
         Assert-True $authorRoute.data.requiresIndependentReview 'evidence repair must return through independent review'
         $budgetExpired = Copy-JsonObject $contradictionRequest; $budgetExpired.remainingMinutes = 0
         $budgetResult = Invoke-PsJson $script:ReviewScript @('-Operation','route','-InputPath',(New-InputPath $budgetExpired 'repair-budget-expired'))
-        Assert-Equal 'needs_input' $budgetResult.data.decision 'repair must stop when the wall-clock budget is exhausted'
+        Assert-Equal 'repair' $budgetResult.data.decision 'receipt repair must not stop solely because a wall-clock budget elapsed'
 
         $repairRoot = Join-Path $script:FixtureRoot 'receipt-repair-state'
         $repairInit = Invoke-PsJson $script:StateScript @('-Operation','initialize-session','-InputPath',$syntheticPath,'-StateRoot',$repairRoot)

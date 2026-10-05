@@ -430,14 +430,17 @@ function Merge-Defaults {
     $defaults = @{
         implementationProfile = @{ model = 'gpt-5.6-luna'; effort = 'xhigh' }
         reviewerProfile = @{ model = 'gpt-6.1-sol'; effort = 'high' }
-        limits = @{ maxActiveTicketsPerRepository = 2; maxWorkerTurns = 8; maxCorrectionRounds = 3; maxReceiptRepairAttempts = 2; elapsedMinutes = 120 }
+        limits = @{ maxActiveTicketsPerRepository = 2; maxWorkerTurns = 8; maxReceiptRepairAttempts = 2 }
         completion = @{ leafDonePolicy = 'merged'; epicDonePolicy = 'all_required_stories_merged_and_accepted' }
         branchPrefix = 'codex/'; dependencyPolicy = 'wait_for_merge'; autoPush = $true; autoCreatePr = $true; autoMerge = $false; allowForcePush = $false; useSubagents = $false
     }
     foreach ($name in $defaults.Keys) { if (-not $config.ContainsKey($name)) { $config[$name] = $defaults[$name] } }
     if ($config.limits -isnot [System.Collections.IDictionary]) { throw 'config.limits must be an object.' }
-    foreach ($name in @('maxActiveTicketsPerRepository','maxWorkerTurns','maxCorrectionRounds','maxReceiptRepairAttempts','elapsedMinutes')) {
+    foreach ($name in @('maxActiveTicketsPerRepository','maxWorkerTurns','maxReceiptRepairAttempts')) {
         if (-not $config.limits.Contains($name)) { $config.limits[$name] = $defaults.limits[$name] }
+    }
+    foreach ($deprecated in @('maxCorrectionRounds','elapsedMinutes')) {
+        if ($config.limits.Contains($deprecated)) { $config.limits.Remove($deprecated) }
     }
     if ([int]$config.limits.maxReceiptRepairAttempts -lt 1 -or [int]$config.limits.maxReceiptRepairAttempts -gt 2) { throw 'limits.maxReceiptRepairAttempts must be between 1 and 2.' }
     $config.useSubagents = $false
@@ -467,7 +470,7 @@ function Invoke-Initialize {
     $scope = if ($InputObject.ContainsKey('scope')) { @($InputObject.scope) } else { @() }
     $deps = if ($InputObject.ContainsKey('dependencies')) { @($InputObject.dependencies) } else { @() }
     $session = [ordered]@{
-        sessionId = $sessionId; coordinatorThreadId = $threadId; coordinatorHostId = $hostId; ownerGeneration = 1; state = 'running'; controlState = $null; createdAt = New-UtcStamp; updatedAt = New-UtcStamp; config = $config; authorization = if ($InputObject.ContainsKey('authorization')) { $InputObject.authorization } else { [ordered]@{} }; scope = $scope; dependencies = $deps; statusMappings = if ($InputObject.ContainsKey('statusMappings')) { $InputObject.statusMappings } else { [ordered]@{} }; heartbeatId = $null; pauseIntent = $null; cancelIntent = $null
+        sessionId = $sessionId; coordinatorThreadId = $threadId; coordinatorHostId = $hostId; ownerGeneration = 1; state = 'running'; controlState = $null; createdAt = New-UtcStamp; updatedAt = New-UtcStamp; config = $config; authorization = if ($InputObject.ContainsKey('authorization')) { $InputObject.authorization } else { [ordered]@{} }; scope = $scope; dependencies = $deps; statusMappings = if ($InputObject.ContainsKey('statusMappings')) { $InputObject.statusMappings } else { [ordered]@{} }; heartbeatId = $null; heartbeatState = $null; heartbeatBinding = $null; heartbeatUpdatedAt = $null; pauseIntent = $null; cancelIntent = $null
     }
     $state.sessions[$sessionId] = $session
     Add-Event $state 'session_initialized' @{ sessionId = $sessionId }
@@ -562,13 +565,6 @@ function Invoke-PrepareAction {
     Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','actionId','ticketKey','projectId','kind','id','actionKind','target','input','inputDigest','leaseSeconds','packetDeadlineUtc','packetNowUtc') 'prepare-action'
     Assert-Revision $State $InputObject; $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject
     if ($session.state -in @('pausing','cancelling','paused','cancelled','completed')) { throw "Session is not accepting new actions: $($session.state)." }
-    if ($InputObject.ContainsKey('packetDeadlineUtc')) {
-        $deadline = [DateTimeOffset]::MinValue; $now = [DateTimeOffset]::MinValue
-        if (-not [DateTimeOffset]::TryParse([string]$InputObject.packetDeadlineUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$deadline)) { throw 'packetDeadlineUtc must be an ISO-8601 timestamp.' }
-        $nowText = if ($InputObject.ContainsKey('packetNowUtc')) { [string]$InputObject.packetNowUtc } else { [DateTimeOffset]::UtcNow.ToString('o') }
-        if (-not [DateTimeOffset]::TryParse($nowText, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$now)) { throw 'packetNowUtc must be an ISO-8601 timestamp.' }
-        if ($now -ge $deadline) { throw 'The assignment packet deadline has elapsed; observation or reconciliation is required.' }
-    }
     $actionId = Require-String $InputObject 'actionId'; Assert-Id $actionId 'actionId'
     if ($State.actions.ContainsKey($actionId)) { throw "Action already exists; reconcile it instead of preparing again: $actionId" }
     $actionKind = Require-String $InputObject 'actionKind'; $target = if ($InputObject.ContainsKey('target')) { $InputObject.target } else { [ordered]@{} }
@@ -683,8 +679,6 @@ function Invoke-AcceptResult {
         if ($InputObject.ContainsKey('reason')) { $ticket.lastTransitionReason = $InputObject.reason }
         if ($toPhase -eq 'correcting') {
             $ticket.correctionRound = [int]$ticket.correctionRound + 1
-            $limit = [int](Get-ConfigValue (Get-Session $State $InputObject) 'limits.maxCorrectionRounds' 3)
-            if ($ticket.correctionRound -gt $limit) { throw "Correction round limit exhausted: $limit" }
         }
         Add-Event $State 'phase_transitioned' @{ ticketKey = $ticket.ticketKey; from = $from; to = $toPhase; source = 'accept-result' }
         $changed += 'phase'
@@ -705,7 +699,7 @@ function Invoke-Transition {
     $ticket.phase = $to; $ticket.updatedAt = New-UtcStamp; if ($InputObject.ContainsKey('resumePhase')) { $ticket.resumePhase = $InputObject.resumePhase }
     if ($InputObject.ContainsKey('reason')) { $ticket.lastTransitionReason = $InputObject.reason }
     if ($InputObject.ContainsKey('evidence')) { $ticket.evidence = @($ticket.evidence) + @($InputObject.evidence) }
-    if ($to -eq 'correcting') { $ticket.correctionRound = [int]$ticket.correctionRound + 1; $limit = [int](Get-ConfigValue (Get-Session $State $InputObject) 'limits.maxCorrectionRounds' 3); if ($ticket.correctionRound -gt $limit) { throw "Correction round limit exhausted: $limit" } }
+    if ($to -eq 'correcting') { $ticket.correctionRound = [int]$ticket.correctionRound + 1 }
     Add-Event $State 'phase_transitioned' @{ ticketKey = $ticket.ticketKey; from = $from; to = $to }
     return @{ Data = @{ ticketKey = $ticket.ticketKey; from = $from; to = $to; correctionRound = $ticket.correctionRound } }
 }
@@ -740,9 +734,9 @@ function Invoke-RecordReceiptRepair {
     $session = Get-Session $State $InputObject
     $limit = [int](Get-ConfigValue $session 'limits.maxReceiptRepairAttempts' 2)
     $used = @($ledger.attempts).Count
-    if ($remainingMinutes -le 0 -or $used -ge $limit) {
+    if ($used -ge $limit) {
         $ledger.exhausted = $true
-        $reason = if ($remainingMinutes -le 0) { 'elapsed_budget' } else { 'receipt_repair_limit' }
+        $reason = 'receipt_repair_limit'
         Add-Event $State 'receipt_repair_blocked' @{ ticketKey = $ticket.ticketKey; resultId = $resultId; reason = $reason; attempts = $used }
         return @{ Data = @{ decision = 'needs_input'; reason = $reason; ticketKey = $ticket.ticketKey; resultId = $resultId; repairAttempts = $used; maxRepairAttempts = $limit; correctionRound = $ticket.correctionRound } }
     }
@@ -824,10 +818,21 @@ function Invoke-Resume {
 
 function Invoke-Heartbeat {
     param([hashtable] $State, [hashtable] $InputObject)
-    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','heartbeatId','scheduleState','reason') 'set-heartbeat'; Assert-Revision $State $InputObject
-    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $id = if ($InputObject.ContainsKey('heartbeatId')) { Require-String $InputObject 'heartbeatId' } else { $null }; $session.heartbeatId = $id; $session.heartbeatState = if ($InputObject.ContainsKey('scheduleState')) { $InputObject.scheduleState } else { $null }; $session.heartbeatUpdatedAt = New-UtcStamp
-    Add-Event $State 'heartbeat_recorded' @{ sessionId = $session.sessionId; heartbeatId = $id; scheduleState = $session.heartbeatState }
-    return @{ Data = @{ heartbeatId = $id; scheduleState = $session.heartbeatState } }
+    Assert-AllowedKeys $InputObject @('sessionId','ownerGeneration','expectedRevision','heartbeatId','scheduleState','heartbeatBinding','reason') 'set-heartbeat'; Assert-Revision $State $InputObject
+    $session = Get-Session $State $InputObject; Assert-SessionOwner $session $InputObject; $id = if ($InputObject.ContainsKey('heartbeatId')) { Require-String $InputObject 'heartbeatId' } else { $null }
+    $binding = if ($InputObject.ContainsKey('heartbeatBinding')) { $InputObject.heartbeatBinding } else { $null }
+    if ($null -ne $binding) {
+        if ($binding -isnot [System.Collections.IDictionary]) { throw 'heartbeatBinding must be an object.' }
+        foreach ($name in @('runId','coordinatorThreadId','scopeHash','intervalMinutes','name','notificationPolicy','targetThreadId')) { if (-not $binding.Contains($name)) { throw "heartbeatBinding.$name is required." } }
+        if ([string]$binding.runId -cne [string]$session.sessionId -or [string]$binding.coordinatorThreadId -cne [string]$session.coordinatorThreadId -or [string]$binding.targetThreadId -cne [string]$session.coordinatorThreadId) { throw 'heartbeatBinding is not bound to this coordinator run.' }
+        if ([int]$binding.intervalMinutes -ne 30) { throw 'heartbeatBinding.intervalMinutes must be 30.' }
+        if ([string]::IsNullOrWhiteSpace([string]$binding.scopeHash) -or [string]::IsNullOrWhiteSpace([string]$binding.name)) { throw 'heartbeatBinding scopeHash and name must be nonblank.' }
+        if ([string]$binding.notificationPolicy -notin @('failed_runs_only','')) { throw 'heartbeatBinding.notificationPolicy must be failed_runs_only or null.' }
+        $binding = [ordered]@{ runId = [string]$binding.runId; coordinatorThreadId = [string]$binding.coordinatorThreadId; targetThreadId = [string]$binding.targetThreadId; scopeHash = [string]$binding.scopeHash; intervalMinutes = 30; name = [string]$binding.name; notificationPolicy = if ([string]::IsNullOrWhiteSpace([string]$binding.notificationPolicy)) { $null } else { [string]$binding.notificationPolicy } }
+    }
+    $session.heartbeatId = $id; $session.heartbeatState = if ($InputObject.ContainsKey('scheduleState')) { $InputObject.scheduleState } else { $null }; $session.heartbeatBinding = $binding; $session.heartbeatUpdatedAt = New-UtcStamp
+    Add-Event $State 'heartbeat_recorded' @{ sessionId = $session.sessionId; heartbeatId = $id; scheduleState = $session.heartbeatState; heartbeatBinding = $binding }
+    return @{ Data = @{ heartbeatId = $id; scheduleState = $session.heartbeatState; heartbeatBinding = $binding } }
 }
 
 function Validate-ImplementationReceipt {

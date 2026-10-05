@@ -194,9 +194,6 @@ function Get-RepairRoute {
         if (@($Validation.errors | Where-Object { $error = [string]$_; @($semanticPatterns | Where-Object { $error -match $_ }).Count -gt 0 }).Count -gt 0) { $repairKind = 'evidence' }
     }
 
-    if ($remainingMinutes -le 0) {
-        return [ordered]@{ decision = 'needs_input'; reason = 'elapsed_budget'; resultId = $resultId; repairAttempts = $attempts; maxRepairAttempts = $maximum; errors = $routingErrors }
-    }
     if ($attempts -ge $maximum) {
         return [ordered]@{ decision = 'needs_input'; reason = 'receipt_repair_limit'; resultId = $resultId; repairAttempts = $attempts; maxRepairAttempts = $maximum; errors = $routingErrors }
     }
@@ -232,7 +229,7 @@ try {
         $data = $validation
     } else {
         $receipt = $validation.normalizedReceipt
-        $currentSha = Need $inputObject 'currentSha'; $currentScopeHash = Need $inputObject 'currentScopeHash'; $currentBaseSha = Need $inputObject 'currentBaseSha'; $expectedRunId = Need $inputObject 'expectedRunId'; $expectedActionId = Need $inputObject 'expectedActionId'; $expectedTicketKey = Need $inputObject 'expectedTicketKey'; $round = [int]$inputObject.correctionRound; $maxRounds = if ($inputObject.Contains('maxCorrectionRounds')) { [int]$inputObject.maxCorrectionRounds } else { 3 }; $remainingMinutes = if ($inputObject.Contains('remainingMinutes')) { [int]$inputObject.remainingMinutes } else { 1 }; $allowedEvidenceActions = if ($inputObject.Contains('allowedEvidenceActions')) { @($inputObject.allowedEvidenceActions) } else { @() }; $requiredCommands = if ($inputObject.Contains('requiredCommands')) { @($inputObject.requiredCommands | ForEach-Object { [string]$_ }) } else { @() }; $unresolvedRequirements = if ($inputObject.Contains('unresolvedRequirements')) { @($inputObject.unresolvedRequirements | ForEach-Object { [string]$_ }) } else { @() }; $expectedPacketHash = if ($inputObject.Contains('packetHash')) { [string]$inputObject.packetHash } else { '' }; $bindingErrors = @()
+        $currentSha = Need $inputObject 'currentSha'; $currentScopeHash = Need $inputObject 'currentScopeHash'; $currentBaseSha = Need $inputObject 'currentBaseSha'; $expectedRunId = Need $inputObject 'expectedRunId'; $expectedActionId = Need $inputObject 'expectedActionId'; $expectedTicketKey = Need $inputObject 'expectedTicketKey'; $round = [int]$inputObject.correctionRound; $allowedEvidenceActions = if ($inputObject.Contains('allowedEvidenceActions')) { @($inputObject.allowedEvidenceActions) } else { @() }; $requiredCommands = if ($inputObject.Contains('requiredCommands')) { @($inputObject.requiredCommands | ForEach-Object { [string]$_ }) } else { @() }; $unresolvedRequirements = if ($inputObject.Contains('unresolvedRequirements')) { @($inputObject.unresolvedRequirements | ForEach-Object { [string]$_ }) } else { @() }; $expectedPacketHash = if ($inputObject.Contains('packetHash')) { [string]$inputObject.packetHash } else { '' }; $bindingErrors = @()
         $reuseValidation = @()
         $deltaError = $null
         $coverageError = $null
@@ -277,8 +274,6 @@ try {
             $data = [ordered]@{ decision = 'needs_input'; reason = $deltaError; reviewedSha = $currentSha; previousReviewedSha = if ($inputObject.Contains('previousReviewedSha')) { $inputObject.previousReviewedSha } else { $null } }
         } elseif ($null -ne $coverageError) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'inconsistent_current_coverage'; detail = $coverageError; reviewedSha = $currentSha }
-        } elseif ($remainingMinutes -le 0) {
-            $data = [ordered]@{ decision = 'needs_input'; reason = 'elapsed_budget'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and -not $strictEvidence) {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'durable_evidence_required_for_publication'; reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0 -and $unresolvedRequirements.Count -gt 0) {
@@ -287,12 +282,12 @@ try {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'review_checks_are_not_bound_to_passing_review_evidence'; reviewedSha = $currentSha; bindingErrors = $bindingErrors }
         } elseif ($receipt.verdict -eq 'pass' -and $validation.blockingFindingCount -eq 0) {
             $data = [ordered]@{ decision = 'publish'; reviewedSha = $currentSha }
-        } elseif ($receipt.verdict -eq 'changes_requested' -and $round -lt $maxRounds -and $remainingMinutes -gt 0) {
+        } elseif ($receipt.verdict -eq 'changes_requested') {
             $data = [ordered]@{ decision = 'correct'; nextRound = $round + 1; findings = @($receipt.findings); reviewedSha = $currentSha }
         } elseif ($receipt.verdict -eq 'blocked') {
             $data = [ordered]@{ decision = 'needs_input'; reason = 'review_blocked'; reviewedSha = $currentSha }
         } else {
-            $data = [ordered]@{ decision = 'needs_input'; reason = if ($round -ge $maxRounds) { 'correction_round_limit' } else { 'elapsed_budget_or_unresolved_findings' } }
+            $data = [ordered]@{ decision = 'needs_input'; reason = 'unresolved_findings' }
         }
     }
     if ($Operation -eq 'decide' -and $data -is [System.Collections.IDictionary]) { $data.verdict = [string]$receipt.verdict; $data.currentSha = $currentSha }

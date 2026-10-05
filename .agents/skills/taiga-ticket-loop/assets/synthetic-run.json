@@ -15,7 +15,7 @@
     "repository": { "identity": "synthetic-repo", "path": "C:/fixtures/repo", "fetchRemote": "origin", "baseBranch": "master", "pushRemote": "origin", "githubRepository": "example/repo" },
     "reviewerProfile": { "model": "gpt-6.1-sol", "effort": "high" },
     "implementationProfile": { "model": "gpt-5.6-luna", "effort": "xhigh" },
-    "limits": { "maxActiveTicketsPerRepository": 2, "maxWorkerTurns": 4, "maxCorrectionRounds": 3, "elapsedMinutes": 120 },
+    "limits": { "maxActiveTicketsPerRepository": 2, "maxWorkerTurns": 4 },
     "completion": { "leafDonePolicy": "merged", "epicDonePolicy": "all_required_stories_merged_and_accepted" },
     "branchPrefix": "codex/", "dependencyPolicy": "wait_for_merge", "autoPush": true, "autoCreatePr": true, "autoMerge": false, "allowForcePush": false, "useSubagents": false
   },

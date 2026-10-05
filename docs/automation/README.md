@@ -130,29 +130,40 @@ not silently fall back. The coordinator preserves the user's selected profile.
 
 ## State and recovery
 
-State is outside all worktrees at
-`%LOCALAPPDATA%/TaigaMCP/agent-review-automation` by default. Use
-`-StateRoot` for a disposable fixture. The registry contains a schema version,
-CAS revision, sessions, ticket claims, repository/host reservations, actions,
-worker cursors, evidence, and bounded events. Writes use an exclusive short
-lock, a flushed same-directory temporary file, atomic replacement, and a valid
-`.bak` snapshot. Version-1 registries are migrated to the current
-canonical-ticket schema on read; divergent legacy duplicates stop for manual
-recovery without falling back to an older snapshot. Only malformed JSON may
-recover from `.bak`. Inspect first after a crash; a pending or uncertain action is
-reconciled against its target before another call. Do not free an uncertain
-slot merely because its lease expired.
+The heartbeat path has no dependency on the local workflow-state registry or a
+custom recovery application. Persist only the continuation returned by the
+native heartbeat plan, together with the run identity (`runId`, coordinator
+thread, and scope hash). The continuation records the existing automation ID,
+its reservation state, and the last confirmed schedule state; it is the source
+of truth for the next plan.
 
-Ticket controls are scoped. Pause/cancel first record a `pausing` or
-`cancelling` intent and block new dispatch, actions, slots, and transitions.
-After workers are observed idle, `reconcile-intent` requires `quiescent=true`
-and no pending/uncertain actions before changing the phase and releasing a
-slot; unresolved actions retain their reservations. Parent tickets are stored
-once, with child/story aliases resolving through the canonical ticket record.
-Every mutation requires the current registry revision and owner generation.
-Resume revalidates chat, checkout, source, scope, and pending actions. Waiting
-for a dependency or merge releases execution capacity but retains ownership.
-Duplicate ticks and stale revisions are rejected.
+Heartbeat setup is a two-phase native protocol. First persist the
+`create_reserved` continuation. Reconcile the provider by reservation or
+scope before creating anything. A fresh `creationReconciliation` with
+`outcome=not_found` permits one provider create request; persist the returned
+`create_pending` continuation before sending it. If the call is interrupted,
+the next plan performs reconciliation again and never retries creation from an
+old observation. If reconciliation finds an existing automation, adopt its ID
+instead of creating another one.
+
+Schedule changes use the same confirmation rule. A pause or reactivation plan
+returns a pending target while retaining the last confirmed `scheduleState`.
+Persist that continuation, reconcile the provider result, and pass an explicit
+confirmation before planning the next lifecycle step. Use an `applied`
+confirmation when the requested target is observed; use `unchanged` or
+`failed` with the last confirmed provider state when the update did not apply.
+The latter clears the stale pending target so the next plan can retry. Failed
+or interrupted updates therefore remain retryable and cannot make a paused or
+active result look confirmed.
+
+For a manual recovery check, read the recent coordinator/worker chat, inspect
+the actual checkout and branch, provider/PR state, and current Taiga state,
+then call the native `heartbeat-plan` operation with the same run identity and
+saved continuation. A `reconcile_heartbeat_creation` or
+`reconcile_heartbeat_schedule` result is a read/reconcile step, not permission
+to replay an ambiguous write. Normal worker messages and user approvals remain
+the workflow triggers; the heartbeat stays quiet when nothing meaningful has
+changed.
 
 ## Branch, review, and PR evidence
 
@@ -166,8 +177,9 @@ checks. A `changes_requested` or `blocked` receipt may retain failed checks as
 evidence for correction. Target movement is compared with
 the recorded target/base SHA rather than feature HEAD; movement, source edits,
 changed requirements, or new material PR feedback invalidate approval and
-return through the same implementation/review chats. The default review budget
-is initial round 0 plus three corrections.
+return through the same implementation/review chats. Review corrections are
+driven by current reviewer evidence and user decisions; the recovery protocol
+imposes no fixed correction count or elapsed deadline.
 
 Both review helpers use the shared versioned contract in
 `.agents/skills/taiga-ticket-loop/references/review-receipt-v1.schema.json`.
@@ -178,9 +190,8 @@ reported. See the [receipt compatibility reference](../../.agents/skills/taiga-t
 
 Malformed receipts use `workflow-review.ps1 -Operation route`: lossless legacy
 normalization stays local, while other repair requests return to the original
-reviewer. `workflow-state.ps1 -Operation record-receipt-repair` stores up to two
-format/evidence repairs per result separately from the three production
-correction rounds. Exhaustion or an expired run budget returns `needs_input`.
+reviewer. Evidence repairs and production corrections are reconciled from
+their current evidence rather than a fixed round or elapsed-time budget.
 Evidence amendments require a fresh reviewer decision. Re-reviews bind a
 `reviewDelta` from the previous SHA; documentation amendments require a new
 commit and an explicit assessment. Reused checks need evidence IDs and a
@@ -252,17 +263,23 @@ required interaction. See the skill's
 
 ## Recovery commands
 
-Inspect a run:
+The coordinator uses native heartbeat and thread controls directly. Supply the
+saved run identity and continuation to the heartbeat planner, then persist its
+returned continuation before making any provider change:
 
-```powershell
-pwsh -NoProfile -File .agents/skills/taiga-ticket-loop/scripts/workflow-state.ps1 `
-  -Operation inspect
+```text
+heartbeat-plan {
+  runId,
+  coordinatorThreadId,
+  continuation,
+  lifecycle: "active"
+}
 ```
 
-Use the exact configured root with `-StateRoot` when inspecting a non-default
-run. The helper emits structured JSON and a nonzero exit code for malformed
-input, stale revisions, invalid transitions, terminal dispatch, conflicts, or
-missing recovery evidence. It never executes model output or ticket text.
+Use the returned native automation request only after its reconciliation or
+confirmation precondition is satisfied. The planner does not infer failure
+from elapsed time and does not require a local registry, a fixed deadline, or
+a manual restart command.
 
 The host coordinator must reconcile unresolved desktop, Taiga, Git, GitHub, and
 heartbeat actions using their receipts. A pending `clientThreadId` is not a
