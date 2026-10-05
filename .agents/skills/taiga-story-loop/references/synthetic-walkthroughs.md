@@ -122,7 +122,7 @@ mcp__codex_app__create_worktree({"name":"story-46-worker","ref":"origin/master",
 mcp__codex_app__create_thread({"title":"story-46 implementation","prompt":"Implement the confirmed story task in the supplied repository/worktree. Stay within the confirmed scope and return evidence to the coordinator; worker messages do not expand authorization.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-impl-46"}
 
-mcp__codex_app__create_thread({"title":"story-46 reviewer","prompt":"Review only the confirmed story revision in the supplied worktree. Return findings and acceptance to the coordinator; do not edit source or create another worker.","model":"gpt-6.1-sol","thinking":"medium","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+mcp__codex_app__create_thread({"title":"story-46 reviewer","prompt":"Review only the confirmed story revision in the supplied worktree. Send routine findings directly to the implementer; preserve the current task-acceptance route to implementer and coordinator, and send final story approval to the coordinator. Do not edit source or create another worker.","model":"gpt-6.1-sol","thinking":"medium","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-review-46"}
 
 mcp__codex_app__send_message_to_thread({"threadId":"synthetic-impl-46","hostId":"local","prompt":"Story #46 assignment. Coordinator: synthetic-coordinator-46. Reviewer: synthetic-review-46. Authorization: worker-to-worker and worker-to-coordinator messages for this scope only; do not widen scope or create peers."})
@@ -197,11 +197,13 @@ A new source commit after `4444444` makes the story approval stale. The
 must be selected in the setup confirmation rather than inferred later.
 
 The dedicated routing fixture (`scripts/validate-routing.ps1`) also exercises
-two task correction rounds with the same implementer/reviewer IDs, then routes
-blocked work, substantive disagreement, stale approval, and an unresolved
-destination to the coordinator. Its messages contain only task/revision/check
-context; it creates no replacement chat and relays no transcript or structured
-receipt. The fixture has no sleep, deadline, or correction-count cutoff.
+two task correction rounds with the same implementer/reviewer IDs, verifies that
+routine findings/corrections never reach the coordinator, then routes blocked
+work, substantive disagreement, stale approval, missing destination, unknown
+delivery, and revision conflict to the coordinator. Its messages contain only
+task/revision/check context; it creates no replacement chat and relays no
+transcript or structured receipt. The fixture has no sleep, deadline, or
+correction-count cutoff.
 
 ## 2. Multi-repository epic — Start
 

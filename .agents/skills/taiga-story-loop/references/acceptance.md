@@ -8,6 +8,9 @@ setup summary; the implementer may complete the ordered task commits before a
 single final review, but findings still route to the same pair and no approval
 is implied by implementation evidence.
 
+The current task-acceptance route remains reviewer-to-implementer and
+reviewer-to-coordinator for now; issue #89 may revise it.
+
 ## Task acceptance
 
 After inspecting the exact revision and all task criteria, the reviewer sends

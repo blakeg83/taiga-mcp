@@ -294,25 +294,48 @@ Assert-WorkerPairContains 'exact reviewer profile' 'gpt-6.1-sol'
 Assert-WorkerPairContains 'pending thread guard' 'pending `clientThreadId`'
 Assert-WorkerPairContains 'coordinator-owned pair' 'neither worker creates the other worker'
 Assert-HandoffContains 'task-ready payload' 'Task #<ref> ready for review'
-Assert-HandoffContains 'findings route' 'reviewer sends findings directly to the implementer'
+Assert-HandoffContains 'findings route' 'The reviewer sends routine findings directly to the implementer'
 Assert-HandoffContains 'correction route' 'returns to the same reviewer chat'
 Assert-HandoffContains 'stable branch gate' 'does not start the next ordered task'
 Assert-HandoffContains 'no receipt requirement' 'Do not require a JSON receipt'
+Assert-WorkerPairContains 'direct routine pair' 'routine findings and corrections stay within the worker pair'
+Assert-WorkerPairContains 'no routine relay' 'The coordinator is not a routine finding or correction relay'
+Assert-WorkerPairContains 'acceptance preserved for issue 89' '#89 may revise it'
+if ($normalizedHandoff.Contains('same reviewer and coordinator')) {
+    throw 'Handoff assertion failed: routine corrections must not copy the coordinator'
+}
+if ($normalizedPrompt.Contains('correction-ready handoff to both reviewer and coordinator')) {
+    throw 'Prompt assertion failed: correction-ready handoffs must stay direct'
+}
+if (-not $normalizedReviewerPrompt.Contains('Do not copy or restate routine findings to the coordinator')) {
+    throw 'Reviewer prompt assertion failed: routine findings must not be relayed'
+}
+if (-not $normalizedAcceptance.Contains('reviewer-to-implementer and reviewer-to-coordinator for now')) {
+    throw 'Acceptance assertion failed: current task-acceptance route must remain explicit'
+}
 if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
     -not $normalizedRouting.Contains('fixed correction-count cutoff')) {
     throw 'Routing assertion failed: no arbitrary cutoff policy'
+}
+foreach ($marker in @('routine findings and corrections must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied')) {
+    if (-not (Get-Content $routingScriptPath -Raw).Contains($marker)) {
+        throw "Routing assertion failed: $marker"
+    }
 }
 if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections must not create a new chat')) {
     throw 'Routing assertion failed: controlled fixture coverage'
 }
 foreach ($marker in @(
         'ready_for_review'
-        'Send one review request to the persistent reviewer'
+        'Send one direct review request to the persistent reviewer'
         'changes_requested'
-        'send the correction to the same implementer'
+        'send the finding directly to the same implementer'
+        'Implementer sends correction-ready'
+        'keep the coordinator out of the routine correction cycle'
         'Reviewer accepts'
         'idle status, timeout, elapsed time, or implementation commit'
-        'Merge approval, product decisions, and scope changes remain separate user gates'
+        'Routine `changes_requested` and correction-ready events stay worker-to-worker'
+        'Unknown message delivery, missing destinations, revision conflicts, merge approval'
         'PR creation or update is already covered by `Start`')) {
     if (-not $normalizedAutomaticFlow.Contains($marker)) {
         throw "Automatic review-flow assertion failed: $marker"
