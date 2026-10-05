@@ -31,6 +31,11 @@ source edits and does not start the next ordered task. A failed or unknown
 handoff is reported to the coordinator for reconciliation; it is not a
 confirmed review dispatch.
 
+The scoped workflow may dispatch this handoff automatically from one durable
+`ready_for_review` event. Dispatch is idempotent for the event and current
+task/revision: a duplicate event does not send another request, and an old or
+wrong binding is held for coordinator reconciliation.
+
 ## Findings message
 
 The reviewer sends findings directly to the implementer and copies the
@@ -70,6 +75,11 @@ rule as the initial ready handoff. The coordinator keeps the branch stable
 while the reviewer is inspecting it and routes later findings to the same
 implementer; it never creates a correction chat or allows the next task to
 race the active per-task review.
+
+An automatic correction route is valid only for the current task, assigned
+reviewer, pending reviewed SHA, packet, and scope. It reopens that task and
+dispatches one correction request to the same persistent pair; it cannot
+advance another task or authorize a scope change.
 
 ## Message-driven resume
 

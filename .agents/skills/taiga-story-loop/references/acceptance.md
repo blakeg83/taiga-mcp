@@ -33,6 +33,15 @@ A duplicate acceptance is a no-op; acceptance for an old task/revision cannot
 release the current gate. Reconcile an unknown Taiga write before another
 attempt. Idle chat status and elapsed time are not acceptance evidence.
 
+The scoped workflow may apply this handoff automatically after a durable
+current acceptance event in `per_task` mode. It must verify reviewer identity,
+task identity, exact SHA, packet/scope binding, criteria, and current Taiga
+version before writing, then release only the next ordered task. In
+`story_end_only` mode, implementation-ready evidence advances task order
+without task acceptance or per-task review; the final story review accepts the
+retained task revisions. A stale, duplicate, changed-scope, or uncertain event
+stops at reconciliation.
+
 ## Final story acceptance
 
 After the last task's required reviews, the reviewer checks the complete story

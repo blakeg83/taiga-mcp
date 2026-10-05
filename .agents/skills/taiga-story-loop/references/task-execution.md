@@ -82,6 +82,15 @@ using the identity, exact-revision, and deduplication checks in
 idle worker cannot release the review gate. Coordinator recovery handles
 interrupted or missing handoffs, not routine review waits.
 
+The ordinary handoff can be automated after the scope-bound `Start`: consume a
+durable `ready_for_review` event once, dispatch the persistent reviewer, route
+one current finding back to the same pair, and apply one exact-revision
+acceptance before advancing. Duplicate or stale events, changed packet/scope,
+unknown delivery, and idle observations remain pending for reconciliation. The
+automatic path may start only the next declared task after its selected
+review-mode gate is satisfied; it never starts an undeclared task, changes
+scope, creates a PR, or merges.
+
 ## Version-safe writes and reconciliation
 
 Every update is a read/compare/write operation:

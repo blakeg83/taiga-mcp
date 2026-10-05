@@ -109,6 +109,15 @@ next reviewer action. Do not call `wait_threads`, poll/read the reviewer chat,
 schedule a review monitor, or keep the turn alive. Do not edit source or start
 the next task while review is pending. Recovery belongs to the coordinator.
 
+Once `Start` has authorized the scope, the coordinator or workflow driver may
+automate this ordinary handoff: a durable `ready_for_review` event dispatches
+one review request for the current task; a current reviewer finding reopens
+only that task and routes a correction to the same pair; a current acceptance
+performs the version-safe task write and releases the next ordered task only
+under the declared review mode. The worker still does not poll, infer
+acceptance from idle status, or widen scope; duplicate and stale events are
+no-ops or coordinator reconciliation cases.
+
 Resume this same chat only for an authorized actionable message or scoped
 recovery. Follow `references/worker-handoffs.md#message-driven-resume`: verify
 the assigned reviewer, current task, pending SHA, branch HEAD, and prior outcome

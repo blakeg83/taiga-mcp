@@ -89,6 +89,17 @@ The lifecycle verifier covers restart midway through synchronization and refuses
 parent completion when selected-task acceptance evidence is missing. No real-host
 trial is implied by offline fixture success.
 
+The story-loop review handoff is event-driven within the confirmed scope. A
+`ready_for_review` event dispatches one request to the persistent reviewer;
+current findings reopen only the affected task and route a correction to the
+same pair; exact current acceptance advances the next ordered task in
+`per_task` mode. `story_end_only` records implementation-ready milestones and
+defers task acceptance and review to the final story review. Duplicate or stale
+events, idle status, changed scope, and uncertain Taiga writes stop for
+reconciliation. The contract and offline behavior fixture are
+`.agents/skills/taiga-story-loop/references/automatic-review-flow.md` and
+`.agents/skills/taiga-story-loop/scripts/validate-automatic-review-flow.ps1`.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the
