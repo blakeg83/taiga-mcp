@@ -31,6 +31,7 @@ authoritative.
 | Implementer sends `implementation_ready` in `story_end_only` | Current task, committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Record implementation evidence and advance the next ordered task without task acceptance or a per-task review; request one final story review after the last task |
 | Reviewer sends `changes_requested` | Assigned reviewer, current task, exact pending SHA, finding, and requested correction | Reopen only that task and send the finding directly to the same implementer; require a new revision and review delta |
 | Implementer sends correction-ready | Same current task, assigned reviewer, prior reviewed SHA, new committed SHA, and review delta | Send the new revision directly to the same reviewer; keep the coordinator out of the routine correction cycle |
+| Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
 | Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Apply the version-safe accepted/Done transition, then advance the next ordered task |
 | Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Send the next task assignment through the same implementer chat and story branch |
 | Final task is accepted | Every selected task has exact-revision acceptance | Request final story review; do not merge automatically. After story approval, prepare the PR under the existing `Start` authorization |
@@ -56,6 +57,9 @@ authoritative.
   approval, product decisions, and scope changes remain coordinator
   reconciliation or user gates. PR creation or update is already covered by
   `Start` and may follow final story approval without another user prompt.
+- After an exceptional escalation, the coordinator must reconcile the exact
+  pending event before another review, correction, acceptance, or advancement
+  event can resume the loop.
 
 The coordinator may observe and reconcile the durable action records, but an
 ordinary review handoff or correction is not routed through coordinator action

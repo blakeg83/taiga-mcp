@@ -18,7 +18,8 @@ Passed routing fixture: two tasks, direct correction rounds, stable pair, no rou
 
 The automatic review-flow fixture passed with direct worker-pair dispatch and
 correction assertions, exact acceptance advancement, duplicate/stale/idle
-guards, coordinator escalation, and scope gating.
+guards, coordinator escalation, reconciliation-before-resume, and scope
+gating.
 
 The static contract check passed:
 

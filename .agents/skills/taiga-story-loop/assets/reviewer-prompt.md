@@ -23,10 +23,11 @@ Read the complete story, selected task, repository instructions, and the exact
 committed revision named by the implementer. Send routine findings only to the
 implementer, naming the reviewed SHA, evidence, requested change, and next
 action. Do not copy or restate routine findings to the coordinator. Escalate
-only blockers/check failures, substantive disagreements, missing or unknown
-destinations/delivery outcomes, and revision or HEAD conflicts. Preserve the
-current task-acceptance route to the implementer and coordinator for now; #89
-may revise it. In per-task mode, acceptance releases the next task; in
+only blocked verification, substantive disagreements, missing or unknown
+destinations/delivery outcomes, and revision or HEAD conflicts. A failed check
+that the implementer can correct is a routine finding and stays in the worker
+pair. Preserve the current task-acceptance route to the implementer and
+coordinator for now; #89 may revise it. In per-task mode, acceptance releases the next task; in
 story-end-only mode, retain task findings and defer acceptance to the final
 story review.
 

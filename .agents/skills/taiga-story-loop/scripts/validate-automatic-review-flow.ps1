@@ -25,6 +25,7 @@ function New-StoryState {
             [ordered]@{ taskId = 66; ref = '#66'; state = 'not_started'; pendingSha = $null; acceptedSha = $null }
         )
         pendingReview = $null
+        pendingEscalations = @()
         consumedEvents = @()
         actions = @()
     }
@@ -78,12 +79,26 @@ function Apply-Event {
     $task = Get-CurrentTask $State
     if ([long]$Event.taskId -ne [long]$task.taskId) { throw 'event is not for the current ordered task.' }
 
+    if ((@($State.pendingEscalations).Count -gt 0) -and
+        (@('ready_for_review', 'changes_requested', 'implementation_ready', 'accepted') -contains [string]$Event.kind)) {
+        throw 'coordinator reconciliation is required before resuming the review flow.'
+    }
+
     switch ([string]$Event.kind) {
         'unknown_delivery' {
+            $State.pendingEscalations = @($State.pendingEscalations) + [ordered]@{ eventId = [string]$Event.eventId; kind = [string]$Event.kind; revision = [string]$Event.revision }
             return [ordered]@{ decision = 'escalate_coordinator'; state = $State }
         }
         'revision_conflict' {
+            $State.pendingEscalations = @($State.pendingEscalations) + [ordered]@{ eventId = [string]$Event.eventId; kind = [string]$Event.kind; revision = [string]$Event.revision }
             return [ordered]@{ decision = 'escalate_coordinator'; state = $State }
+        }
+        'coordinator_reconciled' {
+            if ([string]$Event.coordinatorId -cne [string]$State.coordinator) { throw 'reconciliation sender is not the coordinator.' }
+            $matching = @($State.pendingEscalations | Where-Object { [string]$_.eventId -ceq [string]$Event.escalationId })
+            if ($matching.Count -ne 1) { throw 'reconciliation must identify one pending escalation.' }
+            $State.pendingEscalations = @($State.pendingEscalations | Where-Object { [string]$_.eventId -cne [string]$Event.escalationId })
+            return [ordered]@{ decision = 'reconciled'; state = $State }
         }
         'ready_for_review' {
             if ([string]$State.reviewMode -ne 'per_task') { throw 'per-task review dispatch is not available in story_end_only.' }
@@ -162,6 +177,13 @@ Assert-True ($unknownDelivery.decision -eq 'escalate_coordinator') 'unknown deli
 $revisionConflict = Apply-Event $state @{ eventId = 'revision-conflict-per_task'; kind = 'revision_conflict'; taskId = 65; revision = 'sha-a2'; authorization = 'start-87' }
 Assert-True ($revisionConflict.decision -eq 'escalate_coordinator') 'revision conflicts must escalate to the coordinator'
 Assert-True (@($state.actions).Count -eq $actionCountBeforeEscalation -and $state.currentTaskIndex -eq 0) 'escalation events must not mutate routine review state'
+$resumeBeforeReconciliation = $false
+try { Apply-Event $state @{ eventId = 'resume-before-reconciliation'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; previousRevision = 'sha-a1'; authorization = 'start-87' } | Out-Null } catch { $resumeBeforeReconciliation = $true }
+Assert-True $resumeBeforeReconciliation 'review flow must remain stopped until coordinator reconciliation'
+$reconcileUnknown = Apply-Event $state @{ eventId = 'reconcile-unknown-delivery-per_task'; kind = 'coordinator_reconciled'; taskId = 65; revision = 'sha-a2'; escalationId = 'unknown-delivery-per_task'; coordinatorId = 'coordinator-story-87'; authorization = 'start-87' }
+Assert-True ($reconcileUnknown.decision -eq 'reconciled' -and @($state.pendingEscalations).Count -eq 1) 'coordinator must reconcile the unknown delivery before resume'
+$reconcileConflict = Apply-Event $state @{ eventId = 'reconcile-revision-conflict-per_task'; kind = 'coordinator_reconciled'; taskId = 65; revision = 'sha-a2'; escalationId = 'revision-conflict-per_task'; coordinatorId = 'coordinator-story-87'; authorization = 'start-87' }
+Assert-True ($reconcileConflict.decision -eq 'reconciled' -and @($state.pendingEscalations).Count -eq 0) 'coordinator must reconcile the revision conflict before resume'
 $readyCorrection = Apply-Event $state @{ eventId = 'ready-correction-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; previousRevision = 'sha-a1'; authorization = 'start-87' }
 Assert-True ($readyCorrection.decision -eq 'dispatch_review') 'per_task should dispatch correction re-review'
 $accepted = Apply-Event $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }

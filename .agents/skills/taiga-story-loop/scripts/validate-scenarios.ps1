@@ -310,6 +310,10 @@ if ($normalizedPrompt.Contains('correction-ready handoff to both reviewer and co
 if (-not $normalizedReviewerPrompt.Contains('Do not copy or restate routine findings to the coordinator')) {
     throw 'Reviewer prompt assertion failed: routine findings must not be relayed'
 }
+if (-not $normalizedReviewerPrompt.Contains('only blocked verification') -or
+    $normalizedReviewerPrompt.Contains('only blockers/check failures')) {
+    throw 'Reviewer prompt assertion failed: routine check failures must not escalate automatically'
+}
 if (-not $normalizedAcceptance.Contains('reviewer-to-implementer and reviewer-to-coordinator for now')) {
     throw 'Acceptance assertion failed: current task-acceptance route must remain explicit'
 }
@@ -346,7 +350,8 @@ if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains('Passed automatic 
 }
 foreach ($marker in @(
         'per-task review dispatch is not available in story_end_only'
-        'story_end_only should reject per-task review dispatch')) {
+        'story_end_only should reject per-task review dispatch'
+        'coordinator reconciliation is required before resuming')) {
     if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {
         throw "Automatic review-flow fixture assertion failed: $marker"
     }
