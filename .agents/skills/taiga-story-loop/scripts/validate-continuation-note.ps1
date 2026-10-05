@@ -25,6 +25,162 @@ function Assert-Rejected([System.Collections.IDictionary] $Candidate, [string] $
     Assert-True ([IO.File]::ReadAllText($path + '.previous') -ceq $backup) "$Message preserves backup"
 }
 
+function Read-Snapshot([string] $NotePath) {
+    $snapshot = [ordered]@{}
+    foreach ($line in [IO.File]::ReadAllLines($NotePath)) {
+        $separator = $line.IndexOf(': ')
+        if ($separator -gt 0) {
+            $snapshot[$line.Substring(0, $separator)] = $line.Substring($separator + 2)
+        }
+    }
+    $snapshot
+}
+
+function New-AuthoritativePairState {
+    $messages = [System.Collections.Generic.List[object]]::new()
+    [void]$messages.Add([pscustomobject]@{ Id = 'ready-task-77'; Route = 'implementer-to-reviewer' })
+    [void]$messages.Add([pscustomobject]@{ Id = 'accepted-task-77-revision-a2'; Route = 'reviewer-to-implementer' })
+
+    $taigaWrites = [System.Collections.Generic.List[object]]::new()
+    [void]$taigaWrites.Add([pscustomobject]@{
+        OperationId = 'task-77-accepted-revision-a2'
+        TaskId = 77
+        Revision = 'revision-a2'
+        Status = 'accepted'
+        Outcome = 'confirmed'
+        EvidenceRef = 'taiga-task-77-v4'
+    })
+
+    $advancements = [System.Collections.Generic.List[object]]::new()
+    [void]$advancements.Add([pscustomobject]@{
+        EventId = 'advance-task-78'
+        FromTaskId = 77
+        ToTaskId = 78
+        Outcome = 'confirmed'
+        EvidenceRef = 'progress-task-78'
+    })
+
+    [ordered]@{
+        StoryRef = 52
+        DeclaredTasks = @(77, 78)
+        TaskAcceptances = @([pscustomobject]@{
+            EventId = 'accepted-task-77-revision-a2'
+            TaskId = 77
+            ReviewedRevision = 'revision-a2'
+            EvidenceRef = 'review-accept-77'
+            Confirmed = $true
+        })
+        ConfirmedWrites = $taigaWrites
+        WorkerStates = @(
+            [pscustomobject]@{
+                Role = 'implementer'
+                TaskId = 78
+                Revision = 'revision-b1'
+                State = 'implementing'
+                Cursor = 'impl-cursor-b1'
+                Confirmed = $true
+            }
+            [pscustomobject]@{
+                Role = 'reviewer'
+                TaskId = 78
+                Revision = 'none'
+                State = 'waiting_for_implementation'
+                Cursor = 'review-cursor-b1'
+                Confirmed = $true
+            }
+        )
+        Messages = $messages
+        Advancements = $advancements
+    }
+}
+
+function Get-AuthoritativeRecoveryState {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Authoritative
+    )
+
+    $declaredTasks = @($Authoritative['DeclaredTasks'])
+    $acceptance = @($Authoritative['TaskAcceptances'] | Where-Object { $_.Confirmed -and $_.TaskId -gt 0 } | Select-Object -First 1)
+    if ($null -eq $acceptance) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed task acceptance' }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$acceptance.EvidenceRef)) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing task acceptance evidence reference' }
+    }
+
+    $acceptedIndex = [Array]::IndexOf([int[]]$declaredTasks, [int]$acceptance.TaskId)
+    if ($acceptedIndex -lt 0 -or $acceptedIndex -ge ($declaredTasks.Count - 1)) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'task acceptance is not followed by a declared task' }
+    }
+    $expectedNextTask = [int]$declaredTasks[$acceptedIndex + 1]
+
+    $writesForTask = @($Authoritative['ConfirmedWrites'] | Where-Object {
+        $_.TaskId -eq $acceptance.TaskId -and $_.Status -eq 'accepted'
+    })
+    if ($writesForTask.Count -eq 0) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed Taiga write for accepted task' }
+    }
+    $conflictingWrites = @($writesForTask | Where-Object {
+        $_.Outcome -eq 'confirmed' -and $_.Revision -cne $acceptance.ReviewedRevision
+    })
+    if ($conflictingWrites.Count -gt 0) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'conflicting confirmed Taiga write for accepted revision' }
+    }
+    $write = @($writesForTask | Where-Object {
+        $_.Outcome -eq 'confirmed' -and $_.Revision -ceq $acceptance.ReviewedRevision
+    } | Select-Object -First 1)
+    if ($null -eq $write) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed Taiga write for accepted revision' }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$write.EvidenceRef)) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing Taiga write evidence reference' }
+    }
+
+    $advancement = @($Authoritative['Advancements'] | Where-Object {
+        $_.FromTaskId -eq $acceptance.TaskId -and $_.ToTaskId -eq $expectedNextTask
+    } | Select-Object -First 1)
+    if ($null -eq $advancement) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing advancement evidence for next declared task' }
+    }
+    if ($advancement.Outcome -ne 'confirmed') {
+        return [pscustomobject]@{ Ready = $false; Reason = 'conflicting advancement outcome for next declared task' }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$advancement.EvidenceRef)) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing advancement evidence reference' }
+    }
+
+    $implementer = @($Authoritative['WorkerStates'] | Where-Object {
+        $_.Confirmed -and $_.Role -eq 'implementer'
+    } | Select-Object -First 1)
+    $reviewer = @($Authoritative['WorkerStates'] | Where-Object {
+        $_.Confirmed -and $_.Role -eq 'reviewer'
+    } | Select-Object -First 1)
+    if ($null -eq $implementer -or $null -eq $reviewer) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed persistent worker state' }
+    }
+    if ($implementer.TaskId -ne $expectedNextTask -or $reviewer.TaskId -ne $expectedNextTask) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'conflicting worker task state for next declared task' }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$implementer.Revision) -or
+        [string]::IsNullOrWhiteSpace([string]$implementer.Cursor) -or
+        [string]::IsNullOrWhiteSpace([string]$reviewer.Cursor)) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'missing worker revision or cursor evidence' }
+    }
+
+    $nextAction = if ($implementer.State -eq 'implementing') {
+        "continue task #$expectedNextTask implementation"
+    } else {
+        "reconcile task #$expectedNextTask worker state"
+    }
+    [pscustomobject]@{
+        Ready = $true
+        Current = "story #$($Authoritative['StoryRef']) | task #$($implementer.TaskId)"
+        TaskState = "$($implementer.Revision) | $($implementer.State)"
+        Next = $nextAction
+        Evidence = "acceptance:$($acceptance.EvidenceRef) | write:$($write.EvidenceRef) | advancement:$($advancement.EvidenceRef) | workers:$($implementer.Cursor),$($reviewer.Cursor)"
+    }
+}
+
 function Invoke-StaleSnapshotRecovery {
     param(
         [Parameter(Mandatory)] [string] $NotePath,
@@ -32,13 +188,28 @@ function Invoke-StaleSnapshotRecovery {
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Authoritative
     )
 
-    $isStale = $StaleSnapshot['Current'] -cne $Authoritative['Current'] -or
-        $StaleSnapshot['Task state'] -cne $Authoritative['Task state']
+    $recoveryState = Get-AuthoritativeRecoveryState -Authoritative $Authoritative
+    if (-not $recoveryState.Ready) {
+        return [pscustomobject]@{
+            SnapshotChanged = $false
+            Held = $true
+            Reason = $recoveryState.Reason
+            Messages = $Authoritative['Messages'].Count
+            TaigaWrites = $Authoritative['ConfirmedWrites'].Count
+            Advancements = $Authoritative['Advancements'].Count
+        }
+    }
+
+    $isStale = $StaleSnapshot['Current'] -cne $recoveryState.Current -or
+        $StaleSnapshot['Task state'] -cne $recoveryState.TaskState -or
+        $StaleSnapshot['Evidence'] -cne $recoveryState.Evidence
     if (-not $isStale) {
         return [pscustomobject]@{
             SnapshotChanged = $false
+            Held = $false
+            Reason = $null
             Messages = $Authoritative['Messages'].Count
-            TaigaWrites = $Authoritative['TaigaWrites'].Count
+            TaigaWrites = $Authoritative['ConfirmedWrites'].Count
             Advancements = $Authoritative['Advancements'].Count
         }
     }
@@ -48,17 +219,19 @@ function Invoke-StaleSnapshotRecovery {
     # be replayed while the coordinator refreshes its note.
     $refreshedSnapshot = [ordered]@{}
     foreach ($key in $StaleSnapshot.Keys) { $refreshedSnapshot[$key] = $StaleSnapshot[$key] }
-    $refreshedSnapshot['Current'] = $Authoritative['Current']
-    $refreshedSnapshot['Task state'] = $Authoritative['Task state']
+    $refreshedSnapshot['Current'] = $recoveryState.Current
+    $refreshedSnapshot['Task state'] = $recoveryState.TaskState
     $refreshedSnapshot['Review'] = 'pending'
-    $refreshedSnapshot['Next'] = $Authoritative['Next']
-    $refreshedSnapshot['Evidence'] = $Authoritative['Evidence']
+    $refreshedSnapshot['Next'] = $recoveryState.Next
+    $refreshedSnapshot['Evidence'] = $recoveryState.Evidence
     $writeResult = & $writer -NotePath $NotePath -Snapshot $refreshedSnapshot
 
     [pscustomobject]@{
         SnapshotChanged = [bool]$writeResult.Changed
+        Held = $false
+        Reason = $null
         Messages = $Authoritative['Messages'].Count
-        TaigaWrites = $Authoritative['TaigaWrites'].Count
+        TaigaWrites = $Authoritative['ConfirmedWrites'].Count
         Advancements = $Authoritative['Advancements'].Count
     }
 }
@@ -238,51 +411,67 @@ try {
     $staleResult = & $writer -NotePath $recoveryPath -Snapshot $staleSnapshot
     Assert-True $staleResult.Changed 'creates the stale recovery snapshot'
 
-    $authoritative = [ordered]@{
-        Current = 'story #52 | task #78'
-        'Task state' = 'revision-b1 | implementing'
-        Next = 'send task #78 ready-for-review to reviewer'
-        Evidence = 'task-77-accepted-ref | task-78-started-ref | reviewer-cursor-b1'
-        Messages = [System.Collections.Generic.List[object]]::new()
-        TaigaWrites = [System.Collections.Generic.List[object]]::new()
-        Advancements = [System.Collections.Generic.List[object]]::new()
-    }
-    [void]$authoritative['Messages'].Add([pscustomobject]@{ Id = 'ready-task-77'; Route = 'implementer-to-reviewer' })
-    [void]$authoritative['Messages'].Add([pscustomobject]@{ Id = 'accepted-task-77-revision-a2'; Route = 'reviewer-to-implementer' })
-    [void]$authoritative['TaigaWrites'].Add([pscustomobject]@{ Id = 'task-77-accepted-revision-a2'; Kind = 'task-status' })
-    [void]$authoritative['Advancements'].Add([pscustomobject]@{ Id = 'advance-task-78'; Kind = 'next-declared-task' })
-    Assert-True ($staleSnapshot['Current'] -cne $authoritative['Current'] -and
-        $authoritative['TaigaWrites'].Count -eq 1 -and
+    $authoritative = New-AuthoritativePairState
+    $derivedState = Get-AuthoritativeRecoveryState -Authoritative $authoritative
+    Assert-True $derivedState.Ready 'authoritative acceptance, confirmed write, advancement, and worker state are sufficient for recovery'
+    Assert-True ($staleSnapshot['Current'] -cne $derivedState.Current -and
+        $staleSnapshot['Task state'] -cne $derivedState.TaskState -and
+        $staleSnapshot['Evidence'] -cne $derivedState.Evidence -and
+        $authoritative['ConfirmedWrites'].Count -eq 1 -and
         $authoritative['Advancements'].Count -eq 1) 'worker pair advances independently before stale snapshot recovery'
 
     $beforeMessages = $authoritative['Messages'].Count
-    $beforeTaigaWrites = $authoritative['TaigaWrites'].Count
+    $beforeTaigaWrites = $authoritative['ConfirmedWrites'].Count
     $beforeAdvancements = $authoritative['Advancements'].Count
     $firstRecovery = Invoke-StaleSnapshotRecovery -NotePath $recoveryPath -StaleSnapshot $staleSnapshot -Authoritative $authoritative
     Assert-True $firstRecovery.SnapshotChanged 'recovery replaces the obsolete task snapshot'
     $recoveredText = [IO.File]::ReadAllText($recoveryPath)
-    Assert-True ($recoveredText.Contains('Current: story #52 | task #78') -and
-        $recoveredText.Contains('Task state: revision-b1 | implementing') -and
-        -not $recoveredText.Contains('Current: story #52 | task #77')) 'recovery records the authoritative current task and revision'
+    Assert-True ($recoveredText.Contains($derivedState.Current) -and
+        $recoveredText.Contains($derivedState.TaskState) -and
+        $recoveredText.Contains($derivedState.Evidence) -and
+        -not $recoveredText.Contains('Current: story #52 | task #77')) 'recovery records derived authoritative task, revision, and evidence'
     Assert-True ($authoritative['Messages'].Count -eq $beforeMessages) 'recovery does not duplicate messages'
-    Assert-True ($authoritative['TaigaWrites'].Count -eq $beforeTaigaWrites) 'recovery does not duplicate Taiga writes'
+    Assert-True ($authoritative['ConfirmedWrites'].Count -eq $beforeTaigaWrites) 'recovery does not duplicate Taiga writes'
     Assert-True ($authoritative['Advancements'].Count -eq $beforeAdvancements) 'recovery does not duplicate task advancement'
 
-    $reconciledSnapshot = [ordered]@{}
-    foreach ($key in $staleSnapshot.Keys) { $reconciledSnapshot[$key] = $staleSnapshot[$key] }
-    $reconciledSnapshot['Current'] = $authoritative['Current']
-    $reconciledSnapshot['Task state'] = $authoritative['Task state']
-    $reconciledSnapshot['Review'] = 'pending'
-    $reconciledSnapshot['Next'] = $authoritative['Next']
-    $reconciledSnapshot['Evidence'] = $authoritative['Evidence']
+    $reconciledSnapshot = Read-Snapshot -NotePath $recoveryPath
     $secondRecovery = Invoke-StaleSnapshotRecovery -NotePath $recoveryPath -StaleSnapshot $reconciledSnapshot -Authoritative $authoritative
     Assert-True (-not $secondRecovery.SnapshotChanged) 'repeated recovery of the reconciled snapshot is a no-op'
     Assert-True ($authoritative['Messages'].Count -eq $beforeMessages) 'repeated recovery keeps message count unchanged'
-    Assert-True ($authoritative['TaigaWrites'].Count -eq $beforeTaigaWrites) 'repeated recovery keeps Taiga write count unchanged'
+    Assert-True ($authoritative['ConfirmedWrites'].Count -eq $beforeTaigaWrites) 'repeated recovery keeps Taiga write count unchanged'
     Assert-True ($authoritative['Advancements'].Count -eq $beforeAdvancements) 'repeated recovery keeps advancement count unchanged'
     Assert-True (@($authoritative['Messages'] | ForEach-Object { $_.Id } | Select-Object -Unique).Count -eq $beforeMessages) 'recovery leaves message identities unique'
-    Assert-True (@($authoritative['TaigaWrites'] | ForEach-Object { $_.Id } | Select-Object -Unique).Count -eq $beforeTaigaWrites) 'recovery leaves Taiga write identities unique'
-    Assert-True (@($authoritative['Advancements'] | ForEach-Object { $_.Id } | Select-Object -Unique).Count -eq $beforeAdvancements) 'recovery leaves advancement identities unique'
+    Assert-True (@($authoritative['ConfirmedWrites'] | ForEach-Object { $_.OperationId } | Select-Object -Unique).Count -eq $beforeTaigaWrites) 'recovery leaves Taiga write identities unique'
+    Assert-True (@($authoritative['Advancements'] | ForEach-Object { $_.EventId } | Select-Object -Unique).Count -eq $beforeAdvancements) 'recovery leaves advancement identities unique'
+
+    $missingEvidenceState = New-AuthoritativePairState
+    [void]$missingEvidenceState['ConfirmedWrites'].Clear()
+    $missingEvidencePath = Join-Path $fixtureRoot 'recovery-missing.md'
+    & $writer -NotePath $missingEvidencePath -Snapshot $staleSnapshot | Out-Null
+    $missingBefore = [IO.File]::ReadAllText($missingEvidencePath)
+    $missingMessages = $missingEvidenceState['Messages'].Count
+    $missingAdvancements = $missingEvidenceState['Advancements'].Count
+    $missingRecovery = Invoke-StaleSnapshotRecovery -NotePath $missingEvidencePath -StaleSnapshot $staleSnapshot -Authoritative $missingEvidenceState
+    Assert-True ($missingRecovery.Held -and $missingRecovery.Reason -eq 'missing confirmed Taiga write for accepted task') 'recovery holds when authoritative evidence is missing'
+    Assert-True ([IO.File]::ReadAllText($missingEvidencePath) -ceq $missingBefore) 'missing evidence does not rewrite the stale snapshot'
+    Assert-True ($missingEvidenceState['Messages'].Count -eq $missingMessages -and
+        $missingEvidenceState['ConfirmedWrites'].Count -eq 0 -and
+        $missingEvidenceState['Advancements'].Count -eq $missingAdvancements) 'missing evidence does not replay external actions'
+
+    $conflictingEvidenceState = New-AuthoritativePairState
+    $conflictingEvidenceState['ConfirmedWrites'][0].Revision = 'revision-conflict'
+    $conflictingEvidencePath = Join-Path $fixtureRoot 'recovery-conflicting.md'
+    & $writer -NotePath $conflictingEvidencePath -Snapshot $staleSnapshot | Out-Null
+    $conflictingBefore = [IO.File]::ReadAllText($conflictingEvidencePath)
+    $conflictingMessages = $conflictingEvidenceState['Messages'].Count
+    $conflictingWrites = $conflictingEvidenceState['ConfirmedWrites'].Count
+    $conflictingAdvancements = $conflictingEvidenceState['Advancements'].Count
+    $conflictingRecovery = Invoke-StaleSnapshotRecovery -NotePath $conflictingEvidencePath -StaleSnapshot $staleSnapshot -Authoritative $conflictingEvidenceState
+    Assert-True ($conflictingRecovery.Held -and $conflictingRecovery.Reason -eq 'conflicting confirmed Taiga write for accepted revision') 'recovery holds when authoritative evidence conflicts'
+    Assert-True ([IO.File]::ReadAllText($conflictingEvidencePath) -ceq $conflictingBefore) 'conflicting evidence does not rewrite the stale snapshot'
+    Assert-True ($conflictingEvidenceState['Messages'].Count -eq $conflictingMessages -and
+        $conflictingEvidenceState['ConfirmedWrites'].Count -eq $conflictingWrites -and
+        $conflictingEvidenceState['Advancements'].Count -eq $conflictingAdvancements) 'conflicting evidence does not replay external actions'
 
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'
@@ -308,11 +497,11 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, stale-snapshot recovery, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, authoritative stale-snapshot recovery, missing/conflicting evidence holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
-    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'legacy.md')) {
+    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'legacy.md')) {
         $fixtureFile = Join-Path $fixtureRoot $name
         if ([IO.File]::Exists($fixtureFile)) { [IO.File]::Delete($fixtureFile) }
     }

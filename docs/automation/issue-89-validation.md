@@ -45,8 +45,12 @@ The fixtures use synthetic state and exercise two ordered tasks, correction
 rounds, both review modes, duplicate/stale outcomes, and coordinator recovery
 from a snapshot that still points at task #77 after the pair has independently
 accepted it and advanced to task #78. The recovery fixture asserts that
-reconciliation updates only the compact pointer: it does not duplicate worker
-messages, Taiga writes, or task advancement, including on a repeated resume.
+reconciliation derives the current task, revision, and evidence from the
+authoritative acceptance, confirmed Taiga write, ordered advancement, and
+worker cursors. It updates only the compact pointer: it does not duplicate
+worker messages, Taiga writes, or task advancement, including on a repeated
+resume. Missing or conflicting acceptance/write/worker evidence holds the
+stale snapshot without rewriting it or replaying external actions.
 The remaining fixtures cover exact-HEAD approval and an unanswered merge gate.
 They do not launch workers, mutate live Taiga/GitHub data, or measure live
 token/cost savings.

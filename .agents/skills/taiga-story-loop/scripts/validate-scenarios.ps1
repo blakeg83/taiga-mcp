@@ -393,11 +393,18 @@ foreach ($marker in @('Resolve-MigrationTopology', 'resolvedLegacyTopology', 're
 }
 foreach ($marker in @(
         'Invoke-StaleSnapshotRecovery'
+        'Get-AuthoritativeRecoveryState'
+        'TaskAcceptances'
+        'ConfirmedWrites'
+        'WorkerStates'
         'worker pair advances independently before stale snapshot recovery'
+        'authoritative acceptance, confirmed write, advancement, and worker state are sufficient for recovery'
         'recovery does not duplicate messages'
         'recovery does not duplicate Taiga writes'
         'recovery does not duplicate task advancement'
-        'repeated recovery of the reconciled snapshot is a no-op')) {
+        'repeated recovery of the reconciled snapshot is a no-op'
+        'recovery holds when authoritative evidence is missing'
+        'recovery holds when authoritative evidence conflicts')) {
     if (-not (Get-Content $continuationScriptPath -Raw).Contains($marker)) {
         throw "Continuation recovery fixture assertion failed: $marker"
     }

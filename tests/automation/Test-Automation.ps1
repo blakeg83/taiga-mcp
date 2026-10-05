@@ -1517,7 +1517,7 @@ try {
         $output = & pwsh -NoProfile -File $script:ContinuationScript 2>&1
         $exitCode = $LASTEXITCODE
         Assert-Equal 0 $exitCode 'continuation snapshot fixture must pass'
-        Assert-True (($output -join "`n").Contains('Passed snapshot replacement, stale-snapshot recovery, no-duplicate external actions')) 'continuation fixture must report stale-snapshot recovery coverage'
+        Assert-True (($output -join "`n").Contains('Passed snapshot replacement, authoritative stale-snapshot recovery, missing/conflicting evidence holds')) 'continuation fixture must report authoritative stale-snapshot recovery coverage'
     }
 
     Test-Case 'journal reviewed child transitions and reconcile partial writes safely' {
