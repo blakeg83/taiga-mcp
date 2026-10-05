@@ -50,7 +50,9 @@ authoritative acceptance, confirmed Taiga write, ordered advancement, and
 worker cursors. It updates only the compact pointer: it does not duplicate
 worker messages, Taiga writes, or task advancement, including on a repeated
 resume. Missing or conflicting acceptance/write/worker evidence holds the
-stale snapshot without rewriting it or replaying external actions.
+stale snapshot without rewriting it or replaying external actions; the fixture
+also covers empty acceptance lookup, unknown write outcome, and unconfirmed
+implementer state under strict mode.
 The remaining fixtures cover exact-HEAD approval and an unanswered merge gate.
 They do not launch workers, mutate live Taiga/GitHub data, or measure live
 token/cost savings.

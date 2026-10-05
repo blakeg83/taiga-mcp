@@ -100,10 +100,11 @@ function Get-AuthoritativeRecoveryState {
     )
 
     $declaredTasks = @($Authoritative['DeclaredTasks'])
-    $acceptance = @($Authoritative['TaskAcceptances'] | Where-Object { $_.Confirmed -and $_.TaskId -gt 0 } | Select-Object -First 1)
-    if ($null -eq $acceptance) {
+    $acceptanceMatches = @($Authoritative['TaskAcceptances'] | Where-Object { $_.Confirmed -and $_.TaskId -gt 0 } | Select-Object -First 1)
+    if ($acceptanceMatches.Count -eq 0) {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed task acceptance' }
     }
+    $acceptance = $acceptanceMatches[0]
     if ([string]::IsNullOrWhiteSpace([string]$acceptance.EvidenceRef)) {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing task acceptance evidence reference' }
     }
@@ -126,22 +127,27 @@ function Get-AuthoritativeRecoveryState {
     if ($conflictingWrites.Count -gt 0) {
         return [pscustomobject]@{ Ready = $false; Reason = 'conflicting confirmed Taiga write for accepted revision' }
     }
-    $write = @($writesForTask | Where-Object {
+    $writeMatches = @($writesForTask | Where-Object {
         $_.Outcome -eq 'confirmed' -and $_.Revision -ceq $acceptance.ReviewedRevision
     } | Select-Object -First 1)
-    if ($null -eq $write) {
+    if ($writeMatches.Count -eq 0) {
+        if (@($writesForTask | Where-Object { $_.Outcome -ne 'confirmed' }).Count -gt 0) {
+            return [pscustomobject]@{ Ready = $false; Reason = 'unknown Taiga write outcome' }
+        }
         return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed Taiga write for accepted revision' }
     }
+    $write = $writeMatches[0]
     if ([string]::IsNullOrWhiteSpace([string]$write.EvidenceRef)) {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing Taiga write evidence reference' }
     }
 
-    $advancement = @($Authoritative['Advancements'] | Where-Object {
+    $advancementMatches = @($Authoritative['Advancements'] | Where-Object {
         $_.FromTaskId -eq $acceptance.TaskId -and $_.ToTaskId -eq $expectedNextTask
     } | Select-Object -First 1)
-    if ($null -eq $advancement) {
+    if ($advancementMatches.Count -eq 0) {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing advancement evidence for next declared task' }
     }
+    $advancement = $advancementMatches[0]
     if ($advancement.Outcome -ne 'confirmed') {
         return [pscustomobject]@{ Ready = $false; Reason = 'conflicting advancement outcome for next declared task' }
     }
@@ -149,15 +155,17 @@ function Get-AuthoritativeRecoveryState {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing advancement evidence reference' }
     }
 
-    $implementer = @($Authoritative['WorkerStates'] | Where-Object {
+    $implementerMatches = @($Authoritative['WorkerStates'] | Where-Object {
         $_.Confirmed -and $_.Role -eq 'implementer'
     } | Select-Object -First 1)
-    $reviewer = @($Authoritative['WorkerStates'] | Where-Object {
+    $reviewerMatches = @($Authoritative['WorkerStates'] | Where-Object {
         $_.Confirmed -and $_.Role -eq 'reviewer'
     } | Select-Object -First 1)
-    if ($null -eq $implementer -or $null -eq $reviewer) {
+    if ($implementerMatches.Count -eq 0 -or $reviewerMatches.Count -eq 0) {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing confirmed persistent worker state' }
     }
+    $implementer = $implementerMatches[0]
+    $reviewer = $reviewerMatches[0]
     if ($implementer.TaskId -ne $expectedNextTask -or $reviewer.TaskId -ne $expectedNextTask) {
         return [pscustomobject]@{ Ready = $false; Reason = 'conflicting worker task state for next declared task' }
     }
@@ -473,6 +481,42 @@ try {
         $conflictingEvidenceState['ConfirmedWrites'].Count -eq $conflictingWrites -and
         $conflictingEvidenceState['Advancements'].Count -eq $conflictingAdvancements) 'conflicting evidence does not replay external actions'
 
+    $missingAcceptanceState = New-AuthoritativePairState
+    $missingAcceptanceState['TaskAcceptances'] = @()
+    $missingAcceptancePath = Join-Path $fixtureRoot 'recovery-missing-acceptance.md'
+    & $writer -NotePath $missingAcceptancePath -Snapshot $staleSnapshot | Out-Null
+    $missingAcceptanceBefore = [IO.File]::ReadAllText($missingAcceptancePath)
+    $missingAcceptanceRecovery = Invoke-StaleSnapshotRecovery -NotePath $missingAcceptancePath -StaleSnapshot $staleSnapshot -Authoritative $missingAcceptanceState
+    Assert-True ($missingAcceptanceRecovery.Held -and $missingAcceptanceRecovery.Reason -eq 'missing confirmed task acceptance') 'empty acceptance lookup holds recovery'
+    Assert-True ([IO.File]::ReadAllText($missingAcceptancePath) -ceq $missingAcceptanceBefore) 'missing acceptance does not rewrite the stale snapshot'
+    Assert-True ($missingAcceptanceState['Messages'].Count -eq 2 -and
+        $missingAcceptanceState['ConfirmedWrites'].Count -eq 1 -and
+        $missingAcceptanceState['Advancements'].Count -eq 1) 'missing acceptance does not replay external actions'
+
+    $unknownWriteState = New-AuthoritativePairState
+    $unknownWriteState['ConfirmedWrites'][0].Outcome = 'unknown'
+    $unknownWritePath = Join-Path $fixtureRoot 'recovery-unknown-write.md'
+    & $writer -NotePath $unknownWritePath -Snapshot $staleSnapshot | Out-Null
+    $unknownWriteBefore = [IO.File]::ReadAllText($unknownWritePath)
+    $unknownWriteRecovery = Invoke-StaleSnapshotRecovery -NotePath $unknownWritePath -StaleSnapshot $staleSnapshot -Authoritative $unknownWriteState
+    Assert-True ($unknownWriteRecovery.Held -and $unknownWriteRecovery.Reason -eq 'unknown Taiga write outcome') 'unknown write outcome holds recovery'
+    Assert-True ([IO.File]::ReadAllText($unknownWritePath) -ceq $unknownWriteBefore) 'unknown write outcome does not rewrite the stale snapshot'
+    Assert-True ($unknownWriteState['Messages'].Count -eq 2 -and
+        $unknownWriteState['ConfirmedWrites'].Count -eq 1 -and
+        $unknownWriteState['Advancements'].Count -eq 1) 'unknown write outcome does not replay external actions'
+
+    $unconfirmedWorkerState = New-AuthoritativePairState
+    $unconfirmedWorkerState['WorkerStates'][0].Confirmed = $false
+    $unconfirmedWorkerPath = Join-Path $fixtureRoot 'recovery-unconfirmed-worker.md'
+    & $writer -NotePath $unconfirmedWorkerPath -Snapshot $staleSnapshot | Out-Null
+    $unconfirmedWorkerBefore = [IO.File]::ReadAllText($unconfirmedWorkerPath)
+    $unconfirmedWorkerRecovery = Invoke-StaleSnapshotRecovery -NotePath $unconfirmedWorkerPath -StaleSnapshot $staleSnapshot -Authoritative $unconfirmedWorkerState
+    Assert-True ($unconfirmedWorkerRecovery.Held -and $unconfirmedWorkerRecovery.Reason -eq 'missing confirmed persistent worker state') 'unconfirmed implementer lookup holds recovery'
+    Assert-True ([IO.File]::ReadAllText($unconfirmedWorkerPath) -ceq $unconfirmedWorkerBefore) 'unconfirmed worker state does not rewrite the stale snapshot'
+    Assert-True ($unconfirmedWorkerState['Messages'].Count -eq 2 -and
+        $unconfirmedWorkerState['ConfirmedWrites'].Count -eq 1 -and
+        $unconfirmedWorkerState['Advancements'].Count -eq 1) 'unconfirmed worker state does not replay external actions'
+
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'
     Assert-Rejected $bad 'rejects history field'
@@ -501,7 +545,7 @@ try {
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
-    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'legacy.md')) {
+    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md')) {
         $fixtureFile = Join-Path $fixtureRoot $name
         if ([IO.File]::Exists($fixtureFile)) { [IO.File]::Delete($fixtureFile) }
     }

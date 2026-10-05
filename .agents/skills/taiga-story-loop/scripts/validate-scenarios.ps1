@@ -397,6 +397,10 @@ foreach ($marker in @(
         'TaskAcceptances'
         'ConfirmedWrites'
         'WorkerStates'
+        'acceptanceMatches.Count -eq 0'
+        'writeMatches.Count -eq 0'
+        'advancementMatches.Count -eq 0'
+        'implementerMatches.Count -eq 0'
         'worker pair advances independently before stale snapshot recovery'
         'authoritative acceptance, confirmed write, advancement, and worker state are sufficient for recovery'
         'recovery does not duplicate messages'
@@ -404,7 +408,10 @@ foreach ($marker in @(
         'recovery does not duplicate task advancement'
         'repeated recovery of the reconciled snapshot is a no-op'
         'recovery holds when authoritative evidence is missing'
-        'recovery holds when authoritative evidence conflicts')) {
+        'recovery holds when authoritative evidence conflicts'
+        'empty acceptance lookup holds recovery'
+        'unknown write outcome holds recovery'
+        'unconfirmed implementer lookup holds recovery')) {
     if (-not (Get-Content $continuationScriptPath -Raw).Contains($marker)) {
         throw "Continuation recovery fixture assertion failed: $marker"
     }
