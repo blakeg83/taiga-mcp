@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $fields = @(
-    'Run', 'Scope', 'Repository', 'Base', 'Feature', 'Current', 'Story branch',
+    'Run', 'Scope', 'Repository', 'Base', 'Topology', 'Feature', 'Current', 'Story branch',
     'Implementer', 'Pair', 'Review mode', 'PR', 'PR delivery', 'Approval',
     'Review', 'Integrated review', 'Final delivery', 'Merge', 'Next', 'Recovery',
     'Worker cursors', 'Task state', 'Gate', 'Pending action', 'Evidence'

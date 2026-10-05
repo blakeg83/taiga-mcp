@@ -14,6 +14,7 @@ function Assert-True {
 
 function New-Gate {
     param(
+        [ValidateSet('standalone','epic')] [string] $RunKind = 'epic',
         [string] $Head = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $CurrentHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $Reply = '',
@@ -32,6 +33,7 @@ function New-Gate {
     if ([string]::IsNullOrEmpty($CurrentBase)) { $CurrentBase = $Base }
     if ([string]::IsNullOrEmpty($CurrentScope)) { $CurrentScope = $Scope }
     [ordered]@{
+        runKind = $RunKind
         prUrl = $PrUrl
         repository = $Repository
         base = $Base
@@ -51,7 +53,12 @@ function New-Gate {
 
 function New-MergePrompt {
     param([hashtable] $Gate)
-    "Story #50 PR ready: $($Gate.prUrl)`nRepository: $($Gate.repository)`nScope: $($Gate.scope)`nBase: $($Gate.base)`nHead: $($Gate.reviewedHead)`n`nYes - merge and continue to the next ordered story`nNo - hold for feedback`n`nMerge this exact PR and continue? Reply Yes or No."
+    if ($Gate.runKind -eq 'epic') {
+        "Story #50 PR ready: $($Gate.prUrl)`nRepository: $($Gate.repository)`nScope: $($Gate.scope)`nBase: $($Gate.base)`nHead: $($Gate.reviewedHead)`n`nYes - merge and continue to the next ordered story`nNo - hold for feedback`n`nMerge this exact PR and continue? Reply Yes or No."
+    }
+    else {
+        "Story #50 PR ready: $($Gate.prUrl)`nRepository: $($Gate.repository)`nScope: $($Gate.scope)`nBase: $($Gate.base)`nHead: $($Gate.reviewedHead)`n`nYes - merge this exact PR`nNo - hold for feedback`n`nMerge this exact PR? Reply Yes or No."
+    }
 }
 
 function Resolve-Decision {
@@ -69,7 +76,7 @@ function Resolve-Decision {
     if ($Gate.mergeResult -ne 'merged') {
         return [ordered]@{ state = 'merge_unverified'; merge = $false; advance = $false; dispatch = 0 }
     }
-    [ordered]@{ state = 'merged_verified'; merge = $true; advance = $true; dispatch = 1 }
+    [ordered]@{ state = 'merged_verified'; merge = $true; advance = ($Gate.runKind -eq 'epic'); dispatch = if ($Gate.runKind -eq 'epic') { 1 } else { 0 }; complete = ($Gate.runKind -eq 'standalone') }
 }
 
 function Route-RequestedChanges {
@@ -82,6 +89,12 @@ foreach ($marker in @('Yes - merge and continue', 'No - hold for feedback', 'htt
     Assert-True $prompt.Contains($marker) "prompt must include $marker"
 }
 
+$standalonePrompt = New-MergePrompt (New-Gate -RunKind standalone -Base 'master')
+foreach ($marker in @('Yes - merge this exact PR', 'Base: master', 'No - hold for feedback')) {
+    Assert-True $standalonePrompt.Contains($marker) "standalone prompt must include $marker"
+}
+Assert-True (-not $standalonePrompt.Contains('continue to the next ordered story')) 'standalone prompt must not promise a next story'
+
 $no = Resolve-Decision (New-Gate -Reply 'No')
 Assert-True ($no.state -eq 'hold_feedback' -and -not $no.merge -and -not $no.advance -and $no.dispatch -eq 0) 'No must hold without dispatch'
 
@@ -90,6 +103,9 @@ Assert-True ($silent.state -eq 'wait_for_user' -and -not $silent.merge -and -not
 
 $yesMerged = Resolve-Decision (New-Gate -Reply 'Yes' -MergeResult 'merged')
 Assert-True ($yesMerged.state -eq 'merged_verified' -and $yesMerged.merge -and $yesMerged.advance -and $yesMerged.dispatch -eq 1) 'explicit Yes plus verified merge must advance'
+
+$standaloneMerged = Resolve-Decision (New-Gate -RunKind standalone -Base 'master' -Reply 'Yes' -MergeResult 'merged')
+Assert-True ($standaloneMerged.state -eq 'merged_verified' -and $standaloneMerged.merge -and -not $standaloneMerged.advance -and $standaloneMerged.dispatch -eq 0 -and $standaloneMerged.complete) 'standalone merge must complete without dispatching a next story'
 
 $yesFailed = Resolve-Decision (New-Gate -Reply 'Yes' -MergeResult 'failed')
 Assert-True ($yesFailed.state -eq 'merge_unverified' -and -not $yesFailed.advance -and $yesFailed.dispatch -eq 0) 'failed merge must hold the current story'
@@ -115,4 +131,4 @@ $recovery.promptCount = 1
 $recovery.workerDispatchCount = 0
 Assert-True ($recovery.promptCount -eq 1 -and $recovery.workerDispatchCount -eq 0) 'recovery while waiting must not repeat prompt or dispatch'
 
-Write-Output 'Passed offline merge-gate fixture: exact PR identity prompt, Yes/No/no-response handling, stale identity or HEAD approval, failed merge hold, verified advancement, correction routing, and quiet recovery.'
+Write-Output 'Passed offline merge-gate fixture: standalone direct-master completion and epic feature advancement, exact PR identity prompt, Yes/No/no-response handling, stale identity or HEAD approval, failed merge hold, correction routing, and quiet recovery.'

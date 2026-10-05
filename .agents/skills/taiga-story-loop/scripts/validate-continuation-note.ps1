@@ -31,6 +31,7 @@ try {
         'Scope' = 'project 12 story #52 | tasks: #77, #78'
         'Repository' = 'C:\Synthetic\TaigaMCP | remote: origin https://example.invalid/repo'
         'Base' = 'origin/master @ base-sha'
+        'Topology' = 'epic-shared-feature'
         'Feature' = 'codex/feature-synthetic | worktree: C:\Synthetic\feature | head: feature-sha'
         'Current' = 'story #52 | task #77'
         'Story branch' = 'codex/story-52-synthetic | worktree: C:\Synthetic\story | base: feature-sha'
@@ -53,6 +54,30 @@ try {
     $created = & $writer -NotePath $path -Snapshot $snapshot
     Assert-True $created.Changed 'creates initial complete snapshot'
     Assert-True (-not [IO.File]::Exists($path + '.previous')) 'initial creation has no invented previous snapshot'
+
+    # Existing active runs may omit Topology. Preserve their feature lineage
+    # rather than reinterpreting the run as standalone during migration.
+    $legacySnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) {
+        if ($key -cne 'Topology') { $legacySnapshot[$key] = $snapshot[$key] }
+    }
+    $legacyResult = & $writer -NotePath $path -Snapshot $legacySnapshot
+    Assert-True $legacyResult.Changed 'legacy snapshot without topology remains writable'
+    $legacyText = [IO.File]::ReadAllText($path)
+    Assert-True ($legacyText.Contains('codex/feature-synthetic')) 'legacy feature branch identity is preserved'
+    Assert-True (-not $legacyText.Contains('standalone-story-direct-master')) 'legacy snapshot is not silently reinterpreted as standalone'
+
+    $standaloneSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $standaloneSnapshot[$key] = $snapshot[$key] }
+    $standaloneSnapshot['Topology'] = 'standalone-story-direct-master'
+    $standaloneSnapshot['Feature'] = 'none (standalone direct-to-master)'
+    $standaloneSnapshot['PR'] = 'pending | base: master | head: revision-000'
+    $standaloneResult = & $writer -NotePath $path -Snapshot $standaloneSnapshot
+    Assert-True $standaloneResult.Changed 'standalone snapshot is writable'
+    $standaloneText = [IO.File]::ReadAllText($path)
+    Assert-True ($standaloneText.Contains('standalone-story-direct-master') -and $standaloneText.Contains('base: master')) 'standalone topology and direct PR base are preserved'
+
+    & $writer -NotePath $path -Snapshot $snapshot | Out-Null
 
     # Reproduce accumulation, then migrate it without throwing away history.
     $legacy = "Run: synthetic-story-52`n" + ((1..40 | ForEach-Object {

@@ -3,7 +3,8 @@
 This contract keeps the story loop small while making its branch lineage and
 resume point observable. It is a short note, not a registry or a workflow
 state machine. Git, Taiga, Codex, and the pull-request provider remain the
-authoritative systems.
+authoritative systems. The selected scope chooses the topology described in
+[scope-specific branch topology](branch-topology.md).
 
 ## Facts to retain
 
@@ -14,7 +15,8 @@ scope:
 | --- | --- |
 | Scope | project, story/epic ref, ordered task refs, and run identifier |
 | Repository | absolute path, remote name/URL, resolved base ref, and captured base SHA |
-| Feature integration | unique `codex/feature-<slug>-<run-suffix>` branch, worktree path, and current HEAD |
+| Topology | `standalone-story-direct-master` or `epic-shared-feature` |
+| Feature integration | Epic: unique `codex/feature-<slug>-<run-suffix>` branch, worktree path, and current HEAD; standalone: `none (standalone direct-to-master)` |
 | Current story | story ref, unique `codex/story-<ref>-<slug>-<run-suffix>` branch, worktree path, and base SHA |
 | Workers | implementer and reviewer chat IDs, when created |
 | Review | PR URL, PR base/head, approval or wait state, and the next required action |
@@ -24,7 +26,7 @@ Do not copy a ticket transcript, model output, full diff, or a second state
 registry into the note. A missing value is an unresolved setup fact, not a
 placeholder to guess.
 
-## Fresh feature branch
+## Fresh base and topology setup
 
 After the single setup confirmation and before worker dispatch:
 
@@ -36,32 +38,41 @@ After the single setup confirmation and before worker dispatch:
 2. Fetch the configured remote with `git fetch --prune <remote>` and capture
    `git rev-parse <remote>/<base-branch>`. The captured SHA is the only base
    for this run. A fetch failure, missing ref, or changed mapping blocks setup.
-3. Create one managed Codex worktree from that captured SHA. In that worktree,
-   create a unique `codex/feature-<slug>-<run-suffix>` branch with supported
-   Git commands, then verify the absolute path, branch, HEAD, captured base,
-   clean status, and repository identity. Never reuse a path or branch whose
-   ownership cannot be reconciled.
-4. Write the feature branch, worktree, base ref/SHA, and current feature HEAD
-   into the continuation note before creating a story worktree.
+3. For a standalone story, create one managed Codex worktree from that captured
+   SHA and create the unique story branch there. Verify the absolute path,
+   branch, HEAD, captured base, clean status, and repository identity. Record
+   `Feature: none (standalone direct-to-master)` and `PR: ... | base: master`.
+4. For an epic, create one managed Codex worktree from that captured SHA and
+   create a unique `codex/feature-<slug>-<run-suffix>` branch there. Verify the
+   absolute path, branch, HEAD, captured base, clean status, and repository
+   identity, then write the feature branch and current feature HEAD into the
+   continuation note before creating a story worktree.
+5. Never reuse a path or branch whose ownership cannot be reconciled. New
+   runs must write the topology before worker dispatch.
 
-The feature worktree is the integration line for this run. It is not the
-user's checkout and it is not a worker's story worktree.
+Only an epic has a feature worktree. It is the integration line for that run;
+it is not the user's checkout and it is not a worker's story worktree.
 
 ## Story branch and worktree
 
-For each story, after the preceding story is accepted according to its stated
-approval boundary, read the continuation note and re-check the feature branch
-with Git and the provider. Create one managed worktree from the current feature
-HEAD, then create a distinct `codex/story-<ref>-<slug>-<run-suffix>` branch in
-that worktree. Verify the story branch, base SHA, clean status, and absolute
-path before passing the path and branch receipt to the implementer and
-reviewer. The implementer is the only source writer in that checkout;
-reviewers inspect the frozen revision and return findings.
+For a standalone story, create one managed worktree from the captured base SHA
+and create a distinct `codex/story-<ref>-<slug>-<run-suffix>` branch there. The
+story branch is the only branch in the run and its PR base is `master`.
+
+For each story in an epic, after the preceding story is accepted according to
+its stated approval boundary, read the continuation note and re-check the
+feature branch with Git and the provider. Create one managed worktree from the
+current feature HEAD, then create a distinct
+`codex/story-<ref>-<slug>-<run-suffix>` branch in that worktree. Verify the
+story branch, base SHA, clean status, and absolute path before passing the
+path and branch receipt to the implementer and reviewer. The implementer is
+the only source writer in that checkout; reviewers inspect the frozen revision
+and return findings.
 
 The supported handoff is explicit:
 
 ```text
-create_worktree({ name: "<run>-story-<ref>", ref: "<feature-head>", allowAsync: true })
+create_worktree({ name: "<run>-story-<ref>", ref: "<captured-base-or-feature-head>", allowAsync: true })
 → wait for the operation to complete and use its returned workspace directory
 git -C <workspace> switch --create <story-branch>
 git -C <workspace> rev-parse --show-toplevel
@@ -72,18 +83,20 @@ git -C <workspace> status --porcelain
 
 The coordinator records the returned absolute path and verifies that the
 repository root, story branch, HEAD/base SHA, and clean status match the
-feature-to-story mapping. A pending worktree operation has no usable path;
-wait for its completion rather than inventing one. A path or branch collision
-is reconciled against the recorded scope and ownership, or blocks for user
+topology mapping. A pending worktree operation has no usable path; wait for
+its completion rather than inventing one. A path or branch collision is
+reconciled against the recorded scope and ownership, or blocks for user
 input. The same receipt is passed to the implementer and reviewer chat. The
 implementer may write source and commit on the story branch; the reviewer is
 read-only and reviews the frozen commit from that same path/revision.
 
-The story pull request targets the feature branch. A later story is based on
-the updated feature HEAD only after the provider confirms that the preceding
-story PR merged into that exact feature branch. A closed-unmerged, conflicting,
-or response-lost merge cannot advance the run. Do not infer merge completion
-from a branch name, a local checkout, a chat message, or a Taiga status alone.
+The standalone story pull request targets `master` and ends only after its
+explicit merge gate is verified. An epic story pull request targets the shared
+feature branch. A later epic story is based on the updated feature HEAD only
+after the provider confirms that the preceding story PR merged into that exact
+feature branch. A closed-unmerged, conflicting, or response-lost merge cannot
+advance an epic. Do not infer merge completion from a branch name, a local
+checkout, a chat message, or a Taiga status alone.
 
 ## Resume and preservation
 
@@ -96,8 +109,9 @@ lineage is ambiguous, stop for user input.
 
 Resume never resets or deletes unrelated branches, user changes, worktrees, or
 PRs. It never force-pushes. A failed review returns to the same implementer
-checkout; a confirmed merge advances the feature HEAD; an unconfirmed merge
-keeps the run waiting at the current story.
+checkout. For a standalone run, a confirmed direct-to-master merge completes
+the run. For an epic, a confirmed story merge advances the feature HEAD; an
+unconfirmed merge keeps the run waiting at the current story.
 
 ## Compact continuation note
 
@@ -111,11 +125,12 @@ The note can be Markdown or JSON. A Markdown shape is sufficient:
 Run: <run-id> | scope: <project> story/epic #<ref> | stories: <ordered story refs>
 Repository: <absolute path> | remote: <name> (<url>)
 Base: <remote>/<base> @ <base-sha>
-Feature: <feature-branch> | worktree: <absolute path> | HEAD: <sha>
+Topology: <standalone-story-direct-master or epic-shared-feature>
+Feature: <feature-branch and worktree, or none (standalone direct-to-master)>
 Current story/task: <story ref> / <task ref or review stage>
 Story branch: <story-branch> | worktree: <absolute path> | base: <sha>
 Workers: implementer <chat-id> | reviewer <chat-id>
-PR: <url or pending> | base <feature-branch> | head <sha>
+PR: <url or pending> | base <master or feature-branch> | head <sha>
 Approval: <pending/approved/merged/blocked> | next: <one action>
 Recovery: <automation-id or none>
 ```

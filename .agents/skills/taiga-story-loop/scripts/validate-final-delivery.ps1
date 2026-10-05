@@ -47,6 +47,64 @@ function Test-FinalPreflight {
     'ready'
 }
 
+function New-StandaloneRequest {
+    param(
+        [bool] $StoryReviewAccepted = $true,
+        [string] $RequestedHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        [string] $CurrentHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        [string] $Base = 'master',
+        [string] $FinalResponse = '',
+        [string] $MergeResult = 'pending'
+    )
+    [ordered]@{
+        topology = 'standalone-story-direct-master'
+        storyReviewAccepted = $StoryReviewAccepted
+        requestedHead = $RequestedHead
+        currentHead = $CurrentHead
+        base = $Base
+        finalResponse = $FinalResponse
+        mergeResult = $MergeResult
+    }
+}
+
+function Test-StandalonePreflight {
+    param([hashtable] $Request)
+    if ($Request.base -ne 'master') { return 'wrong_master_base' }
+    if ($Request.currentHead -ne $Request.requestedHead) { return 'stale_story_review' }
+    if (-not $Request.storyReviewAccepted) { return 'story_review_required' }
+    'ready'
+}
+
+function Resolve-StandaloneDecision {
+    param([hashtable] $Request)
+    if ($Request.finalResponse -ne 'Yes') {
+        return [ordered]@{ state = if ($Request.finalResponse -eq 'No') { 'hold_feedback' } else { 'wait_for_user' }; release = $false; complete = $false }
+    }
+    if ($Request.currentHead -ne $Request.requestedHead) {
+        return [ordered]@{ state = 'approval_invalidated'; release = $false; complete = $false }
+    }
+    if ($Request.mergeResult -ne 'merged') {
+        return [ordered]@{ state = 'release_unverified'; release = $false; complete = $false }
+    }
+    [ordered]@{ state = 'standalone_story_release_verified'; release = $true; complete = $true }
+}
+
+function New-StandaloneBody {
+    param([hashtable] $Request)
+    @(
+        '## Story release'
+        '- Run: standalone story'
+        '- Topology: `standalone-story-direct-master`'
+        '- Base: `master`'
+        "- Head: ``$($Request.currentHead)``"
+        ''
+        '## Review and approval'
+        '- Final story review: exact current story HEAD accepted'
+        '- Direct story PR to master: pending user approval'
+        '- Master merge: not automatic.'
+    ) -join "`n"
+}
+
 function New-FinalPrompt {
     param([hashtable] $Request)
     "Final feature-to-master PR is ready for review.`nBase: master`nHead: $($Request.currentHead)`n`nYes - merge final PR to master`nNo - hold for feedback`n`nMerge this final PR? Reply Yes or No."
@@ -90,40 +148,40 @@ function New-FinalBody {
     ) -join "`n"
 }
 
-$single = New-FinalRequest -RunKind single
+$standalone = New-StandaloneRequest
 $epic = New-FinalRequest -RunKind epic
-Assert-True ((Test-FinalPreflight $single) -eq 'ready') 'single-story final story review should permit final PR preparation'
+Assert-True ((Test-StandalonePreflight $standalone) -eq 'ready') 'standalone exact story review should permit direct master PR preparation'
 Assert-True ((Test-FinalPreflight $epic) -eq 'ready') 'epic final integrated review should permit final PR preparation'
 
 $blockedEpic = New-FinalRequest -RunKind epic -EpicReviewAccepted $false
 Assert-True ((Test-FinalPreflight $blockedEpic) -eq 'epic_review_required') 'epic final PR must require integrated epic acceptance'
 
-$wrongBase = New-FinalRequest -RunKind single -Base 'codex/feature-taiga-mcp-run1'
-Assert-True ((Test-FinalPreflight $wrongBase) -eq 'wrong_master_base') 'final PR must target master'
+$wrongBase = New-StandaloneRequest -Base 'codex/feature-taiga-mcp-run1'
+Assert-True ((Test-StandalonePreflight $wrongBase) -eq 'wrong_master_base') 'standalone story PR must target master'
 
-$stale = New-FinalRequest -RunKind single -CurrentHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-Assert-True ((Test-FinalPreflight $stale) -eq 'stale_final_review') 'changed feature HEAD must invalidate final review'
+$stale = New-StandaloneRequest -CurrentHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+Assert-True ((Test-StandalonePreflight $stale) -eq 'stale_story_review') 'changed story HEAD must invalidate final review'
 
-$prompt = New-FinalPrompt $single
+$prompt = New-FinalPrompt $epic
 foreach ($marker in @('Yes - merge final PR to master', 'No - hold for feedback', 'Reply Yes or No')) {
     Assert-True $prompt.Contains($marker) "final prompt must include $marker"
 }
 
-$no = New-FinalRequest -RunKind single -FinalResponse 'No'
-$noDecision = Resolve-FinalDecision $no
-Assert-True ($noDecision.state -eq 'hold_feedback' -and -not $noDecision.release -and -not $noDecision.masterComplete) 'No must hold final release'
+$no = New-StandaloneRequest -FinalResponse 'No'
+$noDecision = Resolve-StandaloneDecision $no
+Assert-True ($noDecision.state -eq 'hold_feedback' -and -not $noDecision.release -and -not $noDecision.complete) 'No must hold standalone story release'
 
-$silent = Resolve-FinalDecision (New-FinalRequest -RunKind single)
-Assert-True ($silent.state -eq 'wait_for_user' -and -not $silent.release) 'missing final answer must hold release'
+$silent = Resolve-StandaloneDecision (New-StandaloneRequest)
+Assert-True ($silent.state -eq 'wait_for_user' -and -not $silent.release) 'missing final answer must hold standalone story release'
 
-$failed = Resolve-FinalDecision (New-FinalRequest -RunKind single -FinalResponse 'Yes' -MergeResult 'failed')
-Assert-True ($failed.state -eq 'release_unverified' -and -not $failed.masterComplete) 'failed final merge must not claim master release'
+$failed = Resolve-StandaloneDecision (New-StandaloneRequest -FinalResponse 'Yes' -MergeResult 'failed')
+Assert-True ($failed.state -eq 'release_unverified' -and -not $failed.complete) 'failed standalone merge must not claim release'
 
-$changed = Resolve-FinalDecision (New-FinalRequest -RunKind single -FinalResponse 'Yes' -CurrentHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+$changed = Resolve-StandaloneDecision (New-StandaloneRequest -FinalResponse 'Yes' -CurrentHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
 Assert-True ($changed.state -eq 'approval_invalidated') 'changes after approval must invalidate final release'
 
-$merged = Resolve-FinalDecision (New-FinalRequest -RunKind single -FinalResponse 'Yes' -MergeResult 'merged')
-Assert-True ($merged.state -eq 'master_release_verified' -and $merged.release -and $merged.masterComplete) 'only verified final merge may claim master release'
+$merged = Resolve-StandaloneDecision (New-StandaloneRequest -FinalResponse 'Yes' -MergeResult 'merged')
+Assert-True ($merged.state -eq 'standalone_story_release_verified' -and $merged.release -and $merged.complete) 'only verified standalone merge may claim story release'
 
 Assert-True (Test-NextStoryGate 'merged_verified' $true) 'next story requires verified previous merge and refreshed feature HEAD'
 Assert-True (-not (Test-NextStoryGate 'approved' $true)) 'PR approval alone must not start next story'
@@ -133,8 +191,12 @@ $body = New-FinalBody $epic
 foreach ($marker in @('## Release', '## Integrated evidence', '## Approval boundary', '`master`', 'not automatic')) {
     Assert-True $body.Contains($marker) "final PR body must include $marker"
 }
+$standaloneBody = New-StandaloneBody $standalone
+foreach ($marker in @('## Story release', 'standalone-story-direct-master', '`master`', 'exact current story HEAD', 'not automatic')) {
+    Assert-True $standaloneBody.Contains($marker) "standalone story body must include $marker"
+}
 $createdOnly = New-FinalRequest -RunKind epic
 $createdOnly.finalPrCreated = $true
 Assert-True (-not $createdOnly.epicComplete -and -not $createdOnly.masterComplete) 'creating final PR alone must not complete epic or master'
 
-Write-Output 'Passed offline final delivery fixture: single/epic readiness, master base, final prompt, hold/failure/invalidation paths, sequence gate, evidence body, and completion separation.'
+Write-Output 'Passed offline final delivery fixture: standalone direct-master story release, epic integrated feature release, master base, exact-head review, approval/hold/failure/invalidation paths, sequence gate, evidence bodies, and completion separation.'

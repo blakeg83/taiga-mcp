@@ -17,6 +17,7 @@ acceptance criteria or grant permission to perform external writes.
 - Out of scope: <nearby work deliberately excluded>
 - Repository/workspace: <resolved repository and path>
 - Related epic: <resolved epic or “none”>
+- Branch topology: <standalone-story-direct-master or epic-shared-feature>
 
 ## Dependencies and execution order
 1. <task ref> — <subject> — depends on <none or prior task refs>
@@ -30,7 +31,25 @@ Unresolved requirements: <none, or the exact questions to resolve before work>
 
 ## Verification and delivery
 - Checks: <commands or other evidence appropriate to the changed artifacts>
-- Review/approval boundary: <what remains unapproved or requires a separate decision>
+- Review/approval boundary: <exact story HEAD review and direct-to-master merge for a standalone story, or story integration and final epic/master gates>
+
+## Branch topology
+
+Use the selected scope, not a generic default, to choose the branch lineage:
+
+- A standalone story has one managed story branch from the captured base SHA.
+  Its story PR targets `master`; final story approval and the explicit merge
+  decision are bound to that exact PR and HEAD.
+- An epic has one shared feature branch from the captured base SHA. Each story
+  receives a managed branch from the current feature HEAD and a PR targeting
+  that feature branch. After all story PRs are verified merged, the exact
+  integrated feature HEAD receives the final epic review and a separate
+  feature-to-`master` PR/approval.
+
+Do not create a feature branch for a standalone story. Do not use a standalone
+story PR as evidence that an epic story was integrated. See
+[scope-specific branch topology](branch-topology.md) for setup, continuation,
+and active-run migration rules.
 ```
 
 The goal must be actionable without prescribing an implementation. Scope is

@@ -58,9 +58,11 @@ pair. A comment, timeout, or unchanged Taiga status cannot substitute for the
 reviewer's exact HEAD approval.
 
 The coordinator follows [reviewed story PR delivery](pr-delivery.md) after this
-approval. The resulting PR is a delivery artifact targeting the integration
-feature branch, not a merge. Its base, head, checks, review profile, and exact
-URL are recorded before asking for the separate merge decision.
+approval. For a standalone story, the resulting delivery PR targets `master`
+directly. For an epic, it targets the shared integration feature branch. In
+both cases it is a delivery artifact, not a merge: its topology, base, head,
+checks, review profile, and exact URL are recorded before asking for the
+separate merge decision.
 
 The merge decision follows [the Yes/No story merge gate](merge-approval.md).
 Only an explicit Yes for the exact displayed PR authorizes an attempt. No,
@@ -69,8 +71,9 @@ story waiting and cannot release the next ordered story.
 
 When the scope is an epic, all story merges are followed by the [final
 integrated epic review](final-epic-review.md) at `gpt-6.1-sol`/`high` before
-final PR delivery. A single-story scope uses final story acceptance instead;
-the epic review is not added as an unnecessary gate.
+final feature-to-master PR delivery. A standalone story uses its final story
+acceptance as the exact-HEAD review for the direct-to-master story PR; the
+epic review and a second feature-to-master PR are not added.
 
 Final delivery follows [final feature-to-master delivery](final-delivery.md).
 Opening that PR hands the user a release candidate and never claims epic or

@@ -11,11 +11,28 @@ shown to the user, the observed outcome, and the tool-call trace. The static
 PowerShell file in `scripts/validate-scenarios.ps1` checks contract text only;
 it is not used as behavioral evidence.
 
+## Scope-specific topology
+
+The walkthroughs use two different branch paths:
+
+- A standalone story creates exactly one story branch from the captured
+  `origin/master` SHA. Its reviewed story PR targets `master`; the exact final
+  story review and explicit merge gate apply to that direct PR. No feature
+  branch or second PR is created.
+- An epic creates one shared feature branch from the captured base. Each linked
+  story gets its own branch/worktree from the current feature HEAD and a story
+  PR targeting that feature branch. Verified story merges are followed by one
+  integrated feature review and a separate final feature-to-`master` PR.
+
+An existing active continuation note that predates this distinction keeps its
+recorded feature/story branches, PR base, worker IDs, and recovery identity;
+the migration does not reinterpret that run.
+
 ## Summary
 
 | Case | Setup prompt | Observed outcome | Mutation calls before confirmation |
 | --- | --- | --- | --- |
-| Single-repository story | Emitted | `Start` accepted; scoped run authorized | None |
+| Single-repository story | Emitted | `Start` accepted; one direct-to-master story branch authorized | None |
 | Multi-repository epic | Emitted with two mapping rows | `Start` accepted; both repository scopes authorized | None |
 | Ambiguous scope | Not emitted | Clarification requested for missing project | None |
 | Cancelled setup | Emitted | `Cancel`; external systems unchanged | None |
@@ -71,18 +88,19 @@ Subject: 01 — Establish taiga-story-loop setup and agent-ready work contracts
 Scope: tasks #53, #54, #55, #56 in the story's declared order
 
 Repositories and branch/worktree mapping:
-| Repository/workspace | Remote | Verified base ref/SHA | Coordinator branch | Worker worktrees |
-| C:\Projects\TaigaMCP | origin | origin/master / 6670cbf | codex/story-46 | create one scoped worker worktree |
+| Repository/workspace | Remote | Verified base ref/SHA | Scope topology | Story branch/worktrees |
+| C:\Projects\TaigaMCP | origin | origin/master / 6670cbf | standalone-story-direct-master | codex/story-46 from base; PR base `master` |
 
 Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
 - Story/task reviews: gpt-6.1-sol, medium, after each task
 - Final epic review: gpt-6.1-sol, high, when the epic gate is reached
 
-Start authorizes the scoped worker chats, messages, worktree/branch,
-commits, pushes, Taiga updates, pull request, and 30-minute recovery
-automation. Each story merge requires its own Yes; final master merge is
-separate. Reply Start or Cancel.
+Start authorizes the scoped worker chats, messages, one story worktree/branch,
+commits, pushes, Taiga updates, direct story pull request to `master`, and
+30-minute recovery automation. The exact story review is followed by its own
+Yes merge gate; no feature branch or second final PR exists. Reply Start or
+Cancel.
 ```
 
 Synthetic user reply and trace:
@@ -247,9 +265,9 @@ Subject: Build a lean, message-driven Taiga story loop
 Scope: linked stories #46 and #47, each with its ordered child tasks
 
 Repositories and branch/worktree mapping:
-| Repository/workspace | Remote | Verified base ref/SHA | Coordinator branch | Worker worktrees |
-| C:\Projects\TaigaMCP | origin | origin/master / 6670cbf | codex/epic-45-taiga-mcp | C:\Temp\epic-45-taiga-mcp-worker |
-| C:\Projects\ReviewRepo | origin | origin/main / 1111111 | codex/epic-45-review | C:\Temp\epic-45-review-worker |
+| Repository/workspace | Remote | Verified base ref/SHA | Scope topology and feature branch | Story worker worktrees |
+| C:\Projects\TaigaMCP | origin | origin/master / 6670cbf | epic-shared-feature: codex/feature-epic-45-taiga-mcp | C:\Temp\epic-45-taiga-mcp-worker |
+| C:\Projects\ReviewRepo | origin | origin/main / 1111111 | epic-shared-feature: codex/feature-epic-45-review | C:\Temp\epic-45-review-worker |
 
 Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
@@ -257,9 +275,10 @@ Workers and review cadence:
 - Final epic review: gpt-6.1-sol, high, after all linked stories are ready
 
 Start authorizes only these mapped repositories and their scoped workers,
-messages, commits, pushes, Taiga updates, pull requests, and 30-minute
-recovery automation. Each story merge requires its own Yes; final master
-merge is separate. Reply Start or Cancel.
+messages, commits, pushes, Taiga updates, story pull requests into the shared
+feature branches, and 30-minute recovery automation. Each story merge into its
+feature branch requires its own Yes; the final feature-to-master merge is
+separate. Reply Start or Cancel.
 ```
 
 Synthetic user reply and trace:

@@ -1,16 +1,21 @@
 # Yes/No story merge gate
 
 The coordinator presents the exact reviewed story PR and waits for a scoped
-user decision. The prompt is a real approval boundary, not a status update:
+user decision. For a standalone story this is the direct-to-`master` release
+gate. For an epic it is the story-to-feature integration gate and does not
+release the feature to `master`. The prompt is a real approval boundary, not a
+status update:
 
 ```text
 Story #<ref> PR ready: <url>
 Repository: <repository>
 Scope: <story scope>
-Base: <integration feature branch>
+Topology: <standalone-story-direct-master or epic-shared-feature>
+Base: <master for standalone, integration feature branch for epic>
 Head: <reviewed commit SHA>
 
-Yes — merge and continue to the next ordered story
+Epic: Yes — merge and continue to the next ordered story
+Standalone: Yes — merge this exact PR
 No — hold for feedback
 
 Merge this exact PR and continue? Reply Yes or No.
@@ -24,18 +29,19 @@ text, or a worker message is `no_response`; it is never approval.
 
 | Observed input/state | Merge action | Story/next-story action |
 | --- | --- | --- |
-| `Yes`, PR URL/repository/base/scope/head still match, provider confirms merged | authorized merge result is verified | update truthful Taiga state, refresh feature HEAD, then begin the next ordered story |
+| `Yes`, PR URL/repository/base/scope/head still match, provider confirms merged | authorized merge result is verified | standalone: update truthful Taiga state and end the run; epic: refresh feature HEAD and begin the next ordered story |
 | `No` | none | retain the current PR and hold for feedback |
 | no response or invalid response | none | retain the current PR and wait silently for a user decision |
 | `Yes` but PR URL, repository, head, base, or story scope changed | none | mark approval stale and return the same story pair for fresh review/user approval |
 | `Yes` but merge fails, conflicts, closes unmerged, or is unknown | none beyond the provider attempt | keep the story waiting; reconcile before retrying and do not start another story |
 | requested changes after review | no merge | route the same story branch to the existing implementer/reviewer pair; a new reviewed HEAD needs a new prompt |
 
-Only a verified provider merge unlocks the next story. Do not update a story to
-Done, create the next story branch, dispatch the next worker, or claim feature
-progress from a Yes alone, PR approval, a Taiga status, or a timeout. The
-feature branch must be refreshed from the authoritative merged result before
-the next story receives its base.
+Only a verified provider merge unlocks the next epic story. A standalone story
+has no next-story dispatch. Do not update a story to Done, create the next
+story branch, dispatch the next worker, or claim feature progress from a Yes
+alone, PR approval, a Taiga status, or a timeout. An epic feature branch must
+be refreshed from the authoritative merged result before the next story
+receives its base.
 
 ## Waiting and recovery
 

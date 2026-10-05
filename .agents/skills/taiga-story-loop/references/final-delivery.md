@@ -1,10 +1,10 @@
 # Final feature-to-master delivery
 
-The final delivery is a release handoff, not an automatic merge. It is
-available only after the current feature HEAD has passed the correct final
-review:
+This contract applies only to an epic. The final delivery is a release
+handoff, not an automatic merge, and is available only after every story PR
+has been verified merged into the shared feature branch and the current
+feature HEAD has passed the integrated epic review:
 
-- a single-story run requires final story approval at the exact feature HEAD;
 - an epic run requires the integrated epic acceptance from
   [the final epic review](final-epic-review.md) at the exact feature HEAD.
 
@@ -14,13 +14,23 @@ head and `master` as base. Reuse is valid only when the repository, base, head,
 scope, and review evidence still match. A final PR is never treated as a
 successful release merely because it was opened.
 
+## Standalone story delivery
+
+A standalone story does not use this final feature-to-master PR. Its final
+story approval is bound to the exact current story HEAD, and
+[reviewed story PR delivery](pr-delivery.md) creates or reuses one story PR
+with the story branch as head and `master` as base. The [story merge gate](merge-approval.md)
+presents that direct PR for the user's explicit approval.
+After the provider confirms the direct merge, the story is released and the
+run ends. There is no feature branch, integrated epic review, or second PR.
+
 ## Final PR evidence
 
 The description identifies the path that produced it:
 
 ```markdown
 ## Release
-- Run: <single-story or epic>
+- Run: epic
 - Feature branch: `<branch>`
 - Base: `master`
 - Head: `<exact feature SHA>`
@@ -47,8 +57,8 @@ and master release remain distinct facts.
 For an epic, story `n + 1` starts only after story `n`'s PR is confirmed
 merged into the feature branch and the feature HEAD is refreshed. The final
 PR cannot be opened until every ordered story is integrated and the final epic
-review is accepted. For a single-story run, omit the epic review but retain the
-same final master approval boundary.
+review is accepted. A standalone story follows the direct story PR and merge
+gate described above and never enters this sequence.
 
 Any correction after final review or any material requirement change invalidates
 the final PR evidence. Return to the appropriate existing worker/reviewer
