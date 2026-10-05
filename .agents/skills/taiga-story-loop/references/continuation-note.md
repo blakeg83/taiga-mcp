@@ -100,6 +100,13 @@ reconciliation, never guessed identities or new duplicate workers. A genuine
 restart still uses the reconciliation steps below; the scheduled healthy
 path does not invoke full restart reconciliation on every tick.
 
+In per-task review, the implementer ending its turn in `awaiting_review` after
+a confirmed handoff is expected. Reviewer messages resume that same chat. Do
+not treat idle/completed chat status alone as interruption, resend readiness,
+or wake the implementer to poll the reviewer. Recover only an evidenced missing
+handoff, failed delivery, or interruption before dispatch; reconcile the
+current task/revision and delivery outcome first.
+
 Record context measurements in a separate evidence report: before/after UTF-8
 bytes and line counts, the scenario and number of corrections/ticks, and
 attributable usage only when available. Otherwise record usage as `unknown`;

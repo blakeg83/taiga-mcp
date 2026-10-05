@@ -47,6 +47,11 @@ and `scripts/validate-routing.ps1` for the controlled correction, stale-approval
 blocker, disagreement, and missing-destination scenarios. These checks do not
 create chats or perform live writes.
 
+In per-task review, initial and correction-ready handoffs end the implementer
+turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
+the implementer never polls the reviewer. Follow the identity/revision and
+deduplication checks in [message-driven resume](references/worker-handoffs.md#message-driven-resume).
+
 Use [per-task commits and parent-story progress comments](references/commit-and-progress.md)
 for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker

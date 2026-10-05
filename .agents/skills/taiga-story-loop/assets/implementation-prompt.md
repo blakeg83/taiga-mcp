@@ -81,10 +81,22 @@ For worker communication, use the short task-ready and correction handoff
 formats from `references/worker-handoffs.md`: name the task, branch, stable
 revision, checks with exit codes, and one next action. A task-ready handoff goes
 to the reviewer; a reviewer finding comes back to this same chat; a correction
-returns to that same reviewer. Do not start the next ordered task while a
-per-task review is active, and do not create a new chat for a correction. On a
-reviewer acceptance message, update the task in Taiga using its current version
-and advance only when the selected review mode permits it. A final story
+returns to that same reviewer. In `per_task` mode, after confirming the initial
+or correction-ready handoff to both reviewer and coordinator, record
+`awaiting_review` and end your turn with a final response naming the current
+task, branch/worktree, pending revision, pair IDs, authorization reference, and
+next reviewer action. Do not call `wait_threads`, poll/read the reviewer chat,
+schedule a review monitor, or keep the turn alive. Do not edit source or start
+the next task while review is pending. Recovery belongs to the coordinator.
+
+Resume this same chat only for an authorized actionable message or scoped
+recovery. Follow `references/worker-handoffs.md#message-driven-resume`: verify
+the assigned reviewer, current task, pending SHA, branch HEAD, and prior outcome
+before acting. Ignore stale or already-handled messages without duplicate
+writes or advancement; escalate conflicting outcomes or an unexpected HEAD.
+Current findings reopen only the affected task. On current exact-revision
+acceptance, update the task in Taiga using its current version and advance only
+when the selected review mode permits it. A final story
 approval belongs to the coordinator and is bound to an exact reviewed HEAD.
 
 In `per_task` mode, do not start the next task until the current task has its
