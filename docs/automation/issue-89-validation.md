@@ -37,11 +37,16 @@ pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-scenarios
 pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-merge-approval.ps1
 pwsh -NoProfile -File tests/automation/Test-Automation.ps1 -Only 'keep routine story corrections within the persistent worker pair'
 pwsh -NoProfile -File tests/automation/Test-Automation.ps1 -Only 'automate review dispatch and ordered task advancement'
+pwsh -NoProfile -File tests/automation/Test-Automation.ps1 -Only 'reconcile stale story-loop snapshots without replaying milestones'
 git diff --check
 ```
 
 The fixtures use synthetic state and exercise two ordered tasks, correction
-rounds, both review modes, duplicate/stale outcomes, coordinator interruption
-and reconciliation, exact-HEAD approval, and an unanswered merge gate. They do
-not launch workers, mutate live Taiga/GitHub data, or measure live token/cost
-savings.
+rounds, both review modes, duplicate/stale outcomes, and coordinator recovery
+from a snapshot that still points at task #77 after the pair has independently
+accepted it and advanced to task #78. The recovery fixture asserts that
+reconciliation updates only the compact pointer: it does not duplicate worker
+messages, Taiga writes, or task advancement, including on a repeated resume.
+The remaining fixtures cover exact-HEAD approval and an unanswered merge gate.
+They do not launch workers, mutate live Taiga/GitHub data, or measure live
+token/cost savings.

@@ -8,6 +8,7 @@ $ErrorActionPreference = 'Stop'
 $writer = Join-Path $PSScriptRoot 'write-continuation-note.ps1'
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('taiga-continuation-' + [Guid]::NewGuid().ToString('N'))
 $path = Join-Path $fixtureRoot 'current.md'
+$recoveryPath = Join-Path $fixtureRoot 'recovery.md'
 $encoding = [Text.UTF8Encoding]::new($false)
 
 function Assert-True([bool] $Condition, [string] $Message) {
@@ -22,6 +23,44 @@ function Assert-Rejected([System.Collections.IDictionary] $Candidate, [string] $
     Assert-True $rejected $Message
     Assert-True ([IO.File]::ReadAllText($path) -ceq $before) "$Message preserves current snapshot"
     Assert-True ([IO.File]::ReadAllText($path + '.previous') -ceq $backup) "$Message preserves backup"
+}
+
+function Invoke-StaleSnapshotRecovery {
+    param(
+        [Parameter(Mandatory)] [string] $NotePath,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $StaleSnapshot,
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Authoritative
+    )
+
+    $isStale = $StaleSnapshot['Current'] -cne $Authoritative['Current'] -or
+        $StaleSnapshot['Task state'] -cne $Authoritative['Task state']
+    if (-not $isStale) {
+        return [pscustomobject]@{
+            SnapshotChanged = $false
+            Messages = $Authoritative['Messages'].Count
+            TaigaWrites = $Authoritative['TaigaWrites'].Count
+            Advancements = $Authoritative['Advancements'].Count
+        }
+    }
+
+    # Recovery only replaces the stale pointer. The pair's confirmed messages,
+    # Taiga writes, and task advancement are already authoritative and must not
+    # be replayed while the coordinator refreshes its note.
+    $refreshedSnapshot = [ordered]@{}
+    foreach ($key in $StaleSnapshot.Keys) { $refreshedSnapshot[$key] = $StaleSnapshot[$key] }
+    $refreshedSnapshot['Current'] = $Authoritative['Current']
+    $refreshedSnapshot['Task state'] = $Authoritative['Task state']
+    $refreshedSnapshot['Review'] = 'pending'
+    $refreshedSnapshot['Next'] = $Authoritative['Next']
+    $refreshedSnapshot['Evidence'] = $Authoritative['Evidence']
+    $writeResult = & $writer -NotePath $NotePath -Snapshot $refreshedSnapshot
+
+    [pscustomobject]@{
+        SnapshotChanged = [bool]$writeResult.Changed
+        Messages = $Authoritative['Messages'].Count
+        TaigaWrites = $Authoritative['TaigaWrites'].Count
+        Advancements = $Authoritative['Advancements'].Count
+    }
 }
 
 function Resolve-MigrationTopology([System.Collections.IDictionary] $Snapshot) {
@@ -186,6 +225,65 @@ try {
     Assert-True ([IO.File]::ReadAllText($path + '.previous') -ceq $previous) 'healthy observations do not rotate backup'
     Assert-True ([IO.File]::ReadAllText((Join-Path $fixtureRoot 'legacy.md')) -ceq $legacy) 'historical evidence remains accessible separately'
 
+    # The pair can advance after the coordinator's last snapshot and before a
+    # scheduled resume. Reconcile that stale pointer without replaying any
+    # already-confirmed worker message, Taiga write, or task advancement.
+    $staleSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $staleSnapshot[$key] = $snapshot[$key] }
+    $staleSnapshot['Current'] = 'story #52 | task #77'
+    $staleSnapshot['Task state'] = 'revision-a1 | reviewing'
+    $staleSnapshot['Review'] = 'pending'
+    $staleSnapshot['Next'] = 'resume task #77 review'
+    $staleSnapshot['Evidence'] = 'task-77-ready-ref | reviewer-cursor-a1'
+    $staleResult = & $writer -NotePath $recoveryPath -Snapshot $staleSnapshot
+    Assert-True $staleResult.Changed 'creates the stale recovery snapshot'
+
+    $authoritative = [ordered]@{
+        Current = 'story #52 | task #78'
+        'Task state' = 'revision-b1 | implementing'
+        Next = 'send task #78 ready-for-review to reviewer'
+        Evidence = 'task-77-accepted-ref | task-78-started-ref | reviewer-cursor-b1'
+        Messages = [System.Collections.Generic.List[object]]::new()
+        TaigaWrites = [System.Collections.Generic.List[object]]::new()
+        Advancements = [System.Collections.Generic.List[object]]::new()
+    }
+    [void]$authoritative['Messages'].Add([pscustomobject]@{ Id = 'ready-task-77'; Route = 'implementer-to-reviewer' })
+    [void]$authoritative['Messages'].Add([pscustomobject]@{ Id = 'accepted-task-77-revision-a2'; Route = 'reviewer-to-implementer' })
+    [void]$authoritative['TaigaWrites'].Add([pscustomobject]@{ Id = 'task-77-accepted-revision-a2'; Kind = 'task-status' })
+    [void]$authoritative['Advancements'].Add([pscustomobject]@{ Id = 'advance-task-78'; Kind = 'next-declared-task' })
+    Assert-True ($staleSnapshot['Current'] -cne $authoritative['Current'] -and
+        $authoritative['TaigaWrites'].Count -eq 1 -and
+        $authoritative['Advancements'].Count -eq 1) 'worker pair advances independently before stale snapshot recovery'
+
+    $beforeMessages = $authoritative['Messages'].Count
+    $beforeTaigaWrites = $authoritative['TaigaWrites'].Count
+    $beforeAdvancements = $authoritative['Advancements'].Count
+    $firstRecovery = Invoke-StaleSnapshotRecovery -NotePath $recoveryPath -StaleSnapshot $staleSnapshot -Authoritative $authoritative
+    Assert-True $firstRecovery.SnapshotChanged 'recovery replaces the obsolete task snapshot'
+    $recoveredText = [IO.File]::ReadAllText($recoveryPath)
+    Assert-True ($recoveredText.Contains('Current: story #52 | task #78') -and
+        $recoveredText.Contains('Task state: revision-b1 | implementing') -and
+        -not $recoveredText.Contains('Current: story #52 | task #77')) 'recovery records the authoritative current task and revision'
+    Assert-True ($authoritative['Messages'].Count -eq $beforeMessages) 'recovery does not duplicate messages'
+    Assert-True ($authoritative['TaigaWrites'].Count -eq $beforeTaigaWrites) 'recovery does not duplicate Taiga writes'
+    Assert-True ($authoritative['Advancements'].Count -eq $beforeAdvancements) 'recovery does not duplicate task advancement'
+
+    $reconciledSnapshot = [ordered]@{}
+    foreach ($key in $staleSnapshot.Keys) { $reconciledSnapshot[$key] = $staleSnapshot[$key] }
+    $reconciledSnapshot['Current'] = $authoritative['Current']
+    $reconciledSnapshot['Task state'] = $authoritative['Task state']
+    $reconciledSnapshot['Review'] = 'pending'
+    $reconciledSnapshot['Next'] = $authoritative['Next']
+    $reconciledSnapshot['Evidence'] = $authoritative['Evidence']
+    $secondRecovery = Invoke-StaleSnapshotRecovery -NotePath $recoveryPath -StaleSnapshot $reconciledSnapshot -Authoritative $authoritative
+    Assert-True (-not $secondRecovery.SnapshotChanged) 'repeated recovery of the reconciled snapshot is a no-op'
+    Assert-True ($authoritative['Messages'].Count -eq $beforeMessages) 'repeated recovery keeps message count unchanged'
+    Assert-True ($authoritative['TaigaWrites'].Count -eq $beforeTaigaWrites) 'repeated recovery keeps Taiga write count unchanged'
+    Assert-True ($authoritative['Advancements'].Count -eq $beforeAdvancements) 'repeated recovery keeps advancement count unchanged'
+    Assert-True (@($authoritative['Messages'] | ForEach-Object { $_.Id } | Select-Object -Unique).Count -eq $beforeMessages) 'recovery leaves message identities unique'
+    Assert-True (@($authoritative['TaigaWrites'] | ForEach-Object { $_.Id } | Select-Object -Unique).Count -eq $beforeTaigaWrites) 'recovery leaves Taiga write identities unique'
+    Assert-True (@($authoritative['Advancements'] | ForEach-Object { $_.Id } | Select-Object -Unique).Count -eq $beforeAdvancements) 'recovery leaves advancement identities unique'
+
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'
     Assert-Rejected $bad 'rejects history field'
@@ -210,11 +308,11 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, stale-snapshot recovery, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
-    foreach ($name in @('current.md', 'current.md.previous', 'legacy.md')) {
+    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'legacy.md')) {
         $fixtureFile = Join-Path $fixtureRoot $name
         if ([IO.File]::Exists($fixtureFile)) { [IO.File]::Delete($fixtureFile) }
     }

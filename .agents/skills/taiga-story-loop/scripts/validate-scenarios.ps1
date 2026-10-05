@@ -392,6 +392,17 @@ foreach ($marker in @('Resolve-MigrationTopology', 'resolvedLegacyTopology', 're
     }
 }
 foreach ($marker in @(
+        'Invoke-StaleSnapshotRecovery'
+        'worker pair advances independently before stale snapshot recovery'
+        'recovery does not duplicate messages'
+        'recovery does not duplicate Taiga writes'
+        'recovery does not duplicate task advancement'
+        'repeated recovery of the reconciled snapshot is a no-op')) {
+    if (-not (Get-Content $continuationScriptPath -Raw).Contains($marker)) {
+        throw "Continuation recovery fixture assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
         'Yes — merge and continue to the next ordered story'
         'No — hold for feedback'
         'Yes`, PR URL/repository/base/scope/head still match, provider confirms merged'

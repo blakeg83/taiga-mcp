@@ -121,7 +121,8 @@ Persist current state by replacing the continuation snapshot, not appending
 milestones. Healthy recovery ticks read that snapshot and at most one compact
 worker wait; unanswered user gates stay silent. Follow the replacement and
 heartbeat read budget in [minimal continuation note](references/continuation-note.md)
-and run `scripts/validate-continuation-note.ps1` for offline persistence checks.
+and run `scripts/validate-continuation-note.ps1` for offline persistence and
+stale-snapshot recovery checks.
 
 For the shortest entry, use `Use $taiga-story-loop for <project> story #<ref>`
 or `Use $taiga-story-loop for <project> epic #<ref>`. Read

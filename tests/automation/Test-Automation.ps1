@@ -16,6 +16,7 @@ $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-tic
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
 $script:AutomaticReviewFlowScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-automatic-review-flow.ps1'
 $script:StoryRoutingScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-routing.ps1'
+$script:ContinuationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-continuation-note.ps1'
 $script:VerificationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-verification.ps1'
 $script:MeasureScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-measure.ps1'
 $script:AcceptanceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-acceptance.ps1'
@@ -1510,6 +1511,13 @@ try {
         $exitCode = $LASTEXITCODE
         Assert-Equal 0 $exitCode 'story routing fixture must pass'
         Assert-True (($output -join "`n").Contains('Passed routing fixture')) 'story routing fixture must report coverage'
+    }
+
+    Test-Case 'reconcile stale story-loop snapshots without replaying milestones' {
+        $output = & pwsh -NoProfile -File $script:ContinuationScript 2>&1
+        $exitCode = $LASTEXITCODE
+        Assert-Equal 0 $exitCode 'continuation snapshot fixture must pass'
+        Assert-True (($output -join "`n").Contains('Passed snapshot replacement, stale-snapshot recovery, no-duplicate external actions')) 'continuation fixture must report stale-snapshot recovery coverage'
     }
 
     Test-Case 'journal reviewed child transitions and reconcile partial writes safely' {
