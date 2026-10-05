@@ -56,6 +56,7 @@ try {
         'PR' = 'pending | base: codex/feature-synthetic | head: revision-000'
         'Approval' = 'pending | prompt: none | identity: pending'
         'Review' = 'changes_requested'
+        'Final review' = 'not_applicable | profile: none | head: pending'
         'Merge' = 'pending'
         'Next' = 'wait for correction of task #77'
         'Recovery' = 'automation-id | current note: current.md'

@@ -95,8 +95,10 @@ Reply Start or Cancel.
 record the approval with the resolved scope and pass that record to every
 worker assignment. `Cancel` leaves the external systems unchanged and ends
 setup. A later worker message is never treated as a substitute for either
-reply. If the user changes the scope, regenerate the summary and obtain a new
-confirmation.
+reply. The listed pull-request creation or update is included in that one
+`Start` authorization; do not ask for another PR-creation confirmation after
+final story approval. If the user changes the scope, regenerate the summary and
+obtain a new confirmation.
 
 After `Start`, the coordinator follows
 [scope-specific branch topology](branch-topology.md) and

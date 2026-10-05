@@ -35,8 +35,9 @@ attempt. Idle chat status and elapsed time are not acceptance evidence.
 
 The scoped workflow may apply this handoff automatically after a durable
 current acceptance event in `per_task` mode. It must verify reviewer identity,
-task identity, exact SHA, packet/scope binding, criteria, and current Taiga
-version before writing, then release only the next ordered task. In
+task identity, exact SHA, the immutable `Start` authorization and assignment
+identity, criteria, and current Taiga version before writing, then release only
+the next ordered task. In
 `story_end_only` mode, implementation-ready evidence advances task order
 without task acceptance or per-task review; the final story review accepts the
 retained task revisions. A stale, duplicate, changed-scope, or uncertain event
@@ -84,10 +85,11 @@ delivery; it never dispatches another story.
 When the scope is an epic, all story merges are followed by the [final
 integrated epic review](final-epic-review.md) at `gpt-6.1-sol`/`high` before
 final feature-to-master PR delivery. An active legacy standalone run skips the
-epic review and uses its preserved feature HEAD after the story-to-feature
-merge for the final feature-to-master PR. A new standalone story uses its
-final story acceptance as the exact-HEAD review for the direct-to-master story
-PR; the epic review and a second feature-to-master PR are not added.
+epic review but requires a separate final legacy review of the refreshed
+preserved feature HEAD before the final feature-to-master PR. A new standalone
+story uses its final story acceptance as the exact-HEAD review for the
+direct-to-master story PR; the epic review and a second feature-to-master PR
+are not added.
 
 Final delivery follows [final feature-to-master delivery](final-delivery.md).
 Opening that PR hands the user a release candidate and never claims epic or

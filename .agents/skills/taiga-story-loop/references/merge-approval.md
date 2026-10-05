@@ -32,7 +32,7 @@ text, or a worker message is `no_response`; it is never approval.
 
 | Observed input/state | Merge action | Story/next-story action |
 | --- | --- | --- |
-| `Yes`, PR URL/repository/base/scope/head still match, provider confirms merged | authorized merge result is verified | standalone: update truthful Taiga state and end the run; epic: refresh feature HEAD and begin the next ordered story; legacy standalone: refresh the preserved feature HEAD and continue to final feature-to-`master` delivery |
+| `Yes`, PR URL/repository/base/scope/head still match, provider confirms merged | authorized merge result is verified | standalone: update truthful Taiga state and end the run; epic: refresh feature HEAD and begin the next ordered story; legacy standalone: refresh the preserved feature HEAD and request final legacy review before final feature-to-`master` delivery |
 | `No` | none | retain the current PR and hold for feedback |
 | no response or invalid response | none | retain the current PR and wait silently for a user decision |
 | `Yes` but PR URL, repository, head, base, or story scope changed | none | mark approval stale and return the same story pair for fresh review/user approval |
@@ -42,7 +42,8 @@ text, or a worker message is `no_response`; it is never approval.
 Only a verified provider merge unlocks the next epic story. A standalone story
 has no next-story dispatch, and a legacy standalone run has no next-story
 dispatch either: its verified story merge unlocks only the preserved final
-feature-to-`master` delivery. Do not update a story to Done, create the next
+feature-to-`master` delivery, which still requires final review acceptance at
+the refreshed feature HEAD. Do not update a story to Done, create the next
 story branch, dispatch the next worker, or claim feature progress from a Yes
 alone, PR approval, a Taiga status, or a timeout. An epic or legacy feature
 branch must be refreshed from the authoritative merged result before its next

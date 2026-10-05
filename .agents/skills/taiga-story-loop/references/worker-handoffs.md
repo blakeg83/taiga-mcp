@@ -77,9 +77,10 @@ implementer; it never creates a correction chat or allows the next task to
 race the active per-task review.
 
 An automatic correction route is valid only for the current task, assigned
-reviewer, pending reviewed SHA, packet, and scope. It reopens that task and
-dispatches one correction request to the same persistent pair; it cannot
-advance another task or authorize a scope change.
+reviewer, pending reviewed SHA, branch receipt, and the immutable `Start`
+authorization. It reopens that task and dispatches one correction request to
+the same persistent pair; it cannot advance another task or authorize a scope
+change.
 
 ## Message-driven resume
 

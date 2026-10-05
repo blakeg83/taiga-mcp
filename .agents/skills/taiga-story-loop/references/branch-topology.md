@@ -8,7 +8,7 @@ one worker branch.
 | --- | --- | --- | --- | --- |
 | Standalone story | None | Fresh captured `origin/master` SHA | `master` | Exact story HEAD review, then the user's explicit approval to merge that story PR to `master` |
 | Epic | One shared `codex/feature-<slug>-<run-suffix>` branch/worktree | Current verified feature HEAD, one managed worktree per story | Shared feature branch | Exact integrated feature HEAD review, then a separate final feature-to-`master` PR and user approval |
-| Legacy active standalone | Existing recorded feature branch/worktree | Existing recorded story lineage | Existing recorded feature branch | Resume the old story-to-feature review/merge, then the legacy feature-to-`master` PR and separate user approval |
+| Legacy active standalone | Existing recorded feature branch/worktree | Existing recorded story lineage | Existing recorded feature branch | Resume the old story-to-feature review/merge, obtain final review at the refreshed feature HEAD, then the legacy feature-to-`master` PR and separate user approval |
 
 ## Standalone story
 
@@ -38,9 +38,11 @@ direct-to-`master` topology.
 Review the exact story HEAD against the recorded feature base and deliver the
 story PR to that same feature branch. The story merge gate is still a separate
 user approval: after the provider verifies that story PR merged, refresh the
-recorded feature HEAD and continue to the legacy final feature-to-`master`
-delivery. Do not dispatch another story, invent a new feature branch, require
-an integrated epic review, or reinterpret the run as a new standalone run.
+recorded feature HEAD and obtain a separate final legacy review acceptance at
+that exact refreshed HEAD before continuing to the legacy final
+feature-to-`master` delivery. Do not dispatch another story, invent a new
+feature branch, require an integrated epic review, or reinterpret the run as a
+new standalone run.
 
 ## Epic
 

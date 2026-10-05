@@ -14,8 +14,7 @@ function New-StoryState {
 
     return [ordered]@{
         reviewMode = $ReviewMode
-        scopeHash = 'scope-87'
-        packetHash = 'packet-87'
+        authorization = 'start-87'
         branch = 'codex/story-87'
         implementer = 'implementer-story-87'
         reviewer = 'reviewer-story-87'
@@ -53,10 +52,10 @@ function Add-Action {
 function Apply-Event {
     param([System.Collections.IDictionary] $State, [System.Collections.IDictionary] $Event)
 
-    foreach ($required in @('eventId', 'kind', 'taskId', 'revision', 'scopeHash', 'packetHash')) {
+    foreach ($required in @('eventId', 'kind', 'taskId', 'revision', 'authorization')) {
         if (-not $Event.Contains($required) -or [string]::IsNullOrWhiteSpace([string]$Event[$required])) { throw "$required is required." }
     }
-    if ([string]$Event.scopeHash -cne [string]$State.scopeHash -or [string]$Event.packetHash -cne [string]$State.packetHash) { throw 'event binding is stale.' }
+    if ([string]$Event.authorization -cne [string]$State.authorization) { throw 'Start authorization binding is stale.' }
     if (-not (Add-Unique $State ([string]$Event.eventId))) { return [ordered]@{ decision = 'duplicate'; state = $State } }
 
     $task = Get-CurrentTask $State
@@ -121,41 +120,41 @@ function Apply-Event {
 }
 
 $state = New-StoryState 'per_task'
-$ready = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$ready = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($ready.decision -eq 'dispatch_review') 'per_task should dispatch the initial review'
 Assert-True (@($state.actions | Where-Object kind -eq 'review').Count -eq 1) 'per_task should prepare one review action'
-$duplicate = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$duplicate = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($duplicate.decision -eq 'duplicate') 'per_task should ignore duplicate ready events'
 $stale = $false
-try { Apply-Event $state @{ eventId = 'stale-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-old'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; scopeHash = 'scope-87'; packetHash = 'packet-87' } | Out-Null } catch { $stale = $true }
+try { Apply-Event $state @{ eventId = 'stale-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-old'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' } | Out-Null } catch { $stale = $true }
 Assert-True $stale 'per_task should reject stale acceptance'
-$finding = Apply-Event $state @{ eventId = 'finding-per_task'; kind = 'changes_requested'; taskId = 65; reviewedRevision = 'sha-a1'; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$finding = Apply-Event $state @{ eventId = 'finding-per_task'; kind = 'changes_requested'; taskId = 65; reviewedRevision = 'sha-a1'; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($finding.decision -eq 'route_correction') 'per_task should route correction to the same pair'
-$readyCorrection = Apply-Event $state @{ eventId = 'ready-correction-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; previousRevision = 'sha-a1'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$readyCorrection = Apply-Event $state @{ eventId = 'ready-correction-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; previousRevision = 'sha-a1'; authorization = 'start-87' }
 Assert-True ($readyCorrection.decision -eq 'dispatch_review') 'per_task should dispatch correction re-review'
-$accepted = Apply-Event $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$accepted = Apply-Event $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }
 Assert-True ($accepted.decision -eq 'advance_next_task') 'per_task should advance only after exact acceptance'
 Assert-True ($state.currentTaskIndex -eq 1 -and $state.tasks[1].state -eq 'in_progress') 'per_task should start the next declared task'
-$idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-a2'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-a2'; authorization = 'start-87' }
 Assert-True ($idle.decision -eq 'wait') 'per_task should not infer acceptance from idle'
 
 $storyEndState = New-StoryState 'story_end_only'
-$implementationReady = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-1'; kind = 'implementation_ready'; taskId = 65; revision = 'sha-b1'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$implementationReady = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-1'; kind = 'implementation_ready'; taskId = 65; revision = 'sha-b1'; authorization = 'start-87' }
 Assert-True ($implementationReady.decision -eq 'advance_next_task_without_review') 'story_end_only should advance on implementation evidence'
 Assert-True (@($storyEndState.actions | Where-Object kind -eq 'review').Count -eq 0) 'story_end_only should not dispatch a per-task review'
 $perTaskReviewInStoryEnd = $false
-try { Apply-Event $storyEndState @{ eventId = 'ready-story-end-invalid'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b2'; reviewerId = 'reviewer-story-87'; scopeHash = 'scope-87'; packetHash = 'packet-87' } | Out-Null } catch { $perTaskReviewInStoryEnd = $true }
+try { Apply-Event $storyEndState @{ eventId = 'ready-story-end-invalid'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b2'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' } | Out-Null } catch { $perTaskReviewInStoryEnd = $true }
 Assert-True $perTaskReviewInStoryEnd 'story_end_only should reject per-task review dispatch'
 $taskAcceptanceBeforeFinal = $false
-try { Apply-Event $storyEndState @{ eventId = 'accepted-story-end-early'; kind = 'accepted'; taskId = 66; revision = 'sha-b2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; scopeHash = 'scope-87'; packetHash = 'packet-87' } | Out-Null } catch { $taskAcceptanceBeforeFinal = $true }
+try { Apply-Event $storyEndState @{ eventId = 'accepted-story-end-early'; kind = 'accepted'; taskId = 66; revision = 'sha-b2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' } | Out-Null } catch { $taskAcceptanceBeforeFinal = $true }
 Assert-True $taskAcceptanceBeforeFinal 'story_end_only should defer task acceptance until final story review'
-$finalStoryReview = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-2'; kind = 'implementation_ready'; taskId = 66; revision = 'sha-b2'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
+$finalStoryReview = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-2'; kind = 'implementation_ready'; taskId = 66; revision = 'sha-b2'; authorization = 'start-87' }
 Assert-True ($finalStoryReview.decision -eq 'final_story_review') 'story_end_only should request final story review after the last task'
 Assert-True (@($storyEndState.actions | Where-Object kind -eq 'story_review').Count -eq 1) 'story_end_only should prepare one final story review'
 
 $scopeState = New-StoryState 'per_task'
 $scopeError = $false
-try { Apply-Event $scopeState @{ eventId = 'scope-change'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; scopeHash = 'changed-scope'; packetHash = 'packet-87' } | Out-Null } catch { $scopeError = $true }
+try { Apply-Event $scopeState @{ eventId = 'scope-change'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'changed-start' } | Out-Null } catch { $scopeError = $true }
 Assert-True $scopeError 'scope changes must stop automatic dispatch'
 
 Write-Output 'Passed automatic review-flow fixture: initial dispatch, same-pair correction, exact acceptance advancement, duplicate/stale/idle guards, and scope gating.'

@@ -12,8 +12,10 @@ review owns acceptance.
 
 Duplicate and stale events, wrong task/reviewer or revision bindings, idle
 status, scope changes, and uncertain/version-conflicted writes remain
-reconciliation cases. The flow never widens scope, infers acceptance, creates
-a replacement worker pair, creates a PR, or merges automatically.
+reconciliation cases. The flow never widens scope, infers acceptance, or
+creates a replacement worker pair. After final story approval, the coordinator
+may create or update the PR under the original `Start` authorization; merging
+remains a separate user decision and is never automatic.
 
 ## Offline validation
 

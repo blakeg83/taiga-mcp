@@ -264,7 +264,7 @@ Assert-TopologyContains 'standalone direct branch' 'A standalone story has one m
 Assert-TopologyContains 'standalone master PR' 'its story PR targets `master`'
 Assert-TopologyContains 'epic shared feature branch' 'An epic has one shared feature branch'
 Assert-TopologyContains 'active-run migration' 'Preserve its recorded feature/story branches, worktrees, PR, worker, and recovery identities'
-Assert-TopologyContains 'legacy resume delivery' 'continue to the legacy final feature-to-`master` delivery'
+Assert-TopologyContains 'legacy resume delivery' 'before continuing to the legacy final feature-to-`master` delivery'
 Assert-TopologyContains 'epic migration classification' 'If `Scope` identifies an epic or a set of ordered stories'
 Assert-TopologyContains 'standalone migration classification' 'If `Scope` identifies one standalone story'
 Assert-TopologyContains 'ambiguous migration guard' 'Feature fields alone are insufficient evidence for the legacy exception'
@@ -273,6 +273,7 @@ Assert-BranchContractContains 'worker path receipt' 'The coordinator records the
 Assert-BranchContractContains 'implementer ownership' 'implementer may write source'
 Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
 Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/changes_requested>'
+Assert-ContinuationContains 'legacy final review state' 'Final review: <not_applicable/pending/findings/accepted>'
 Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
@@ -310,7 +311,8 @@ foreach ($marker in @(
         'send the correction to the same implementer'
         'Reviewer accepts'
         'idle status, timeout, elapsed time, or implementation commit'
-        'PR creation, merge approval, product decisions, and scope changes remain')) {
+        'Merge approval, product decisions, and scope changes remain separate user gates'
+        'PR creation or update is already covered by `Start`')) {
     if (-not $normalizedAutomaticFlow.Contains($marker)) {
         throw "Automatic review-flow assertion failed: $marker"
     }
@@ -393,9 +395,11 @@ foreach ($marker in @(
         'an epic run requires the integrated epic acceptance'
         'creates or reuses one final PR with the feature branch as head and `master` as base'
         'An active `legacy-standalone-feature` run is the compatibility exception'
+        'obtain a separate final legacy review acceptance'
+        'only after the final legacy review has accepted'
         'New standalone runs never use this exception'
         'Final master merge: pending separate user approval; not automatic'
-        'Story integration, epic acceptance, final PR creation, and master release remain distinct facts')) {
+        'Story integration, final review, final PR creation, and master release remain distinct facts')) {
     if (-not $normalizedFinalDelivery.Contains($marker)) {
         throw "Final delivery assertion failed: $marker"
     }

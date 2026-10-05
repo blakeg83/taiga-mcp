@@ -11,12 +11,12 @@ $ErrorActionPreference = 'Stop'
 $fields = @(
     'Run', 'Scope', 'Repository', 'Base', 'Topology', 'Feature', 'Current', 'Story branch',
     'Implementer', 'Pair', 'Review mode', 'PR', 'PR delivery', 'Approval',
-    'Review', 'Integrated review', 'Final delivery', 'Merge', 'Next', 'Recovery',
+    'Review', 'Integrated review', 'Final review', 'Final delivery', 'Merge', 'Next', 'Recovery',
     'Worker cursors', 'Task state', 'Gate', 'Pending action', 'Evidence'
 )
 $required = @(
     'Run', 'Scope', 'Repository', 'Base', 'Feature', 'Current', 'Story branch',
-    'Implementer', 'Pair', 'Review mode', 'PR', 'Approval', 'Review', 'Merge',
+    'Implementer', 'Pair', 'Review mode', 'PR', 'Approval', 'Review', 'Final review', 'Merge',
     'Next', 'Recovery', 'Worker cursors', 'Task state', 'Gate', 'Pending action', 'Evidence'
 )
 foreach ($key in $Snapshot.Keys) {

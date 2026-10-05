@@ -95,8 +95,9 @@ read-only and reviews the frozen commit from that same path/revision.
 The new standalone story pull request targets `master` and ends only after its
 explicit merge gate is verified. An epic story pull request targets the shared
 feature branch. A legacy standalone story PR targets its preserved feature
-branch; after its verified merge, the preserved feature HEAD continues to the
-separate final feature-to-`master` gate and no next story is dispatched. A
+branch; after its verified merge, the preserved feature HEAD is reviewed again
+for the final legacy delivery before the separate final feature-to-`master`
+gate, and no next story is dispatched. A
 later epic story is based on the updated feature HEAD only after the provider
 confirms that the preceding story PR merged into that exact feature branch. A
 closed-unmerged, conflicting, or response-lost merge cannot advance an epic

@@ -16,7 +16,9 @@ function New-FinalRequest {
     param(
         [ValidateSet('single','legacy-standalone-feature','epic')] [string] $RunKind,
         [bool] $StoryReviewAccepted = $true,
+        [bool] $FinalReviewAccepted = $true,
         [bool] $EpicReviewAccepted = $true,
+        [string] $StoryHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $RequestedHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $CurrentHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $Base = 'master',
@@ -26,7 +28,9 @@ function New-FinalRequest {
     [ordered]@{
         runKind = $RunKind
         storyReviewAccepted = $StoryReviewAccepted
+        finalReviewAccepted = $FinalReviewAccepted
         epicReviewAccepted = $EpicReviewAccepted
+        storyHead = $StoryHead
         requestedHead = $RequestedHead
         currentHead = $CurrentHead
         base = $Base
@@ -44,6 +48,7 @@ function Test-FinalPreflight {
     if ($Request.currentHead -ne $Request.requestedHead) { return 'stale_final_review' }
     if ($Request.runKind -eq 'single' -and -not $Request.storyReviewAccepted) { return 'story_review_required' }
     if ($Request.runKind -eq 'legacy-standalone-feature' -and -not $Request.storyReviewAccepted) { return 'story_review_required' }
+    if ($Request.runKind -eq 'legacy-standalone-feature' -and -not $Request.finalReviewAccepted) { return 'legacy_final_review_required' }
     if ($Request.runKind -eq 'epic' -and -not $Request.epicReviewAccepted) { return 'epic_review_required' }
     'ready'
 }
@@ -173,6 +178,15 @@ Assert-True ((Test-FinalPreflight $blockedEpic) -eq 'epic_review_required') 'epi
 
 $blockedLegacy = New-FinalRequest -RunKind legacy-standalone-feature -StoryReviewAccepted $false
 Assert-True ((Test-FinalPreflight $blockedLegacy) -eq 'story_review_required') 'legacy final PR must require the preserved story review'
+
+$blockedLegacyFinalReview = New-FinalRequest -RunKind legacy-standalone-feature -FinalReviewAccepted $false
+Assert-True ((Test-FinalPreflight $blockedLegacyFinalReview) -eq 'legacy_final_review_required') 'legacy final PR must require review acceptance at the refreshed feature HEAD'
+
+$legacyWithMergeRevision = New-FinalRequest -RunKind legacy-standalone-feature -StoryHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' -RequestedHead 'cccccccccccccccccccccccccccccccccccccccc' -CurrentHead 'cccccccccccccccccccccccccccccccccccccccc'
+Assert-True ((Test-FinalPreflight $legacyWithMergeRevision) -eq 'ready') 'legacy final review must bind to the refreshed head, even when the merge changes the story revision'
+
+$legacyMergeWithoutReview = New-FinalRequest -RunKind legacy-standalone-feature -StoryHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' -RequestedHead 'cccccccccccccccccccccccccccccccccccccccc' -CurrentHead 'cccccccccccccccccccccccccccccccccccccccc' -FinalReviewAccepted $false
+Assert-True ((Test-FinalPreflight $legacyMergeWithoutReview) -eq 'legacy_final_review_required') 'a refreshed legacy head without its own review must block final PR preparation'
 
 $wrongBase = New-StandaloneRequest -Base 'codex/feature-taiga-mcp-run1'
 Assert-True ((Test-StandalonePreflight $wrongBase) -eq 'wrong_master_base') 'standalone story PR must target master'
