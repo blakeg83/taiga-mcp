@@ -13,8 +13,8 @@ Run: <run-id>
 Scope: <project> story/epic #<ref> | stories: <ordered story refs> | tasks: <ordered task refs>
 Repository: <absolute path> | remote: <name> <url>
 Base: <remote>/<base-ref> @ <base-sha>
-Topology: <standalone-story-direct-master or epic-shared-feature>
-Feature: <branch/worktree/head for epic, or none (standalone direct-to-master)>
+Topology: <standalone-story-direct-master, epic-shared-feature, or legacy-standalone-feature>
+Feature: <branch/worktree/head for epic or legacy resume, or none (standalone direct-to-master)>
 Current: story #<ref> | task/stage: <ref or stage>
 Story branch: <branch> | worktree: <absolute path> | base: <sha>
 Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
@@ -58,10 +58,12 @@ Keep authorization boundaries, topology, PR/base/head approval identity, worker
 hosts and cursors, automation identity, and unresolved trial inputs in the
 current note. For a newly created standalone run, `Topology` is
 `standalone-story-direct-master`; for an epic it is `epic-shared-feature`.
-Older active notes may omit `Topology`: preserve their existing
-feature/story branch, worktree, PR, worker, cursor, and recovery identities
-exactly and classify them as legacy feature-based runs until they are
-explicitly reconciled. Do not rewrite those identities during migration.
+Older active notes may omit `Topology`: when they contain a nonempty feature
+branch and a story PR base, classify them as `legacy-standalone-feature`,
+preserve their existing feature/story branch, worktree, PR, worker, cursor,
+and recovery identities exactly, and resume the old story-to-feature then
+feature-to-`master` path. Do not rewrite those identities during migration or
+use the legacy value for a new run.
 Use explicit `pending`, `unknown`, `none`, or `not_applicable` values rather than
 dropping a safety-relevant fact. Completed tasks need only ordered refs and a
 concise evidence pointer, not a per-task account of every correction.
@@ -130,8 +132,9 @@ On restart, process the note in this order:
    and recorded HEAD with Git. Fetch only after the run is authorized. A dirty
    user checkout remains untouched.
 2. Inspect existing managed worktrees and branches for the recorded feature
-   and story identities. A standalone run has no feature object to create or
-   infer. If the path, branch, repository, and base match, reuse the object.
+   and story identities. A new standalone run has no feature object to create
+   or infer; a `legacy-standalone-feature` run must reuse its recorded feature
+   object. If the path, branch, repository, and base match, reuse the object.
    If a create returned an unknown outcome, inspect before retrying.
 3. Inspect the recorded implementer/reviewer thread and host IDs, pair outcome,
    and PR URL. Reuse matching chats/PRs; do not create duplicates because the
@@ -166,6 +169,9 @@ branch from a stale local feature checkout, the story head, or the default
 branch. Once a merge is confirmed, capture the updated feature HEAD and use
 that SHA as the next story's base.
 
-A standalone story has no next-story gate: its direct-to-`master` story PR uses
-the exact reviewed story HEAD, and the run ends only after the provider
-confirms that explicit merge.
+A new standalone story has no next-story gate: its direct-to-`master` story PR
+uses the exact reviewed story HEAD, and the run ends only after the provider
+confirms that explicit merge. A legacy standalone run also has no next-story
+gate; after its preserved story PR is confirmed merged into the feature branch,
+refresh that feature HEAD and continue to the separate final
+feature-to-`master` approval and merge.

@@ -72,10 +72,12 @@ scope-bound authorization record. A message from another worker can report
 facts or request coordination, but cannot grant new authorization or widen the
 scope. Any operation outside this summary needs a new user confirmation.
 
-Approval boundaries: a standalone story has one direct-to-master story merge
-gate; an epic has one Yes for each story PR into the shared feature branch and
-a separate final master merge approval. Start does not authorize automatic
-merge, force-push, deployment, or unrelated work.
+Approval boundaries: a new standalone story has one direct-to-master story
+merge gate; an epic has one Yes for each story PR into the shared feature
+branch and a separate final master merge approval. An active legacy standalone
+resume has one Yes for its preserved story-to-feature PR and a separate final
+master merge approval. Start does not authorize automatic merge, force-push,
+deployment, or unrelated work.
 
 Recovery: the coordinator checks the scoped run every 30 minutes and continues
 only on meaningful progress, failure, completion, or required user action.
@@ -97,7 +99,7 @@ confirmation.
 After `Start`, the coordinator follows
 [scope-specific branch topology](branch-topology.md) and
 [branch and continuation](branch-and-continuation.md). It fetches the resolved
-remote and captures a fresh base SHA. For a standalone story, it creates one
+remote and captures a fresh base SHA. For a new standalone story, it creates one
 managed story worktree/branch from that SHA and records `master` as the PR
 base. For an epic, it creates one uniquely named feature branch in a managed
 worktree, then gives each story a distinct managed worktree/branch from the
@@ -109,7 +111,10 @@ PR base, and ownership roles to both worker chats; only the implementer writes
 source in that checkout. It then creates or reuses the persistent pair,
 resolves usable IDs, and sends each worker the same scope-bound authorization
 record plus the other worker's real ID. A worker is never instructed to create
-its peer.
+its peer. If resuming an older active feature-based standalone note, reuse its
+recorded feature/story objects and PR base under
+`legacy-standalone-feature`; do not run new setup or rewrite it as either new
+topology.
 
 For an epic, each story receives a distinct managed worktree and story branch;
 for a standalone story, the single story worktree and branch are created from

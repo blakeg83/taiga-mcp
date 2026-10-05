@@ -8,6 +8,7 @@ one worker branch.
 | --- | --- | --- | --- | --- |
 | Standalone story | None | Fresh captured `origin/master` SHA | `master` | Exact story HEAD review, then the user's explicit approval to merge that story PR to `master` |
 | Epic | One shared `codex/feature-<slug>-<run-suffix>` branch/worktree | Current verified feature HEAD, one managed worktree per story | Shared feature branch | Exact integrated feature HEAD review, then a separate final feature-to-`master` PR and user approval |
+| Legacy active standalone | Existing recorded feature branch/worktree | Existing recorded story lineage | Existing recorded feature branch | Resume the old story-to-feature review/merge, then the legacy feature-to-`master` PR and separate user approval |
 
 ## Standalone story
 
@@ -24,6 +25,22 @@ confirms the merge.
 
 There is no feature worktree, story-to-feature PR, next-story sequencing gate,
 integrated epic review, or second feature-to-master PR in this path.
+
+## Legacy active standalone run
+
+An active standalone run created by the older workflow may already have a
+feature branch/worktree and a story PR targeting that feature branch. Classify
+that run as `legacy-standalone-feature` and preserve its recorded feature and
+story branches, worktrees, PR identity, worker pair, and recovery identity.
+This is a resume-only compatibility path; new standalone runs must use the
+direct-to-`master` topology.
+
+Review the exact story HEAD against the recorded feature base and deliver the
+story PR to that same feature branch. The story merge gate is still a separate
+user approval: after the provider verifies that story PR merged, refresh the
+recorded feature HEAD and continue to the legacy final feature-to-`master`
+delivery. Do not dispatch another story, invent a new feature branch, require
+an integrated epic review, or reinterpret the run as a new standalone run.
 
 ## Epic
 
@@ -48,6 +65,7 @@ New snapshots include a `Topology` line with one of:
 ```text
 Topology: standalone-story-direct-master
 Topology: epic-shared-feature
+Topology: legacy-standalone-feature
 ```
 
 For a standalone snapshot, retain the existing field shape with explicit
@@ -56,9 +74,11 @@ master`. For an epic snapshot, `Feature` identifies the shared branch and
 worktree and `PR` names that feature branch until final delivery.
 
 The `Topology` field is optional only when reading an older active snapshot.
-If an existing snapshot has a nonempty feature branch and a story PR base, it
-is a legacy feature-based run: preserve its recorded branch, worktree, PR,
-worker, and recovery identities exactly and resume that run under its recorded
-lineage. Never reinterpret or rewrite an active run as standalone merely
-because the new contract has a different default. New runs must write the
-explicit topology before worker dispatch.
+If an existing snapshot has a nonempty feature branch and a story PR base,
+classify it as `legacy-standalone-feature`: preserve its recorded branch,
+worktree, PR, worker, and recovery identities exactly and resume that run
+under its recorded lineage. Never reinterpret or rewrite an active run as
+standalone merely because the new contract has a different default. New runs
+must write either `standalone-story-direct-master` or `epic-shared-feature`
+before worker dispatch; `legacy-standalone-feature` is never selected for a
+new run.

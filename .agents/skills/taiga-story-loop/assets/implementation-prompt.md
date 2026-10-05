@@ -13,7 +13,7 @@ worktree:
 | Worktree | `{{storyWorktree}}` |
 | Story base SHA | `{{storyBaseSha}}` |
 | Scope topology | `{{topology}}` |
-| PR base | `{{prBase}}` (`master` for standalone stories; shared feature branch for epics) |
+| PR base | `{{prBase}}` (`master` for new standalone stories; shared or preserved feature branch for epics/legacy resumes) |
 | Feature integration | `{{featureBranch}}` / `{{featureWorktree}}` or `none (standalone direct-to-master)` |
 | Coordinator | `{{coordinatorId}}` |
 | Implementer chat | `{{implementerId}}` @ `{{implementerHostId}}` |
@@ -41,6 +41,11 @@ PR. For `epic-shared-feature`, work only on the supplied story branch from the
 current feature HEAD; the coordinator owns the feature branch, the story PR
 targets it, and only a verified story merge advances the next story. Never
 change the branch base or infer a merge from a local checkout or chat message.
+For `legacy-standalone-feature`, preserve the supplied feature branch,
+worktree, and story-to-feature PR base exactly; after the verified story merge,
+the coordinator continues to the legacy final feature-to-`master` delivery
+without dispatching another story. Never convert that resume path to either a
+new standalone or epic topology.
 
 The coordinator created or reused this persistent pair after the user's setup
 confirmation. The authorization record explicitly permits worker-to-worker and

@@ -15,7 +15,7 @@ function Assert-True {
 
 function New-DeliveryReceipt {
     param(
-        [ValidateSet('standalone','epic')] [string] $RunKind = 'epic',
+        [ValidateSet('standalone','legacy-standalone-feature','epic')] [string] $RunKind = 'epic',
         [string] $Repository = 'TaigaMCP',
         [string] $StoryBranch = 'codex/story-50-run1',
         [string] $FeatureBranch = 'codex/feature-taiga-mcp-run1',
@@ -142,6 +142,9 @@ Assert-True ((Test-DeliveryPreflight $valid) -eq 'ready') 'matching clean approv
 $standalone = New-DeliveryReceipt -RunKind standalone -FeatureBranch '' -PrBase 'master'
 Assert-True ((Test-DeliveryPreflight $standalone) -eq 'ready') 'standalone story should deliver directly to master without a feature branch'
 
+$legacy = New-DeliveryReceipt -RunKind legacy-standalone-feature
+Assert-True ((Test-DeliveryPreflight $legacy) -eq 'ready') 'legacy standalone resume should preserve its recorded feature PR base'
+
 $stale = New-DeliveryReceipt -BranchHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 Assert-True ((Test-DeliveryPreflight $stale) -eq 'stale_review') 'changed branch HEAD must invalidate review approval'
 
@@ -205,6 +208,9 @@ Assert-True ($created.state -eq 'create' -and $created.pr.base -eq $valid.featur
 $standalonePr = Resolve-Pr @() $standalone 'https://example.invalid/pr/standalone'
 Assert-True ($standalonePr.state -eq 'create' -and $standalonePr.pr.base -eq 'master' -and $standalonePr.pr.head -eq $standalone.branchHead) 'standalone PR must target master and the reviewed HEAD'
 
+$legacyPr = Resolve-Pr @() $legacy 'https://example.invalid/pr/legacy'
+Assert-True ($legacyPr.state -eq 'create' -and $legacyPr.pr.base -eq $legacy.featureBranch -and $legacyPr.pr.head -eq $legacy.branchHead) 'legacy standalone PR must target the preserved feature branch and reviewed HEAD'
+
 $body = New-PrBody '50' $valid.prBase $valid.branchHead @('- `dotnet test` — exit 0; passed', '- `validate-pr-delivery.ps1` — exit 0; passed')
 foreach ($marker in @('## Problem', '## Changes', '## Validation', '## Review', '## Scope', $valid.featureBranch, $valid.branchHead)) {
     Assert-True $body.Contains($marker) "PR body must include $marker"
@@ -221,4 +227,7 @@ Assert-True ((Test-DeliveryPreflight $wrongBase) -eq 'missing_feature_base') 'mi
 $standaloneWrongBase = New-DeliveryReceipt -RunKind standalone -FeatureBranch '' -PrBase 'codex/feature-taiga-mcp-run1'
 Assert-True ((Test-DeliveryPreflight $standaloneWrongBase) -eq 'wrong_standalone_base') 'standalone story must not target a feature branch'
 
-Write-Output 'Passed offline PR delivery fixture: standalone direct-master and epic feature-base topologies, exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, unknown-state reconciliation, PR create identity, review evidence, and Taiga link evidence.'
+$legacyWrongBase = New-DeliveryReceipt -RunKind legacy-standalone-feature -PrBase 'master'
+Assert-True ((Test-DeliveryPreflight $legacyWrongBase) -eq 'missing_feature_base') 'legacy standalone resume must not be converted to a direct master story PR'
+
+Write-Output 'Passed offline PR delivery fixture: standalone direct-master, legacy preserved-feature, and epic feature-base topologies, exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, unknown-state reconciliation, PR create identity, review evidence, and Taiga link evidence.'

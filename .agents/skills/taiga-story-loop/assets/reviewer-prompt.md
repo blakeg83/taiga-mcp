@@ -43,8 +43,12 @@ For `standalone-story-direct-master`, review the exact story HEAD as the final
 story review for a direct-to-`master` PR; there is no feature branch or
 integrated epic review. For `epic-shared-feature`, verify that the story branch
 is based on the supplied feature HEAD and that the story PR base is the shared
-feature branch. Do not approve a changed base, stale HEAD, or a local merge as
-integration evidence.
+feature branch. For `legacy-standalone-feature`, verify the exact story HEAD
+against the preserved feature base and approve only the recorded
+story-to-feature delivery; after its verified merge, the coordinator owns the
+separate final feature-to-`master` review and approval. Do not approve a
+changed base, stale HEAD, or a local merge as integration evidence, and do not
+reclassify a legacy resume as a new standalone or epic.
 
 If the implementer sends a correction, review the new SHA and treat prior
 acceptance as superseded. The coordinator owns final story/branch coordination;

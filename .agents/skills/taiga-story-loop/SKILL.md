@@ -58,9 +58,13 @@ comment markers, resume deduplication, and the distinction between worker
 completion, review acceptance, PR approval, and merge.
 
 Use [scope-specific branch topology](references/branch-topology.md) when
-creating branches or deciding a PR base. A standalone story has one story
+creating branches or deciding a PR base. A new standalone story has one story
 branch and a direct-to-`master` PR. An epic has one shared feature branch,
 per-story branches/PRs targeting that feature, and a final integrated review.
+An active standalone run from the older feature-based workflow uses the
+documented `legacy-standalone-feature` compatibility path and preserves its
+feature branch through final delivery; that value is never selected for a new
+run.
 
 Use [reviewed story PR delivery](references/pr-delivery.md) when the complete
 story is approved. It defines the coordinator's exact-HEAD preflight, the
@@ -81,10 +85,11 @@ review](references/final-epic-review.md). It pins the final review to
 findings through isolated corrections with exact-HEAD re-review. Run
 `scripts/validate-final-epic-review.ps1` for its offline fixture.
 
-Use [final feature-to-master delivery](references/final-delivery.md) only for
-an epic after its integrated review. A standalone story merges its reviewed
+Use [final feature-to-master delivery](references/final-delivery.md) for an
+epic after its integrated review or for an active legacy standalone resume
+after its preserved story merge. A new standalone story merges its reviewed
 story PR directly to `master` through the story merge gate. The contract keeps
-the two approval paths distinct and preserves the exact reviewed HEAD in each.
+the approval paths distinct and preserves the exact reviewed HEAD in each.
 Run `scripts/validate-final-delivery.ps1` for its offline fixture.
 
 The synthetic ordered-task, failed-check, blocker, review-rejection, and

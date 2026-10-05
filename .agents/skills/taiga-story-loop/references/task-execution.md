@@ -4,9 +4,10 @@ This reference is the Taiga update contract for the story-loop implementer.
 The implementer owns status/checklist writes for the selected story tasks and
 the parent-story progress comments. All tasks in one story remain on that
 story's branch, worktree, and worker pair. Delivery follows the selected
-topology: a standalone story PR targets `master`, while an epic story PR
-targets the coordinator-owned shared feature branch. The implementer never
-creates or mutates the epic feature branch.
+topology: a new standalone story PR targets `master`, an epic story PR targets
+the coordinator-owned shared feature branch, and a legacy standalone resume
+targets its preserved feature branch before final feature-to-`master` delivery.
+The implementer never creates or mutates the epic or legacy feature branch.
 
 ## Resolve mappings once
 

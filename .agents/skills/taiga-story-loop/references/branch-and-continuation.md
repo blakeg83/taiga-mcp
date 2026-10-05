@@ -50,12 +50,14 @@ After the single setup confirmation and before worker dispatch:
 5. Never reuse a path or branch whose ownership cannot be reconciled. New
    runs must write the topology before worker dispatch.
 
-Only an epic has a feature worktree. It is the integration line for that run;
-it is not the user's checkout and it is not a worker's story worktree.
+Only a new epic creates a feature worktree. It is the integration line for
+that run; it is not the user's checkout and it is not a worker's story
+worktree. A legacy standalone resume may retain an existing recorded feature
+worktree solely to complete its old delivery path.
 
 ## Story branch and worktree
 
-For a standalone story, create one managed worktree from the captured base SHA
+For a new standalone story, create one managed worktree from the captured base SHA
 and create a distinct `codex/story-<ref>-<slug>-<run-suffix>` branch there. The
 story branch is the only branch in the run and its PR base is `master`.
 
@@ -90,12 +92,15 @@ input. The same receipt is passed to the implementer and reviewer chat. The
 implementer may write source and commit on the story branch; the reviewer is
 read-only and reviews the frozen commit from that same path/revision.
 
-The standalone story pull request targets `master` and ends only after its
+The new standalone story pull request targets `master` and ends only after its
 explicit merge gate is verified. An epic story pull request targets the shared
-feature branch. A later epic story is based on the updated feature HEAD only
-after the provider confirms that the preceding story PR merged into that exact
-feature branch. A closed-unmerged, conflicting, or response-lost merge cannot
-advance an epic. Do not infer merge completion from a branch name, a local
+feature branch. A legacy standalone story PR targets its preserved feature
+branch; after its verified merge, the preserved feature HEAD continues to the
+separate final feature-to-`master` gate and no next story is dispatched. A
+later epic story is based on the updated feature HEAD only after the provider
+confirms that the preceding story PR merged into that exact feature branch. A
+closed-unmerged, conflicting, or response-lost merge cannot advance an epic
+or legacy delivery. Do not infer merge completion from a branch name, a local
 checkout, a chat message, or a Taiga status alone.
 
 ## Resume and preservation
@@ -109,9 +114,11 @@ lineage is ambiguous, stop for user input.
 
 Resume never resets or deletes unrelated branches, user changes, worktrees, or
 PRs. It never force-pushes. A failed review returns to the same implementer
-checkout. For a standalone run, a confirmed direct-to-master merge completes
-the run. For an epic, a confirmed story merge advances the feature HEAD; an
-unconfirmed merge keeps the run waiting at the current story.
+checkout. For a new standalone run, a confirmed direct-to-master merge
+completes the run. For an epic, a confirmed story merge advances the feature
+HEAD; for a legacy standalone run, it unlocks only the preserved final
+feature-to-master delivery. An unconfirmed merge keeps the run waiting at the
+current story.
 
 ## Compact continuation note
 
@@ -125,8 +132,8 @@ The note can be Markdown or JSON. A Markdown shape is sufficient:
 Run: <run-id> | scope: <project> story/epic #<ref> | stories: <ordered story refs>
 Repository: <absolute path> | remote: <name> (<url>)
 Base: <remote>/<base> @ <base-sha>
-Topology: <standalone-story-direct-master or epic-shared-feature>
-Feature: <feature-branch and worktree, or none (standalone direct-to-master)>
+Topology: <standalone-story-direct-master, epic-shared-feature, or legacy-standalone-feature>
+Feature: <feature-branch and worktree for epic/legacy resume, or none (standalone direct-to-master)>
 Current story/task: <story ref> / <task ref or review stage>
 Story branch: <story-branch> | worktree: <absolute path> | base: <sha>
 Workers: implementer <chat-id> | reviewer <chat-id>

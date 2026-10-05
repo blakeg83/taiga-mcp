@@ -67,6 +67,17 @@ try {
     Assert-True ($legacyText.Contains('codex/feature-synthetic')) 'legacy feature branch identity is preserved'
     Assert-True (-not $legacyText.Contains('standalone-story-direct-master')) 'legacy snapshot is not silently reinterpreted as standalone'
 
+    $legacyTypedSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $legacyTypedSnapshot[$key] = $snapshot[$key] }
+    $legacyTypedSnapshot['Topology'] = 'legacy-standalone-feature'
+    $legacyTypedSnapshot['PR'] = 'pending | base: codex/feature-synthetic | head: revision-000'
+    $legacyTypedResult = & $writer -NotePath $path -Snapshot $legacyTypedSnapshot
+    Assert-True $legacyTypedResult.Changed 'legacy topology snapshot remains writable'
+    $legacyTypedText = [IO.File]::ReadAllText($path)
+    Assert-True ($legacyTypedText.Contains('legacy-standalone-feature') -and
+        $legacyTypedText.Contains('codex/feature-synthetic') -and
+        $legacyTypedText.Contains('base: codex/feature-synthetic')) 'legacy topology and preserved feature PR base are recorded'
+
     $standaloneSnapshot = [ordered]@{}
     foreach ($key in $snapshot.Keys) { $standaloneSnapshot[$key] = $snapshot[$key] }
     $standaloneSnapshot['Topology'] = 'standalone-story-direct-master'

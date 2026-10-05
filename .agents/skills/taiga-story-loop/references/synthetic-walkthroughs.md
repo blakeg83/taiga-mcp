@@ -23,6 +23,10 @@ The walkthroughs use two different branch paths:
   story gets its own branch/worktree from the current feature HEAD and a story
   PR targeting that feature branch. Verified story merges are followed by one
   integrated feature review and a separate final feature-to-`master` PR.
+- An active standalone continuation from the older workflow preserves its
+  feature branch and story-to-feature PR, then uses the verified story merge to
+  reach the separate final feature-to-`master` PR. It does not dispatch a next
+  story or require an integrated epic review.
 
 An existing active continuation note that predates this distinction keeps its
 recorded feature/story branches, PR base, worker IDs, and recovery identity;

@@ -17,10 +17,13 @@ Before pushing or creating/reusing a PR, reconcile the authoritative records:
    approved HEAD.
 3. Re-run the required repository checks or verify their recorded results are
    for that same HEAD. A missing, failed, or stale check blocks delivery.
-4. Verify the topology-specific PR base: `master` for a standalone story, or
-   the recorded integration feature branch for an epic. A standalone delivery
-   must not invent or substitute a feature branch; an epic must not substitute
-   `master` or a similarly named branch.
+4. Verify the topology-specific PR base: `master` for a new
+   `standalone-story-direct-master` run, or the recorded integration feature
+   branch for an `epic-shared-feature` run. An active
+   `legacy-standalone-feature` run is the explicit compatibility exception:
+   retain and verify its recorded feature branch as the story PR base. A new
+   standalone delivery must not invent or substitute a feature branch; an
+   epic must not substitute `master` or a similarly named branch.
 
 If any preflight result is unknown, preserve the state and reconcile it before
 retrying. A changed HEAD, story requirement, branch base, or check result makes
@@ -59,9 +62,15 @@ review evidence in its description:
 
 ## Scope
 - Story: #<ref>
-- Base: `<master for standalone story, feature branch for epic>`
+- Base: `<master for new standalone, feature branch for epic or legacy active standalone>`
 - Head: `<exact commit SHA>`
 ```
+
+For a legacy active standalone run, this is still the old story-to-feature PR;
+after its separate merge approval and provider-confirmed merge, follow
+[final feature-to-master delivery](final-delivery.md) for the preserved feature
+branch. The exception never authorizes a new story or changes the recorded
+lineage.
 
 The coordinator attaches the resulting PR to the current chat and links the
 exact PR URL, topology, base, head, and checks in the parent Taiga story
