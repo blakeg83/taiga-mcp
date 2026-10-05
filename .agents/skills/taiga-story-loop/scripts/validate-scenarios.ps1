@@ -28,6 +28,8 @@ $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
 $acceptancePath = Join-Path $skillRoot 'references/acceptance.md'
 $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
+$automaticFlowPath = Join-Path $skillRoot 'references/automatic-review-flow.md'
+$automaticFlowScriptPath = Join-Path $PSScriptRoot 'validate-automatic-review-flow.ps1'
 $prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
 $prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
 $mergeApprovalPath = Join-Path $skillRoot 'references/merge-approval.md'
@@ -57,6 +59,9 @@ if (-not (Test-Path $acceptancePath)) {
 }
 if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
     throw 'Missing routing and escalation fixture.'
+}
+if (-not (Test-Path $automaticFlowPath) -or -not (Test-Path $automaticFlowScriptPath)) {
+    throw 'Missing automatic review-flow contract or fixture.'
 }
 if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath)) {
     throw 'Missing reviewed story PR delivery contract or fixture.'
@@ -99,6 +104,8 @@ $acceptanceText = Get-Content $acceptancePath -Raw
 $normalizedAcceptance = [regex]::Replace($acceptanceText, '\s+', ' ')
 $routingText = Get-Content $routingPath -Raw
 $normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
+$automaticFlowText = Get-Content $automaticFlowPath -Raw
+$normalizedAutomaticFlow = [regex]::Replace($automaticFlowText, '\s+', ' ')
 $prDeliveryText = Get-Content $prDeliveryPath -Raw
 $normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
 $mergeApprovalText = Get-Content $mergeApprovalPath -Raw
@@ -295,6 +302,21 @@ if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
 }
 if (-not (Get-Content $routingScriptPath -Raw).Contains('ordinary corrections must not create a new chat')) {
     throw 'Routing assertion failed: controlled fixture coverage'
+}
+foreach ($marker in @(
+        'ready_for_review'
+        'Send one review request to the persistent reviewer'
+        'changes_requested'
+        'send the correction to the same implementer'
+        'Reviewer accepts'
+        'idle status, timeout, elapsed time, or implementation commit'
+        'PR creation, merge approval, product decisions, and scope changes remain')) {
+    if (-not $normalizedAutomaticFlow.Contains($marker)) {
+        throw "Automatic review-flow assertion failed: $marker"
+    }
+}
+if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains('Passed automatic review-flow fixture')) {
+    throw 'Automatic review-flow assertion failed: offline fixture coverage'
 }
 foreach ($marker in @(
         'exact current HEAD'

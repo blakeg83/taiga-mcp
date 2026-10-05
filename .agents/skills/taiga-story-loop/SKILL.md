@@ -47,6 +47,13 @@ and `scripts/validate-routing.ps1` for the controlled correction, stale-approval
 blocker, disagreement, and missing-destination scenarios. These checks do not
 create chats or perform live writes.
 
+Use [automatic review and ordered-task flow](references/automatic-review-flow.md)
+and `scripts/validate-automatic-review-flow.ps1` for the scoped event-driven
+handoffs. A ready-for-review event dispatches the persistent reviewer once;
+current findings route a correction back to the same pair; exact-revision
+acceptance advances only according to the declared review mode. Duplicate,
+stale, idle, scope-changing, and uncertain outcomes remain coordinator-owned.
+
 In per-task review, initial and correction-ready handoffs end the implementer
 turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
 the implementer never polls the reviewer. Follow the identity/revision and

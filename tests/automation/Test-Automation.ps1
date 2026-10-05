@@ -14,6 +14,7 @@ $script:VerificationTracePath = Join-Path $PSScriptRoot 'fixtures\ticket-loop-ve
 $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-review.ps1'
 $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
+$script:AutomaticReviewFlowScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-automatic-review-flow.ps1'
 $script:VerificationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-verification.ps1'
 $script:MeasureScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-measure.ps1'
 $script:AcceptanceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-acceptance.ps1'
@@ -1494,6 +1495,13 @@ try {
         $stale = $second.Clone(); $stale.currentSha = 'abcdef3'; $stale.eventType = 'blocked'; $stale.sequence = 3; $stale.blockedReason = 'stale'; $stale.evidence = @{ source = 'stale evidence' }
         $staleRelayEvent = Invoke-PsJson $script:ProgressScript @('-Operation','record','-InputPath',(New-InputPath $stale 'relay-stale'),'-StateRoot',$progressRoot) $false
         Assert-True (-not $staleRelayEvent.ok) 'stale overlapping evidence must be rejected'
+    }
+
+    Test-Case 'automate review dispatch and ordered task advancement' {
+        $output = & pwsh -NoProfile -File $script:AutomaticReviewFlowScript 2>&1
+        $exitCode = $LASTEXITCODE
+        Assert-Equal 0 $exitCode 'automatic review-flow fixture must pass'
+        Assert-True (($output -join "`n").Contains('Passed automatic review-flow fixture')) 'automatic review-flow fixture must report coverage'
     }
 
     Test-Case 'journal reviewed child transitions and reconcile partial writes safely' {

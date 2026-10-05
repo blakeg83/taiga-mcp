@@ -33,6 +33,13 @@ the task ref and exact reviewed SHA. Do not ask it to poll or stay active, and
 do not repeat an unchanged outcome to wake it. Reconcile an unknown delivery
 with the coordinator before retrying.
 
+The scoped workflow may dispatch these ordinary review messages automatically
+from durable task events. A ready event receives one review request, a current
+finding routes back to the same implementer, and an exact current acceptance
+releases the next task only when the declared review mode permits it. Do not
+treat an idle worker, elapsed time, duplicate event, stale SHA, or changed
+scope as review evidence.
+
 Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
 the implementer to update Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator

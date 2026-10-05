@@ -63,6 +63,8 @@ Start authorizes, for this scope only:
 - creating or reusing the scoped worker chats and their worktrees/branches;
 - worker-to-worker and worker-to-coordinator messages, with the coordinator as
   the owner of the destination table;
+- automatic initial-review dispatch, correction re-review, and ordered-task
+  advancement after the declared exact-revision acceptance;
 - commits and pushes on the owned branch;
 - Taiga task/story status updates and story comments;
 - pull-request creation or update and recovery automation on the 30-minute heartbeat.
