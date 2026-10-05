@@ -319,6 +319,13 @@ if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains('Passed automatic 
     throw 'Automatic review-flow assertion failed: offline fixture coverage'
 }
 foreach ($marker in @(
+        'per-task review dispatch is not available in story_end_only'
+        'story_end_only should reject per-task review dispatch')) {
+    if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {
+        throw "Automatic review-flow fixture assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
         'exact current HEAD'
         'Find an existing PR by repository, exact head branch, topology-specific base, and reviewed head commit'
         'Reuse a PR only when all of those identities match and the provider reports it open and unclosed'

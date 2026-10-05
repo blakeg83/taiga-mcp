@@ -64,6 +64,7 @@ function Apply-Event {
 
     switch ([string]$Event.kind) {
         'ready_for_review' {
+            if ([string]$State.reviewMode -ne 'per_task') { throw 'per-task review dispatch is not available in story_end_only.' }
             if ([string]::IsNullOrWhiteSpace([string]$Event.reviewerId) -or [string]$Event.reviewerId -cne [string]$State.reviewer) { throw 'reviewer identity is required for review dispatch.' }
             if ($task.state -notin @('in_progress', 'awaiting_review')) { throw 'task is not ready for review.' }
             if ($State.pendingReview -and [string]$State.pendingReview.revision -cne [string]$Event.revision) { throw 'a different review is already pending.' }
@@ -142,6 +143,9 @@ $storyEndState = New-StoryState 'story_end_only'
 $implementationReady = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-1'; kind = 'implementation_ready'; taskId = 65; revision = 'sha-b1'; scopeHash = 'scope-87'; packetHash = 'packet-87' }
 Assert-True ($implementationReady.decision -eq 'advance_next_task_without_review') 'story_end_only should advance on implementation evidence'
 Assert-True (@($storyEndState.actions | Where-Object kind -eq 'review').Count -eq 0) 'story_end_only should not dispatch a per-task review'
+$perTaskReviewInStoryEnd = $false
+try { Apply-Event $storyEndState @{ eventId = 'ready-story-end-invalid'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b2'; reviewerId = 'reviewer-story-87'; scopeHash = 'scope-87'; packetHash = 'packet-87' } | Out-Null } catch { $perTaskReviewInStoryEnd = $true }
+Assert-True $perTaskReviewInStoryEnd 'story_end_only should reject per-task review dispatch'
 $taskAcceptanceBeforeFinal = $false
 try { Apply-Event $storyEndState @{ eventId = 'accepted-story-end-early'; kind = 'accepted'; taskId = 66; revision = 'sha-b2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; scopeHash = 'scope-87'; packetHash = 'packet-87' } | Out-Null } catch { $taskAcceptanceBeforeFinal = $true }
 Assert-True $taskAcceptanceBeforeFinal 'story_end_only should defer task acceptance until final story review'
