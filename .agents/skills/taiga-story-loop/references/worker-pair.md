@@ -62,5 +62,7 @@ Each assignment includes a destination table:
 | Coordinator | implementer, reviewer | scoped assignments, routed results, status/recovery coordination |
 
 The coordinator records the pair IDs, host IDs, creation/reuse outcome, branch
-receipt, authorization summary, and the first assignment message in the
-continuation note. This is connection evidence, not reviewer acceptance.
+receipt, authorization summary, and a reference to the first assignment message
+in the continuation snapshot, replacing superseded values. Retain current
+worker cursors; keep assignment text in the worker chat. This is connection
+evidence, not reviewer acceptance.

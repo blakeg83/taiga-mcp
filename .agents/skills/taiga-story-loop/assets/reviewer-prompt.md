@@ -25,6 +25,12 @@ exact revision satisfies the task. In per-task mode, acceptance releases the
 next task; in story-end-only mode, retain task findings and defer acceptance to
 the final story review.
 
+The implementer ends its turn after each per-task ready/correction handoff.
+Your authorized findings or acceptance message wakes that same chat; include
+the task ref and exact reviewed SHA. Do not ask it to poll or stay active, and
+do not repeat an unchanged outcome to wake it. Reconcile an unknown delivery
+with the coordinator before retrying.
+
 Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
 the implementer to update Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator

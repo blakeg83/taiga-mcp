@@ -1,7 +1,8 @@
 # Task and story acceptance
 
 Review mode is part of the confirmed setup. `per_task` is the default: the
-implementer pauses after each task-ready handoff until the reviewer accepts
+implementer ends its turn after each task-ready or correction-ready handoff
+and resumes on an authorized reviewer message until the reviewer accepts
 that exact revision. `story_end_only` is an explicit alternative shown in the
 setup summary; the implementer may complete the ordered task commits before a
 single final review, but findings still route to the same pair and no approval
@@ -25,6 +26,12 @@ Taiga version and begin the next task only when the selected review mode allows
 it. A task acceptance is bound to the named SHA; a later source change
 supersedes it and requires a new ready handoff and review. A reviewer never
 accepts a SHA it did not inspect.
+
+Before applying acceptance, follow the identity, current pending revision, and
+already-handled outcome checks in [message-driven resume](worker-handoffs.md#message-driven-resume).
+A duplicate acceptance is a no-op; acceptance for an old task/revision cannot
+release the current gate. Reconcile an unknown Taiga write before another
+attempt. Idle chat status and elapsed time are not acceptance evidence.
 
 ## Final story acceptance
 

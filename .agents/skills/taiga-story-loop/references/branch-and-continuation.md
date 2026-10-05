@@ -120,6 +120,9 @@ Approval: <pending/approved/merged/blocked> | next: <one action>
 Recovery: <automation-id or none>
 ```
 
-Update only after an authoritative fact changes. Keep the previous note
-recoverable when editing it, and do not treat the note as evidence that an
-external operation succeeded.
+Replace the complete snapshot only after an authoritative fact changes; never
+append milestones or repeated next actions. Keep one previous note recoverable
+outside routine reads, and do not treat the note as evidence that an external
+operation succeeded. Use the replacement helper and healthy-heartbeat read
+budget in [minimal continuation note](continuation-note.md); full resume
+reconciliation is for interruptions or actionable changes, not healthy ticks.

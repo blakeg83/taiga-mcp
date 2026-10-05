@@ -70,6 +70,14 @@ re-read the task, reopen only that task to `mapping.in_progress`, preserve the
 other tasks and human edits, and add new revision-bound evidence before
 returning it to review.
 
+In `per_task` mode, both initial and correction-ready handoffs end the
+implementer turn in `awaiting_review`; waiting means an idle chat, with no
+reviewer polling or source edits. Resume on an authorized reviewer message
+using the identity, exact-revision, and deduplication checks in
+[message-driven resume](worker-handoffs.md#message-driven-resume). A timeout or
+idle worker cannot release the review gate. Coordinator recovery handles
+interrupted or missing handoffs, not routine review waits.
+
 ## Version-safe writes and reconciliation
 
 Every update is a read/compare/write operation:

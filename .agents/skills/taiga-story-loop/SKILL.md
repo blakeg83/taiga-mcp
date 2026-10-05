@@ -47,6 +47,11 @@ and `scripts/validate-routing.ps1` for the controlled correction, stale-approval
 blocker, disagreement, and missing-destination scenarios. These checks do not
 create chats or perform live writes.
 
+In per-task review, initial and correction-ready handoffs end the implementer
+turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
+the implementer never polls the reviewer. Follow the identity/revision and
+deduplication checks in [message-driven resume](references/worker-handoffs.md#message-driven-resume).
+
 Use [per-task commits and parent-story progress comments](references/commit-and-progress.md)
 for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker
@@ -89,6 +94,12 @@ the fresh-base feature branch, per-story managed worktree, PR base, merge gate,
 and compact resume note. The note is deliberately smaller than a state
 registry; existing Git, Taiga, Codex, and pull-request records remain
 authoritative.
+
+Persist current state by replacing the continuation snapshot, not appending
+milestones. Healthy recovery ticks read that snapshot and at most one compact
+worker wait; unanswered user gates stay silent. Follow the replacement and
+heartbeat read budget in [minimal continuation note](references/continuation-note.md)
+and run `scripts/validate-continuation-note.ps1` for offline persistence checks.
 
 For the shortest entry, use `Use $taiga-story-loop for <project> story #<ref>`
 or `Use $taiga-story-loop for <project> epic #<ref>`. Read

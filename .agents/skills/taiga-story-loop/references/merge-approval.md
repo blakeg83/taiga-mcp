@@ -41,9 +41,11 @@ the next story receives its base.
 
 While waiting for the decision, keep one prompt and one pending approval record.
 Do not dispatch workers or send repeated notifications because the user has
-not answered. A recovery check may inspect the recorded PR, current head, and
-Taiga state, but it preserves the wait unless a meaningful state change or
-required user action is observed.
+not answered. Healthy ticks read only the current continuation snapshot and end
+silently while the gate is unanswered. After a user response or a meaningful
+change requiring reconciliation, a recovery check may inspect the recorded PR,
+current head, and Taiga state. Follow the read budget in
+[minimal continuation note](continuation-note.md).
 
 An approval is bound to the PR URL, repository, base branch, reviewed head, and
 story scope shown in the prompt. Any source change or material scope change

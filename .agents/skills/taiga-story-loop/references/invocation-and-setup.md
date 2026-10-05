@@ -78,6 +78,10 @@ force-push, deployment, or unrelated work.
 
 Recovery: the coordinator checks the scoped run every 30 minutes and continues
 only on meaningful progress, failure, completion, or required user action.
+The saved heartbeat prompt names the current continuation snapshot and follows
+its healthy read budget: unanswered user gates end silently; active worker waits
+use recorded IDs/cursors for at most one compact snapshot. History and full
+reconciliation are loaded only for actionable change or recovery investigation.
 
 Reply Start or Cancel.
 ```
