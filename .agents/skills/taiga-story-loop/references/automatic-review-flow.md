@@ -27,22 +27,23 @@ authoritative.
 
 | Event | Required proof | Automatic result |
 | --- | --- | --- |
-| Implementer sends `ready_for_review` | Current task, current committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Send one direct review request to the persistent reviewer; set the task to the review-ready mapping or its documented fallback; hold the next task |
-| Implementer sends `implementation_ready` in `story_end_only` | Current task, committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Record implementation evidence and advance the next ordered task without task acceptance or a per-task review; request one final story review after the last task |
+| Implementer sends `ready_for_review` | Current task, current committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Send one direct review request to the persistent reviewer; set the task to the review-ready mapping or its documented fallback; hold the next task; do not copy the coordinator |
+| Implementer sends `implementation_ready` in `story_end_only` | Current task, committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Record implementation evidence and advance the next ordered task without task acceptance or a per-task review; request one final story review after the last task directly from the implementer to the reviewer |
 | Reviewer sends `changes_requested` | Assigned reviewer, current task, exact pending SHA, finding, and requested correction | Reopen only that task and send the finding directly to the same implementer; require a new revision and review delta |
 | Implementer sends correction-ready | Same current task, assigned reviewer, prior reviewed SHA, new committed SHA, and review delta | Send the new revision directly to the same reviewer; keep the coordinator out of the routine correction cycle |
 | Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
-| Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Apply the version-safe accepted/Done transition, then advance the next ordered task |
-| Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Send the next task assignment through the same implementer chat and story branch |
-| Final task is accepted | Every selected task has exact-revision acceptance | Request final story review; do not merge automatically. After story approval, prepare the PR under the existing `Start` authorization |
+| Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Deliver acceptance directly to the implementer; the implementer applies the version-safe accepted/Done transition, reconciles progress, then advances the next ordered task |
+| Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
+| Final task is accepted | Every selected task has exact-revision acceptance | The implementer requests final story review from the reviewer; the reviewer sends exact-HEAD approval to the coordinator; do not merge automatically. After story approval, prepare the PR under the existing `Start` authorization |
 
 ## Safety rules
 
 - A ready event, idle status, timeout, elapsed time, or implementation commit
   is not reviewer acceptance.
-- Routine `changes_requested` and correction-ready events stay worker-to-worker;
-  the coordinator does not relay or restate their findings. The current
-  task-acceptance route remains unchanged for now; #89 may revise it.
+- Routine `changes_requested`, correction-ready, task-ready, and exact task-acceptance
+  events stay worker-to-worker; the coordinator does not relay or
+  restate them. The implementer owns the current-version Taiga reconciliation
+  and ordered-task advancement after acceptance.
 - `story_end_only` never turns implementation evidence into task acceptance and
   never dispatches a per-task review; only the selected final story review can
   accept those task revisions.

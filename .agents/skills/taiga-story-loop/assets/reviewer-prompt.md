@@ -26,8 +26,9 @@ action. Do not copy or restate routine findings to the coordinator. Escalate
 only blocked verification, substantive disagreements, missing or unknown
 destinations/delivery outcomes, and revision or HEAD conflicts. A failed check
 that the implementer can correct is a routine finding and stays in the worker
-pair. Preserve the current task-acceptance route to the implementer and
-coordinator for now; #89 may revise it. In per-task mode, acceptance releases the next task; in
+pair. Send exact-revision task acceptance only to the implementer; the
+implementer owns the version-safe Taiga reconciliation and next-task
+advancement. In per-task mode, acceptance releases the next task; in
 story-end-only mode, retain task findings and defer acceptance to the final
 story review.
 
@@ -46,7 +47,7 @@ review mode permits it. Do not treat an idle worker, elapsed time, duplicate
 event, stale SHA, or changed scope as review evidence.
 
 Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
-the implementer to update Taiga with the current version and advance the
+the implementer to reconcile Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator
 with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
 PR. Any later source change invalidates that approval and requires re-review.

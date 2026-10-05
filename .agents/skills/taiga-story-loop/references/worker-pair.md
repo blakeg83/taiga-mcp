@@ -61,13 +61,15 @@ Each assignment includes a destination table:
 | Sender | Destination | Purpose |
 | --- | --- | --- |
 | Implementer | reviewer | task-ready and correction-ready handoffs |
-| Implementer | coordinator | existing task-ready notification; blockers, delivery uncertainty, or revision conflicts |
-| Reviewer | implementer | routine findings and task acceptance |
-| Reviewer | coordinator | current task acceptance, final story approval, and exceptional escalation |
-| Coordinator | implementer, reviewer | scoped assignments, routed results, status/recovery coordination |
+| Implementer | coordinator | blockers, delivery uncertainty, revision conflicts, or scope decisions |
+| Reviewer | implementer | routine findings and exact-revision task acceptance |
+| Reviewer | coordinator | final story approval and exceptional escalation |
+| Coordinator | implementer, reviewer | scoped assignments, exceptional escalation, and recovery coordination |
 
-The coordinator is not a routine finding or correction relay. The current task-
-acceptance route remains unchanged for now; #89 may revise it.
+The coordinator is not a routine finding, correction, task-ready, or task-acceptance
+relay. The implementer owns current-version Taiga checklist/status/
+progress reconciliation and next-task advancement after the direct acceptance
+when the selected review mode allows it.
 
 The coordinator records the pair IDs, host IDs, creation/reuse outcome, branch
 receipt, authorization summary, and a reference to the first assignment message

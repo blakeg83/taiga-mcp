@@ -8,25 +8,30 @@ setup summary; the implementer may complete the ordered task commits before a
 single final review, but findings still route to the same pair and no approval
 is implied by implementation evidence.
 
-The current task-acceptance route remains reviewer-to-implementer and
-reviewer-to-coordinator for now; issue #89 may revise it.
+The task-acceptance route is reviewer-to-implementer. The implementer owns the
+version-safe Taiga reconciliation and ordered-task advancement permitted by
+the selected review mode; the coordinator is not copied on this routine
+milestone.
 
 ## Task acceptance
 
 After inspecting the exact revision and all task criteria, the reviewer sends
-the acceptance directly to the implementer and the coordinator:
+the acceptance directly to the implementer:
 
 ```text
 Task #<ref> accepted
 Reviewed: <exact commit SHA>
 Criteria: <criterion/result summary>
 Checks: `<command>` — exit <code>; <concise result>
-Next: implementer, update the task in Taiga and advance to the next ordered task.
+Next: implementer, reconcile the current Taiga version and advance to the next ordered task.
 ```
 
-The implementer may then update the task's checklist/status using the current
-Taiga version and begin the next task only when the selected review mode allows
-it. A task acceptance is bound to the named SHA; a later source change
+The implementer then rereads the task, merges only evidence-backed checklist
+changes, writes the accepted status using the current Taiga version, records
+the parent-story progress evidence, and begins the next task only when the
+selected review mode allows it. No coordinator acknowledgement, next-task
+assignment, or reminder is an additional gate. A task acceptance is bound to
+the named SHA; a later source change
 supersedes it and requires a new ready handoff and review. A reviewer never
 accepts a SHA it did not inspect.
 
@@ -36,11 +41,11 @@ A duplicate acceptance is a no-op; acceptance for an old task/revision cannot
 release the current gate. Reconcile an unknown Taiga write before another
 attempt. Idle chat status and elapsed time are not acceptance evidence.
 
-The scoped workflow may apply this handoff automatically after a durable
-current acceptance event in `per_task` mode. It must verify reviewer identity,
-task identity, exact SHA, the immutable `Start` authorization and assignment
-identity, criteria, and current Taiga version before writing, then release only
-the next ordered task. In
+The scoped workflow may deliver this handoff automatically after a durable
+current acceptance event in `per_task` mode. The implementer must verify
+reviewer identity, task identity, exact SHA, the immutable `Start`
+authorization and assignment identity, criteria, and current Taiga version
+before writing, then release only the next ordered task. In
 `story_end_only` mode, implementation-ready evidence advances task order
 without task acceptance or per-task review; the final story review accepts the
 retained task revisions. A stale, duplicate, changed-scope, or uncertain event

@@ -43,8 +43,10 @@ function Send-Message {
     Assert-True (-not [string]::IsNullOrWhiteSpace($Destination)) "$Kind must have a destination"
     Assert-True ($Destination -in @($coordinator, $implementer, $reviewer)) "$Kind destination must be known"
     $directDestination = @{
+        ready = $reviewer
         finding = $implementer
         correction = $reviewer
+        accepted = $implementer
         story_approval = $coordinator
         blocked = $coordinator
         disagreement = $coordinator
@@ -126,9 +128,11 @@ Send-Message $reviewer $coordinator 'missing_destination' '#68' '' 'resolve work
 Send-Message $reviewer $coordinator 'unknown_delivery' '#68' 'c2' 'reconcile before retry' 'reviewer delivery result is unknown'
 Send-Message $implementer $coordinator 'revision_conflict' '#68' 'c2' 'reconcile current review binding' 'branch HEAD conflicts with the pending reviewed revision'
 
-# Routine finding/correction copies to the coordinator are forbidden.
+# Routine milestone copies to the coordinator are forbidden.
+Assert-Throws { Send-Message $implementer $coordinator 'ready' '#65' 'a1' 'review exact revision' 'routine ready copy' } 'task-ready must not be copied to the coordinator'
 Assert-Throws { Send-Message $reviewer $coordinator 'finding' '#65' 'a1' 'correct same branch' 'routine finding copy' } 'routine finding must not be copied to the coordinator'
 Assert-Throws { Send-Message $implementer $coordinator 'correction' '#65' 'a2' 're-review exact revision' 'routine correction copy' } 'routine correction must not be copied to the coordinator'
+Assert-Throws { Send-Message $reviewer $coordinator 'accepted' '#65' 'a2' 'advance ordered task' 'routine acceptance copy' } 'task acceptance must not be copied to the coordinator'
 
 Assert-True ($createdChats.Count -eq $initialChatCount) 'ordinary corrections must not create a new chat'
 $taskACorrections = @(Get-Messages 'correction' '#65')
@@ -139,7 +143,7 @@ Assert-True ($taskACorrections.Count -eq 1) 'task A must have one correction'
 Assert-True ($taskBCorrections.Count -eq 1) 'task B must have one correction'
 Assert-True ($taskACorrections[0].destination -eq $reviewer) 'task A correction must return to the same reviewer'
 Assert-True ($taskBCorrections[0].destination -eq $reviewer) 'task B correction must return to the same reviewer'
-Assert-True (@($messages | Where-Object { $_.kind -in @('finding', 'correction') -and $_.destination -eq $coordinator }).Count -eq 0) 'routine findings and corrections must not reach the coordinator'
+Assert-True (@($messages | Where-Object { $_.kind -in @('ready', 'finding', 'correction', 'accepted') -and $_.destination -eq $coordinator }).Count -eq 0) 'routine readiness, findings, corrections, and acceptance must not reach the coordinator'
 Assert-True ($storyApprovals.Count -eq 1 -and $storyApprovals[0].destination -eq $coordinator) 'final approval must route to coordinator'
 Assert-True (@($messages | Where-Object { $_.kind -in @('blocked','disagreement','stale_approval','missing_destination','unknown_delivery','revision_conflict') -and $_.destination -ne $coordinator }).Count -eq 0) 'exceptional states must route to coordinator'
 Assert-True (@($messages | Where-Object { $_.PSObject.Properties.Name -contains 'transcript' -or $_.PSObject.Properties.Name -contains 'receipt' }).Count -eq 0) 'messages must not relay full transcripts or structured receipts'
@@ -148,4 +152,4 @@ Assert-True ((Get-Messages 'unknown_delivery' '#68').Count -eq 1) 'unknown deliv
 Assert-True ((Get-Messages 'revision_conflict' '#68').Count -eq 1) 'revision conflict must escalate once'
 Assert-True ($messages.Count -eq 15) 'fixture should cover the complete controlled route set'
 
-Write-Output "Passed routing fixture: two tasks, direct correction rounds, stable pair, no routine coordinator relay, concise context, and coordinator escalation paths. No time or correction-count cutoff is used."
+Write-Output "Passed routing fixture: two ordered tasks, direct readiness/acceptance and correction rounds, stable pair, no routine coordinator relay, concise context, and coordinator escalation paths. No time or correction-count cutoff is used."

@@ -3,8 +3,10 @@
 The repository-local `taiga-story-loop` now keeps ordinary review corrections
 inside the persistent implementer/reviewer pair. Routine findings go directly
 to the implementer, correction-ready revisions go directly back to the same
-reviewer, and the coordinator is not a routine relay. The current task-
-acceptance route remains unchanged for now; issue #89 may revise it. Blockers,
+reviewer, and the coordinator is not a routine relay. At the #88 validation
+point, task acceptance still had a coordinator copy; issue #89 supersedes that
+route with direct reviewer-to-implementer acceptance and implementer-owned
+advancement. Blockers,
 substantive disagreements, missing or unknown destinations/delivery outcomes,
 and revision conflicts remain coordinator escalation cases.
 

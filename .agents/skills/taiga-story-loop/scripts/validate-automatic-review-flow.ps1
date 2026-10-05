@@ -126,13 +126,13 @@ function Apply-Event {
             $task.state = 'implementation_complete'
             $task.pendingSha = [string]$Event.revision
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
-                $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.coordinator $State.reviewer
+                $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
                 return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
             }
             $State.currentTaskIndex = [int]$State.currentTaskIndex + 1
             $next = Get-CurrentTask $State
             $next.state = 'in_progress'
-            $created = Add-Action $State 'implementation' $next.ref 'pending' $State.coordinator $State.implementer
+            $created = Add-Action $State 'advance_next_task' $next.ref 'pending' $State.implementer $State.implementer
             return [ordered]@{ decision = if ($created) { 'advance_next_task_without_review' } else { 'duplicate' }; state = $State }
         }
         'accepted' {
@@ -144,12 +144,16 @@ function Apply-Event {
             $task.acceptedSha = [string]$Event.revision
             $task.pendingSha = $null
             $State.pendingReview = $null
-            $State.actions = @($State.actions) + [ordered]@{ key = "taiga|$($task.ref)|$($Event.revision)"; kind = 'taiga_accept'; task = $task.ref; revision = [string]$Event.revision; branch = $State.branch; sender = $State.coordinator; destination = 'Taiga'; worker = 'coordinator' }
-            if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) { return [ordered]@{ decision = 'final_story_review'; state = $State } }
+            [void](Add-Action $State 'acceptance' $task.ref ([string]$Event.revision) $State.reviewer $State.implementer)
+            $State.actions = @($State.actions) + [ordered]@{ key = "taiga|$($task.ref)|$($Event.revision)"; kind = 'taiga_reconcile'; task = $task.ref; revision = [string]$Event.revision; branch = $State.branch; sender = $State.implementer; destination = 'Taiga'; worker = 'implementer' }
+            if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
+                $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
+                return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
+            }
             $State.currentTaskIndex = [int]$State.currentTaskIndex + 1
             $next = Get-CurrentTask $State
             $next.state = 'in_progress'
-            $created = Add-Action $State 'implementation' $next.ref 'pending' $State.coordinator $State.implementer
+            $created = Add-Action $State 'advance_next_task' $next.ref 'pending' $State.implementer $State.implementer
             return [ordered]@{ decision = if ($created) { 'advance_next_task' } else { 'duplicate' }; state = $State }
         }
         'idle' { return [ordered]@{ decision = 'wait'; state = $State } }
@@ -162,6 +166,7 @@ $ready = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_rev
 Assert-True ($ready.decision -eq 'dispatch_review') 'per_task should dispatch the initial review'
 Assert-True (@($state.actions | Where-Object kind -eq 'review').Count -eq 1) 'per_task should prepare one review action'
 Assert-True ($state.actions[0].sender -eq $state.implementer -and $state.actions[0].destination -eq $state.reviewer) 'initial review must stay direct between the worker pair'
+Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordinator }).Count -eq 0) 'initial readiness must not notify the coordinator'
 $duplicate = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($duplicate.decision -eq 'duplicate') 'per_task should ignore duplicate ready events'
 $stale = $false
@@ -171,6 +176,7 @@ $finding = Apply-Event $state @{ eventId = 'finding-per_task'; kind = 'changes_r
 Assert-True ($finding.decision -eq 'route_correction') 'per_task should route correction to the same pair'
 $correctionAction = @($state.actions | Where-Object kind -eq 'correction')[0]
 Assert-True ($correctionAction.sender -eq $state.reviewer -and $correctionAction.destination -eq $state.implementer) 'routine findings must go directly to the implementer'
+Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordinator }).Count -eq 0) 'routine findings and corrections must not notify the coordinator'
 $actionCountBeforeEscalation = @($state.actions).Count
 $unknownDelivery = Apply-Event $state @{ eventId = 'unknown-delivery-per_task'; kind = 'unknown_delivery'; taskId = 65; revision = 'sha-a2'; authorization = 'start-87' }
 Assert-True ($unknownDelivery.decision -eq 'escalate_coordinator') 'unknown delivery must escalate to the coordinator'
@@ -189,6 +195,13 @@ Assert-True ($readyCorrection.decision -eq 'dispatch_review') 'per_task should d
 $accepted = Apply-Event $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }
 Assert-True ($accepted.decision -eq 'advance_next_task') 'per_task should advance only after exact acceptance'
 Assert-True ($state.currentTaskIndex -eq 1 -and $state.tasks[1].state -eq 'in_progress') 'per_task should start the next declared task'
+$acceptanceAction = @($state.actions | Where-Object kind -eq 'acceptance')[0]
+Assert-True ($acceptanceAction.sender -eq $state.reviewer -and $acceptanceAction.destination -eq $state.implementer) 'task acceptance must go directly to the implementer'
+$taigaAction = @($state.actions | Where-Object kind -eq 'taiga_reconcile')[0]
+Assert-True ($taigaAction.sender -eq $state.implementer -and $taigaAction.destination -eq 'Taiga') 'implementer must own accepted-task Taiga reconciliation'
+$advanceAction = @($state.actions | Where-Object kind -eq 'advance_next_task')[0]
+Assert-True ($advanceAction.sender -eq $state.implementer -and $advanceAction.destination -eq $state.implementer) 'implementer must own next-task advancement without a coordinator gate'
+Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordinator }).Count -eq 0) 'task acceptance must not notify the coordinator'
 $idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-a2'; authorization = 'start-87' }
 Assert-True ($idle.decision -eq 'wait') 'per_task should not infer acceptance from idle'
 
@@ -205,10 +218,13 @@ Assert-True $taskAcceptanceBeforeFinal 'story_end_only should defer task accepta
 $finalStoryReview = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-2'; kind = 'implementation_ready'; taskId = 66; revision = 'sha-b2'; authorization = 'start-87' }
 Assert-True ($finalStoryReview.decision -eq 'final_story_review') 'story_end_only should request final story review after the last task'
 Assert-True (@($storyEndState.actions | Where-Object kind -eq 'story_review').Count -eq 1) 'story_end_only should prepare one final story review'
+$storyEndReviewAction = @($storyEndState.actions | Where-Object kind -eq 'story_review')[0]
+Assert-True ($storyEndReviewAction.sender -eq $storyEndState.implementer -and $storyEndReviewAction.destination -eq $storyEndState.reviewer) 'story_end_only final review request must stay in the worker pair'
+Assert-True (@($storyEndState.actions | Where-Object { $_.destination -eq $storyEndState.coordinator }).Count -eq 0) 'story_end_only advancement must not notify the coordinator'
 
 $scopeState = New-StoryState 'per_task'
 $scopeError = $false
 try { Apply-Event $scopeState @{ eventId = 'scope-change'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'changed-start' } | Out-Null } catch { $scopeError = $true }
 Assert-True $scopeError 'scope changes must stop automatic dispatch'
 
-Write-Output 'Passed automatic review-flow fixture: direct worker-pair dispatch/correction, exact acceptance advancement, duplicate/stale/idle guards, coordinator escalation, and scope gating.'
+Write-Output 'Passed automatic review-flow fixture: direct readiness/correction/acceptance, implementer-owned reconciliation and advancement, both review modes, duplicate/stale/idle guards, coordinator escalation, and scope gating.'

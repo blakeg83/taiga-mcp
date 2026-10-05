@@ -86,11 +86,13 @@ The ordinary handoff can be automated after the scope-bound `Start`: consume a
 durable `ready_for_review` event once, send the review request directly to the
 persistent reviewer, send one current finding directly back to the same
 implementer, and send each correction-ready revision directly to that reviewer.
-The current task-acceptance route remains unchanged for now; #89 may revise it.
-Duplicate or stale events, changed authorization/scope, unknown delivery,
-revision conflicts, and idle observations remain pending for reconciliation.
-The automatic path may start only the next declared task after its selected
-review-mode gate is satisfied; it never starts an undeclared task, changes
+An exact acceptance is delivered directly from the reviewer to the implementer.
+The implementer performs the current-version Taiga reconciliation and starts
+only the next declared task when the selected review-mode gate is satisfied;
+there is no coordinator acknowledgement, next-task assignment, or reminder
+in this ordinary path. Duplicate or stale events, changed authorization/scope,
+unknown delivery, revision conflicts, and idle observations remain pending for
+reconciliation. The automatic path never starts an undeclared task, changes
 scope, or merges. After final story approval, the coordinator may perform the
 Start-authorized story PR delivery without another PR-creation gate.
 

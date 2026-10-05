@@ -10,8 +10,8 @@ transcript, or a new chat for an ordinary correction.
 
 ## Task-ready message
 
-The implementer sends this to the reviewer and coordinator after the task's
-implementation evidence and commit exist:
+The implementer sends this to the reviewer after the task's implementation
+evidence and commit exist:
 
 ```text
 Task #<ref> ready for review
@@ -19,12 +19,12 @@ Branch: <story-branch>
 Revision: <commit SHA or stable revision range>
 Changes: <one-sentence summary>
 Checks: `<command>` — exit <code>; <concise result>
-Next: reviewer, inspect this exact revision and report findings or acceptance.
+Next: reviewer, inspect this exact revision and report findings or acceptance to the implementer.
 ```
 
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
 truncate the SHA. The revision is immutable review input. In `per_task` mode,
-after both handoffs are confirmed, the implementer records `awaiting_review`
+after the reviewer handoff is confirmed, the implementer records `awaiting_review`
 and ends its turn with a final response naming the task, branch, revision, and
 pending reviewer action.
 It must not call `wait_threads`, poll/read the reviewer chat, schedule its own
@@ -117,10 +117,10 @@ handoff is healthy: do not wake it to check status or re-send readiness. See
 
 | Handoff | Sender | Destination | Stable identity |
 | --- | --- | --- | --- |
-| ready | implementer | reviewer, coordinator | task ref + revision |
+| ready | implementer | reviewer | task ref + revision |
 | findings | reviewer | implementer; coordinator only for escalation | task ref + reviewed SHA |
 | correction | implementer | same reviewer; coordinator only for escalation | task ref + new revision |
-| acceptance | reviewer | implementer and coordinator | task ref + reviewed SHA |
+| acceptance | reviewer | implementer | task ref + reviewed SHA |
 | story approval | reviewer | coordinator | story ref + reviewed HEAD |
 
 If a destination is missing or a message has an unresolved worker ID, stop and

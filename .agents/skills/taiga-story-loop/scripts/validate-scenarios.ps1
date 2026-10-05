@@ -260,6 +260,7 @@ Assert-TaskExecutionContains 'preserve-or-replace decision' 'explicit decision t
 Assert-TaskExecutionContains 'per-task advancement gate' 'In `per_task` mode, only an independent'
 Assert-TaskExecutionContains 'story-end advancement gate' 'In `story_end_only` mode, implementation evidence may release'
 Assert-TaskExecutionContains 'story-end accepted gate' 'cannot become `mapping.accepted`/Done until'
+Assert-TaskExecutionContains 'no routine coordinator gate' 'there is no coordinator acknowledgement, next-task assignment, or reminder'
 Assert-TopologyContains 'standalone direct branch' 'A standalone story has one managed story branch'
 Assert-TopologyContains 'standalone master PR' 'its story PR targets `master`'
 Assert-TopologyContains 'epic shared feature branch' 'An epic has one shared feature branch'
@@ -278,6 +279,9 @@ Assert-ContinuationContains 'legacy snapshot compatibility' 'optional when readi
 Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
+Assert-ContinuationContains 'snapshot ownership' 'The coordinator owns this compact snapshot'
+Assert-ContinuationContains 'worker evidence ownership' 'The implementer owns current-version Taiga task and story progress writes'
+Assert-ContinuationContains 'quiet review wait' 'idle `awaiting_review` implementer'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
 Assert-ContinuationContains 'epic migration classification' 'If the scope identifies an epic or multiple ordered stories'
 Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
@@ -299,8 +303,9 @@ Assert-HandoffContains 'correction route' 'returns to the same reviewer chat'
 Assert-HandoffContains 'stable branch gate' 'does not start the next ordered task'
 Assert-HandoffContains 'no receipt requirement' 'Do not require a JSON receipt'
 Assert-WorkerPairContains 'direct routine pair' 'routine findings and corrections stay within the worker pair'
-Assert-WorkerPairContains 'no routine relay' 'The coordinator is not a routine finding or correction relay'
-Assert-WorkerPairContains 'acceptance preserved for issue 89' '#89 may revise it'
+Assert-WorkerPairContains 'no routine relay' 'The coordinator is not a routine finding, correction, task-ready, or task-acceptance relay'
+Assert-WorkerPairContains 'no task-ready relay' 'task-ready, or task-acceptance relay'
+Assert-WorkerPairContains 'implementer owns advancement' 'implementer owns current-version Taiga checklist/status/'
 if ($normalizedHandoff.Contains('same reviewer and coordinator')) {
     throw 'Handoff assertion failed: routine corrections must not copy the coordinator'
 }
@@ -314,14 +319,15 @@ if (-not $normalizedReviewerPrompt.Contains('only blocked verification') -or
     $normalizedReviewerPrompt.Contains('only blockers/check failures')) {
     throw 'Reviewer prompt assertion failed: routine check failures must not escalate automatically'
 }
-if (-not $normalizedAcceptance.Contains('reviewer-to-implementer and reviewer-to-coordinator for now')) {
-    throw 'Acceptance assertion failed: current task-acceptance route must remain explicit'
+if (-not $normalizedAcceptance.Contains('The task-acceptance route is reviewer-to-implementer') -or
+    -not $normalizedAcceptance.Contains('No coordinator acknowledgement, next-task assignment, or reminder')) {
+    throw 'Acceptance assertion failed: direct task acceptance and implementer ownership must remain explicit'
 }
 if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
     -not $normalizedRouting.Contains('fixed correction-count cutoff')) {
     throw 'Routing assertion failed: no arbitrary cutoff policy'
 }
-foreach ($marker in @('routine findings and corrections must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied')) {
+foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied')) {
     if (-not (Get-Content $routingScriptPath -Raw).Contains($marker)) {
         throw "Routing assertion failed: $marker"
     }
@@ -336,9 +342,11 @@ foreach ($marker in @(
         'send the finding directly to the same implementer'
         'Implementer sends correction-ready'
         'keep the coordinator out of the routine correction cycle'
+        'Deliver acceptance directly to the implementer'
+        'implementer applies the version-safe accepted/Done transition'
         'Reviewer accepts'
         'idle status, timeout, elapsed time, or implementation commit'
-        'Routine `changes_requested` and correction-ready events stay worker-to-worker'
+        'Routine `changes_requested`, correction-ready, task-ready, and exact task-acceptance events stay worker-to-worker'
         'Unknown message delivery, missing destinations, revision conflicts, merge approval'
         'PR creation or update is already covered by `Start`')) {
     if (-not $normalizedAutomaticFlow.Contains($marker)) {

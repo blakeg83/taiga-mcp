@@ -36,6 +36,14 @@ Values are updated only after their source system confirms a change. Keep the
 previous note recoverable, and never use a note's claim as proof that a Git,
 Codex, PR, or Taiga mutation succeeded.
 
+The coordinator owns this compact snapshot: it replaces the note after an
+authoritative workflow fact changes and preserves unresolved external
+operations or user gates. The implementer owns current-version Taiga task and
+story progress writes; the reviewer owns exact-revision task acceptance and
+final story approval evidence. Workers do not append routine milestones to the
+snapshot, and the coordinator does not replace removed copies with status
+messages, receipts, hashes, a state registry, or another measurement layer.
+
 ## Replace current state
 
 Rewrite the complete snapshot when an operational fact changes; never append
@@ -105,7 +113,9 @@ identity and follows this read budget:
 2. For an active worker wait, take one compact `wait_threads` snapshot using
    the recorded thread/host IDs and `afterCursor`, with `timeoutMs: 0`. Preserve
    returned cursors in place when they change. Ongoing work or an unchanged
-   state ends silently, without appending tick records or timestamps.
+   state ends silently, without appending tick records or timestamps. An idle
+   `awaiting_review` implementer after a confirmed worker-pair handoff is
+   healthy and does not receive a reminder or duplicate readiness request.
 3. Only new actionable worker evidence, a failure, missing/ambiguous identity,
    an unknown external result, a user response, or an explicit resume after
    interruption opens recovery. Load only the relevant evidence references
