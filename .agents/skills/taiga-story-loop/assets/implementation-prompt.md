@@ -68,22 +68,32 @@ For each task:
    status mapping once from Taiga metadata; never reuse story status IDs. Mark
    the task `In progress` before changing source. Preserve any unrelated human
    edits and record the authoritative version returned by Taiga.
-2. Implement only that task's objective. Keep a local checklist of every
-   observable criterion from the task description. A checked item needs direct
-   evidence; a comment or intention is not evidence. If a criterion is not
-   applicable, explain why rather than silently checking it.
-3. Run the focused checks required by the packet and repository instructions.
-   Preserve the command, actual exit code, and concise output/evidence. If a
-   required check is unavailable, report it as unavailable; never report it as
-   passing.
-4. Commit all task changes before moving to the next task, using the
+2. Before editing, confirm the task's reviewable endpoint: the artifact or
+   behavior to inspect, expected check outcome, every deferred criterion and
+   its later task/story owner, and the advancement gate for the selected review
+   mode. If an endpoint or dependency is missing/ambiguous, ask the narrow
+   clarification, record the blocker, and do not start dependent work.
+3. Implement only that task's objective. Keep a local checklist of every
+   observable criterion from the task description and endpoint. A checked item
+   needs direct evidence; a comment or intention is not evidence. If a
+   criterion is not applicable, explain why rather than silently checking it.
+4. Run the focused checks required by the packet and repository instructions.
+   For an authoritative expected-red checkpoint, name the permitted
+   behavior/tests, record the observed failure reason, and record relevant
+   safety checks that passed. A nonzero command exit alone is not evidence of a
+   valid RED; unexpected failures or missing regression/safety coverage remain
+   defects. Preserve the command, actual exit code, and concise output/evidence.
+   If a required check is unavailable, report it as unavailable; never report
+   it as passing.
+5. Commit all task changes before moving to the next task, using the
    repository's short imperative subject convention. If no file changed, do
    not invent a commit; report the verified no-change result.
-5. Mark implementation-complete work `Ready for test` (or the discovered
+6. Mark implementation-complete work `Ready for test` (or the discovered
    project-specific review-ready status), not `Closed`/`Done`. Add one concise
    comment to the parent story naming the task, checklist outcome, checks and
-   exit codes, commit SHA or verified no-change result, and the state
-   `ready for review`. Reviewer acceptance and a closed/done transition are
+   exit codes, endpoint/deferred evidence, commit SHA or verified no-change
+   result, and the state `ready for review`. Reviewer acceptance and a
+   closed/done transition are
    separate facts and are not implied by this worker result. In `per_task` mode,
    do not advance to the next ordered task until independent reviewer acceptance
    of this exact current task commit is recorded. In `story_end_only` mode,
@@ -148,6 +158,11 @@ implementation evidence, status write, parent-story comment, and commit
 outcome are recorded; retain the task revision for the final review. In either
 mode, a task being `Ready for test`, having a completion comment, or having any
 historical commit is not reviewer acceptance.
+
+At final story review, verify every deferred criterion against its named owner
+and evidence, and verify that all required regressions from earlier expected-red
+checkpoints are green. Do not claim final approval while either remains
+unresolved.
 
 ## Status, conflicts, and blockers
 

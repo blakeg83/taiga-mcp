@@ -30,6 +30,18 @@ function Add-Task {
         isBlocked = $false
         blockedNote = ''
         reviewableCommit = $null
+        endpointEvidence = $false
+        reviewableArtifact = ''
+        expectedOutcome = ''
+        expectedRedTests = @()
+        observedExpectedRedFailures = @()
+        safetyEvidence = @()
+        expectedRedEvidence = $false
+        expectedRedResolved = $false
+        unexpectedFailures = @()
+        deferredCriteria = @()
+        deferredEvidence = @()
+        advancementGate = ''
         humanEdits = @()
         checklist = [ordered]@{ contract = $false; verification = $false }
         commits = @()
@@ -42,6 +54,112 @@ function Get-Task {
     $task = $script:fixture.tasks[[string]$Id]
     if ($null -eq $task) { throw "Unknown synthetic task: $Id" }
     return $task
+}
+
+function Set-ReviewableEndpoint {
+    param(
+        [int] $TaskId,
+        [string] $Artifact,
+        [ValidateSet('pass', 'expected_red')] [string] $ExpectedOutcome,
+        [string[]] $ExpectedRedTests = @(),
+        [string[]] $DeferredCriteria = @(),
+        [string] $AdvancementGate
+    )
+
+    $task = Get-Task $TaskId
+    if ([string]::IsNullOrWhiteSpace($Artifact)) { throw "task $TaskId requires a reviewable artifact" }
+    if ([string]::IsNullOrWhiteSpace($AdvancementGate)) { throw "task $TaskId requires an advancement gate" }
+    foreach ($criterion in @($DeferredCriteria)) {
+        if ([string]::IsNullOrWhiteSpace($criterion) -or $criterion -notlike '*owner:*') {
+            throw "task $TaskId deferred criteria require a named owner"
+        }
+    }
+
+    $task.endpointEvidence = $true
+    $task.reviewableArtifact = $Artifact
+    $task.expectedOutcome = $ExpectedOutcome
+    $task.expectedRedTests = @($ExpectedRedTests)
+    $task.deferredCriteria = @($DeferredCriteria)
+    $task.advancementGate = $AdvancementGate
+    $task.checklist.contract = $true
+}
+
+function Record-PassingCheck {
+    param([int] $TaskId, [string] $Evidence)
+    $task = Get-Task $TaskId
+    Assert-True $task.endpointEvidence "task $TaskId endpoint must be defined before recording a check"
+    Assert-True ($task.expectedOutcome -eq 'pass') "task $TaskId does not expect a passing check"
+    Assert-True ($Evidence -like '*exit 0*') "task $TaskId passing evidence must record exit 0"
+    $task.safetyEvidence = @($Evidence)
+    $task.checklist.verification = $true
+}
+
+function Record-ExpectedRedCheckpoint {
+    param(
+        [int] $TaskId,
+        [string[]] $ObservedFailures,
+        [string[]] $SafetyChecks
+    )
+
+    $task = Get-Task $TaskId
+    Assert-True $task.endpointEvidence "task $TaskId endpoint must be defined before recording expected RED"
+    Assert-True ($task.expectedOutcome -eq 'expected_red') "task $TaskId is not an expected-red checkpoint"
+    Assert-True (@($task.expectedRedTests).Count -gt 0) "task $TaskId expected RED must name a behavior/test"
+    Assert-True (@($ObservedFailures).Count -gt 0) "task $TaskId expected RED must record an observed failure"
+    Assert-True (@($SafetyChecks).Count -gt 0) "task $TaskId expected RED must record safety evidence"
+
+    foreach ($testName in @($task.expectedRedTests)) {
+        Assert-True (@($ObservedFailures | Where-Object { $_ -like "${testName}:*" }).Count -eq 1) "task $TaskId must record the observed reason for $testName"
+    }
+    foreach ($safetyCheck in @($SafetyChecks)) {
+        Assert-True ($safetyCheck -like '*exit 0*') "task $TaskId safety evidence must pass"
+    }
+
+    $task.observedExpectedRedFailures = @($ObservedFailures)
+    $task.safetyEvidence = @($SafetyChecks)
+    $task.expectedRedEvidence = $true
+    $task.checklist.verification = $true
+}
+
+function Record-UnexpectedFailure {
+    param([int] $TaskId, [string] $TestName, [string] $Reason)
+    $task = Get-Task $TaskId
+    if ([string]::IsNullOrWhiteSpace($TestName) -or [string]::IsNullOrWhiteSpace($Reason)) {
+        throw "task $TaskId unexpected failure requires a test and reason"
+    }
+    $task.unexpectedFailures += "${TestName}: $Reason"
+}
+
+function Resolve-ExpectedRedCheckpoint {
+    param([int] $TaskId, [string] $Evidence)
+    $task = Get-Task $TaskId
+    Assert-True ($task.expectedOutcome -eq 'expected_red') "task $TaskId has no expected-red checkpoint to resolve"
+    Assert-True ($Evidence -like '*exit 0*') "task $TaskId RED resolution must record exit 0"
+    $task.expectedRedResolved = $true
+    $task.safetyEvidence += $Evidence
+}
+
+function Satisfy-DeferredCriterion {
+    param([int] $TaskId, [string] $Criterion, [int] $OwnerTaskId)
+    $task = Get-Task $TaskId
+    $owner = Get-Task $OwnerTaskId
+    Assert-True (@($task.deferredCriteria | Where-Object { $_ -like "${Criterion}*" }).Count -eq 1) "task $TaskId has no deferred criterion '$Criterion'"
+    Assert-True ($owner.status -eq 'accepted') "task $OwnerTaskId must be accepted before supplying deferred evidence"
+    $task.deferredEvidence += "${Criterion} | owner: task #$OwnerTaskId | evidence: accepted task"
+}
+
+function Complete-StoryReview {
+    Assert-True (@($script:fixture.storyScope).Count -gt 0) 'story review requires a declared story scope'
+    foreach ($taskId in @($script:fixture.storyScope)) {
+        $task = Get-Task $taskId
+        if ($task.expectedOutcome -eq 'expected_red') {
+            Assert-True $task.expectedRedResolved "final story review cannot approve unresolved RED in task $taskId"
+        }
+        foreach ($criterion in @($task.deferredCriteria)) {
+            Assert-True (@($task.deferredEvidence | Where-Object { $_ -like "$criterion*" }).Count -eq 1) "final story review lacks evidence for deferred criterion '$criterion'"
+        }
+    }
+    $script:fixture.storyReviewApproved = $true
 }
 
 function Add-ProgressComment {
@@ -89,8 +207,13 @@ function Complete-Task {
     param([int] $TaskId, [string] $Commit, [switch] $ReviewRejected)
     $task = Get-Task $TaskId
     Assert-True ($task.status -eq 'in_progress') "task $TaskId must be in progress before completion"
+    Assert-True $task.endpointEvidence "task $TaskId reviewable endpoint is required"
     Assert-True $task.checklist.contract "task $TaskId contract checklist is required"
     Assert-True $task.checklist.verification "task $TaskId verification checklist is required"
+    Assert-True (@($task.unexpectedFailures).Count -eq 0) "task $TaskId has unexpected failures"
+    if ($task.expectedOutcome -eq 'expected_red') {
+        Assert-True $task.expectedRedEvidence "task $TaskId expected-red evidence is incomplete"
+    }
     $task.commits += $Commit
     $task.reviewableCommit = $Commit
     $null = Set-Status $TaskId $task.version 'awaiting_review'
@@ -166,6 +289,8 @@ $script:fixture = [ordered]@{
     tasks = @{}
     activeTaskId = $null
     storyComments = @()
+    storyScope = @()
+    storyReviewApproved = $false
 }
 
 try {
@@ -174,20 +299,21 @@ try {
     Add-Task 903 @(902)
 
     Start-Task 901
+    Set-ReviewableEndpoint -TaskId 901 -Artifact 'shared task contract' -ExpectedOutcome 'pass' -AdvancementGate 'reviewer accepts exact commit before task #902'
     Fail-Check 901
     Assert-Throws { Complete-Task 901 'a901-failed' } 'failed verification cannot produce review-ready task'
     Assert-True ((Get-Task 901).status -eq 'in_progress') 'failed check keeps task in progress'
     Assert-True (-not (Get-Task 901).checklist.verification) 'failed check leaves verification unchecked'
 
     $task901 = Get-Task 901
-    $task901.checklist.contract = $true
-    $task901.checklist.verification = $true
+    Record-PassingCheck 901 'contract fixture check | exit 0'
     Complete-Task 901 'a901001'
     Assert-True ((Get-Task 902).status -eq 'not_started') 'dependent task remains untouched before acceptance'
     Assert-Throws { Start-Task 902 } 'unaccepted prerequisite blocks next task'
     Accept-Task 901 'a901001'
 
     Start-Task 902
+    Set-ReviewableEndpoint -TaskId 902 -Artifact 'consumer implementation' -ExpectedOutcome 'pass' -AdvancementGate 'reviewer accepts exact commit before task #903'
     Block-Task 902 'required provider decision is missing'
     Assert-True ((Get-Task 902).isBlocked) 'blocked task records isBlocked'
     Assert-True ((Get-Task 902).blockedNote -like '*provider decision*') 'blocked task records note'
@@ -208,8 +334,7 @@ try {
     Assert-True ((Get-Task 902).status -eq 'in_progress') 'replace decision records the intended status transition'
     Assert-True (@((Get-Task 902).humanEdits | Where-Object { $_.status -eq 'needs_info' }).Count -eq 1) 'human edit remains after reconciliation'
     Assert-True (@((Get-Task 902).comments | Where-Object { $_ -like '*decision: replace_after_decision*' }).Count -eq 1) 'human edit reconciliation decision is surfaced'
-    $task902.checklist.contract = $true
-    $task902.checklist.verification = $true
+    Record-PassingCheck 902 'consumer fixture check | exit 0'
     Complete-Task 902 'a902001' -ReviewRejected
     Assert-True ((Get-Task 902).status -eq 'in_progress') 'review rejection reopens only affected task'
     $task902.checklist.verification = $true
@@ -219,9 +344,9 @@ try {
     Accept-Task 902 'a902002'
 
     Start-Task 903
+    Set-ReviewableEndpoint -TaskId 903 -Artifact 'integrated behavior' -ExpectedOutcome 'pass' -AdvancementGate 'reviewer accepts exact final task commit before story review'
     $task903 = Get-Task 903
-    $task903.checklist.contract = $true
-    $task903.checklist.verification = $true
+    Record-PassingCheck 903 'integrated fixture check | exit 0'
     Complete-Task 903 'a903001'
     Assert-True ((Get-Task 903).status -eq 'awaiting_review') 'final task is ready for review, not done'
 
@@ -233,7 +358,101 @@ try {
     Assert-True (@((Get-Task 903).comments | Where-Object { $_ -like '*a903001*' }).Count -eq 1) 'final task has one completion comment'
     Assert-True (@($script:fixture.storyComments | Where-Object { $_ -like '*Task #903*' }).Count -eq 1) 'no dependent story comment precedes task 903 start'
 
-    Write-Output 'Passed synthetic ordered-task, failed-check, blocker, review-rejection, human-conflict, commit, and parent-comment assertions.'
+    # A named expected-red checkpoint is reviewable when its observed failure
+    # and safety evidence match the endpoint contract.
+    $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
+    Add-Task 904 @()
+    Start-Task 904
+    Set-ReviewableEndpoint -TaskId 904 -Artifact 'declared behavior regression' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_declared_behavior') -AdvancementGate 'reviewer accepts the checkpoint before dependent work'
+    Record-ExpectedRedCheckpoint -TaskId 904 -ObservedFailures @('test_declared_behavior: endpoint not implemented') -SafetyChecks @('test_safety: exit 0')
+    Complete-Task 904 'a904001'
+    Assert-True ((Get-Task 904).status -eq 'awaiting_review') 'legitimate expected RED can become review-ready'
+    Accept-Task 904 'a904001'
+    Assert-True ((Get-Task 904).observedExpectedRedFailures[0] -like 'test_declared_behavior:*') 'expected RED records the named observed failure'
+    Assert-True ((Get-Task 904).safetyEvidence[0] -like '*exit 0*') 'expected RED records passing safety evidence'
+
+    # An incomplete artifact/advancement endpoint requires clarification before
+    # task start and leaves dependent work untouched.
+    $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
+    Add-Task 913 @()
+    Add-Task 914 @(913)
+    Assert-Throws { Set-ReviewableEndpoint -TaskId 913 -Artifact '' -ExpectedOutcome 'pass' -AdvancementGate '' } 'ambiguous endpoint requires clarification'
+    Assert-Throws { Start-Task 914 } 'ambiguous endpoint blocks the dependent task'
+    Assert-True ((Get-Task 914).status -eq 'not_started') 'ambiguous endpoint leaves dependent task untouched'
+
+    # An unrelated failure cannot be relabeled as the permitted RED and cannot
+    # release a dependent task.
+    $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
+    Add-Task 905 @()
+    Add-Task 906 @(905)
+    Start-Task 905
+    Set-ReviewableEndpoint -TaskId 905 -Artifact 'declared behavior regression' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_declared_behavior') -AdvancementGate 'reviewer accepts the checkpoint before task #906'
+    Record-UnexpectedFailure 905 'test_unrelated_behavior' 'unexpected state transition'
+    (Get-Task 905).checklist.verification = $true
+    Assert-Throws { Complete-Task 905 'a905001' } 'unexpected failure cannot become review-ready'
+    Assert-True ((Get-Task 905).status -eq 'in_progress') 'unexpected failure keeps task in progress'
+    Assert-Throws { Start-Task 906 } 'unexpected failure blocks the dependent task'
+    Assert-True ((Get-Task 906).status -eq 'not_started') 'blocked dependent task remains untouched'
+
+    # Expected-red work without named regression evidence cannot become
+    # review-ready, even when a task endpoint exists.
+    $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
+    Add-Task 907 @()
+    Start-Task 907
+    Set-ReviewableEndpoint -TaskId 907 -Artifact 'missing regression fixture' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_missing_regression') -AdvancementGate 'reviewer accepts only after named regression evidence'
+    Assert-Throws { Record-ExpectedRedCheckpoint -TaskId 907 -ObservedFailures @() -SafetyChecks @('test_safety: exit 0') } 'missing regression coverage is rejected'
+    Assert-Throws { Complete-Task 907 'a907001' } 'missing regression coverage cannot become review-ready'
+    Assert-True (-not (Get-Task 907).expectedRedEvidence) 'missing regression evidence remains unrecorded'
+
+    # Deferred criteria stay attached to the originating task until the named
+    # later owner supplies evidence.
+    $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
+    Add-Task 907 @()
+    Add-Task 908 @(907)
+    Set-ReviewableEndpoint -TaskId 907 -Artifact 'deferred contract' -ExpectedOutcome 'pass' -DeferredCriteria @('final regression green | owner: task #908') -AdvancementGate 'reviewer accepts task #907, then task #908 supplies the deferred evidence'
+    Start-Task 907
+    Record-PassingCheck 907 'deferred contract check | exit 0'
+    Complete-Task 907 'a907002'
+    Accept-Task 907 'a907002'
+    Assert-True ((Get-Task 907).deferredEvidence.Count -eq 0) 'deferred criterion remains visible after source task acceptance'
+    Start-Task 908
+    Set-ReviewableEndpoint -TaskId 908 -Artifact 'final regression evidence' -ExpectedOutcome 'pass' -AdvancementGate 'final story review'
+    Record-PassingCheck 908 'final regression check | exit 0'
+    Complete-Task 908 'a908002'
+    Accept-Task 908 'a908002'
+    Satisfy-DeferredCriterion -TaskId 907 -Criterion 'final regression green' -OwnerTaskId 908
+    Assert-True ((Get-Task 907).deferredEvidence.Count -eq 1) 'later owner supplies deferred evidence'
+
+    # Final story approval rejects unresolved RED first, then rejects missing
+    # deferred evidence, and succeeds only after both are resolved.
+    $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
+    Add-Task 910 @()
+    Add-Task 911 @()
+    Add-Task 912 @(911)
+    $script:fixture.storyScope = @(910, 911, 912)
+    Start-Task 910
+    Set-ReviewableEndpoint -TaskId 910 -Artifact 'final regression checkpoint' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_final_regression') -AdvancementGate 'final story review requires the formerly red test to pass'
+    Record-ExpectedRedCheckpoint -TaskId 910 -ObservedFailures @('test_final_regression: endpoint not implemented') -SafetyChecks @('test_safety: exit 0')
+    Complete-Task 910 'a910001'
+    Accept-Task 910 'a910001'
+    Start-Task 911
+    Set-ReviewableEndpoint -TaskId 911 -Artifact 'story-level deferred criterion' -ExpectedOutcome 'pass' -DeferredCriteria @('final regression green | owner: task #912') -AdvancementGate 'final story review'
+    Record-PassingCheck 911 'story deferred check | exit 0'
+    Complete-Task 911 'a911001'
+    Accept-Task 911 'a911001'
+    Start-Task 912
+    Set-ReviewableEndpoint -TaskId 912 -Artifact 'deferred owner evidence' -ExpectedOutcome 'pass' -AdvancementGate 'final story review'
+    Record-PassingCheck 912 'owner evidence check | exit 0'
+    Complete-Task 912 'a912001'
+    Accept-Task 912 'a912001'
+    Assert-Throws { Complete-StoryReview } 'final story review rejects unresolved expected RED'
+    Resolve-ExpectedRedCheckpoint -TaskId 910 -Evidence 'test_final_regression: exit 0'
+    Assert-Throws { Complete-StoryReview } 'final story review rejects missing deferred evidence'
+    Satisfy-DeferredCriterion -TaskId 911 -Criterion 'final regression green' -OwnerTaskId 912
+    Complete-StoryReview
+    Assert-True $script:fixture.storyReviewApproved 'final story review succeeds only after RED and deferred evidence resolve'
+
+    Write-Output 'Passed synthetic ordered-task, failed-check, blocker, review-rejection, human-conflict, reviewable-endpoint, expected-red, deferred-criteria, final-review, commit, and parent-comment assertions.'
     exit 0
 }
 catch {

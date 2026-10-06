@@ -32,6 +32,15 @@ advancement. In per-task mode, acceptance releases the next task; in
 story-end-only mode, retain task findings and defer acceptance to the final
 story review.
 
+For each task, assess the declared reviewable endpoint before assessing the
+implementation: artifact, expected check outcome, deferred criteria and owner,
+and advancement gate. An expected-red checkpoint is acceptable only when the
+named behavior/tests have the permitted observed failure reason and relevant
+safety checks pass. Treat an unexpected failure, a nonzero exit without named
+failure evidence, or missing regression/safety coverage as a finding; do not
+require downstream implementation merely to make an intentionally red task
+green.
+
 The implementer ends its turn after each per-task ready/correction handoff.
 Your authorized findings or acceptance message wakes that same chat; include
 the task ref and exact reviewed SHA. Do not ask it to poll or stay active, and
@@ -53,6 +62,10 @@ the implementer to reconcile Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator
 with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
 PR. Any later source change invalidates that approval and requires re-review.
+
+For final story approval, require evidence for every deferred criterion from its
+named owner and require formerly red regressions to be green. An unresolved RED
+or deferred criterion is not compatible with `Story #<ref> approved`.
 
 For `standalone-story-direct-master`, review the exact story HEAD as the final
 story review for a direct-to-`master` PR; there is no feature branch or

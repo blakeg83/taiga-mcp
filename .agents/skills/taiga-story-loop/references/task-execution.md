@@ -38,6 +38,30 @@ the fallback: a task remains not-Done until independent review accepts it. If a
 blocked status is absent, set `isBlocked=true` and a nonblank `blockedNote` on
 the task and report the blocker in the parent story; do not invent a status ID.
 
+## Establish the reviewable endpoint before implementation
+
+Before changing source, the assignment and task description must identify:
+
+- the artifact or behavior the reviewer will inspect;
+- the expected check outcome, including whether this is an authoritative
+  expected-red checkpoint;
+- every criterion intentionally deferred, its later task or final-story owner,
+  and the evidence that owner must provide; and
+- the advancement gate for the selected review mode.
+
+If any of these are missing or materially ambiguous, ask the narrow
+clarification, record the task as blocked/needs information when available, and
+do not start dependent work. Do not resolve ambiguity by demanding downstream
+implementation early or by inventing an allowed failure.
+
+For an expected-red checkpoint, record the named behavior/tests that are
+permitted to fail, the observed failure reason, and relevant safety checks that
+passed. A nonzero command exit alone is not a valid RED. An unexpected failure,
+missing regression coverage, or missing safety evidence leaves the task
+in-progress and blocks advancement. The checkpoint can be reviewable when its
+contracted RED is evidenced, but final story acceptance still requires the
+formerly red regressions to be green.
+
 ## Start, checklist, and review gates
 
 Before each task, read the authoritative detail and version:
@@ -59,6 +83,11 @@ specific evidence-backed checkbox, then send the complete description with the
 current version. Never mark a review, acceptance, merge, or unavailable-check
 item complete from worker intent. A task status transition is not checklist
 evidence, and checked boxes are not reviewer acceptance.
+
+Merge endpoint evidence into the existing task checklist/comment rather than
+creating a mandatory receipt schema or duplicating the ticket transcript. Keep
+deferred criteria and their owners visible until their later evidence is
+recorded.
 
 At implementation completion, update the current version to
 `mapping.awaiting_review` (or the documented in-progress fallback). The worker
@@ -153,3 +182,8 @@ blocking fields. Then add a parent-story comment containing:
 Clear a blocker only after rereading the current task and documenting the new
 evidence. Never turn a failed check, missing receipt, timeout, response-lost
 write, or unaccepted review into a completed checklist item.
+
+At final story review, verify every deferred criterion against its named owner
+and evidence, and verify that every required expected-red regression is green.
+An unresolved RED or an ownerless/unsupported deferred criterion keeps the
+story unapproved even when all implementation tasks have commits.

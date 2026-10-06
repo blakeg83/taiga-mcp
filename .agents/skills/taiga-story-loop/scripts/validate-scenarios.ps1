@@ -19,6 +19,7 @@ $continuationScriptPath = Join-Path $PSScriptRoot 'validate-continuation-note.ps
 $promptPath = Join-Path $skillRoot 'assets/implementation-prompt.md'
 $branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
+$contractsPath = Join-Path $skillRoot 'references/contracts.md'
 $taskExecutionPath = Join-Path $skillRoot 'references/task-execution-walkthroughs.md'
 $taskExecutionGuidancePath = Join-Path $skillRoot 'references/task-execution.md'
 $taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
@@ -41,6 +42,9 @@ $finalDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-final-delivery.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
+}
+if (-not (Test-Path $contractsPath)) {
+    throw 'Missing story/task contract reference.'
 }
 if (-not (Test-Path $topologyPath)) {
     throw 'Missing scope-specific branch topology contract.'
@@ -90,6 +94,8 @@ $branchScenarioText = Get-Content $branchScenarioPath -Raw
 $normalizedBranchScenario = [regex]::Replace($branchScenarioText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
 $normalizedWalkthrough = [regex]::Replace($walkthroughText, '\s+', ' ')
+$contractsText = Get-Content $contractsPath -Raw
+$normalizedContracts = [regex]::Replace($contractsText, '\s+', ' ')
 $taskExecutionText = Get-Content $taskExecutionPath -Raw
 $normalizedTaskExecution = [regex]::Replace($taskExecutionText, '\s+', ' ')
 $taskExecutionGuidanceText = Get-Content $taskExecutionGuidancePath -Raw
@@ -156,6 +162,17 @@ function Assert-TaskExecutionContains {
 
     if (-not $normalizedTaskExecutionGuidance.Contains($Text)) {
         throw "Task execution assertion failed: $Label"
+    }
+}
+
+function Assert-ContractsContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedContracts.Contains($Text)) {
+        throw "Contract assertion failed: $Label"
     }
 }
 
@@ -233,6 +250,13 @@ Assert-DocumentContains 'pending ID guard' 'pending `clientThreadId` is never a 
 Assert-DocumentContains 'standalone topology setup' 'standalone-story-direct-master'
 Assert-DocumentContains 'epic topology setup' 'epic-shared-feature'
 Assert-DocumentContains 'legacy topology setup' 'legacy-standalone-feature'
+Assert-ContractsContains 'reviewable endpoint template' '### Reviewable endpoint'
+Assert-ContractsContains 'endpoint artifact' '- Artifact:'
+Assert-ContractsContains 'expected outcome' '- Expected check outcome:'
+Assert-ContractsContains 'deferred owner' '- Deferred criteria:'
+Assert-ContractsContains 'advancement gate' '- Advancement gate:'
+Assert-ContractsContains 'expected-red evidence' 'A nonzero command exit by itself is not evidence of a valid RED.'
+Assert-ContractsContains 'ambiguous endpoint gate' 'missing or ambiguous artifact'
 Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
 Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
@@ -532,6 +556,30 @@ foreach ($recordMarker in @(
     }
 }
 
+foreach ($endpointMarker in @(
+        'Legitimate expected-red checkpoint'
+        'Unexpected failure'
+        'Ambiguous endpoint'
+        'Missing regression coverage'
+        'Deferred criterion later satisfied'
+        'Final review with unresolved RED/deferred evidence'
+        'mandatory receipt schema')) {
+    if (-not $normalizedTaskExecution.Contains($endpointMarker)) {
+        throw "Task endpoint walkthrough assertion failed: $endpointMarker"
+    }
+}
+foreach ($fixtureMarker in @(
+        'Record-ExpectedRedCheckpoint'
+        'Record-UnexpectedFailure'
+        'missing regression coverage cannot become review-ready'
+        'Satisfy-DeferredCriterion'
+        'Complete-StoryReview'
+        'final story review rejects unresolved expected RED')) {
+    if (-not (Get-Content $taskExecutionScriptPath -Raw).Contains($fixtureMarker)) {
+        throw "Task endpoint fixture assertion failed: $fixtureMarker"
+    }
+}
+
 $worktreeMarker = 'mcp__codex_app__create_worktree({"name":"story-46-worker"'
 $implementationThreadMarker = 'mcp__codex_app__create_thread({"title":"story-46 implementation"'
 $worktreeIndex = $normalizedWalkthrough.IndexOf($worktreeMarker, [StringComparison]::Ordinal)
@@ -690,4 +738,4 @@ $results = foreach ($scenario in $scenarios) {
 }
 
 $results | Format-Table Name, Input, Observed, Detail -AutoSize | Out-String | Write-Output
-Write-Output "Passed $($results.Count) static contract route assertions and 13 walkthrough-record completeness assertions; this is not behavioral evidence."
+Write-Output "Passed $($results.Count) static setup scenarios plus contract, endpoint-walkthrough, and recorded-walkthrough assertions; this is not behavioral evidence."
