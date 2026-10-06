@@ -128,6 +128,13 @@ acceptance, use the version-safe Taiga update contract and then advance only
 as the review mode permits. Reconcile unknown write/message outcomes before
 retrying; repeated acceptance must not close another task or advance twice.
 
+Acceptance is an evidence event, not a provider write result. The implementer
+must complete the task/status/checklist write and the marker-bearing parent-story
+progress comment from one `task + reviewed SHA` journal. A response-lost,
+interrupted, or version-conflicted step holds the ordered pointer until an
+authoritative detail/history read confirms the result or an explicit human-edit
+decision is recorded.
+
 The coordinator's scoped recovery heartbeat handles a genuine interruption or
 missing handoff. An idle implementer in `awaiting_review` after a confirmed
 handoff is healthy: do not wake it to check status or re-send readiness. See

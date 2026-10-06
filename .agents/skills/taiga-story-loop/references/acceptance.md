@@ -60,6 +60,16 @@ the complete named input; a later source change, branch movement, or HEAD
 change supersedes it and requires a new committed ready handoff and review. A
 reviewer never accepts a SHA it did not inspect.
 
+The reviewer message is evidence, not a provider write receipt. The implementer
+records an idempotent `task + reviewed SHA` acceptance marker, rereads the
+current task/version, merges only the named checklist items, and confirms the
+task write before adding one marker-bearing parent-story progress comment. A
+response-lost or interrupted operation remains pending until a detail/history
+read confirms it; recovery resumes the same journal and does not repeat an
+already-confirmed operation. A version-conflicted human edit is preserved and
+requires an explicit reconciliation decision before the accepted transition or
+advancement can proceed.
+
 Before applying acceptance, follow the identity, current pending revision, and
 already-handled outcome checks in [message-driven resume](worker-handoffs.md#message-driven-resume).
 A duplicate acceptance is a no-op; acceptance for an old task/revision cannot

@@ -43,6 +43,31 @@ authoritative.
 | Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
 | Final task is accepted | Every selected task has exact-revision acceptance | The implementer requests final story review from the reviewer; the reviewer sends exact-HEAD approval to the coordinator; do not merge automatically. After story approval, prepare the PR under the existing `Start` authorization |
 
+### Acceptance reconciliation transaction
+
+The reviewer message is not a Taiga write result. In `per_task`, the
+implementer resumes the same chat and owns a durable acceptance journal keyed
+by the current task and exact reviewed SHA. It reads the task detail/version,
+merges only checklist items named by the acceptance evidence, preserves
+unrelated human edits, and applies the project-specific task status mapping.
+It then confirms the status/checklist write and a marker-bearing parent-story
+progress comment separately. Advancement is legal only after both are
+authoritatively observed.
+
+An unknown or version-conflicted task/status/comment operation holds the
+acceptance and ordered pointer. The implementer rereads the task/story and
+history before another write; a response-lost write may be confirmed as
+already applied, while a human change remains unresolved until an explicit
+decision. Recovery resumes the same journal and performs only the missing
+operation. Duplicate acceptance messages, duplicate event IDs, and repeated
+recovery of a confirmed marker are no-ops.
+
+For the final task, confirmed closure requests final whole-story review and
+does not merge or release the story. In `story_end_only`, implementation-ready
+milestones may advance task order but leave provider tasks unaccepted; final
+story acceptance reconciles those task closures and progress evidence, then
+leaves merge/release as separate gates.
+
 ## Safety rules
 
 - A ready event, idle status, timeout, elapsed time, or implementation commit
