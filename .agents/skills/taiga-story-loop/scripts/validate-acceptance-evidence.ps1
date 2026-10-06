@@ -201,6 +201,32 @@ foreach ($manifestScenario in @($manifest.scenarios)) {
 foreach ($validation in @('capability', 'production_path', 'metrics', 'scenario_coverage', 'limitation')) {
     Assert-True ($manifestCases.ContainsKey($validation)) "manifest is missing validation case: $validation"
 }
+Assert-True (@($manifest.scenarioMatrix).Count -eq $requiredScenarioIds.Count) 'manifest scenario matrix must cover each required scenario ID'
+$scenarioRecords = @()
+foreach ($manifestScenario in @($manifest.scenarioMatrix)) {
+    $scenarioRecord = [ordered]@{
+        id = [string]$manifestScenario.id
+        evidenceKind = [string]$manifestScenario.evidenceKind
+        setup = [string]$manifestScenario.setup
+        action = [string]$manifestScenario.action
+        expected = [string]$manifestScenario.expected
+        observed = [string]$manifestScenario.observed
+        status = [string]$manifestScenario.status
+    }
+    foreach ($optionalField in @('evidence', 'limitationSource', 'nextAction')) {
+        if ($manifestScenario.PSObject.Properties.Name -contains $optionalField) {
+            $scenarioRecord[$optionalField] = [string]$manifestScenario.$optionalField
+        }
+    }
+    $scenarioRecords += $scenarioRecord
+}
+Assert-True (@($scenarioRecords | ForEach-Object id | Select-Object -Unique).Count -eq $requiredScenarioIds.Count) 'manifest scenario matrix IDs must be unique'
+foreach ($requiredScenarioId in $requiredScenarioIds) {
+    Assert-True (@($scenarioRecords | Where-Object { $_.id -ceq $requiredScenarioId }).Count -eq 1) "manifest scenario matrix is missing $requiredScenarioId"
+}
+$automatedScenario = @($scenarioRecords | Where-Object evidenceKind -eq 'automated_assertion')[0]
+$unavailableScenario = @($scenarioRecords | Where-Object evidenceKind -eq 'unavailable')[0]
+Assert-True ($null -ne $automatedScenario -and $null -ne $unavailableScenario) 'manifest scenario matrix needs automated and unavailable cases'
 
 $observedCapabilities = @{
     viewport = [ordered]@{ available = $true; source = 'synthetic host capability probe'; sourceType = 'probe' }
@@ -267,26 +293,14 @@ $goodMetric = [ordered]@{
 }
 Assert-MetricRecord $goodMetric
 
-$missingScenario = @([ordered]@{
-    id = $requiredScenarioIds[0]
-    evidenceKind = 'automated_assertion'
-    setup = 'synthetic data'
-    action = 'invoke production path'
-    expected = 'result is returned'
-    observed = 'assertion passed'
-    status = 'passed'
-    evidence = ''
-})
-Assert-Throws { Assert-ScenarioCoverage -Scenarios $missingScenario -RequiredIds @($requiredScenarioIds[0]) } "$($manifestCases.scenario_coverage.id) must reject missing evidence"
-$unavailableWithPassedStatus = [ordered]@{
-    id = $requiredScenarioIds[2]; evidenceKind = 'unavailable'; setup = 'authorized host'; action = 'inspect console'; expected = 'no unexpected errors'; observed = 'not run'; status = 'passed'; limitationSource = 'synthetic authorized capability probe'; nextAction = 'report limitation'
-}
-Assert-Throws { Assert-ScenarioCoverage -Scenarios @($unavailableWithPassedStatus) -RequiredIds @($requiredScenarioIds[2]) } "$($manifestCases.limitation.id) must keep an unavailable case honest"
-$scenarioRecords = @(
-    [ordered]@{ id = $requiredScenarioIds[0]; evidenceKind = 'automated_assertion'; setup = 'synthetic data'; action = 'invoke production path'; expected = 'result is returned'; observed = 'assertion passed'; status = 'passed'; evidence = 'synthetic assertion output' }
-    [ordered]@{ id = $requiredScenarioIds[1]; evidenceKind = 'visible_observation'; setup = 'authorized disposable page'; action = 'resize and inspect layout'; expected = 'content remains usable'; observed = 'observation required on host'; status = 'pending_host_observation'; evidence = 'visible observation record' }
-    [ordered]@{ id = $requiredScenarioIds[2]; evidenceKind = 'unavailable'; setup = 'authorized host'; action = 'inspect console'; expected = 'no unexpected errors'; observed = 'not run'; status = 'unavailable'; limitationSource = 'synthetic authorized capability probe'; nextAction = 'report limitation and request a host with console access' }
-)
+$missingScenario = [ordered]@{}
+foreach ($key in $automatedScenario.Keys) { $missingScenario[$key] = $automatedScenario[$key] }
+$missingScenario.evidence = ''
+Assert-Throws { Assert-ScenarioCoverage -Scenarios @($missingScenario) -RequiredIds @($automatedScenario.id) } "$($manifestCases.scenario_coverage.id) must reject missing evidence"
+$unavailableWithPassedStatus = [ordered]@{}
+foreach ($key in $unavailableScenario.Keys) { $unavailableWithPassedStatus[$key] = $unavailableScenario[$key] }
+$unavailableWithPassedStatus.status = 'passed'
+Assert-Throws { Assert-ScenarioCoverage -Scenarios @($unavailableWithPassedStatus) -RequiredIds @($unavailableScenario.id) } "$($manifestCases.limitation.id) must keep an unavailable case honest"
 Assert-ScenarioCoverage -Scenarios $scenarioRecords -RequiredIds $requiredScenarioIds
 
 $badSmoke = [ordered]@{

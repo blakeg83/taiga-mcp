@@ -643,6 +643,7 @@ foreach ($marker in @(
         'mislabeled-metric'
         'missing-scenario-evidence'
         'honest-limitation'
+        'scenarioMatrix'
         'liveProvider')) {
     if (-not $acceptanceEvidenceManifestText.Contains($marker)) {
         throw "Acceptance-evidence manifest assertion failed: $marker"

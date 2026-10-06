@@ -7,6 +7,39 @@
     "responsive-observation",
     "console-check"
   ],
+  "scenarioMatrix": [
+    {
+      "id": "normal-search",
+      "evidenceKind": "automated_assertion",
+      "setup": "synthetic data",
+      "action": "invoke production path",
+      "expected": "result is returned",
+      "observed": "assertion passed",
+      "status": "passed",
+      "evidence": "synthetic assertion output"
+    },
+    {
+      "id": "responsive-observation",
+      "evidenceKind": "visible_observation",
+      "setup": "authorized disposable page",
+      "action": "resize and inspect layout",
+      "expected": "content remains usable",
+      "observed": "observation required on host",
+      "status": "pending_host_observation",
+      "evidence": "visible observation record"
+    },
+    {
+      "id": "console-check",
+      "evidenceKind": "unavailable",
+      "setup": "authorized host",
+      "action": "inspect console",
+      "expected": "no unexpected errors",
+      "observed": "not run",
+      "status": "unavailable",
+      "limitationSource": "synthetic authorized capability probe",
+      "nextAction": "report limitation and request a host with console access"
+    }
+  ],
   "scenarios": [
     {
       "id": "false-unavailable-claim",
