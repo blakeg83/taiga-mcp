@@ -201,10 +201,25 @@ outcome are recorded; retain the task revision for the final review. In either
 mode, a task being `Ready for test`, having a completion comment, or having any
 historical commit is not reviewer acceptance.
 
-At final story review, verify every deferred criterion against its named owner
-and evidence, and verify exit-0 evidence for every required regression from
-earlier expected-red checkpoints. Do not claim final approval while either
-remains unresolved.
+At final story review, in both `per_task` and `story_end_only` modes, request
+exactly one whole-story review after the final task endpoint: after final task
+acceptance and Taiga reconciliation in `per_task`, or after the final
+implementation-ready milestone in `story_end_only`. End the implementer turn
+after sending that direct final-review request to the persistent reviewer. Do
+not treat task acceptance, implementation evidence, a `Ready for test` status,
+or a completion comment as final story approval or PR authorization.
+
+The final-review input must freeze the repository, absolute worktree, branch,
+scope, ordered task revisions, definition of done, cross-task criteria,
+deferred criteria and owners, required checks, and the exact current full HEAD.
+The final approval must report independent verification separately from
+inspected worker evidence, plus cross-task evidence, deferred evidence,
+checks, and honest limitations. Verify every deferred criterion against its
+named owner and evidence, and verify exit-0 evidence for every required
+regression from earlier expected-red checkpoints. Do not claim final approval
+while either remains unresolved. Any changed revision, scope, requirement, or
+new finding invalidates the approval; continue correction and re-review with
+the same implementer/reviewer pair.
 
 ## Status, conflicts, and blockers
 

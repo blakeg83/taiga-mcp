@@ -41,7 +41,8 @@ authoritative.
 | Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
 | Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Deliver acceptance directly to the implementer; the implementer applies the version-safe accepted/Done transition, reconciles progress, then advances the next ordered task |
 | Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
-| Final task is accepted | Every selected task has exact-revision acceptance | The implementer requests final story review from the reviewer; the reviewer sends exact-HEAD approval to the coordinator; do not merge automatically. After story approval, prepare the PR under the existing `Start` authorization |
+| Final task reaches the selected review-mode endpoint | `per_task`: every selected task has exact-revision acceptance; `story_end_only`: every selected task has implementation-ready evidence | Request exactly one final whole-story review from the reviewer at the exact current HEAD; do not treat the last task acceptance or implementation milestone as story approval |
+| Reviewer accepts the final story review | Assigned reviewer, final-review request identity, exact current repository/worktree/branch/HEAD/scope, definition-of-done evidence, ordered task coverage, cross-task evidence, deferred-criterion evidence, independent checks, inspected worker evidence, and limitations | Send one exact-HEAD story approval to the coordinator; only the coordinator may open the topology-specific PR; do not merge automatically |
 
 ### Acceptance reconciliation transaction
 
@@ -62,11 +63,14 @@ decision. Recovery resumes the same journal and performs only the missing
 operation. Duplicate acceptance messages, duplicate event IDs, and repeated
 recovery of a confirmed marker are no-ops.
 
-For the final task, confirmed closure requests final whole-story review and
-does not merge or release the story. In `story_end_only`, implementation-ready
-milestones may advance task order but leave provider tasks unaccepted; final
-story acceptance reconciles those task closures and progress evidence, then
-leaves merge/release as separate gates.
+For the final task, confirmed closure requests exactly one final whole-story
+review and does not merge or release the story. In `story_end_only`,
+implementation-ready milestones may advance task order but leave provider
+tasks unaccepted; final story acceptance reconciles those task closures and
+progress evidence, then leaves merge/release as separate gates. A final finding
+routes to the same implementer/reviewer pair, and the corrected HEAD receives
+a fresh final-review request; no approval survives a changed revision, scope,
+requirement, or new finding.
 
 ## Safety rules
 
@@ -101,6 +105,10 @@ leaves merge/release as separate gates.
   reset, clean, stash, force-push, or silently review another revision.
 - A changed task list, scope, acceptance criterion, or substantive requirement
   stops the loop for user input and creates no replacement task or branch.
+- A final story approval is not a task acceptance. It must report independent
+  verification separately from inspected worker evidence, and it must name
+  cross-task behavior, deferred criteria and owners/evidence, checks, and
+  limitations.
 - Unknown message delivery, missing destinations, revision conflicts, merge
   approval, product decisions, and scope changes remain coordinator
   reconciliation or user gates. PR creation or update is already covered by

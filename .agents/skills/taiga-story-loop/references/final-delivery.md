@@ -57,11 +57,13 @@ Next: coordinator, prepare the final feature-to-master PR; do not merge it.
 
 ## New standalone story delivery
 
-A new standalone story does not use this final feature-to-master PR. Its final
-story approval is bound to the exact current story HEAD, and
-[reviewed story PR delivery](pr-delivery.md) creates or reuses one story PR
-with the story branch as head and `master` as base. The [story merge gate](merge-approval.md)
-presents that direct PR for the user's explicit approval.
+A new standalone story does not use this final feature-to-master PR. Its one
+explicit final whole-story approval is bound to the exact current story HEAD,
+and [reviewed story PR delivery](pr-delivery.md) creates or reuses one story
+PR with the story branch as head and `master` as base. The [story merge
+gate](merge-approval.md) presents that direct PR for the user's explicit
+approval. Do not add a feature branch, integrated epic review, or second
+feature-to-master PR to this standalone path.
 After the provider confirms the direct merge, the story is released and the
 run ends. There is no feature branch, integrated epic review, or second PR.
 

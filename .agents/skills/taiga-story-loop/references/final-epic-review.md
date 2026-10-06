@@ -8,9 +8,11 @@ verification outputs are allowed only when declared and source checks remain
 clean.
 
 The final epic review is a coordinator-owned gate after every ordered story
-has been accepted and its story PR has been verified merged into the same
-integration feature branch. It applies only to an epic run. A single-story run
-uses the final story review and proceeds to final delivery without inventing an
+has completed its own explicit final whole-story review and its story PR has
+been verified merged into the same integration feature branch. It applies only
+to an epic run and is distinct from every story's final review: it checks the
+integrated feature HEAD, not just the last story HEAD. A single-story run uses
+the final story review and proceeds to final delivery without inventing an
 epic review.
 
 ## Review assignment

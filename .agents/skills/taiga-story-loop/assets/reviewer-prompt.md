@@ -61,7 +61,31 @@ Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
 the implementer to reconcile Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator
 with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
-PR. Any later source change invalidates that approval and requires re-review.
+PR. This is one explicit final whole-story review in both modes: after the
+final exact task acceptance in `per_task`, or after the final
+implementation-ready milestone in `story_end_only`. The final review must
+cover the definition of done, every selected task, cross-task behavior,
+deferred criteria and named owners/evidence, and required checks. Report
+independent verification separately from inspected worker evidence, and name
+limitations honestly. Any later source, branch, scope, requirement, or HEAD
+change, or any new finding, supersedes the approval and returns correction and
+re-review to the same implementer/reviewer pair.
+
+Use this final-review message shape:
+
+```text
+Story #<ref> approved
+Final review request: <request ID>
+Reviewed HEAD: <exact full 40-character SHA>
+Definition of done: <criterion/result summary>
+Tasks: <every ordered task and exact revision>
+Cross-task evidence: <behavior/regression evidence>
+Deferred criteria: <owner and evidence for each, or none>
+Independent verification: <checks run by the reviewer>
+Inspected worker evidence: <artifacts and evidence inspected>
+Limitations: <known limitations or unavailable evidence>
+Next: coordinator, prepare only the topology-specific story PR.
+```
 
 When the task includes UI/browser, wrapper, benchmark, or smoke acceptance,
 review the evidence plan before accepting the implementation. Confirm that
@@ -93,8 +117,9 @@ unresolved RED or deferred criterion is not compatible with `Story #<ref>
 approved`.
 
 For `standalone-story-direct-master`, review the exact story HEAD as the final
-story review for a direct-to-`master` PR; there is no feature branch or
-integrated epic review. For `epic-shared-feature`, verify that the story branch
+story review for a direct-to-`master` PR; there is no feature branch,
+integrated epic review, or second feature-to-master story gate. For
+`epic-shared-feature`, verify that the story branch
 is based on the supplied feature HEAD and that the story PR base is the shared
 feature branch. For `legacy-standalone-feature`, verify the exact story HEAD
 against the preserved feature base and approve only the recorded

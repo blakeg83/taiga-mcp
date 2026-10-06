@@ -31,7 +31,9 @@ function New-DeliveryReceipt {
         [bool] $IgnoredOutputsDeclared = $true,
         [bool] $Clean = $true,
         [bool] $ChecksPassed = $true,
-        [string] $ChecksHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        [string] $ChecksHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        [bool] $FinalStoryReviewAccepted = $true,
+        [string] $FinalStoryReviewHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     )
     [ordered]@{
         runKind = $RunKind
@@ -50,6 +52,8 @@ function New-DeliveryReceipt {
         clean = $Clean
         checksPassed = $ChecksPassed
         checksHead = $ChecksHead
+        finalStoryReviewAccepted = $FinalStoryReviewAccepted
+        finalStoryReviewHead = $FinalStoryReviewHead
     }
 }
 
@@ -66,6 +70,8 @@ function Test-DeliveryPreflight {
     if ($Receipt.approvedHead -ne $Receipt.branchHead) { return 'stale_review' }
     if (-not $Receipt.checksPassed) { return 'failed_checks' }
     if ($Receipt.checksHead -ne $Receipt.branchHead) { return 'stale_checks' }
+    if (-not $Receipt.finalStoryReviewAccepted) { return 'final_story_review_required' }
+    if ($Receipt.finalStoryReviewHead -ne $Receipt.branchHead) { return 'stale_final_story_review' }
     if ($Receipt.runKind -eq 'standalone') {
         if (-not [string]::IsNullOrWhiteSpace($Receipt.featureBranch)) { return 'unexpected_feature_base' }
         if ($Receipt.prBase -ne 'master') { return 'wrong_standalone_base' }
@@ -101,6 +107,7 @@ function New-PrBody {
         "- Base/diff: ``$($Receipt.reviewBaseSha)`` | ``$($Receipt.diffRange)`` | paths ``<relevant changed paths>``"
         "- Source state: ``$($Receipt.sourceState)``; ignored verification outputs: ``declared``"
         '- Review profile: ``gpt-6.1-sol/medium``'
+        "- Final story review: exact current story HEAD accepted; independent verification and inspected worker evidence recorded"
         '- Review state: accepted for PR delivery; merge still requires user approval'
         ''
         '## Scope'
@@ -190,6 +197,12 @@ Assert-True ((Test-DeliveryPreflight $dirty) -eq 'dirty_story_branch') 'dirty st
 $oldChecks = New-DeliveryReceipt -ChecksHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 Assert-True ((Test-DeliveryPreflight $oldChecks) -eq 'stale_checks') 'checks for another HEAD must block delivery'
 
+$taskAcceptanceOnly = New-DeliveryReceipt -FinalStoryReviewAccepted $false
+Assert-True ((Test-DeliveryPreflight $taskAcceptanceOnly) -eq 'final_story_review_required') 'task acceptance alone must not release story PR delivery'
+
+$staleFinalStoryReview = New-DeliveryReceipt -FinalStoryReviewHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+Assert-True ((Test-DeliveryPreflight $staleFinalStoryReview) -eq 'stale_final_story_review') 'final story approval for another HEAD must block delivery'
+
 $existing = [pscustomobject]@{
     url = 'https://example.invalid/pr/existing'
     repository = 'TaigaMCP'
@@ -248,7 +261,7 @@ $legacyPr = Resolve-Pr @() $legacy 'https://example.invalid/pr/legacy'
 Assert-True ($legacyPr.state -eq 'create' -and $legacyPr.pr.base -eq $legacy.featureBranch -and $legacyPr.pr.head -eq $legacy.branchHead) 'legacy standalone PR must target the preserved feature branch and reviewed HEAD'
 
 $body = New-PrBody '50' $valid.prBase $valid.branchHead @('- `dotnet test` — exit 0; passed', '- `validate-pr-delivery.ps1` — exit 0; passed') $valid
-foreach ($marker in @('## Problem', '## Changes', '## Validation', '## Review', '## Scope', $valid.featureBranch, $valid.branchHead)) {
+foreach ($marker in @('## Problem', '## Changes', '## Validation', '## Review', '## Scope', $valid.featureBranch, $valid.branchHead, 'Final story review', 'independent verification', 'inspected worker evidence')) {
     Assert-True $body.Contains($marker) "PR body must include $marker"
 }
 foreach ($marker in @($valid.expectedWorktree, $valid.expectedBranch, $valid.reviewBaseSha, $valid.diffRange, 'clean-tracked-source', 'ignored verification outputs')) {

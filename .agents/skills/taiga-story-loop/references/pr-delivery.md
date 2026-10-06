@@ -6,9 +6,12 @@ base, full reviewed HEAD, relevant diff range, and clean tracked-source state.
 
 The coordinator owns delivery of a reviewed story revision. A task-ready
 handoff or a task acceptance is not enough to create a pull request. Delivery
-starts only after the reviewer has approved the complete story at an exact
-current HEAD and the setup authorization includes the repository and PR
-destination.
+starts only after the reviewer has completed the one explicit final
+whole-story review for the selected mode at an exact current HEAD and the
+setup authorization includes the repository and PR destination. The final
+approval must identify its request, task coverage, definition of done,
+cross-task and deferred-criterion evidence, independent verification,
+inspected worker evidence, required checks, and limitations.
 
 ## Delivery preflight
 
@@ -19,7 +22,9 @@ Before pushing or creating/reusing a PR, reconcile the authoritative records:
 2. Verify the story branch is the expected branch in the expected repository
    and worktree, has clean tracked source (non-ignored untracked source is also
    absent), and currently resolves to the reviewer's approved full HEAD. Record
-   the captured base and relevant `<base SHA>..<reviewed SHA>` diff range.
+   the captured base and relevant `<base SHA>..<reviewed SHA>` diff range. The
+   final whole-story approval request ID and reviewed HEAD must match this
+   exact branch state; task acceptance records alone are insufficient.
 3. Re-run the required repository checks or verify their recorded results are
    for that same HEAD. A missing, failed, or stale check blocks delivery.
 4. Verify the topology-specific PR base: `master` for a new
@@ -67,6 +72,11 @@ review evidence in its description:
 - Review input: `<repository>` | worktree `<absolute path>` | branch `<expected branch>`
 - Base/diff: `<base SHA>` | `<base SHA>..<reviewed SHA>` | paths `<relevant changed paths>`
 - Source state: `clean tracked source`; ignored verification outputs: `<none or declared paths>`
+- Final story review: `<request ID>` accepted at exact HEAD `<full SHA>`
+- Independent verification: `<reviewer-run checks and results>`
+- Inspected worker evidence: `<task revisions, artifacts, and evidence inspected>`
+- Deferred criteria: `<owner/evidence for each, or none>`
+- Limitations: `<known limitations or unavailable evidence>`
 - Review profile: `<configured reviewer profile>`
 - Review state: accepted for PR delivery; merge still requires user approval
 
