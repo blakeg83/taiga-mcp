@@ -168,8 +168,12 @@ the assigned reviewer, current task, pending SHA, branch HEAD, and prior outcome
 before acting. Ignore stale or already-handled messages without duplicate
 writes or advancement; escalate conflicting outcomes or an unexpected HEAD.
 Current findings reopen only the affected task. On current exact-revision
-acceptance, update the task in Taiga using its current version and advance only
-when the selected review mode permits it. A final story
+acceptance, treat the reviewer message as evidence rather than a Taiga write
+receipt: read the task and parent story again, merge only evidence-backed
+checklist changes, use the current versions, and confirm both the task write and
+the marker-bearing progress comment before advancing. If a result is unknown or
+conflicted, hold the acceptance and reconcile detail/history; resume the same
+acceptance marker without blindly repeating confirmed operations. A final story
 approval belongs to the coordinator and is bound to an exact reviewed HEAD.
 
 In `per_task` mode, do not start the next task until the current task has its

@@ -342,6 +342,9 @@ Assert-TaskExecutionContains 'per-task advancement gate' 'In `per_task` mode, on
 Assert-TaskExecutionContains 'story-end advancement gate' 'In `story_end_only` mode, implementation evidence may release'
 Assert-TaskExecutionContains 'story-end accepted gate' 'cannot become `mapping.accepted`/Done until'
 Assert-TaskExecutionContains 'no routine coordinator gate' 'there is no coordinator acknowledgement, next-task assignment, or reminder'
+Assert-TaskExecutionContains 'acceptance journal' 'acceptance journal keyed by'
+Assert-TaskExecutionContains 'advance after progress confirmation' 'advance only after both the task transition and comment are authoritative'
+Assert-TaskExecutionContains 'response-loss recovery' 'Recovery resumes the same journal'
 Assert-TopologyContains 'standalone direct branch' 'A standalone story has one managed story branch'
 Assert-TopologyContains 'standalone master PR' 'its story PR targets `master`'
 Assert-TopologyContains 'epic shared feature branch' 'An epic has one shared feature branch'
@@ -468,6 +471,31 @@ foreach ($marker in @(
         'next task handoff must validate the terminal handoff suffix')) {
     if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {
         throw "Automatic review-flow fixture assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Acceptance reconciliation transaction'
+        'reviewer message is not a Taiga write result'
+        'marker-bearing parent-story progress comment'
+        'story_end_only'
+        'merge/release as separate gates')) {
+    if (-not $normalizedAutomaticFlow.Contains($marker)) {
+        throw "Automatic review-flow contract assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'New-ReconciliationState'
+        'Reconcile-TaskAcceptance'
+        'Reconcile-FinalStoryAcceptance'
+        'humanBeforeTaskWrite'
+        'taskResponseLost'
+        'acceptanceMarkers'
+        'confirmed_after_response_loss'
+        'interrupted task/comment sequence'
+        'duplicate acceptance with a new message id'
+        'final story acceptance must preserve separate merge and release gates')) {
+    if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {
+        throw "Automatic review-flow reconciliation fixture assertion failed: $marker"
     }
 }
 foreach ($marker in @(

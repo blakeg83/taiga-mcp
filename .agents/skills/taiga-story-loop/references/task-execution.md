@@ -139,6 +139,28 @@ reconciliation. The automatic path never starts an undeclared task, changes
 scope, or merges. After final story approval, the coordinator may perform the
 Start-authorized story PR delivery without another PR-creation gate.
 
+Treat reviewer acceptance as durable evidence for the implementer, not as a
+provider write receipt. The implementer owns one acceptance journal keyed by
+`task ref + exact reviewed SHA` and completes it in this order:
+
+1. re-read the authoritative task and current version;
+2. merge only the named evidence-backed checklist items, preserving unrelated
+   human text and applying the discovered task status mapping;
+3. write the accepted status/checklist with that version;
+4. re-read after a conflict or unknown result and classify the write as
+   applied, already applied, human-changed, or unresolved;
+5. read the parent story and add one marker-bearing progress comment using its
+   current version; and
+6. advance only after both the task transition and comment are authoritative.
+
+The journal remains pending when the task write applies but its response is
+lost, when the comment sequence is interrupted, or when a human edit creates a
+version conflict. Recovery resumes the same journal, confirms existing marker
+evidence, and writes only the missing operation. It never blindly retries an
+ambiguous write, consumes acceptance early, closes another task, or advances
+twice. A human status remains unchanged until an explicit preserve-or-replace
+decision is recorded.
+
 ## Version-safe writes and reconciliation
 
 Every update is a read/compare/write operation:

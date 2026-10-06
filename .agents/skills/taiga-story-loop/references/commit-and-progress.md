@@ -81,6 +81,16 @@ adding a duplicate. A changed revision, new checklist evidence, or substantive
 review correction requires a new commit and a new comment that points to the
 new SHA; it must not overwrite the old record.
 
+Reviewer acceptance uses the same marker discipline. The acceptance marker is
+`Task #<ref> accepted | acceptance: task|<task-id>|<exact-reviewed-sha>`.
+Before adding a progress comment, the implementer reads the story comments and
+history and treats an existing marker as confirmed. The task status/checklist
+write and the parent comment are separate operations: a confirmed task write
+does not authorize advancement until the marker-bearing comment is also
+confirmed. If either operation is response-lost or interrupted, the acceptance
+journal is resumed from its authoritative evidence and the already-confirmed
+operation is not repeated.
+
 An opaque comment-write error is uncertain. Re-read the story and comment pages
 before retrying. If the marker is present, treat the comment as submitted; if
 it is absent, retry only with the newly authoritative story version. Preserve

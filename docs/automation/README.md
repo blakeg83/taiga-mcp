@@ -114,6 +114,11 @@ in [issue #90 validation](issue-90-validation.md). Confirmed initial and
 correction-ready deliveries now stop the implementer turn; only a current
 reviewer message or evidenced recovery resumes the same chat.
 
+The acceptance reconciliation contract and barrier-driven synthetic provider
+fixture are recorded in [issue #93 validation](issue-93-validation.md).
+Reviewer acceptance is evidence for the implementer; current-version task and
+parent-story writes must both be confirmed before ordered advancement.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the
