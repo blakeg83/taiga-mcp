@@ -372,10 +372,12 @@ function Apply-Event {
             $task.pendingSha = [string]$Event.revision
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
                 $State.finalReviewRevision = [string]$Event.revision
-                if ($State.Contains('provider')) {
-                    Capture-ProviderReviewBaseline $State @($State.tasks | ForEach-Object { [int]$_.taskId })
-                }
                 $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
+                if ($State.Contains('provider')) {
+                    if ($created) {
+                        Capture-ProviderReviewBaseline $State @($State.tasks | ForEach-Object { [int]$_.taskId })
+                    }
+                }
                 return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
             }
             $State.currentTaskIndex = [int]$State.currentTaskIndex + 1
@@ -1198,13 +1200,15 @@ foreach ($providerTask in @($storyEndState.provider.tasks.Values)) {
 }
 Apply-Event $storyEndState @{ eventId = 'story-end-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $storyEndLastSha; authorization = $storyEndState.authorization } | Out-Null
 Assert-True (@($storyEndState.provider.tasks.Values | Where-Object { $_.statusId -eq $storyEndState.provider.statusMapping.accepted }).Count -eq 0) 'story_end_only implementation milestones must not close tasks'
+$storyEndState.provider.tasks['65'].statusId = $storyEndState.provider.statusMapping.not_started
+$storyEndState.provider.tasks['65'].version++
+Add-ProviderHistory $storyEndState.provider.tasks['65'] 'human_edit' 'story-end-human-before-duplicate-readiness'
+$duplicateFinalReadiness = Apply-Event $storyEndState @{ eventId = 'story-end-ready-2-replayed'; kind = 'implementation_ready'; taskId = 66; revision = $storyEndLastSha; authorization = $storyEndState.authorization }
+Assert-True ($duplicateFinalReadiness.decision -eq 'duplicate' -and $storyEndState.providerReviewBaselines['65'].statusId -eq $storyEndState.provider.statusMapping.awaiting_review) 'duplicate final readiness must not replace the frozen review baseline'
 $storyEndState.turnStatus = 'awaiting_review'
 $unrelatedStoryAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-unrelated-sha' (('5' * 40))
 Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $unrelatedStoryAcceptance | Out-Null } 'final story acceptance must match the pending final-review SHA'
 $storyEndAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-final-accept' $storyEndLastSha
-$storyEndState.provider.tasks['65'].statusId = $storyEndState.provider.statusMapping.not_started
-$storyEndState.provider.tasks['65'].version++
-Add-ProviderHistory $storyEndState.provider.tasks['65'] 'human_edit' 'story-end-human-before-acceptance'
 $storyEndConflict = Resume-ImplementerOnReviewerMessage $storyEndState $storyEndAcceptance
 Assert-True ($storyEndConflict.decision -eq 'reconcile_required' -and $storyEndState.finalStoryState -ne 'accepted') 'final story acceptance must preserve a human status until a decision'
 $storyEndAcceptance.humanDecision = 'replace_after_decision'
