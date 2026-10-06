@@ -269,7 +269,9 @@ foreach ($marker in @(
     }
 }
 if (-not $normalizedHandoff.Contains('Worktree: <absolute story worktree>') -or
-    -not $normalizedHandoff.Contains('Source state: clean tracked source')) {
+    -not $normalizedHandoff.Contains('Source state: clean tracked source') -or
+    -not $normalizedHandoff.Contains('Review range: <base SHA>..<new revision>; paths: <relevant changed paths>') -or
+    -not $normalizedHandoff.Contains('Correction delta: <previous reviewed SHA>..<new revision>; paths: <correction delta>')) {
     throw 'Handoff assertion failed: complete clean revision input'
 }
 if (-not $normalizedAcceptance.Contains('clean tracked-source state') -or

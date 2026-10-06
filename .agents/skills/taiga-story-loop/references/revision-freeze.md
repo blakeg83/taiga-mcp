@@ -43,7 +43,8 @@ the pending input. Preserve any change and escalate a revision conflict. Do
 not reset, clean, stash, force-push, or silently substitute another revision.
 
 An authorized correction is a new review input. It records the previous
-reviewed SHA, the new full SHA, and the new diff/range or changed-path delta;
-approval for the previous SHA is stale and the same worker pair must re-review
-the new input. A source edit or later-task change is not permitted while a
-per-task review is pending.
+reviewed SHA, the new full SHA, the full review range `<base SHA>..<new SHA>`
+with its relevant changed paths, and the separate correction delta `<previous
+reviewed SHA>..<new SHA>` with its correction paths. Approval for the previous
+SHA is stale and the same worker pair must re-review the new input. A source
+edit or later-task change is not permitted while a per-task review is pending.

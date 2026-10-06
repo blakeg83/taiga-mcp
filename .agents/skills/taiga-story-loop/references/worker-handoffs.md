@@ -81,7 +81,8 @@ Worktree: <absolute story worktree>
 Previous review: <old SHA>
 Revision: <new full 40-character commit SHA>
 Base: <captured base SHA>
-Diff: <previous reviewed SHA>..<new revision>; paths: <correction delta>
+Review range: <base SHA>..<new revision>; paths: <relevant changed paths>
+Correction delta: <previous reviewed SHA>..<new revision>; paths: <correction delta>
 Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Changes: <what addressed the finding>
 Checks: `<command>` — exit <code>; <concise result>
