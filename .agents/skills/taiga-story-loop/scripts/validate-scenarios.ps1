@@ -385,7 +385,10 @@ foreach ($marker in @(
         'reconcile_required'
         'healthyAfterReconciliation'
         'failed handoff delivery must escalate to the coordinator'
-        'duplicate acceptance must not resume or write again')) {
+        'duplicate acceptance must not resume or write again'
+        'ready-next-task-per_task'
+        'accepted task should allow next task review handoff'
+        'next task handoff must validate the terminal handoff suffix')) {
     if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {
         throw "Automatic review-flow fixture assertion failed: $marker"
     }

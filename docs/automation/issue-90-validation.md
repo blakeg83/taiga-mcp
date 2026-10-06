@@ -27,13 +27,17 @@ git diff --check
 ```
 
 The automatic review-flow fixture derives initial and correction-ready turn
-termination from the action trace, rejects source edits and coordinator copies
-after the final response until a validated reviewer resume, distinguishes
-healthy recovery from unresolved delivery escalation, and covers
+termination from the action trace, validates the terminal handoff suffix after
+authorized preceding work, rejects source edits and coordinator copies after
+the final response until a validated reviewer resume, distinguishes healthy
+recovery from unresolved delivery escalation, and covers
 duplicate/stale outcomes, failed delivery, and explicit rejection of
 implementer `wait_threads`, reviewer reads, monitors, keep-alives, and
-unchanged acknowledgements. The other fixtures cover ordered-task evidence,
-direct routing, snapshot recovery, and static contract consistency.
+unchanged acknowledgements. It also carries task #65 through acceptance,
+Taiga reconciliation, and advancement before dispatching task #66, proving
+that the next ordered task can end the same implementer turn with a valid
+terminal handoff. The other fixtures cover ordered-task evidence, direct
+routing, snapshot recovery, and static contract consistency.
 
 Observed results for this implementation:
 

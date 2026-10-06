@@ -143,15 +143,16 @@ function End-ImplementerReviewTurn {
     Add-ImplementerAction $State 'send_review_handoff' $Task.ref ([string]$Task.pendingSha)
     Add-ImplementerAction $State 'final_response' $Task.ref ([string]$Task.pendingSha)
     $trace = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
-    $traceKinds = @($trace | ForEach-Object { [string]$_.kind })
-    $expectedTraceKinds = @('send_review_handoff', 'final_response')
-    if ($HandoffKind -eq 'correction') {
-        $expectedTraceKinds = @('reviewer_message_resume', 'source_edit', 'send_review_handoff', 'final_response')
+    $authorizedPrefixKinds = @('reviewer_message_resume', 'source_edit', 'taiga_reconcile', 'advance_next_task')
+    $prefix = @()
+    if ($trace.Count -gt 2) {
+        $prefix = @($trace | Select-Object -First ($trace.Count - 2))
     }
-    $ended = ($traceKinds.Count -eq $expectedTraceKinds.Count)
-    for ($index = 0; $ended -and $index -lt $expectedTraceKinds.Count; $index++) {
-        if ($traceKinds[$index] -cne $expectedTraceKinds[$index]) { $ended = $false }
-    }
+    $invalidPrefix = @($prefix | Where-Object { [string]$_.kind -notin $authorizedPrefixKinds })
+    $hasTerminalHandoffSuffix = ($trace.Count -ge 2 -and
+        [string]$trace[-2].kind -ceq 'send_review_handoff' -and
+        [string]$trace[-1].kind -ceq 'final_response')
+    $ended = ($hasTerminalHandoffSuffix -and $invalidPrefix.Count -eq 0)
     Assert-True $ended "$HandoffKind must terminate from the exact action trace"
     $State.turnStatus = 'awaiting_review'
     $State.turns = @($State.turns) + [ordered]@{
@@ -407,7 +408,16 @@ Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordin
 $implementerActionCountAfterAcceptance = @($state.implementerActions).Count
 $duplicateAcceptance = Resume-ImplementerOnReviewerMessage $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }
 Assert-True ($duplicateAcceptance.decision -eq 'duplicate' -and @($state.implementerActions).Count -eq $implementerActionCountAfterAcceptance) 'duplicate acceptance must not resume or write again'
-$idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-a2'; authorization = 'start-87' }
+$nextReady = Complete-ReviewHandoff $state @{ eventId = 'ready-next-task-per_task'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
+Assert-True ($nextReady.decision -eq 'dispatch_review') 'accepted task should allow next task review handoff'
+Assert-True (@($state.turns).Count -eq 3 -and @($state.turns)[2].task -eq '#66') 'next task review handoff must end a new implementer turn'
+$nextTurn = @($state.turns)[2]
+$nextTrace = @($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$nextTurn.turn })
+$nextPrefix = @($nextTrace | Select-Object -First ($nextTrace.Count - 2))
+$nextTerminal = @($nextTrace | Select-Object -Last 2)
+Assert-True (($nextPrefix | ForEach-Object { [string]$_.kind }) -join ',' -eq 'reviewer_message_resume,taiga_reconcile,advance_next_task') 'next task handoff must allow authorized preceding work'
+Assert-True ($nextTurn.ended -and $nextTurn.lastAction -eq 'final_response' -and $nextTerminal.Count -eq 2 -and $nextTerminal[0].kind -eq 'send_review_handoff' -and $nextTerminal[1].kind -eq 'final_response') 'next task handoff must validate the terminal handoff suffix'
+$idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-b1'; authorization = 'start-87' }
 Assert-True ($idle.decision -eq 'wait') 'per_task should not infer acceptance from idle'
 
 $failedDeliveryState = New-StoryState 'per_task'
