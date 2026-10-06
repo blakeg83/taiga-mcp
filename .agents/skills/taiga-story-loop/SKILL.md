@@ -63,6 +63,15 @@ the coordinator receives only final story approval and exceptional escalation.
 Duplicate, stale, idle, scope-changing, and uncertain outcomes remain
 coordinator-owned.
 
+The ready-turn endpoint is one successful direct delivery to the assigned
+reviewer, followed by the review-ready state and one concise final response.
+This transaction applies to initial, correction, and final-story review
+handoffs. A failed or unknown delivery is an exception: it is not
+`awaiting_review`, does not release ordered work, and is not blindly retried;
+the coordinator must reconcile it first. After confirmed delivery, the final
+response is the last implementer action, with no polling, reviewer read,
+keep-alive, source edit, or next-task work.
+
 In per-task review, initial and correction-ready handoffs end the implementer
 turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
 the implementer never polls the reviewer. Follow the identity/revision and

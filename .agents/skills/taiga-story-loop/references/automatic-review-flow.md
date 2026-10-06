@@ -34,15 +34,31 @@ authoritative.
 
 | Event | Required proof | Automatic result |
 | --- | --- | --- |
-| Implementer sends `ready_for_review` | Current task, current committed full HEAD, expected repository/worktree and branch, base/diff/path record, clean tracked-source state, the confirmed `Start` authorization and assignment identity, checklist evidence, checks, and confirmed delivery to the required reviewer | Send one direct review request to the persistent reviewer; set the task to the review-ready mapping or its documented fallback; hold the next task; issue the concise final response and end the implementer turn; do not copy the coordinator |
+| Implementer sends `ready_for_review` | Current task, current committed full HEAD, expected repository/worktree and branch, base/diff/path record, clean tracked-source state, the confirmed `Start` authorization and assignment identity, checklist evidence, checks, and confirmed delivery to the required reviewer (a successful direct-delivery result for that assigned reviewer) | Send one direct review request to the persistent reviewer exactly once; only after successful delivery set the task to the review-ready mapping or its documented fallback, hold the next task, issue the concise final response and end the implementer turn; failed/unknown delivery remains an exception and is not blindly retried |
 | Implementer sends `implementation_ready` in `story_end_only` | Current task, committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Record implementation evidence and advance the next ordered task without task acceptance or a per-task review; request one final story review after the last task directly from the implementer to the reviewer |
 | Reviewer sends `changes_requested` | Assigned reviewer, current task, exact pending SHA, finding, and requested correction | Reopen only that task and send the finding directly to the same implementer; require a new revision and review delta |
-| Implementer sends correction-ready | Same current task, assigned reviewer, previous full reviewed SHA, new committed full SHA, expected branch/worktree, clean tracked-source state, base/diff/path review delta, and confirmed delivery to that reviewer | Send the new revision directly to the same reviewer; record the new pending revision; supersede prior approval; issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle |
+| Implementer sends correction-ready | Same current task, assigned reviewer, previous full reviewed SHA, new committed full SHA, expected branch/worktree, clean tracked-source state, base/diff/path review delta, and confirmed delivery to that reviewer (a successful direct-delivery result for that reviewer) | Send exactly one new revision to the same reviewer; only after successful delivery record the new pending revision, supersede prior approval, issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle; failed/unknown delivery remains an exception |
 | Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
 | Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Deliver acceptance directly to the implementer; the implementer applies the version-safe accepted/Done transition, reconciles progress, then advances the next ordered task |
 | Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
 | Final task reaches the selected review-mode endpoint | `per_task`: every selected task has exact-revision acceptance; `story_end_only`: every selected task has implementation-ready evidence | Request exactly one final whole-story review from the reviewer at the exact current HEAD; do not treat the last task acceptance or implementation milestone as story approval |
 | Reviewer accepts the final story review | Assigned reviewer, final-review request identity, exact current repository/worktree/branch/HEAD/scope, definition-of-done evidence, ordered task coverage, cross-task evidence, deferred-criterion evidence, independent checks, inspected worker evidence, and limitations | Send one exact-HEAD story approval to the coordinator; only the coordinator may open the topology-specific PR; do not merge automatically |
+
+### Ready-turn transaction
+
+For initial, correction-ready, and final-story review events, the dispatch
+boundary is ordered and terminal:
+
+1. Freeze the relevant task/story revision packet and complete the required
+   Taiga/progress writes before dispatch.
+2. Send exactly one direct message to the assigned persistent reviewer and
+   require a successful delivery result for that exact identity/revision.
+3. Only then enter `awaiting_review` (or the documented review-ready mapping)
+   and issue the concise final response. The response is the last implementer
+   action in that turn.
+4. On failed or unknown delivery, keep the event in coordinator reconciliation;
+   do not present a healthy review wait, release ordered work, or blindly
+   redispatch. A healthy idle review wait is distinct from this exception.
 
 ### Acceptance reconciliation transaction
 
@@ -77,11 +93,12 @@ requirement, or new finding.
 - A ready event, idle status, timeout, elapsed time, or implementation commit
   is not reviewer acceptance.
 - After a confirmed initial or correction-ready delivery, the implementer turn
-  ends immediately. The implementer does not call `wait_threads`, read or poll
-  the reviewer chat, run a review monitor, send a keep-alive or unchanged
-  acknowledgement, or make source changes while the review is pending. Only a
-  current authorized reviewer message or evidenced recovery may resume the
-  same implementer chat.
+  ends immediately. The same terminal rule applies to final-story delivery.
+  The implementer does not call
+  `wait_threads`, read or poll the reviewer chat, run a review monitor, send a
+  keep-alive or unchanged acknowledgement, make source changes, or start the
+  next task while the review is pending. Only a current authorized reviewer
+  message or evidenced recovery may resume the same implementer chat.
 - A failed or unknown handoff delivery is an exceptional coordinator
   reconciliation, not `awaiting_review` and not permission to re-dispatch.
 - A healthy idle `awaiting_review` worker is not woken by recovery. Recovery

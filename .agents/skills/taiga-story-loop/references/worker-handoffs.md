@@ -31,6 +31,23 @@ Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, inspect this exact revision and report findings or acceptance to the implementer.
 ```
 
+## Confirmed ready-turn endpoint
+
+The task-ready message is only the payload for a ready-turn transaction. The
+implementer first freezes the task evidence, current-version Taiga/progress
+record, commit, and revision tuple, then sends exactly one direct message to
+the assigned reviewer. A successful delivery result for that exact reviewer,
+task, and revision is the only confirmation that permits the task to enter
+`awaiting_review` and the implementer to issue its concise final response.
+That final response is the last action in the turn.
+
+If the send fails or its result is unknown, the implementer must not claim
+`awaiting_review`, release the next ordered task, or blindly redispatch. It
+preserves the pending revision and routes the delivery uncertainty to the
+coordinator for reconciliation. The same endpoint applies to correction-ready
+handoffs and to the separate final-story review; final-story dispatch carries
+the exact current HEAD/scope packet and one deduplication identity.
+
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
 truncate the SHA. Verify the expected branch/worktree and clean tracked-source
 state first. The revision tuple is immutable review input. In `per_task` mode,
@@ -107,6 +124,17 @@ authorization. It reopens that task and sends one direct correction request to
 the same persistent pair; it cannot advance another task or authorize a scope
 change. The coordinator is involved only when delivery, identity, revision, or
 scope reconciliation is required.
+
+## Final story-review handoff
+
+After the final task reaches the selected review-mode endpoint, the implementer
+freezes the whole-story scope, ordered revisions, definition-of-done evidence,
+deferred owners, required checks, and exact current HEAD. It sends one direct
+final-review request to the same persistent reviewer. Only a successful direct
+delivery creates the pending final review and permits the final response; the
+response is the last implementer action. A failed or unknown final-review
+delivery is a coordinator reconciliation case, not a story review wait, and
+does not authorize a blind redispatch.
 
 ## Message-driven resume
 

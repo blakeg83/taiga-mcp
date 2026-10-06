@@ -135,6 +135,32 @@ For each task:
    parent-story comment, and commit are recorded; preserve the exact revision
    for the final story review and do not claim task acceptance.
 
+## Ready-turn transaction
+
+Every review handoff uses the same terminal transaction for an initial task,
+correction, or final-story review:
+
+1. Complete the task evidence, current-version Taiga/progress reconciliation,
+   commit, and immutable revision packet before dispatching the review message.
+2. Send exactly one direct handoff to the assigned persistent reviewer. A
+   successful send result for that exact destination, task/story, and revision
+   is the delivery confirmation; an intent to send, timeout, or idle reviewer
+   is not confirmation.
+3. Only after that successful result, record the review-ready/
+   `awaiting_review` state and send the concise final response. That response
+   is the last action in the turn.
+4. If delivery fails or is unknown, do not describe the task or story as
+   `awaiting_review`, release the next task, or blindly retry. Preserve the
+   pending revision and report the delivery exception to the coordinator for
+   reconciliation.
+
+After a confirmed delivery, the implementer performs no `wait_threads`,
+reviewer read/poll, review monitor, keep-alive acknowledgement, source edit,
+or next-task action. The final-story transaction uses the same rule with the
+exact current HEAD/scope packet and one deduplication identity. In
+`story_end_only`, implementation-ready evidence may advance task order, but it
+never creates a per-task review handoff.
+
 Use the task's stable ref and commit SHA as the completion-comment idempotency
 marker. On resume, read the parent-story comments before writing: reuse an
 existing matching record, and create a new comment only for a new revision,
