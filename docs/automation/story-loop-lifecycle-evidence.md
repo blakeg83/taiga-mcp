@@ -232,40 +232,87 @@ decision must authorize the exact disposable scope and cleanup.
 
 #### Prerequisites and safety gate
 
-1. Obtain a fresh explicit `Start` authorization for story #99's selected
-   disposable project/story, repository, worker pair, review mode, branch,
-   worktree, base SHA, and allowed external operations. Historical attachments
-   and worker chats are evidence only.
-2. Use a disposable two-task story with synthetic credentials or an isolated
-   provider area. Confirm the task/status mapping, persistent implementer and
-   reviewer identities, direct destination, and repository clean state before
-   any provider write.
-3. Capture event IDs, provider versions, exact Git SHAs, message-delivery
-   results, and action timestamps in a separate trial record. Stop and escalate
-   on identity mismatch, unknown delivery, dirty source, version conflict,
-   response loss, or ambiguous scope; do not blindly retry an uncertain write.
+The default trial mode is explicitly `per_task`; a separate optional
+`story_end_only` run must not be mixed into this sequence.
+
+1. Resolve these parameters before the setup gate and write them into the
+   trial record: `TRIAL_ID=story99-live-<utc>`, `TAIGA_PROJECT_ID=<new disposable
+   project>`, `STORY_REF=<new story ref>`, `TASK1_REF=<first task ref>`,
+   `TASK2_REF=<second task ref>`, `REVIEW_MODE=per_task`,
+   `REPO=C:\Projects\TaigaMCP`, `WORKTREE=<new managed worktree>`,
+   `BRANCH=codex/<trial-id>`, and `BASE_SHA=<git rev-parse HEAD>`.
+2. Obtain fresh explicit `Start` authorization for exactly those parameters,
+   the persistent implementer/reviewer pair, the direct destinations, and the
+   allowed external operations. Historical attachments and worker chats are
+   evidence only. Invoke the setup through the story-loop gate as
+   `Use $taiga-story-loop for <disposable project> story #<STORY_REF>` and
+   select `per_task`; do not reuse the active story #99 workers.
+3. Before any provider write, run this parameterized preflight from the
+   isolated worktree (substitute only the authorized values):
+
+   ```powershell
+   $TrialId = 'story99-live-<utc>'
+   $Worktree = '<new managed worktree>'
+   $BaseSha = '<git rev-parse HEAD captured at setup>'
+   git -C $Worktree status --short --untracked-files=all
+   git -C $Worktree rev-parse --abbrev-ref HEAD
+   git -C $Worktree rev-parse HEAD
+   git -C $Worktree diff --check "$BaseSha..HEAD"
+   pwsh -NoProfile -File "$Worktree\.agents\skills\taiga-story-loop\scripts\validate-automatic-review-flow.ps1"
+   ```
+
+   The changed skill must be loaded in an isolated trial environment whose
+   skill root is `$Worktree\.agents\skills\taiga-story-loop`; replacing
+   `C:\Users\Blake\.codex\skills\taiga-story-loop` is prohibited. If the
+   story-loop executor has no supported isolated skill-root override or
+   separate trial host/profile, record that prerequisite as unresolved and do
+   not execute the live trial.
+4. Use a disposable two-task story and synthetic credentials or an isolated
+   provider area. Confirm the task/status mapping, worker identities, direct
+   destination, and clean repository state before any Taiga write. Capture
+   event IDs, provider versions, exact Git SHAs, delivery results, and UTC
+   action timestamps in a separate record; stop on identity mismatch, unknown
+   delivery, dirty source, version conflict, response loss, or ambiguous
+   scope, and never blindly retry an uncertain write.
 
 #### Ordered trial actions and expected evidence
 
 | Phase | Authorized action | Expected ordered evidence |
 | --- | --- | --- |
-| Initial handoff | Complete disposable task #1, commit, confirm current-version task/progress writes, then send one direct ready-for-review message. | `send_review_handoff` succeeds to the assigned reviewer, local state becomes `awaiting_review`, and the final implementer action is `final_response`; no wait/read/poll follows. |
-| Induced correction | Have the same reviewer send one exact-revision finding; make a scoped correction and rerun checks. | `reviewer_message_resume`, correction work, one correction handoff to the same reviewer, then terminal `final_response`; no coordinator relay or polling. |
-| Acceptance and continuation | Have the reviewer accept the exact corrected SHA; reconcile task closure/checklist and the parent marker with current versions; activate only task #2. | `taiga_reconcile`, `advance_next_task`, then a same-turn task-bound `source_edit` or nonblank `scoped_check`; a status-only response is rejected and task #2 remains held until evidence exists. |
-| Final review | Complete task #2, commit, confirm its task/progress state, and request the final story review once. | Exactly one `send_final_story_review` followed by `final_response`; a correction must use a changed final HEAD and exactly one new final-review dispatch. |
-| Uncertainty/recovery controls | Separately exercise missing/failed/unknown delivery, response-loss, version conflict, and interrupted reconciliation using only disposable records. | Exceptional cases escalate/hold and require the coordinator's exact reconciliation; a healthy `awaiting_review` or unanswered user/merge gate remains quiet. Resume only the missing authorized operation. |
-| Cleanup | Stop after evidence capture, restore/close the disposable work-item scope according to the explicit authorization, and leave PR/merge untouched. | Cleanup record proves no historical worker, active skill, active automation, unrelated Taiga item, PR, or merge was changed. |
+| Initial task #1 | Create only the authorized disposable story and two tasks. On task #1, add `trial/handshake.md` with `phase=initial` and one deliberately reviewable typo in `expected_marker`, run `pwsh -NoProfile -Command "if ((Get-Content -Raw trial/handshake.md) -notmatch 'phase=initial') { exit 1 }"`, commit, and confirm current-version task/progress writes. Send one direct ready-for-review message. | `send_review_handoff` succeeds to the assigned reviewer, local state becomes `awaiting_review`, and the final implementer action is `final_response`; no wait/read/poll follows. |
+| Induced correction | Have the same reviewer identify only the deliberate marker typo against the exact task #1 SHA. Correct `trial/handshake.md`, rerun the same check plus `git diff --check`, commit a new full SHA, and confirm the correction progress write. | `reviewer_message_resume`, scoped correction, one correction handoff to the same reviewer, then terminal `final_response`; no coordinator relay or polling. |
+| Task #1 acceptance and continuation | Have the reviewer accept the exact corrected SHA. Reconcile task #1 closure/checklist and the parent acceptance marker with current versions, then activate only task #2. In the resumed turn, add `trial/continuation.md` with `continuation-complete` and run `pwsh -NoProfile -Command "if ((Get-Content -Raw trial/continuation.md) -notmatch 'continuation-complete') { exit 1 }"`. | `reviewer_message_resume`, `taiga_reconcile`, `advance_next_task`, then same-turn task-#2-bound `source_edit` or nonblank `scoped_check`; status-only stopping is an observed live failure requiring stop/recovery, while automated rejection is claimed only by the offline fixture. |
+| Task #2 review and acceptance | Confirm task #2 current-version progress, commit the continuation artifact, and send its direct task-ready handoff. Have the same reviewer accept the exact task #2 SHA; reconcile task #2 closure/checklist and the parent acceptance marker with current versions. | A second task review has exactly one dispatch and terminal `final_response`, followed by exact task #2 acceptance and confirmed Closed/progress evidence. Do not bypass this task review or treat `In progress` as implementation evidence. |
+| Separate final review | Only after task #2 acceptance/reconciliation, request exactly one whole-story review at the frozen story HEAD. If a final finding occurs, make a changed-HEAD correction and request exactly one correction re-review. | Exactly one `send_final_story_review` followed by `final_response`; final review does not rewrite task/story provider status. |
+| Uncertainty/recovery controls | Treat missing/failed/unknown delivery, response loss, version conflict, and interrupted reconciliation as controlled observations only. Do not manufacture provider conflicts or response loss unless a separately authorized disposable harness supports that exact injection; otherwise use the offline fixtures for deterministic negative cases. | If a live uncertainty occurs, stop, preserve the exact response/version/event evidence, escalate, and resume only after coordinator reconciliation. A healthy `awaiting_review` or unanswered user/merge gate remains quiet; no live automated rejection is claimed. |
+| Cleanup | Record the exact authorized `TAIGA_PROJECT_ID`, story/task IDs, worktree, branch, and trial record path. After evidence capture and explicit confirmation, close/archive or delete only those disposable records, remove only the new trial worktree, and leave the primary branch, active skill, active automation, PR, and merge untouched. | Cleanup record proves that only newly authorized disposable records and checkout were changed and that no historical worker or unrelated Taiga item was touched. |
+
+For an optional `story_end_only` trial, create a separate trial ID and record
+that task #1 and task #2 use `implementation_ready` advancement with no
+per-task acceptance; complete both substantive tasks and their progress writes,
+then issue one final-story review. Do not combine this mode with the default
+`per_task` acceptance sequence or claim task acceptance in the optional run.
+
+The trial record must include the setup authorization reference; all task and
+story IDs plus current versions before/after each write; worker and reviewer
+IDs; every direct-message result; `git status`, branch, base SHA, each full
+task/story SHA, `base..HEAD` changed paths, and `git diff --check`; the ordered
+action trace; any stop/recovery decision; and the cleanup result. Classify
+every observation as `live`, `synthetic`, or `unverified`.
 
 #### Trial success and stop conditions
 
 Success requires the exact ordered action traces above, one review dispatch per
-ready endpoint, no post-dispatch polling, substantive next-task work in the
-same resumed turn, current-version Taiga evidence, and clean final Git
-preflight. Stop immediately for an unconfirmed destination, uncertain write,
-stale revision, unexpected later-task action, missing final response, or any
-attempt to cross the separate user/merge gate. The trial report must classify
-each observation as live, synthetic, or unverified and retain the exact
-provider/Git/message evidence.
+ready endpoint, task #2's own exact acceptance/reconciliation before final
+review, no post-dispatch polling, and clean final Git preflight. In a live run,
+status-only stopping or post-dispatch polling is an observed adherence failure:
+stop the trial, preserve evidence, and use the authorized recovery path. Only
+the offline synthetic fixtures mechanically reject those actions. Stop
+immediately for an unconfirmed destination, uncertain write, stale revision,
+unexpected later-task action, missing final response, or any attempt to cross
+the separate user/merge gate. The trial report must retain exact
+provider/Git/message evidence and classify every observation as live,
+synthetic, or unverified.
 
 Remaining limitation: until that separate authorization and disposable trial
 occur, the implementation proves offline contract behavior only; it does not
