@@ -43,6 +43,13 @@ Taiga story loop setup — <project> <story|epic> #<ref>
 Subject: <subject>
 Scope: <story tasks in order, or all resolved epic stories in order>
 
+Acceptance evidence plan (conditional on the real story/repository):
+- UI/browser evidence: <not applicable, or criterion and required host/data setup>
+- Capability sources/probes: <provider/context and documentation/schema/probe results>
+- Production path and inputs: <entry point, reachability control, required arguments/validation/result semantics>
+- Scenarios and metrics: <automated/visible/unavailable cases; operation/counter/sample/conditions/baseline/limitations>
+- Smoke and limitations: <setup/start/actions/expected results/cleanup, disposable data, unavailable checks/next actions>
+
 Repositories and branch/worktree mapping (one row per resolved repository;
 required for an epic spanning repositories):
 | Repository/workspace | Remote | Verified base ref/SHA | Scope topology | Feature branch/worktree | Story branch/worktrees |

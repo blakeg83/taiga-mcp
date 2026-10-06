@@ -25,16 +25,18 @@ Probe the relevant capability in the authorized environment when the
 documentation or schema does not settle the question. Record:
 
 - the capability and why the story needs it;
-- the documentation, schema, or probe used as the source;
+- the source type (`documentation`, `tool_schema`, or `probe`) and the exact
+  documentation, schema, or probe used as the source;
 - the provider/context observed and the result (`available`, `unavailable`,
   or `unverified`); and
 - the resulting check, fallback, or limitation.
 
-An unavailable claim is valid only when its source or probe is recorded. A
-wrapper that lacks a convenience method is not evidence that the underlying
-host lacks the capability. A capability listing proves availability of a
-route to attempt a check, not that the check succeeded. Report those facts
-separately, and never silently replace a required check with an assumption.
+An unavailable claim is valid only when its source type and exact source match
+the observed record. A wrapper that lacks a convenience method is not evidence
+that the underlying host lacks the capability. A capability listing proves
+availability of a route to attempt a check, not that the check succeeded.
+Report those facts separately, and never silently replace a required check
+with an assumption.
 
 ## Prove the production path
 
@@ -73,6 +75,11 @@ evidence kind must distinguish:
   UI; and
 - `unavailable` — a required check that could not be performed, with the
   capability source, reason, and owner or next action.
+
+The status must agree with the evidence kind: an unavailable case is
+`unavailable` or `not_run`, an automated assertion is `passed`, `failed`, or
+`pending_review`, and a visible observation is `passed`, `failed`, or
+`pending_host_observation`.
 
 Automated assertions do not become visible observations, and synthetic
 fixtures do not become browser execution. An unavailable case remains

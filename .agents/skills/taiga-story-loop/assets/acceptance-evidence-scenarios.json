@@ -2,29 +2,39 @@
   "schemaVersion": 1,
   "kind": "synthetic_acceptance_evidence",
   "liveProvider": false,
+  "requiredScenarioIds": [
+    "normal-search",
+    "responsive-observation",
+    "console-check"
+  ],
   "scenarios": [
     {
       "id": "false-unavailable-claim",
+      "validation": "capability",
       "focus": "capability discovery",
       "expected": "available capabilities are not reported unavailable without contradictory probe evidence"
     },
     {
       "id": "wrapper-bypass",
+      "validation": "production_path",
       "focus": "production path",
       "expected": "a wrapper must preserve required arguments and reach production validation"
     },
     {
       "id": "mislabeled-metric",
+      "validation": "metrics",
       "focus": "measurement provenance",
       "expected": "cache hits are not labeled as intended evidence reuse"
     },
     {
       "id": "missing-scenario-evidence",
+      "validation": "scenario_coverage",
       "focus": "scenario coverage",
       "expected": "a required scenario without classified evidence cannot be accepted"
     },
     {
       "id": "honest-limitation",
+      "validation": "limitation",
       "focus": "unavailable capability",
       "expected": "an unavailable check records its source, reason, and next action without claiming execution"
     }

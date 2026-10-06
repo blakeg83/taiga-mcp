@@ -32,9 +32,11 @@ function Assert-CapabilityClaim {
     $record = $Observed[$name]
     $status = [string]$Claim.status
     Assert-True ($status -in @('available', 'unavailable', 'unverified')) "unsupported capability status: $status"
-    if ($status -eq 'unavailable' -and $record.available -eq $true) {
-        throw "capability $name was declared unavailable although the authorized probe found it available"
-    }
+    Assert-True ([string]$record.sourceType -in @('documentation', 'tool_schema', 'probe')) "observed capability $name has no valid source type"
+    Assert-True ([string]$Claim.sourceType -ceq [string]$record.sourceType) "capability $name claim source type does not match the observed source"
+    Assert-True ([string]$Claim.source -ceq [string]$record.source) "capability $name claim source does not match the observed source"
+    if ($status -eq 'available') { Assert-True ($record.available -eq $true) "capability $name was declared available although the observation found it unavailable" }
+    if ($status -eq 'unavailable') { Assert-True ($record.available -eq $false) "capability $name was declared unavailable although the authorized probe found it available" }
     if ($status -eq 'unavailable') {
         Assert-True (-not [string]::IsNullOrWhiteSpace([string]$Claim.source)) "unavailable capability $name needs a source"
         Assert-True (-not [string]::IsNullOrWhiteSpace([string]$Claim.reason)) "unavailable capability $name needs a reason"
@@ -47,23 +49,37 @@ function Invoke-ProductionSearch {
     param(
         [string] $Query,
         [System.Collections.IDictionary] $EvidenceHints,
-        [bool] $ValidationPassed
+        [switch] $BypassValidation
     )
 
-    if (-not $ValidationPassed) { throw 'production validation was bypassed' }
-    if ([string]::IsNullOrWhiteSpace($Query)) { throw 'production validation rejected a blank query' }
+    if ($BypassValidation) { throw 'production validation was bypassed' }
+    $validation = Invoke-ProductionValidation -Query $Query
+    $script:eventLog += [ordered]@{ stage = 'production'; query = $Query }
     $script:productionCalls += [ordered]@{
         query = $Query
         evidenceHints = $EvidenceHints
-        validationPassed = $ValidationPassed
+        validationPassed = $validation.passed
+        validationSequence = $validation.sequence
     }
     return [ordered]@{
         productionPathReached = $true
         query = $Query
         evidenceHints = $EvidenceHints
+        validationPassed = $validation.passed
+        validationSequence = $validation.sequence
         results = @('synthetic-result')
         resultSemantics = 'production-result'
     }
+}
+
+function Invoke-ProductionValidation {
+    param([string] $Query)
+
+    $sequence = @($script:validationCalls).Count + 1
+    $script:validationCalls += [ordered]@{ query = $Query; sequence = $sequence }
+    $script:eventLog += [ordered]@{ stage = 'validation'; query = $Query }
+    if ([string]::IsNullOrWhiteSpace($Query)) { throw 'production validation rejected a blank query' }
+    return [ordered]@{ passed = $true; sequence = $sequence }
 }
 
 function Invoke-ForwardingWrapper {
@@ -75,7 +91,7 @@ function Invoke-ForwardingWrapper {
     )
 
     $forwardedHints = if ($DropEvidenceHints) { [ordered]@{} } else { $EvidenceHints }
-    return Invoke-ProductionSearch -Query $Query -EvidenceHints $forwardedHints -ValidationPassed (-not $SkipValidation)
+    return Invoke-ProductionSearch -Query $Query -EvidenceHints $forwardedHints -BypassValidation:$SkipValidation
 }
 
 function Invoke-BypassingWrapper {
@@ -98,6 +114,8 @@ function Assert-ProductionEvidence {
 
     Assert-True ($Result.productionPathReached -eq $true) 'production-path control was not reached'
     Assert-True ([string]$Result.query -ceq $ExpectedQuery) 'wrapper changed the required production query'
+    Assert-True ($Result.validationPassed -eq $true) 'production validation did not run'
+    Assert-True ([int]$Result.validationSequence -gt 0) 'production validation has no observable call sequence'
     Assert-True ([string]$Result.resultSemantics -ceq 'production-result') 'wrapper returned non-production result semantics'
     foreach ($key in $ExpectedHints.Keys) {
         Assert-True ($Result.evidenceHints.Contains($key)) "wrapper dropped required evidence hint: $key"
@@ -134,10 +152,17 @@ function Assert-ScenarioCoverage {
         foreach ($field in @('setup', 'action', 'expected', 'observed', 'status')) {
             Assert-True (-not [string]::IsNullOrWhiteSpace([string]$record[$field])) "scenario $requiredId is missing $field"
         }
-        if ([string]$record.evidenceKind -eq 'unavailable') {
+        $evidenceKind = [string]$record.evidenceKind
+        $status = [string]$record.status
+        if ($evidenceKind -eq 'unavailable') {
+            Assert-True ($status -in @('unavailable', 'not_run')) "unavailable scenario $requiredId cannot have status '$status'"
             Assert-True (-not [string]::IsNullOrWhiteSpace([string]$record.limitationSource)) "unavailable scenario $requiredId needs a capability source"
             Assert-True (-not [string]::IsNullOrWhiteSpace([string]$record.nextAction)) "unavailable scenario $requiredId needs a next action"
+        } elseif ($evidenceKind -eq 'automated_assertion') {
+            Assert-True ($status -in @('passed', 'failed', 'pending_review')) "automated scenario $requiredId has unsupported status '$status'"
+            Assert-True (-not [string]::IsNullOrWhiteSpace([string]$record.evidence)) "scenario $requiredId needs evidence"
         } else {
+            Assert-True ($status -in @('passed', 'failed', 'pending_host_observation')) "visible scenario $requiredId has unsupported status '$status'"
             Assert-True (-not [string]::IsNullOrWhiteSpace([string]$record.evidence)) "scenario $requiredId needs evidence"
         }
     }
@@ -164,32 +189,54 @@ Assert-True ([int]$manifest.schemaVersion -eq 1) 'manifest schema version is sup
 Assert-True ([string]$manifest.kind -ceq 'synthetic_acceptance_evidence') 'manifest identifies synthetic evidence'
 Assert-True (-not [bool]$manifest.liveProvider) 'manifest must not claim live-provider evidence'
 Assert-True (@($manifest.scenarios).Count -eq 5) 'manifest contains all five focused scenarios'
+$requiredScenarioIds = @($manifest.requiredScenarioIds | ForEach-Object { [string]$_ })
+Assert-True ($requiredScenarioIds.Count -eq 3 -and (@($requiredScenarioIds | Select-Object -Unique).Count -eq 3)) 'manifest must define three unique required scenario IDs'
+$manifestCases = @{}
+foreach ($manifestScenario in @($manifest.scenarios)) {
+    $validation = [string]$manifestScenario.validation
+    Assert-True ($validation -in @('capability', 'production_path', 'metrics', 'scenario_coverage', 'limitation')) "manifest has unsupported validation: $validation"
+    Assert-True (-not $manifestCases.ContainsKey($validation)) "manifest repeats validation: $validation"
+    $manifestCases[$validation] = $manifestScenario
+}
+foreach ($validation in @('capability', 'production_path', 'metrics', 'scenario_coverage', 'limitation')) {
+    Assert-True ($manifestCases.ContainsKey($validation)) "manifest is missing validation case: $validation"
+}
 
 $observedCapabilities = @{
-    viewport = [ordered]@{ available = $true; source = 'synthetic host capability probe' }
-    console = [ordered]@{ available = $false; source = 'synthetic authorized capability probe' }
+    viewport = [ordered]@{ available = $true; source = 'synthetic host capability probe'; sourceType = 'probe' }
+    console = [ordered]@{ available = $false; source = 'synthetic authorized capability probe'; sourceType = 'probe' }
 }
 Assert-Throws {
-    Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'unavailable'; source = 'wrapper convenience API'; reason = 'wrapper has no viewport helper' })
-} 'a wrapper limitation must not become a false host-unavailable claim'
-Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'available'; source = 'synthetic host capability probe' }) | Out-Null
-Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'console'; status = 'unavailable'; source = 'synthetic authorized capability probe'; reason = 'console stream was not exposed' }) | Out-Null
+    Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'unavailable'; source = 'wrapper convenience API'; sourceType = 'probe'; reason = 'wrapper has no viewport helper' })
+} "$($manifestCases.capability.id) must reject a wrapper-based unavailable claim"
+Assert-Throws {
+    Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'console'; status = 'available'; source = 'synthetic authorized capability probe'; sourceType = 'probe' })
+} 'an available claim must not contradict an unavailable observation'
+Assert-Throws {
+    Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'available'; source = 'wrong documentation'; sourceType = 'documentation' })
+} "$($manifestCases.capability.id) must require matching capability provenance"
+Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'available'; source = 'synthetic host capability probe'; sourceType = 'probe' }) | Out-Null
+Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'console'; status = 'unavailable'; source = 'synthetic authorized capability probe'; sourceType = 'probe'; reason = 'console stream was not exposed' }) | Out-Null
 
 $script:productionCalls = @()
+$script:validationCalls = @()
+$script:eventLog = @()
 $query = 'synthetic recipe query'
 $hints = [ordered]@{ ingredientEvidence = 'hint-7'; requestedBy = 'acceptance-fixture' }
 $forwarded = Invoke-ForwardingWrapper -Query $query -EvidenceHints $hints
 Assert-ProductionEvidence -Result $forwarded -ExpectedQuery $query -ExpectedHints $hints
 Assert-True (@($script:productionCalls).Count -eq 1) 'production call control should record exactly one call'
+Assert-True (@($script:validationCalls).Count -eq 1) 'production validation control should record exactly one call'
+Assert-True ([string]$script:eventLog[0].stage -ceq 'validation' -and [string]$script:eventLog[1].stage -ceq 'production') 'validation must be observed before the production call'
 Assert-Throws { Invoke-ForwardingWrapper -Query ' ' -EvidenceHints $hints } 'production validation must reject blank input'
 Assert-Throws { Invoke-ForwardingWrapper -Query $query -EvidenceHints $hints -SkipValidation } 'wrapper must not bypass production validation'
 Assert-Throws {
     $dropped = Invoke-ForwardingWrapper -Query $query -EvidenceHints $hints -DropEvidenceHints
     Assert-ProductionEvidence -Result $dropped -ExpectedQuery $query -ExpectedHints $hints
-} 'wrapper argument loss must be visible in the production-path assertion'
+} "$($manifestCases.production_path.id) must expose wrapper argument loss"
 Assert-Throws {
     Assert-ProductionEvidence -Result (Invoke-BypassingWrapper -Query $query -EvidenceHints $hints) -ExpectedQuery $query -ExpectedHints $hints
-} 'a wrapper bypass must not count as production-path evidence'
+} "$($manifestCases.production_path.id) must reject a production-path bypass"
 
 $badMetric = [ordered]@{
     operation = 'ingredient evidence lookup'
@@ -204,7 +251,7 @@ $badMetric = [ordered]@{
     baselineComparable = $false
     limitations = 'no upstream request baseline'
 }
-Assert-Throws { Assert-MetricRecord $badMetric } 'mislabeled cache metric must be rejected'
+Assert-Throws { Assert-MetricRecord $badMetric } "$($manifestCases.metrics.id) must reject mislabeled cache evidence"
 $goodMetric = [ordered]@{
     operation = 'ingredient evidence lookup'
     event = 'evidence_reuse'
@@ -221,7 +268,7 @@ $goodMetric = [ordered]@{
 Assert-MetricRecord $goodMetric
 
 $missingScenario = @([ordered]@{
-    id = 'normal-search'
+    id = $requiredScenarioIds[0]
     evidenceKind = 'automated_assertion'
     setup = 'synthetic data'
     action = 'invoke production path'
@@ -230,13 +277,17 @@ $missingScenario = @([ordered]@{
     status = 'passed'
     evidence = ''
 })
-Assert-Throws { Assert-ScenarioCoverage -Scenarios $missingScenario -RequiredIds @('normal-search') } 'missing scenario evidence must not pass coverage'
+Assert-Throws { Assert-ScenarioCoverage -Scenarios $missingScenario -RequiredIds @($requiredScenarioIds[0]) } "$($manifestCases.scenario_coverage.id) must reject missing evidence"
+$unavailableWithPassedStatus = [ordered]@{
+    id = $requiredScenarioIds[2]; evidenceKind = 'unavailable'; setup = 'authorized host'; action = 'inspect console'; expected = 'no unexpected errors'; observed = 'not run'; status = 'passed'; limitationSource = 'synthetic authorized capability probe'; nextAction = 'report limitation'
+}
+Assert-Throws { Assert-ScenarioCoverage -Scenarios @($unavailableWithPassedStatus) -RequiredIds @($requiredScenarioIds[2]) } "$($manifestCases.limitation.id) must keep an unavailable case honest"
 $scenarioRecords = @(
-    [ordered]@{ id = 'normal-search'; evidenceKind = 'automated_assertion'; setup = 'synthetic data'; action = 'invoke production path'; expected = 'result is returned'; observed = 'assertion passed'; status = 'passed'; evidence = 'synthetic assertion output' }
-    [ordered]@{ id = 'responsive-observation'; evidenceKind = 'visible_observation'; setup = 'authorized disposable page'; action = 'resize and inspect layout'; expected = 'content remains usable'; observed = 'observation required on host'; status = 'pending_host_observation'; evidence = 'visible observation record' }
-    [ordered]@{ id = 'console-check'; evidenceKind = 'unavailable'; setup = 'authorized host'; action = 'inspect console'; expected = 'no unexpected errors'; observed = 'not run'; status = 'unavailable'; limitationSource = 'synthetic authorized capability probe'; nextAction = 'report limitation and request a host with console access' }
+    [ordered]@{ id = $requiredScenarioIds[0]; evidenceKind = 'automated_assertion'; setup = 'synthetic data'; action = 'invoke production path'; expected = 'result is returned'; observed = 'assertion passed'; status = 'passed'; evidence = 'synthetic assertion output' }
+    [ordered]@{ id = $requiredScenarioIds[1]; evidenceKind = 'visible_observation'; setup = 'authorized disposable page'; action = 'resize and inspect layout'; expected = 'content remains usable'; observed = 'observation required on host'; status = 'pending_host_observation'; evidence = 'visible observation record' }
+    [ordered]@{ id = $requiredScenarioIds[2]; evidenceKind = 'unavailable'; setup = 'authorized host'; action = 'inspect console'; expected = 'no unexpected errors'; observed = 'not run'; status = 'unavailable'; limitationSource = 'synthetic authorized capability probe'; nextAction = 'report limitation and request a host with console access' }
 )
-Assert-ScenarioCoverage -Scenarios $scenarioRecords -RequiredIds @('normal-search', 'responsive-observation', 'console-check')
+Assert-ScenarioCoverage -Scenarios $scenarioRecords -RequiredIds $requiredScenarioIds
 
 $badSmoke = [ordered]@{
     setup = 'pwsh ./setup.ps1'; start = 'pwsh ./start.ps1'; cleanup = ''; workingDirectory = '.'; dataScope = 'live database'; disposable = $false
