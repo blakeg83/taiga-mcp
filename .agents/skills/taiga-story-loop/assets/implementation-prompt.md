@@ -122,12 +122,14 @@ For each task:
    `<base SHA>..<reviewed SHA>` diff/path record. Copy the full SHA from Git;
    never shorten or transcribe it. A dirty source state or unexpected HEAD is a
    revision conflict: preserve the change and escalate it.
-7. Mark implementation-complete work `Ready for test` (or the discovered
-   project-specific review-ready status), not `Closed`/`Done`. Add one concise
-   comment to the parent story naming the task, checklist outcome, checks and
-   exit codes, endpoint/deferred evidence, commit SHA or verified no-change
-   result, and the state `ready for review`. Reviewer acceptance and a
-   closed/done transition are
+7. Before dispatch, mark implementation-complete work `Ready for test` (or the
+   discovered project-specific review-ready status), not `Closed`/`Done`, and
+   confirm that versioned provider write. Add one concise comment to the parent
+   story naming the task, checklist outcome, checks and exit codes,
+   endpoint/deferred evidence, commit SHA or verified no-change result, and the
+   state `ready for review`. This provider mapping and progress write belong in
+   the frozen packet; they are not confirmation that the reviewer received the
+   handoff. Reviewer acceptance and a closed/done transition are
    separate facts and are not implied by this worker result. In `per_task` mode,
    do not advance to the next ordered task until independent reviewer acceptance
    of this exact current task commit is recorded. In `story_end_only` mode,
@@ -140,15 +142,19 @@ For each task:
 Every review handoff uses the same terminal transaction for an initial task,
 correction, or final-story review:
 
-1. Complete the task evidence, current-version Taiga/progress reconciliation,
-   commit, and immutable revision packet before dispatching the review message.
+1. Complete and confirm the task evidence, current-version Taiga/progress
+   reconciliation (including the provider review-ready mapping), commit, and
+   immutable revision packet before dispatching the review message. The
+   provider mapping is complete before dispatch and is not delivery
+   confirmation.
 2. Send exactly one direct handoff to the assigned persistent reviewer. A
    successful send result for that exact destination, task/story, and revision
    is the delivery confirmation; an intent to send, timeout, or idle reviewer
    is not confirmation.
-3. Only after that successful result, record the review-ready/
-   `awaiting_review` state and send the concise final response. That response
-   is the last action in the turn.
+3. Only after that successful result, record the worker-local
+   `awaiting_review` state; do not perform a new provider status write at this
+   endpoint. Send the concise final response. That response is the last action
+   in the turn.
 4. If delivery fails or is unknown, do not describe the task or story as
    `awaiting_review`, release the next task, or blindly retry. Preserve the
    pending revision and report the delivery exception to the coordinator for
