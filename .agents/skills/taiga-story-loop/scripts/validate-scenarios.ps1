@@ -377,6 +377,13 @@ foreach ($marker in @(
         'End-ImplementerReviewTurn'
         'Resume-ImplementerOnReviewerMessage'
         'Observe-HealthyReviewRecovery'
+        'turnStatus = ''active'''
+        'Authorize-ImplementerResume'
+        'must terminate from the exact action trace'
+        'source_edit'
+        'coordinator_copy'
+        'reconcile_required'
+        'healthyAfterReconciliation'
         'failed handoff delivery must escalate to the coordinator'
         'duplicate acceptance must not resume or write again')) {
     if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {

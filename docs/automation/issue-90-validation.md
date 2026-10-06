@@ -26,9 +26,11 @@ pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-scenarios
 git diff --check
 ```
 
-The automatic review-flow fixture covers initial and correction-ready turn
-termination, reviewer-message resume in the same pair, duplicate/stale
-outcomes, failed delivery, quiet healthy recovery, and explicit rejection of
+The automatic review-flow fixture derives initial and correction-ready turn
+termination from the action trace, rejects source edits and coordinator copies
+after the final response until a validated reviewer resume, distinguishes
+healthy recovery from unresolved delivery escalation, and covers
+duplicate/stale outcomes, failed delivery, and explicit rejection of
 implementer `wait_threads`, reviewer reads, monitors, keep-alives, and
 unchanged acknowledgements. The other fixtures cover ordered-task evidence,
 direct routing, snapshot recovery, and static contract consistency.
