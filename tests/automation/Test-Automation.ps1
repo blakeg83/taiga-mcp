@@ -15,6 +15,8 @@ $script:ReviewScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticke
 $script:EvidenceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-evidence.ps1'
 $script:CoordinateScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-coordinate.ps1'
 $script:AutomaticReviewFlowScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-automatic-review-flow.ps1'
+$script:StoryRoutingScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-routing.ps1'
+$script:ContinuationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-story-loop\scripts\validate-continuation-note.ps1'
 $script:VerificationScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-verification.ps1'
 $script:MeasureScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-measure.ps1'
 $script:AcceptanceScript = Join-Path $PSScriptRoot '..\..\.agents\skills\taiga-ticket-loop\scripts\workflow-acceptance.ps1'
@@ -1502,6 +1504,20 @@ try {
         $exitCode = $LASTEXITCODE
         Assert-Equal 0 $exitCode 'automatic review-flow fixture must pass'
         Assert-True (($output -join "`n").Contains('Passed automatic review-flow fixture')) 'automatic review-flow fixture must report coverage'
+    }
+
+    Test-Case 'keep routine story corrections within the persistent worker pair' {
+        $output = & pwsh -NoProfile -File $script:StoryRoutingScript 2>&1
+        $exitCode = $LASTEXITCODE
+        Assert-Equal 0 $exitCode 'story routing fixture must pass'
+        Assert-True (($output -join "`n").Contains('Passed routing fixture')) 'story routing fixture must report coverage'
+    }
+
+    Test-Case 'reconcile stale story-loop snapshots without replaying milestones' {
+        $output = & pwsh -NoProfile -File $script:ContinuationScript 2>&1
+        $exitCode = $LASTEXITCODE
+        Assert-Equal 0 $exitCode 'continuation snapshot fixture must pass'
+        Assert-True (($output -join "`n").Contains('Passed snapshot replacement, authoritative stale-snapshot recovery, missing/conflicting evidence holds')) 'continuation fixture must report authoritative stale-snapshot recovery coverage'
     }
 
     Test-Case 'journal reviewed child transitions and reconcile partial writes safely' {

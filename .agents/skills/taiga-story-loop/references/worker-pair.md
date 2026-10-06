@@ -53,14 +53,23 @@ The setup confirmation is the source of authority. It must explicitly include
 worker-to-worker and worker-to-coordinator messaging for this story, in
 addition to the coordinator's ordinary dispatch and review actions. The
 coordinator passes the same immutable authorization record to both workers;
-worker messages can report facts or request coordination but cannot widen it.
+routine findings and corrections stay within the worker pair, while worker
+messages can report exceptional facts or request coordination but cannot widen
+the authorization.
 Each assignment includes a destination table:
 
-| Sender | Allowed destinations | Purpose |
+| Sender | Destination | Purpose |
 | --- | --- | --- |
-| Implementer | reviewer, coordinator | ready-for-review handoff, correction context, blocker/result report |
-| Reviewer | implementer, coordinator | findings, correction request, task acceptance, final approval/blocker |
-| Coordinator | implementer, reviewer | scoped assignments, routed results, status/recovery coordination |
+| Implementer | reviewer | task-ready and correction-ready handoffs |
+| Implementer | coordinator | blockers, delivery uncertainty, revision conflicts, or scope decisions |
+| Reviewer | implementer | routine findings and exact-revision task acceptance |
+| Reviewer | coordinator | final story approval and exceptional escalation |
+| Coordinator | implementer, reviewer | scoped assignments, exceptional escalation, and recovery coordination |
+
+The coordinator is not a routine finding, correction, task-ready, or task-acceptance
+relay. The implementer owns current-version Taiga checklist/status/
+progress reconciliation and next-task advancement after the direct acceptance
+when the selected review mode allows it.
 
 The coordinator records the pair IDs, host IDs, creation/reuse outcome, branch
 receipt, authorization summary, and a reference to the first assignment message

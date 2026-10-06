@@ -41,18 +41,22 @@ and blocker evidence protocol.
 
 Use [persistent story worker pair](references/worker-pair.md), [direct worker
 handoffs](references/worker-handoffs.md), and [task and story acceptance](references/acceptance.md)
-for coordinator-owned chat creation, concise routing, review-mode gates, and
-exact-revision acceptance. Use [routing and substantive escalation](references/routing-and-escalation.md)
-and `scripts/validate-routing.ps1` for the controlled correction, stale-approval,
-blocker, disagreement, and missing-destination scenarios. These checks do not
-create chats or perform live writes.
+for coordinator-owned chat creation, concise worker-pair routing, review-mode
+gates, and exact-revision acceptance. Use [routing and substantive escalation](references/routing-and-escalation.md)
+and `scripts/validate-routing.ps1` for direct routine corrections, stale-
+approval, blocker, disagreement, missing-destination, unknown-delivery, and
+revision-conflict scenarios. These checks do not create chats or perform live
+writes.
 
 Use [automatic review and ordered-task flow](references/automatic-review-flow.md)
 and `scripts/validate-automatic-review-flow.ps1` for the scoped event-driven
 handoffs. A ready-for-review event dispatches the persistent reviewer once;
-current findings route a correction back to the same pair; exact-revision
-acceptance advances only according to the declared review mode. Duplicate,
-stale, idle, scope-changing, and uncertain outcomes remain coordinator-owned.
+current findings, correction-ready handoffs, and exact-revision acceptance stay
+direct within the same pair. The implementer owns the current-version Taiga
+reconciliation and next-task advancement allowed by the declared review mode;
+the coordinator receives only final story approval and exceptional escalation.
+Duplicate, stale, idle, scope-changing, and uncertain outcomes remain
+coordinator-owned.
 
 In per-task review, initial and correction-ready handoffs end the implementer
 turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
@@ -117,7 +121,8 @@ Persist current state by replacing the continuation snapshot, not appending
 milestones. Healthy recovery ticks read that snapshot and at most one compact
 worker wait; unanswered user gates stay silent. Follow the replacement and
 heartbeat read budget in [minimal continuation note](references/continuation-note.md)
-and run `scripts/validate-continuation-note.ps1` for offline persistence checks.
+and run `scripts/validate-continuation-note.ps1` for offline persistence and
+stale-snapshot recovery checks.
 
 For the shortest entry, use `Use $taiga-story-loop for <project> story #<ref>`
 or `Use $taiga-story-loop for <project> epic #<ref>`. Read

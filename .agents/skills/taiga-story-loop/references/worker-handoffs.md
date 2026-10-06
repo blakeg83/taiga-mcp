@@ -1,15 +1,17 @@
 # Direct worker handoffs
 
-The coordinator routes short, plain-language messages through the persistent
-pair. A handoff carries only the context needed for the next action; the
-assignment packet, repository, Taiga pages, and Git history remain the sources
-of full detail. Do not require a JSON receipt, a copied ticket transcript, or a
-new chat for an ordinary correction.
+The persistent pair sends short, plain-language messages directly to the worker
+that owns the next review action. A handoff carries only the context needed for
+that action; the assignment packet, repository, Taiga pages, and Git history
+remain the sources of full detail. The coordinator observes durable workflow
+state and handles exceptional escalation, but does not relay or restate a
+routine finding or correction. Do not require a JSON receipt, a copied ticket
+transcript, or a new chat for an ordinary correction.
 
 ## Task-ready message
 
-The implementer sends this to the reviewer and coordinator after the task's
-implementation evidence and commit exist:
+The implementer sends this to the reviewer after the task's implementation
+evidence and commit exist:
 
 ```text
 Task #<ref> ready for review
@@ -17,12 +19,12 @@ Branch: <story-branch>
 Revision: <commit SHA or stable revision range>
 Changes: <one-sentence summary>
 Checks: `<command>` — exit <code>; <concise result>
-Next: reviewer, inspect this exact revision and report findings or acceptance.
+Next: reviewer, inspect this exact revision and report findings or acceptance to the implementer.
 ```
 
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
 truncate the SHA. The revision is immutable review input. In `per_task` mode,
-after both handoffs are confirmed, the implementer records `awaiting_review`
+after the reviewer handoff is confirmed, the implementer records `awaiting_review`
 and ends its turn with a final response naming the task, branch, revision, and
 pending reviewer action.
 It must not call `wait_threads`, poll/read the reviewer chat, schedule its own
@@ -38,8 +40,9 @@ wrong binding is held for coordinator reconciliation.
 
 ## Findings message
 
-The reviewer sends findings directly to the implementer and copies the
-coordinator only when coordination is needed:
+The reviewer sends routine findings directly to the implementer. It contacts
+the coordinator only when one of the documented escalation conditions needs
+reconciliation:
 
 ```text
 Task #<ref> findings
@@ -52,8 +55,8 @@ Next: implementer, correct the same story branch and return a new revision for r
 ```
 
 Findings name the reviewed SHA and do not edit the implementer's checkout. A
-blocking finding reopens only the affected task. The coordinator does not
-rewrite a finding or turn it into acceptance.
+blocking finding reopens only the affected task. The coordinator does not copy,
+rewrite, or restate a routine finding or turn it into acceptance.
 
 ## Correction-ready message
 
@@ -69,18 +72,20 @@ Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, re-review the new revision; prior acceptance is superseded.
 ```
 
-The new revision is a new review input. After sending the correction to the
-same reviewer and coordinator, the implementer follows the same end-of-turn
-rule as the initial ready handoff. The coordinator keeps the branch stable
-while the reviewer is inspecting it and routes later findings to the same
-implementer; it never creates a correction chat or allows the next task to
-race the active per-task review.
+The new revision is a new review input. After sending the correction only to the
+same reviewer, the implementer follows the same end-of-turn rule as the initial
+ready handoff. The coordinator observes the durable correction event but takes
+no routine action, keeps the branch stable through its workflow state, and
+never creates a correction chat or allows the next task to race the active
+per-task review. An unknown delivery outcome or conflicting revision is
+escalated to the coordinator before retrying.
 
 An automatic correction route is valid only for the current task, assigned
 reviewer, pending reviewed SHA, branch receipt, and the immutable `Start`
-authorization. It reopens that task and dispatches one correction request to
+authorization. It reopens that task and sends one direct correction request to
 the same persistent pair; it cannot advance another task or authorize a scope
-change.
+change. The coordinator is involved only when delivery, identity, revision, or
+scope reconciliation is required.
 
 ## Message-driven resume
 
@@ -112,10 +117,14 @@ handoff is healthy: do not wake it to check status or re-send readiness. See
 
 | Handoff | Sender | Destination | Stable identity |
 | --- | --- | --- | --- |
-| ready | implementer | reviewer, coordinator | task ref + revision |
-| findings | reviewer | implementer, optionally coordinator | task ref + reviewed SHA |
-| correction | implementer | same reviewer, coordinator | task ref + new revision |
+| ready | implementer | reviewer | task ref + revision |
+| findings | reviewer | implementer; coordinator only for escalation | task ref + reviewed SHA |
+| correction | implementer | same reviewer; coordinator only for escalation | task ref + new revision |
+| acceptance | reviewer | implementer | task ref + reviewed SHA |
+| story approval | reviewer | coordinator | story ref + reviewed HEAD |
 
 If a destination is missing or a message has an unresolved worker ID, stop and
-escalate to the coordinator. A worker message cannot authorize a new chat,
-widen the story, skip a review, or change the branch base.
+escalate to the coordinator. An unknown delivery outcome or revision conflict
+also stops the routine route until the coordinator reconciles it. A worker
+message cannot authorize a new chat, widen the story, skip a review, or change
+the branch base.

@@ -20,12 +20,17 @@ implementer's checkout.
 | Ordered scope | `{{orderedTasks}}` |
 
 Read the complete story, selected task, repository instructions, and the exact
-committed revision named by the implementer. Send concise findings directly to
-the implementer, naming the reviewed SHA, evidence, requested change, and next
-action. Send task acceptance to the implementer and coordinator only after the
-exact revision satisfies the task. In per-task mode, acceptance releases the
-next task; in story-end-only mode, retain task findings and defer acceptance to
-the final story review.
+committed revision named by the implementer. Send routine findings only to the
+implementer, naming the reviewed SHA, evidence, requested change, and next
+action. Do not copy or restate routine findings to the coordinator. Escalate
+only blocked verification, substantive disagreements, missing or unknown
+destinations/delivery outcomes, and revision or HEAD conflicts. A failed check
+that the implementer can correct is a routine finding and stays in the worker
+pair. Send exact-revision task acceptance only to the implementer; the
+implementer owns the version-safe Taiga reconciliation and next-task
+advancement. In per-task mode, acceptance releases the next task; in
+story-end-only mode, retain task findings and defer acceptance to the final
+story review.
 
 The implementer ends its turn after each per-task ready/correction handoff.
 Your authorized findings or acceptance message wakes that same chat; include
@@ -35,13 +40,14 @@ with the coordinator before retrying.
 
 The scoped workflow may dispatch these ordinary review messages automatically
 from durable task events. A ready event receives one review request, a current
-finding routes back to the same implementer, and an exact current acceptance
-releases the next task only when the declared review mode permits it. Do not
-treat an idle worker, elapsed time, duplicate event, stale SHA, or changed
-scope as review evidence.
+finding goes directly to the same implementer, and a correction-ready handoff
+goes directly back to this reviewer. The coordinator is not a routine relay.
+An exact current acceptance releases the next task only when the declared
+review mode permits it. Do not treat an idle worker, elapsed time, duplicate
+event, stale SHA, or changed scope as review evidence.
 
 Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
-the implementer to update Taiga with the current version and advance the
+the implementer to reconcile Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator
 with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
 PR. Any later source change invalidates that approval and requires re-review.
@@ -60,8 +66,10 @@ PR. Do not approve a changed base, stale HEAD, or a local merge as integration
 evidence, and do not reclassify a legacy resume as a new standalone or epic.
 
 If the implementer sends a correction, review the new SHA and treat prior
-acceptance as superseded. The coordinator owns final story/branch coordination;
-the implementer owns its authorized Taiga task/checklist update after the
-reviewer acceptance. Do not
+acceptance as superseded. Return routine findings or re-review requests only
+through the same implementer/reviewer pair; use the coordinator for the
+exceptional escalation cases above. The coordinator owns final story/branch
+coordination; the implementer owns its authorized Taiga task/checklist update
+after the reviewer acceptance. Do not
 invent a receipt schema, demand the full transcript, create a new chat for a
 correction, or approve a revision you did not inspect.

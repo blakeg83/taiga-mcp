@@ -91,14 +91,23 @@ trial is implied by offline fixture success.
 
 The story-loop review handoff is event-driven within the confirmed scope. A
 `ready_for_review` event dispatches one request to the persistent reviewer;
-current findings reopen only the affected task and route a correction to the
-same pair; exact current acceptance advances the next ordered task in
-`per_task` mode. `story_end_only` records implementation-ready milestones and
-defers task acceptance and review to the final story review. Duplicate or stale
-events, idle status, changed scope, and uncertain Taiga writes stop for
-reconciliation. The contract and offline behavior fixture are
-`.agents/skills/taiga-story-loop/references/automatic-review-flow.md` and
-`.agents/skills/taiga-story-loop/scripts/validate-automatic-review-flow.ps1`.
+routine findings go directly to the implementer and correction-ready revisions
+go directly back to the same reviewer, without coordinator action. Exact task
+acceptance also goes directly to the implementer, who owns current-version
+Taiga reconciliation and next-task advancement in `per_task` mode. Initial
+readiness, routine corrections, and task acceptance do not wake the coordinator
+or require a coordinator reminder. The reviewer sends only final story approval
+and exceptional escalation to the coordinator.
+`story_end_only` records implementation-ready milestones and defers task
+acceptance and review to the final story review. Duplicate or stale events,
+idle status, changed scope, unknown delivery, and revision conflicts stop for
+coordinator reconciliation. The contracts and offline behavior fixtures are
+`.agents/skills/taiga-story-loop/references/automatic-review-flow.md`,
+`.agents/skills/taiga-story-loop/references/routing-and-escalation.md`,
+`.agents/skills/taiga-story-loop/scripts/validate-automatic-review-flow.ps1`,
+and `.agents/skills/taiga-story-loop/scripts/validate-routing.ps1`.
+The milestone-routing change and its exact offline commands are recorded in
+[issue #89 validation](issue-89-validation.md).
 
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
