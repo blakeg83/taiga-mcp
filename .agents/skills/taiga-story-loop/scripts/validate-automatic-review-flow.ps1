@@ -22,6 +22,9 @@ function New-StoryState {
     return [ordered]@{
         reviewMode = $ReviewMode
         authorization = 'start-87'
+        repository = 'C:\Projects\TaigaMCP'
+        worktree = 'C:\Projects\TaigaMCP'
+        scopeHash = 'scope-87'
         branch = 'codex/story-87'
         implementer = 'implementer-story-87'
         reviewer = 'reviewer-story-87'
@@ -41,6 +44,12 @@ function New-StoryState {
         recoveryObservations = @()
         currentTurnId = 1
         turnStatus = 'active'
+        finalReviewRevision = $null
+        finalReviewStatus = 'not_started'
+        finalReviewRequest = $null
+        finalReviewFindings = @()
+        finalStoryState = 'pending'
+        finalStoryApproval = $null
     }
 }
 
@@ -181,6 +190,38 @@ function End-ImplementerReviewTurn {
     }
 }
 
+function End-ImplementerFinalStoryReviewTurn {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $Task,
+        [string] $Revision,
+        [string] $HandoffKind
+    )
+
+    Add-ImplementerAction $State 'send_final_story_review' 'story' $Revision
+    Add-ImplementerAction $State 'final_response' 'story' $Revision
+    $trace = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
+    Assert-True ($trace.Count -ge 2 -and
+        [string]$trace[-2].kind -ceq 'send_final_story_review' -and
+        [string]$trace[-1].kind -ceq 'final_response') 'final story review handoff must terminate the implementer turn'
+    $State.turnStatus = 'awaiting_review'
+    $State.turns = @($State.turns) + [ordered]@{
+        actor = 'implementer'
+        chat = $State.implementer
+        turn = [int]$State.currentTurnId
+        handoff = $HandoffKind
+        task = 'story'
+        branch = $State.branch
+        revision = $Revision
+        reviewer = $State.reviewer
+        authorization = $State.authorization
+        state = 'awaiting_review'
+        ended = $true
+        lastAction = [string]$trace[-1].kind
+        actionCount = $trace.Count
+    }
+}
+
 function Complete-ReviewHandoff {
     param(
         [System.Collections.IDictionary] $State,
@@ -234,6 +275,9 @@ function Resume-ImplementerOnReviewerMessage {
             if ($result.decision -eq 'advance_next_task') {
                 Add-ImplementerAction $State 'advance_next_task' ([string](Get-CurrentTask $State).ref) 'pending'
             }
+            if ($result.decision -eq 'final_story_review') {
+                End-ImplementerFinalStoryReviewTurn $State (Get-CurrentTask $State) ([string]$Event.revision) 'per_task'
+            }
             return $result
         }
 
@@ -246,6 +290,9 @@ function Resume-ImplementerOnReviewerMessage {
         }
         if ($result.decision -eq 'advance_next_task') {
             Add-ImplementerAction $State 'advance_next_task' ([string](Get-CurrentTask $State).ref) 'pending'
+        }
+        if ($result.decision -eq 'final_story_review') {
+            End-ImplementerFinalStoryReviewTurn $State (Get-CurrentTask $State) ([string]$Event.revision) 'per_task'
         }
         return $result
     }
@@ -335,6 +382,28 @@ function Apply-Event {
             return [ordered]@{ decision = 'escalate_coordinator'; state = $State }
         }
         'revision_conflict' {
+            if ($State.Contains('finalReviewStatus') -and $State.finalReviewStatus -in @('awaiting_review', 'accepted')) {
+                $State.finalReviewStatus = 'invalidated'
+                $State.finalReviewRevision = $null
+                $State.finalReviewRequest = $null
+                $State.pendingFinalStoryAcceptance = $null
+                $State.storyAcceptanceMarker = $null
+                $State.finalStoryApproval = $null
+                $State.finalStoryState = 'pending'
+            }
+            $State.pendingEscalations = @($State.pendingEscalations) + [ordered]@{ eventId = [string]$Event.eventId; kind = [string]$Event.kind; revision = [string]$Event.revision }
+            return [ordered]@{ decision = 'escalate_coordinator'; state = $State }
+        }
+        'scope_changed' {
+            if ($State.Contains('finalReviewStatus') -and $State.finalReviewStatus -in @('awaiting_review', 'accepted')) {
+                $State.finalReviewStatus = 'invalidated'
+                $State.finalReviewRevision = $null
+                $State.finalReviewRequest = $null
+                $State.pendingFinalStoryAcceptance = $null
+                $State.storyAcceptanceMarker = $null
+                $State.finalStoryApproval = $null
+                $State.finalStoryState = 'pending'
+            }
             $State.pendingEscalations = @($State.pendingEscalations) + [ordered]@{ eventId = [string]$Event.eventId; kind = [string]$Event.kind; revision = [string]$Event.revision }
             return [ordered]@{ decision = 'escalate_coordinator'; state = $State }
         }
@@ -371,12 +440,9 @@ function Apply-Event {
             $task.state = 'implementation_complete'
             $task.pendingSha = [string]$Event.revision
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
-                $State.finalReviewRevision = [string]$Event.revision
-                $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
-                if ($State.Contains('provider')) {
-                    if ($created) {
-                        Capture-ProviderReviewBaseline $State @($State.tasks | ForEach-Object { [int]$_.taskId })
-                    }
+                $created = Request-FinalStoryReview $State $task ([string]$Event.revision) 'story_end_only'
+                if ($created) {
+                    End-ImplementerFinalStoryReviewTurn $State $task ([string]$Event.revision) 'story_end_only'
                 }
                 return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
             }
@@ -398,7 +464,10 @@ function Apply-Event {
             [void](Add-Action $State 'acceptance' $task.ref ([string]$Event.revision) $State.reviewer $State.implementer)
             $State.actions = @($State.actions) + [ordered]@{ key = "taiga|$($task.ref)|$($Event.revision)"; kind = 'taiga_reconcile'; task = $task.ref; revision = [string]$Event.revision; branch = $State.branch; sender = $State.implementer; destination = 'Taiga'; worker = 'implementer' }
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
-                $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
+                $created = Request-FinalStoryReview $State $task ([string]$Event.revision) 'per_task'
+                if ($created) {
+                    End-ImplementerFinalStoryReviewTurn $State $task ([string]$Event.revision) 'per_task'
+                }
                 return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
             }
             $State.currentTaskIndex = [int]$State.currentTaskIndex + 1
@@ -406,6 +475,46 @@ function Apply-Event {
             $next.state = 'in_progress'
             $created = Add-Action $State 'advance_next_task' $next.ref 'pending' $State.implementer $State.implementer
             return [ordered]@{ decision = if ($created) { 'advance_next_task' } else { 'duplicate' }; state = $State }
+        }
+        'final_story_changes_requested' {
+            if ($State.finalReviewStatus -ne 'awaiting_review' -or
+                [string]$State.finalReviewRevision -cne [string]$Event.reviewedRevision) {
+                throw 'final story finding is not bound to the pending exact review revision.'
+            }
+            if ([string]$Event.reviewerId -cne [string]$State.reviewer) {
+                throw 'final story finding sender is not the assigned reviewer.'
+            }
+            if ([string]::IsNullOrWhiteSpace([string]$Event.finding) -or
+                [string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$') {
+                throw 'final story finding requires a correction revision and finding.'
+            }
+            $State.finalReviewFindings = @($State.finalReviewFindings) + [ordered]@{
+                reviewedRevision = [string]$Event.reviewedRevision
+                correctionRevision = [string]$Event.revision
+                finding = [string]$Event.finding
+            }
+            $State.finalReviewStatus = 'correction_requested'
+            $State.finalReviewRevision = $null
+            $State.finalReviewRequest = $null
+            $State.pendingFinalStoryAcceptance = $null
+            $State.finalStoryState = 'pending'
+            $created = Add-Action $State 'story_correction' 'story' ([string]$Event.revision) $State.reviewer $State.implementer
+            return [ordered]@{ decision = if ($created) { 'route_final_story_correction' } else { 'duplicate' }; state = $State }
+        }
+        'final_story_ready_for_review' {
+            if ($State.finalReviewStatus -ne 'correction_requested') {
+                throw 'final story correction is not awaiting a new implementation revision.'
+            }
+            if ([string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$' -or
+                [string]$Event.previousRevision -notin @($State.finalReviewFindings | ForEach-Object { [string]$_.reviewedRevision })) {
+                throw 'final story correction must identify the prior reviewed HEAD.'
+            }
+            $task = Get-CurrentTask $State
+            $created = Request-FinalStoryReview $State $task ([string]$Event.revision) 'final_correction' ([string]$Event.previousRevision)
+            if ($created) {
+                End-ImplementerFinalStoryReviewTurn $State $task ([string]$Event.revision) 'final_correction'
+            }
+            return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
         }
         'idle' { return [ordered]@{ decision = 'wait'; state = $State } }
         default { throw "unsupported event kind: $($Event.kind)" }
@@ -427,6 +536,10 @@ function New-ReconciliationState {
     $state.storyAcceptanceMarker = $null
     $state.pendingFinalStoryAcceptance = $null
     $state.finalReviewRevision = $null
+    $state.finalReviewStatus = 'not_started'
+    $state.finalReviewRequest = $null
+    $state.finalReviewFindings = @()
+    $state.finalStoryApproval = $null
     $state.finalStoryState = 'pending'
     $state.storyMerged = $false
     $state.storyReleased = $false
@@ -462,6 +575,79 @@ function New-ReconciliationState {
     }
 
     return $state
+}
+
+function Get-TaskReviewRevision {
+    param([System.Collections.IDictionary] $Task)
+
+    if ([string]$Task.state -eq 'accepted' -and -not [string]::IsNullOrWhiteSpace([string]$Task.acceptedSha)) {
+        return [string]$Task.acceptedSha
+    }
+    if ([string]$Task.state -eq 'implementation_complete' -and -not [string]::IsNullOrWhiteSpace([string]$Task.pendingSha)) {
+        return [string]$Task.pendingSha
+    }
+    throw "final story review is missing implementation evidence for task $($Task.ref)"
+}
+
+function New-FinalStoryReviewRequest {
+    param(
+        [System.Collections.IDictionary] $State,
+        [string] $Revision,
+        [string] $PreviousRevision = ''
+    )
+
+    $taskCoverage = @($State.tasks | ForEach-Object {
+            [ordered]@{
+                taskId = [int]$_.taskId
+                ref = [string]$_.ref
+                revision = Get-TaskReviewRevision $_
+                state = [string]$_.state
+            }
+        })
+    [ordered]@{
+        requestId = "final-story-review|$Revision"
+        reviewMode = [string]$State.reviewMode
+        repository = [string]$State.repository
+        worktree = [string]$State.worktree
+        branch = [string]$State.branch
+        scopeHash = [string]$State.scopeHash
+        reviewedHead = $Revision
+        previousReviewedHead = if ([string]::IsNullOrWhiteSpace($PreviousRevision)) { $null } else { $PreviousRevision }
+        trigger = $Trigger
+        taskCoverage = $taskCoverage
+        definitionOfDone = @('Complete the story definition of done at the exact reviewed HEAD.')
+        crossTaskCriteria = @('Review behavior and regression risk across the ordered tasks.')
+        deferredCriteria = @('none')
+        requiredChecks = @([ordered]@{ command = 'focused story checks'; exitCode = 0; result = 'pass' })
+    }
+}
+
+function Request-FinalStoryReview {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $Task,
+        [string] $Revision,
+        [string] $Trigger,
+        [string] $PreviousRevision = ''
+    )
+
+    if ($State.finalReviewStatus -eq 'awaiting_review' -and
+        [string]$State.finalReviewRevision -eq $Revision) {
+        return $false
+    }
+    if ($State.finalReviewStatus -eq 'awaiting_review') {
+        throw 'a different final story review is already pending.'
+    }
+
+    $State.finalReviewRequest = New-FinalStoryReviewRequest $State $Revision $PreviousRevision
+    $State.finalReviewRevision = $Revision
+    $State.finalReviewStatus = 'awaiting_review'
+    $State.finalStoryState = 'pending'
+    if ($State.Contains('provider')) {
+        Capture-ProviderReviewBaseline $State @($State.tasks | ForEach-Object { [int]$_.taskId })
+    }
+    $created = Add-Action $State 'story_review' $Task.ref $Revision $State.implementer $State.reviewer
+    return $created
 }
 
 function Get-ProviderTaskSnapshot {
@@ -736,7 +922,12 @@ function Assert-FinalStoryAcceptancePreflight {
         [System.Collections.IDictionary] $Event
     )
 
-    foreach ($required in @('eventId', 'taskId', 'revision', 'authorization', 'reviewerId', 'criteria', 'repository', 'worktree', 'branch', 'headSha', 'scopeHash')) {
+    foreach ($required in @(
+            'eventId', 'taskId', 'revision', 'authorization', 'reviewerId', 'criteria',
+            'repository', 'worktree', 'branch', 'headSha', 'scopeHash', 'finalReviewRequestId',
+            'definitionOfDone', 'taskCoverage', 'crossTaskEvidence', 'deferredCriteria',
+            'deferredEvidence', 'independentVerification', 'inspectedWorkerEvidence', 'limitations',
+            'checks')) {
         if (-not $Event.Contains($required)) { throw "final story acceptance requires $required" }
     }
     if ([string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$' -or
@@ -747,10 +938,48 @@ function Assert-FinalStoryAcceptancePreflight {
         [string]$Event.branch -cne [string]$State.branch -or
         [string]$Event.headSha -cne [string]$Event.revision -or
         [string]$Event.scopeHash -cne [string]$State.scopeHash) { throw 'final story acceptance binding is stale' }
-    if ($null -eq $State.finalReviewRevision -or
-        [string]$Event.revision -cne [string]$State.finalReviewRevision) { throw 'final story acceptance is not bound to the pending final-review revision' }
+    if ($State.finalReviewStatus -ne 'awaiting_review' -or
+        $null -eq $State.finalReviewRequest -or
+        [string]$Event.finalReviewRequestId -cne [string]$State.finalReviewRequest.requestId -or
+        $null -eq $State.finalReviewRevision -or
+        [string]$Event.revision -cne [string]$State.finalReviewRevision) {
+        throw 'final story acceptance is not bound to the pending final whole-story review'
+    }
     if ([string]$Event.reviewerId -cne [string]$State.reviewer -or [string]$Event.criteria -cne 'complete') {
         throw 'final story acceptance is not from the assigned reviewer with complete criteria'
+    }
+    foreach ($evidenceField in @('definitionOfDone', 'crossTaskEvidence', 'deferredEvidence', 'independentVerification', 'inspectedWorkerEvidence', 'limitations', 'checks')) {
+        if (@($Event[$evidenceField]).Count -eq 0 -or
+            @($Event[$evidenceField] | Where-Object { $null -eq $_ -or [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 0) {
+            throw "final story approval must report nonblank $evidenceField evidence"
+        }
+    }
+    if (@($Event.deferredCriteria).Count -eq 0) {
+        throw 'final story approval must report definition-of-done, cross-task, independent, inspected, checks, and limitation evidence'
+    }
+    $expectedTaskIds = @($State.tasks | ForEach-Object { [string]$_.taskId } | Sort-Object)
+    $actualTaskIds = @($Event.taskCoverage | ForEach-Object { [string]$_.taskId } | Sort-Object)
+    if (($expectedTaskIds -join '|') -cne ($actualTaskIds -join '|')) {
+        throw 'final story approval must cover every selected task exactly once'
+    }
+    $expectedCoverage = @($State.finalReviewRequest.taskCoverage | ForEach-Object { "$( $_.taskId)|$( $_.revision)" } | Sort-Object)
+    $actualCoverage = @($Event.taskCoverage | ForEach-Object { "$( $_.taskId)|$( $_.revision)" } | Sort-Object)
+    if (($expectedCoverage -join '|') -cne ($actualCoverage -join '|')) {
+        throw 'final story approval task coverage must match the frozen review request'
+    }
+    $requiredCheckCommands = @($State.finalReviewRequest.requiredChecks | ForEach-Object { [string]$_.command })
+    foreach ($requiredCheckCommand in $requiredCheckCommands) {
+        if (@($Event.checks | Where-Object { [string]$_.command -ceq $requiredCheckCommand -and [int]$_.exitCode -eq 0 -and [string]$_.result -ceq 'pass' }).Count -eq 0) {
+            throw "final story approval is missing passing evidence for $requiredCheckCommand"
+        }
+    }
+    foreach ($check in @($Event.checks)) {
+        if ($null -eq $check -or [int]$check.exitCode -ne 0 -or [string]$check.result -cne 'pass') {
+            throw 'final story approval requires exit-0 checks'
+        }
+    }
+    if (@($Event.deferredCriteria).Count -gt 0 -and @($Event.deferredEvidence).Count -eq 0) {
+        throw 'final story approval must resolve or explicitly evidence deferred criteria'
     }
 }
 
@@ -812,7 +1041,7 @@ function Reconcile-TaskAcceptance {
     [void](Add-Action $State 'taiga_reconcile' $task.ref ([string]$Event.revision) $State.implementer 'Taiga')
 
     if ([int]$State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
-        [void](Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer)
+        [void](Request-FinalStoryReview $State $task ([string]$Event.revision) 'per_task')
         return [ordered]@{ decision = 'final_story_review'; state = $State }
     }
 
@@ -837,9 +1066,7 @@ function Reconcile-FinalStoryAcceptance {
     $State.pendingFinalStoryAcceptance = $marker
 
     foreach ($task in @($State.tasks)) {
-        if ([string]$task.state -ne 'implementation_complete' -or [string]::IsNullOrWhiteSpace([string]$task.pendingSha)) {
-            throw "final story acceptance requires implementation evidence for task $($task.ref)"
-        }
+        $taskRevision = Get-TaskReviewRevision $task
         $providerTask = Get-ProviderTaskSnapshot $State.provider ([int]$task.taskId)
         $targetDescription = Merge-ProviderChecklist $providerTask.description @('Final story review evidence')
         $actionKey = "story-task|$($task.taskId)|$($Event.revision)"
@@ -870,13 +1097,15 @@ function Reconcile-FinalStoryAcceptance {
 
     foreach ($task in @($State.tasks)) {
         $task.state = 'accepted'
-        $task.acceptedSha = [string]$task.pendingSha
+        $task.acceptedSha = if ([string]::IsNullOrWhiteSpace([string]$task.pendingSha)) { [string]$task.acceptedSha } else { [string]$task.pendingSha }
         $task.pendingSha = $null
     }
     $State.storyAcceptanceMarker = $marker
     $State.pendingFinalStoryAcceptance = $null
     $State.pendingAcceptance = $null
     $State.finalStoryState = 'accepted'
+    $State.finalReviewStatus = 'accepted'
+    $State.finalStoryApproval = $Event
     $State.storyMerged = $false
     $State.storyReleased = $false
     return [ordered]@{ decision = 'final_story_reconciled'; state = $State }
@@ -927,6 +1156,18 @@ function New-StoryAcceptanceEvent {
         branch = $State.branch
         headSha = $Revision
         scopeHash = $State.scopeHash
+        finalReviewRequestId = $State.finalReviewRequest.requestId
+        definitionOfDone = @('Definition of done is satisfied at the exact current HEAD.')
+        taskCoverage = @($State.tasks | ForEach-Object {
+                [ordered]@{ taskId = [int]$_.taskId; ref = [string]$_.ref; revision = Get-TaskReviewRevision $_ }
+            })
+        crossTaskEvidence = @('Reviewer inspected cross-task behavior and regression risk across the ordered task set.')
+        deferredCriteria = @('none')
+        deferredEvidence = @('No deferred criterion remains unresolved.')
+        independentVerification = @('Reviewer independently ran the focused story checks at the exact HEAD.')
+        inspectedWorkerEvidence = @('Reviewer inspected each task revision and its recorded worker evidence.')
+        limitations = @('Synthetic provider fixture only; no live provider or PR operation was performed.')
+        checks = @([ordered]@{ command = 'focused story checks'; exitCode = 0; result = 'pass' })
     }
 }
 
@@ -1173,6 +1414,17 @@ Complete-ReviewHandoff $finalTaskState @{ eventId = 'final-last-ready'; kind = '
 $lastFinalAcceptance = New-TaskAcceptanceEvent $finalTaskState 'final-last-accept' $lastFinalSha 66
 $finalTaskResult = Resume-ImplementerOnReviewerMessage $finalTaskState $lastFinalAcceptance
 Assert-True ($finalTaskResult.decision -eq 'final_story_review' -and @($finalTaskState.actions | Where-Object kind -eq 'story_review').Count -eq 1) 'the final task must hand off final story review after reconciliation'
+Assert-True ($finalTaskState.finalReviewStatus -eq 'awaiting_review' -and
+    $finalTaskState.finalReviewRequest.reviewedHead -eq $lastFinalSha -and
+    @($finalTaskState.finalReviewRequest.taskCoverage).Count -eq 2) 'per_task final handoff must freeze whole-story coverage at the exact HEAD'
+$finalTaskTrace = @($finalTaskState.implementerActions | Where-Object { [int]$_.turn -eq [int]$finalTaskState.currentTurnId })
+Assert-True ($finalTaskTrace[-2].kind -eq 'send_final_story_review' -and $finalTaskTrace[-1].kind -eq 'final_response') 'per_task final review must end the implementer turn after one direct handoff'
+$finalTaskApproval = New-StoryAcceptanceEvent $finalTaskState 'final-story-accept' $lastFinalSha
+$finalTaskApproved = Resume-ImplementerOnReviewerMessage $finalTaskState $finalTaskApproval
+Assert-True ($finalTaskApproved.decision -eq 'final_story_reconciled' -and $finalTaskState.finalStoryState -eq 'accepted') 'per_task final story review must reconcile after all task acceptances'
+Assert-True (-not $finalTaskState.storyReleased) 'per_task final story approval must not release the PR or merge gate'
+Apply-Event $finalTaskState @{ eventId = 'final-story-head-changed'; kind = 'revision_conflict'; taskId = 66; revision = ('c' * 40); authorization = $finalTaskState.authorization } | Out-Null
+Assert-True ($finalTaskState.finalReviewStatus -eq 'invalidated' -and $null -eq $finalTaskState.storyAcceptanceMarker) 'changed final HEAD must invalidate whole-story approval'
 Assert-True (-not $finalTaskState.storyMerged -and -not $finalTaskState.storyReleased) 'final task acceptance must not merge or release the story'
 
 $escalatedFinalState = New-ReconciliationState 'story_end_only'
@@ -1184,9 +1436,9 @@ foreach ($providerTask in @($escalatedFinalState.provider.tasks.Values)) {
     $providerTask.version++
 }
 Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
+$escalatedFinalAcceptance = New-StoryAcceptanceEvent $escalatedFinalState 'escalated-final-acceptance' $escalatedFinalLastSha
 $escalatedFinalState.turnStatus = 'awaiting_review'
 Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-conflict'; kind = 'revision_conflict'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
-$escalatedFinalAcceptance = New-StoryAcceptanceEvent $escalatedFinalState 'escalated-final-acceptance' $escalatedFinalLastSha
 Assert-Throws { Resume-ImplementerOnReviewerMessage $escalatedFinalState $escalatedFinalAcceptance | Out-Null } 'final story acceptance must honor pending coordinator reconciliation'
 Assert-True ($escalatedFinalState.finalStoryState -eq 'pending' -and @($escalatedFinalState.provider.taskWrites).Count -eq 0 -and @($escalatedFinalState.pendingEscalations).Count -eq 1) 'final story acceptance must not bypass an unresolved escalation'
 
@@ -1199,6 +1451,9 @@ foreach ($providerTask in @($storyEndState.provider.tasks.Values)) {
     $providerTask.version++
 }
 Apply-Event $storyEndState @{ eventId = 'story-end-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $storyEndLastSha; authorization = $storyEndState.authorization } | Out-Null
+Assert-True ($storyEndState.finalReviewStatus -eq 'awaiting_review' -and
+    $storyEndState.finalReviewRequest.reviewMode -eq 'story_end_only' -and
+    @($storyEndState.finalReviewRequest.taskCoverage).Count -eq 2) 'story_end_only must dispatch one explicit final whole-story review'
 Assert-True (@($storyEndState.provider.tasks.Values | Where-Object { $_.statusId -eq $storyEndState.provider.statusMapping.accepted }).Count -eq 0) 'story_end_only implementation milestones must not close tasks'
 $storyEndState.provider.tasks['65'].statusId = $storyEndState.provider.statusMapping.not_started
 $storyEndState.provider.tasks['65'].version++
@@ -1208,6 +1463,15 @@ Assert-True ($duplicateFinalReadiness.decision -eq 'duplicate' -and $storyEndSta
 $storyEndState.turnStatus = 'awaiting_review'
 $unrelatedStoryAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-unrelated-sha' (('5' * 40))
 Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $unrelatedStoryAcceptance | Out-Null } 'final story acceptance must match the pending final-review SHA'
+$missingFinalEvidence = Copy-ReconciliationEvent (New-StoryAcceptanceEvent $storyEndState 'story-end-missing-evidence' $storyEndLastSha)
+$missingFinalEvidence.eventId = 'story-end-missing-cross-task-evidence'
+$missingFinalEvidence.crossTaskEvidence = @()
+Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $missingFinalEvidence | Out-Null } 'final story approval must include cross-task evidence'
+$missingDeferredEvidence = Copy-ReconciliationEvent (New-StoryAcceptanceEvent $storyEndState 'story-end-missing-deferred-evidence' $storyEndLastSha)
+$missingDeferredEvidence.eventId = 'story-end-missing-deferred-evidence'
+$missingDeferredEvidence.deferredCriteria = @('criterion-owner-pending')
+$missingDeferredEvidence.deferredEvidence = @()
+Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $missingDeferredEvidence | Out-Null } 'final story approval must not hide unresolved deferred criteria'
 $storyEndAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-final-accept' $storyEndLastSha
 $storyEndConflict = Resume-ImplementerOnReviewerMessage $storyEndState $storyEndAcceptance
 Assert-True ($storyEndConflict.decision -eq 'reconcile_required' -and $storyEndState.finalStoryState -ne 'accepted') 'final story acceptance must preserve a human status until a decision'
@@ -1221,5 +1485,35 @@ $storyEndComments = @($storyEndState.provider.storyWrites).Count
 $storyEndDuplicate = Copy-ReconciliationEvent $storyEndAcceptance; $storyEndDuplicate.eventId = 'story-end-final-replayed'
 Assert-True ((Resume-ImplementerOnReviewerMessage $storyEndState $storyEndDuplicate).decision -eq 'duplicate') 'duplicate final story acceptance must be a no-op'
 Assert-True (@($storyEndState.provider.taskWrites).Count -eq $storyEndTaskWrites -and @($storyEndState.provider.storyWrites).Count -eq $storyEndComments) 'duplicate final story acceptance must not repeat closure or comments'
+
+$findingState = New-ReconciliationState 'story_end_only'
+$findingFirstSha = ('6' * 40)
+$findingReviewedSha = ('7' * 40)
+Apply-Event $findingState @{ eventId = 'finding-ready-1'; kind = 'implementation_ready'; taskId = 65; revision = $findingFirstSha; authorization = $findingState.authorization } | Out-Null
+foreach ($providerTask in @($findingState.provider.tasks.Values)) {
+    $providerTask.statusId = $findingState.provider.statusMapping.awaiting_review
+    $providerTask.version++
+}
+Apply-Event $findingState @{ eventId = 'finding-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $findingReviewedSha; authorization = $findingState.authorization } | Out-Null
+$findingResult = Resume-ImplementerOnReviewerMessage $findingState @{
+    eventId = 'finding-cross-task-defect'
+    kind = 'final_story_changes_requested'
+    taskId = 66
+    revision = ('8' * 40)
+    reviewedRevision = $findingReviewedSha
+    reviewerId = $findingState.reviewer
+    finding = 'Cross-task behavior is inconsistent at the final HEAD.'
+    authorization = $findingState.authorization
+}
+Assert-True ($findingResult.decision -eq 'route_final_story_correction' -and
+    $findingState.finalReviewStatus -eq 'correction_requested' -and
+    (@($findingState.actions | Where-Object kind -eq 'story_correction')[0].destination -eq $findingState.implementer)) 'a final cross-task finding must route correction through the same worker pair'
+$findingCorrectedSha = ('9' * 40)
+Apply-Event $findingState @{ eventId = 'finding-correction-ready'; kind = 'final_story_ready_for_review'; taskId = 66; revision = $findingCorrectedSha; previousRevision = $findingReviewedSha; authorization = $findingState.authorization } | Out-Null
+Assert-True ($findingState.finalReviewStatus -eq 'awaiting_review' -and $findingState.finalReviewRevision -eq $findingCorrectedSha -and
+    @($findingState.actions | Where-Object kind -eq 'story_review').Count -eq 2) 'a corrected final HEAD must receive a fresh whole-story review'
+$findingApproval = New-StoryAcceptanceEvent $findingState 'finding-corrected-approval' $findingCorrectedSha
+$findingApproved = Resume-ImplementerOnReviewerMessage $findingState $findingApproval
+Assert-True ($findingApproved.decision -eq 'final_story_reconciled' -and $findingState.finalStoryApproval.revision -eq $findingCorrectedSha) 'corrected final HEAD must be the only approvable story revision'
 
 Write-Output 'Passed automatic review-flow fixture: trace-derived end-of-turn initial/correction handoffs with post-termination action rejection, reviewer-message resume, no implementer polling/monitor/keep-alive/unchanged acknowledgement, healthy-versus-unresolved-delivery recovery, implementer-owned version-safe Taiga reconciliation with checklist/comment idempotency, human/version/response-loss/interruption barriers, direct acceptance/advancement, final-task and final-story gates, both review modes, duplicate/stale/idle guards, coordinator escalation, and scope gating.'

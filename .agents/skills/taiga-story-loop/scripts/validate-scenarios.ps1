@@ -348,7 +348,11 @@ if (-not $normalizedAcceptance.Contains('per_task (default)') -or
     throw 'Acceptance assertion failed: review mode choices'
 }
 if (-not $normalizedAcceptance.Contains('Story #<ref> approved') -or
-    -not $normalizedAcceptance.Contains('Reviewed HEAD: <exact full 40-character commit SHA>')) {
+    -not $normalizedAcceptance.Contains('Reviewed HEAD: <exact full 40-character commit SHA>') -or
+    -not $normalizedAcceptance.Contains('Exactly one explicit final whole-story review') -or
+    -not $normalizedAcceptance.Contains('a task acceptance never closes or releases the story PR gate') -or
+    -not $normalizedAcceptance.Contains('Independent verification:') -or
+    -not $normalizedAcceptance.Contains('Inspected worker evidence:')) {
     throw 'Acceptance assertion failed: final story approval binding'
 }
 Assert-TaskExecutionContains 'explicit human status decision' 'A human status is never replaced automatically'
@@ -458,7 +462,10 @@ foreach ($marker in @(
         'A healthy idle `awaiting_review` worker is not woken by recovery'
         'Routine `changes_requested`, correction-ready, task-ready, and exact task-acceptance events stay worker-to-worker'
         'Unknown message delivery, missing destinations, revision conflicts, merge approval'
-        'PR creation or update is already covered by `Start`')) {
+        'PR creation or update is already covered by `Start`'
+        'Final task reaches the selected review-mode endpoint'
+        'Reviewer accepts the final story review'
+        'independent verification separately from inspected worker evidence')) {
     if (-not $normalizedAutomaticFlow.Contains($marker)) {
         throw "Automatic review-flow assertion failed: $marker"
     }
@@ -494,7 +501,9 @@ foreach ($marker in @(
         'reviewer message is not a Taiga write result'
         'marker-bearing parent-story progress comment'
         'story_end_only'
-        'merge/release as separate gates')) {
+        'merge/release as separate gates'
+        'exactly one final whole-story review'
+        'fresh final-review request')) {
     if (-not $normalizedAutomaticFlow.Contains($marker)) {
         throw "Automatic review-flow contract assertion failed: $marker"
     }
@@ -523,7 +532,11 @@ foreach ($marker in @(
         'The story PR must target the topology-specific base'
         'active `legacy-standalone-feature` run is the explicit compatibility exception'
         'state: pr_ready_for_approval'
-        'never blindly retry a write or create a duplicate PR')) {
+        'never blindly retry a write or create a duplicate PR'
+        'one explicit final whole-story review'
+        'task acceptance records alone are insufficient'
+        'Independent verification:'
+        'Inspected worker evidence:')) {
     if (-not $normalizedPrDelivery.Contains($marker)) {
         throw "PR delivery assertion failed: $marker"
     }

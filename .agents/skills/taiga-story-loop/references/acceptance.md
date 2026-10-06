@@ -100,6 +100,22 @@ stops at reconciliation.
 
 ## Final story acceptance
 
+Exactly one explicit final whole-story review follows the last task evidence in
+both review modes. In `per_task`, it is requested only after the final ordered
+task has received exact-revision acceptance and its Taiga reconciliation has
+completed. In `story_end_only`, it is requested only after the final ordered
+task has produced implementation-ready evidence. The final review request is a
+separate state and action from every task acceptance; a task acceptance never
+closes or releases the story PR gate.
+
+The final review request freezes the repository, absolute worktree, branch,
+scope, ordered task coverage, definition of done, cross-task criteria, deferred
+criteria, required checks, and one exact current full HEAD. The reviewer must
+inspect that frozen input at the exact HEAD. A changed revision, branch,
+scope, requirement, or new finding invalidates the request or approval and
+routes correction and re-review through the existing implementer/reviewer
+pair; it never silently substitutes another revision.
+
 After the last task's required reviews, the reviewer checks the complete story
 against its definition of done, ordered-task evidence, cross-task behavior, the
 expected branch/worktree, clean tracked-source state, and the current branch
@@ -123,6 +139,11 @@ Diff: <base SHA>..<reviewed HEAD>; paths: <relevant changed paths>
 Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Tasks: <ordered task refs and acceptance state>
 Definition of done: <criterion/result summary>
+Cross-task evidence: <behavior and regression evidence across the ordered tasks>
+Deferred criteria: <criterion, named owner, and evidence for each; or none>
+Independent verification: <checks the reviewer ran independently>
+Inspected worker evidence: <worker artifacts, task revisions, and evidence inspected>
+Limitations: <known limitations or unavailable evidence>
 Checks: `<command>` — exit <code>; <concise result>
 Next: coordinator, use this HEAD for the story PR/review decision.
 ```
@@ -131,13 +152,14 @@ Before using the message, the coordinator repeats the expected repository,
 worktree, branch, exact HEAD, diff range, and clean tracked-source preflight.
 Only the coordinator may treat this message as final story approval or prepare
 the story PR. A task acceptance alone cannot create the PR. Before using the
-approval, the coordinator verifies that the story branch still points at the
-reviewed HEAD and that the requirements and scope are unchanged. Any tracked or
-non-ignored source change, branch movement, material task change, or new review
-finding makes the approval stale; the affected work returns through the same
-implementer/reviewer pair. Preserve conflicts; never reset, clean, stash,
-force-push, or silently review another revision. A comment, timeout, or
-unchanged Taiga status cannot substitute for the reviewer's exact clean input.
+approval, the coordinator verifies that the final-review request ID, story
+branch, scope, and current branch HEAD still match the reviewed input and that
+the requirements are unchanged. Any tracked or non-ignored source change,
+branch movement, material task change, or new review finding makes the approval
+stale; the affected work returns through the same implementer/reviewer pair.
+Preserve conflicts; never reset, clean, stash, force-push, or silently review
+another revision. A comment, timeout, or unchanged Taiga status cannot
+substitute for the reviewer's exact clean input.
 
 The coordinator follows [reviewed story PR delivery](pr-delivery.md) after this
 approval. For a new standalone story, the resulting delivery PR targets
@@ -161,7 +183,8 @@ epic review but requires a separate final legacy review of the refreshed
 preserved feature HEAD before the final feature-to-master PR. A new standalone
 story uses its final story acceptance as the exact-HEAD review for the
 direct-to-master story PR; the epic review and a second feature-to-master PR
-are not added.
+are not added. Do not add a redundant feature or integrated review gate to a
+standalone story.
 
 Final delivery follows [final feature-to-master delivery](final-delivery.md).
 Opening that PR hands the user a release candidate and never claims epic or
