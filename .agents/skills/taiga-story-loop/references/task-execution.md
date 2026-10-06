@@ -158,6 +158,22 @@ provider write receipt. The implementer owns one acceptance journal keyed by
    current version; and
 6. advance only after both the task transition and comment are authoritative.
 
+For a non-final task, advancement then has a second observable boundary: read
+the next declared task/version, set only that task to `mapping.in_progress`,
+confirm the returned version, and begin concrete task-scoped work in the same
+resumed turn. The first source/documentation edit or first task-scoped check
+with actual output is implementation-start evidence; a status-only write,
+plan, or intention is not. Record the evidence with one current-version
+parent-story marker:
+
+`Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>`
+
+If the accepted task is final, do not activate another task. Freeze the exact
+current HEAD and use the separate final-story review endpoint. In
+`story_end_only`, apply the same concrete-start rule after implementation-ready
+evidence, status, parent-story comment, and commit evidence, without claiming
+task acceptance or dispatching a per-task review.
+
 The journal remains pending when the task write applies but its response is
 lost, when the comment sequence is interrupted, or when a human edit creates a
 version conflict. Recovery resumes the same journal, confirms existing marker

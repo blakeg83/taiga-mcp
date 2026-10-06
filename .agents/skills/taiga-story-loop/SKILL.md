@@ -84,6 +84,13 @@ turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
 the implementer never polls the reviewer. Follow the identity/revision and
 deduplication checks in [message-driven resume](references/worker-handoffs.md#message-driven-resume).
 
+After exact current-task acceptance and version-safe Taiga reconciliation, use
+the [acceptance-to-next-task resume](references/worker-handoffs.md#acceptance-to-next-task-resume)
+sequence. It activates only the next declared task and requires concrete
+implementation or check evidence in that same resumed turn; a status-only
+write, plan, or intention is not advancement. A final task skips activation
+and proceeds to one separate whole-story review at the frozen current HEAD.
+
 Use [per-task commits and parent-story progress comments](references/commit-and-progress.md)
 for commit boundaries, exact SHA/no-change evidence, completion and blocker
 comment markers, resume deduplication, and the distinction between worker

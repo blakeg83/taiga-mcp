@@ -173,6 +173,38 @@ missing handoff. An idle implementer in `awaiting_review` after a confirmed
 handoff is healthy: do not wake it to check status or re-send readiness. See
 [continuation recovery](continuation-note.md#healthy-heartbeat-versus-recovery).
 
+## Acceptance-to-next-task resume
+
+After the assigned reviewer sends an exact current-task acceptance, the same
+implementer chat owns the ordered continuation. It first matches the reviewer,
+task, reviewed SHA, authorization, branch/worktree/HEAD, clean source state,
+and already-handled outcome. A stale, duplicate, wrong-task, or conflicting
+message cannot write Taiga or release a newer gate.
+
+The durable sequence is:
+
+1. Read the current task/version and merge only evidence-backed checklist items.
+2. Write and confirm the accepted task status/checklist with that version.
+3. Read the parent story and write/confirm the marker-bearing acceptance
+   comment with its current version. Response-lost, interrupted, or
+   version-conflicted writes hold the pointer and resume the same journal;
+   confirmed operations are not blindly repeated.
+4. If another declared task remains and the selected review mode allows it,
+   read its complete detail/version, set only that task `In progress`, and
+   confirm the returned version.
+5. Begin concrete work on that next task in the same resumed turn. Observable
+   evidence is a task-scoped source/documentation edit or the first
+   task-scoped check with actual output; a status write, plan, or intention is
+   insufficient. Then add one current-version parent-story marker:
+
+   `Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>`
+
+The start marker is idempotent progress evidence and does not mean the task is
+accepted or review-ready. If the accepted task is final, activate no next task;
+freeze the exact current HEAD and request exactly one separate final-story
+review. In `story_end_only`, implementation-ready evidence follows the same
+next-task start sequence without task acceptance or per-task review dispatch.
+
 ## Route table
 
 | Handoff | Sender | Destination | Stable identity |

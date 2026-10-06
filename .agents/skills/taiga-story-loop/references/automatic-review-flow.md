@@ -40,7 +40,7 @@ authoritative.
 | Implementer sends correction-ready | Same current task, assigned reviewer, previous full reviewed SHA, new committed full SHA, expected branch/worktree, clean tracked-source state, base/diff/path review delta, confirmed implementation-complete Taiga/progress writes, and confirmed delivery to that reviewer (a successful direct-delivery result for that reviewer) | Confirm the corrected task's review-ready mapping or documented fallback before freezing the packet and sending exactly one new revision to the same reviewer; only after successful delivery record the worker-local `awaiting_review` state and supersede prior approval, issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle; failed/unknown delivery remains an exception. The provider write is not dispatch confirmation. |
 | Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
 | Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Deliver acceptance directly to the implementer; the implementer applies the version-safe accepted/Done transition, reconciles progress, then advances the next ordered task |
-| Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
+| Implementer starts next task | Prior task has the required accepted evidence and confirmed task/progress reconciliation in `per_task`, or implementation evidence, status, comment, and commit in `story_end_only`; the next task detail/version and clean branch state are current | Mark only the next declared task active in the same implementer chat and story branch, then perform a concrete task-scoped edit or check in that same resumed turn and record the parent-story implementation-start marker; a status-only write, plan, or intention is not advancement; do not add a coordinator assignment or reminder |
 | Final task reaches the selected review-mode endpoint | `per_task`: every selected task has exact-revision acceptance; `story_end_only`: every selected task has implementation-ready evidence | Request exactly one final whole-story review from the reviewer at the exact current HEAD; do not treat the last task acceptance or implementation milestone as story approval |
 | Reviewer accepts the final story review | Assigned reviewer, final-review request identity, exact current repository/worktree/branch/HEAD/scope, definition-of-done evidence, ordered task coverage, cross-task evidence, deferred-criterion evidence, independent checks, inspected worker evidence, and limitations | Send one exact-HEAD story approval to the coordinator; only the coordinator may open the topology-specific PR; do not merge automatically |
 
@@ -82,6 +82,18 @@ unrelated human edits, and applies the project-specific task status mapping.
 It then confirms the status/checklist write and a marker-bearing parent-story
 progress comment separately. Advancement is legal only after both are
 authoritatively observed.
+
+When the current task is not final and the selected review mode releases the
+next task, the implementer then rereads the next declared task/version, writes
+only its project-specific `In progress` status, and confirms that write. In the
+same resumed turn it must perform a concrete task-scoped source/documentation
+edit or check with actual output and record a current-version marker of the
+form `Task #<ref> started | status: In progress | state:
+implementation_started | evidence: <path-or-command>`. A status-only write,
+plan, or intention is not implementation-start evidence. If the accepted task
+is final, no next-task status is written: freeze the current HEAD and use the
+single final-story review endpoint. `story_end_only` follows the same concrete
+start rule from implementation-ready evidence without per-task acceptance.
 
 An unknown or version-conflicted task/status/comment operation holds the
 acceptance and ordered pointer. The implementer rereads the task/story and
