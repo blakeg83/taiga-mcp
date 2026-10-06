@@ -34,10 +34,12 @@ function Add-Task {
         reviewableArtifact = ''
         expectedOutcome = ''
         expectedRedTests = @()
+        permittedExpectedRedReasons = @{}
         observedExpectedRedFailures = @()
         safetyEvidence = @()
         expectedRedEvidence = $false
         expectedRedResolved = $false
+        resolvedExpectedRedEvidence = @()
         unexpectedFailures = @()
         deferredCriteria = @()
         deferredEvidence = @()
@@ -62,6 +64,7 @@ function Set-ReviewableEndpoint {
         [string] $Artifact,
         [ValidateSet('pass', 'expected_red')] [string] $ExpectedOutcome,
         [string[]] $ExpectedRedTests = @(),
+        [hashtable] $ExpectedRedReasons = @{},
         [string[]] $DeferredCriteria = @(),
         [string] $AdvancementGate
     )
@@ -79,6 +82,13 @@ function Set-ReviewableEndpoint {
     $task.reviewableArtifact = $Artifact
     $task.expectedOutcome = $ExpectedOutcome
     $task.expectedRedTests = @($ExpectedRedTests)
+    $task.permittedExpectedRedReasons = @{}
+    foreach ($testName in @($ExpectedRedTests)) {
+        if (-not $ExpectedRedReasons.ContainsKey($testName) -or [string]::IsNullOrWhiteSpace([string]$ExpectedRedReasons[$testName])) {
+            throw "task $TaskId expected RED requires a permitted reason for $testName"
+        }
+        $task.permittedExpectedRedReasons[$testName] = [string]$ExpectedRedReasons[$testName]
+    }
     $task.deferredCriteria = @($DeferredCriteria)
     $task.advancementGate = $AdvancementGate
     $task.checklist.contract = $true
@@ -108,8 +118,22 @@ function Record-ExpectedRedCheckpoint {
     Assert-True (@($ObservedFailures).Count -gt 0) "task $TaskId expected RED must record an observed failure"
     Assert-True (@($SafetyChecks).Count -gt 0) "task $TaskId expected RED must record safety evidence"
 
+    Assert-True (@($ObservedFailures).Count -eq @($task.expectedRedTests).Count) "task $TaskId expected RED must record the complete failure set"
+    $observedByTest = @{}
+    foreach ($failure in @($ObservedFailures)) {
+        $separator = $failure.IndexOf(':')
+        Assert-True ($separator -gt 0 -and $separator -lt ($failure.Length - 1)) "task $TaskId expected RED failure entries require a test and reason"
+        $testName = $failure.Substring(0, $separator).Trim()
+        $reason = $failure.Substring($separator + 1).Trim()
+        Assert-True (-not $observedByTest.ContainsKey($testName)) "task $TaskId expected RED cannot repeat $testName"
+        $observedByTest[$testName] = $reason
+    }
     foreach ($testName in @($task.expectedRedTests)) {
-        Assert-True (@($ObservedFailures | Where-Object { $_ -like "${testName}:*" }).Count -eq 1) "task $TaskId must record the observed reason for $testName"
+        Assert-True ($observedByTest.ContainsKey($testName)) "task $TaskId must record the observed reason for $testName"
+        Assert-True ([string]$observedByTest[$testName] -ceq [string]$task.permittedExpectedRedReasons[$testName]) "task $TaskId observed reason for $testName is outside the permitted RED contract"
+    }
+    foreach ($observedTest in @($observedByTest.Keys)) {
+        Assert-True ($task.expectedRedTests -contains $observedTest) "task $TaskId observed undeclared RED failure $observedTest"
     }
     foreach ($safetyCheck in @($SafetyChecks)) {
         Assert-True ($safetyCheck -like '*exit 0*') "task $TaskId safety evidence must pass"
@@ -131,12 +155,29 @@ function Record-UnexpectedFailure {
 }
 
 function Resolve-ExpectedRedCheckpoint {
-    param([int] $TaskId, [string] $Evidence)
+    param([int] $TaskId, [string[]] $Evidence)
     $task = Get-Task $TaskId
     Assert-True ($task.expectedOutcome -eq 'expected_red') "task $TaskId has no expected-red checkpoint to resolve"
-    Assert-True ($Evidence -like '*exit 0*') "task $TaskId RED resolution must record exit 0"
+    Assert-True (@($Evidence).Count -eq @($task.expectedRedTests).Count) "task $TaskId RED resolution must cover every declared regression"
+    $resolvedByTest = @{}
+    foreach ($result in @($Evidence)) {
+        $separator = $result.IndexOf(':')
+        Assert-True ($separator -gt 0 -and $separator -lt ($result.Length - 1)) "task $TaskId RED resolution entries require a test and result"
+        $testName = $result.Substring(0, $separator).Trim()
+        $outcome = $result.Substring($separator + 1).Trim()
+        Assert-True (-not $resolvedByTest.ContainsKey($testName)) "task $TaskId RED resolution cannot repeat $testName"
+        $resolvedByTest[$testName] = $outcome
+    }
+    foreach ($testName in @($task.expectedRedTests)) {
+        Assert-True ($resolvedByTest.ContainsKey($testName)) "task $TaskId RED resolution is missing $testName"
+        Assert-True ([string]$resolvedByTest[$testName] -like '*exit 0*') "task $TaskId RED resolution for $testName must record exit 0"
+    }
+    foreach ($resolvedTest in @($resolvedByTest.Keys)) {
+        Assert-True ($task.expectedRedTests -contains $resolvedTest) "task $TaskId RED resolution contains undeclared regression $resolvedTest"
+    }
     $task.expectedRedResolved = $true
-    $task.safetyEvidence += $Evidence
+    $task.resolvedExpectedRedEvidence = @($Evidence)
+    $task.safetyEvidence += @($Evidence)
 }
 
 function Satisfy-DeferredCriterion {
@@ -363,13 +404,15 @@ try {
     $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
     Add-Task 904 @()
     Start-Task 904
-    Set-ReviewableEndpoint -TaskId 904 -Artifact 'declared behavior regression' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_declared_behavior') -AdvancementGate 'reviewer accepts the checkpoint before dependent work'
+    Set-ReviewableEndpoint -TaskId 904 -Artifact 'declared behavior regression' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_declared_behavior') -ExpectedRedReasons @{ test_declared_behavior = 'endpoint not implemented' } -AdvancementGate 'reviewer accepts the checkpoint before dependent work'
     Record-ExpectedRedCheckpoint -TaskId 904 -ObservedFailures @('test_declared_behavior: endpoint not implemented') -SafetyChecks @('test_safety: exit 0')
     Complete-Task 904 'a904001'
     Assert-True ((Get-Task 904).status -eq 'awaiting_review') 'legitimate expected RED can become review-ready'
     Accept-Task 904 'a904001'
     Assert-True ((Get-Task 904).observedExpectedRedFailures[0] -like 'test_declared_behavior:*') 'expected RED records the named observed failure'
     Assert-True ((Get-Task 904).safetyEvidence[0] -like '*exit 0*') 'expected RED records passing safety evidence'
+    Assert-Throws { Record-ExpectedRedCheckpoint -TaskId 904 -ObservedFailures @('test_declared_behavior: authentication crash') -SafetyChecks @('test_safety: exit 0') } 'unpermitted RED reason is rejected'
+    Assert-Throws { Record-ExpectedRedCheckpoint -TaskId 904 -ObservedFailures @('test_declared_behavior: endpoint not implemented', 'test_data_integrity: data corruption') -SafetyChecks @('test_safety: exit 0') } 'undeclared RED failure is rejected'
 
     # An incomplete artifact/advancement endpoint requires clarification before
     # task start and leaves dependent work untouched.
@@ -386,7 +429,7 @@ try {
     Add-Task 905 @()
     Add-Task 906 @(905)
     Start-Task 905
-    Set-ReviewableEndpoint -TaskId 905 -Artifact 'declared behavior regression' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_declared_behavior') -AdvancementGate 'reviewer accepts the checkpoint before task #906'
+    Set-ReviewableEndpoint -TaskId 905 -Artifact 'declared behavior regression' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_declared_behavior') -ExpectedRedReasons @{ test_declared_behavior = 'endpoint not implemented' } -AdvancementGate 'reviewer accepts the checkpoint before task #906'
     Record-UnexpectedFailure 905 'test_unrelated_behavior' 'unexpected state transition'
     (Get-Task 905).checklist.verification = $true
     Assert-Throws { Complete-Task 905 'a905001' } 'unexpected failure cannot become review-ready'
@@ -399,7 +442,7 @@ try {
     $script:fixture = [ordered]@{ tasks = @{}; activeTaskId = $null; storyComments = @(); storyScope = @(); storyReviewApproved = $false }
     Add-Task 907 @()
     Start-Task 907
-    Set-ReviewableEndpoint -TaskId 907 -Artifact 'missing regression fixture' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_missing_regression') -AdvancementGate 'reviewer accepts only after named regression evidence'
+    Set-ReviewableEndpoint -TaskId 907 -Artifact 'missing regression fixture' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_missing_regression') -ExpectedRedReasons @{ test_missing_regression = 'endpoint not implemented' } -AdvancementGate 'reviewer accepts only after named regression evidence'
     Assert-Throws { Record-ExpectedRedCheckpoint -TaskId 907 -ObservedFailures @() -SafetyChecks @('test_safety: exit 0') } 'missing regression coverage is rejected'
     Assert-Throws { Complete-Task 907 'a907001' } 'missing regression coverage cannot become review-ready'
     Assert-True (-not (Get-Task 907).expectedRedEvidence) 'missing regression evidence remains unrecorded'
@@ -431,8 +474,8 @@ try {
     Add-Task 912 @(911)
     $script:fixture.storyScope = @(910, 911, 912)
     Start-Task 910
-    Set-ReviewableEndpoint -TaskId 910 -Artifact 'final regression checkpoint' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_final_regression') -AdvancementGate 'final story review requires the formerly red test to pass'
-    Record-ExpectedRedCheckpoint -TaskId 910 -ObservedFailures @('test_final_regression: endpoint not implemented') -SafetyChecks @('test_safety: exit 0')
+    Set-ReviewableEndpoint -TaskId 910 -Artifact 'final regression checkpoint' -ExpectedOutcome 'expected_red' -ExpectedRedTests @('test_final_regression', 'test_final_filter_regression') -ExpectedRedReasons @{ test_final_regression = 'endpoint not implemented'; test_final_filter_regression = 'endpoint not implemented' } -AdvancementGate 'final story review requires every formerly red test to pass'
+    Record-ExpectedRedCheckpoint -TaskId 910 -ObservedFailures @('test_final_regression: endpoint not implemented', 'test_final_filter_regression: endpoint not implemented') -SafetyChecks @('test_safety: exit 0')
     Complete-Task 910 'a910001'
     Accept-Task 910 'a910001'
     Start-Task 911
@@ -446,7 +489,9 @@ try {
     Complete-Task 912 'a912001'
     Accept-Task 912 'a912001'
     Assert-Throws { Complete-StoryReview } 'final story review rejects unresolved expected RED'
-    Resolve-ExpectedRedCheckpoint -TaskId 910 -Evidence 'test_final_regression: exit 0'
+    Assert-Throws { Resolve-ExpectedRedCheckpoint -TaskId 910 -Evidence @('test_unrelated: exit 0') } 'unrelated green evidence cannot resolve a RED checkpoint'
+    Assert-Throws { Resolve-ExpectedRedCheckpoint -TaskId 910 -Evidence @('test_final_regression: exit 0') } 'partial green evidence cannot resolve every RED regression'
+    Resolve-ExpectedRedCheckpoint -TaskId 910 -Evidence @('test_final_regression: exit 0', 'test_final_filter_regression: exit 0')
     Assert-Throws { Complete-StoryReview } 'final story review rejects missing deferred evidence'
     Satisfy-DeferredCriterion -TaskId 911 -Criterion 'final regression green' -OwnerTaskId 912
     Complete-StoryReview

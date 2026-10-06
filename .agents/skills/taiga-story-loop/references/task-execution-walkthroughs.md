@@ -63,12 +63,12 @@ cases:
 
 | Scenario | Endpoint evidence | Required outcome |
 | --- | --- | --- |
-| Legitimate expected-red checkpoint | The contract names `test_declared_behavior`, records the observed reason `endpoint not implemented`, and records `test_safety` exit 0. | The task can become review-ready and be accepted at the checkpoint; the RED is not treated as a passing final story check. |
+| Legitimate expected-red checkpoint | The contract names `test_declared_behavior`, stores its permitted reason `endpoint not implemented`, records the matching observed reason, and records `test_safety` exit 0 with no extra failures. | The task can become review-ready and be accepted at the checkpoint; the RED is not treated as a passing final story check. |
 | Unexpected failure | A different failure, `test_unrelated_behavior`, is observed outside the permitted endpoint. | The task remains in progress and its dependent task cannot start. |
 | Ambiguous endpoint | The artifact or advancement gate is missing before task start. | Clarification is required and the dependent task remains untouched. |
 | Missing regression coverage | The endpoint says expected-red, but no named failing regression or safety evidence is recorded. | The task cannot become review-ready. |
 | Deferred criterion later satisfied | Task #907 declares `final regression green` owned by task #908 and retains it while #907 is reviewed. | Task #908 supplies the evidence before final story acceptance; the criterion remains visible until then. |
-| Final review with unresolved RED/deferred evidence | The story contains a previously accepted expected-red checkpoint and an unfulfilled deferred criterion. | Final story review rejects until the regression is green and the named owner supplies deferred evidence. |
+| Final review with unresolved RED/deferred evidence | The story contains previously accepted expected-red checkpoints and an unfulfilled deferred criterion. | Final story review rejects until every formerly red test has exit-0 evidence and the named owner supplies deferred evidence. |
 
 These are task-checkpoint and final-story gates, not a mandatory receipt schema
 or a duplicated ticket transcript. The recorded evidence stays in the existing
@@ -91,8 +91,10 @@ The executable scenario must demonstrate all of the following:
 - no dependent task receives a status, commit, or completion comment before its
   prerequisite is accepted.
 - a contracted expected-red checkpoint names its observed failure and passing
-  safety evidence;
+  safety evidence, with the complete failure set matching exact permitted
+  reasons;
 - an unexpected failure or missing regression coverage cannot become
   review-ready;
 - deferred criteria retain a named later owner until final evidence arrives;
-- final story review rejects unresolved expected RED or deferred criteria.
+- final story review rejects unresolved expected RED or deferred criteria and
+  requires green evidence for every formerly red test.

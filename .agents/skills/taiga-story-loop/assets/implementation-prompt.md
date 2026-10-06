@@ -78,11 +78,13 @@ For each task:
    needs direct evidence; a comment or intention is not evidence. If a
    criterion is not applicable, explain why rather than silently checking it.
 4. Run the focused checks required by the packet and repository instructions.
-   For an authoritative expected-red checkpoint, name the permitted
-   behavior/tests, record the observed failure reason, and record relevant
-   safety checks that passed. A nonzero command exit alone is not evidence of a
-   valid RED; unexpected failures or missing regression/safety coverage remain
-   defects. Preserve the command, actual exit code, and concise output/evidence.
+   For an authoritative expected-red checkpoint, name each permitted
+   behavior/test and exact failure reason, record the complete observed failure
+   set, and record relevant safety checks that passed. Additional failures or
+   alternate reasons are defects. A nonzero command exit alone is not evidence
+   of a valid RED; unexpected failures or missing regression/safety coverage
+   remain defects. Preserve the command, actual exit code, and concise
+   output/evidence.
    If a required check is unavailable, report it as unavailable; never report
    it as passing.
 5. Commit all task changes before moving to the next task, using the
@@ -160,9 +162,9 @@ mode, a task being `Ready for test`, having a completion comment, or having any
 historical commit is not reviewer acceptance.
 
 At final story review, verify every deferred criterion against its named owner
-and evidence, and verify that all required regressions from earlier expected-red
-checkpoints are green. Do not claim final approval while either remains
-unresolved.
+and evidence, and verify exit-0 evidence for every required regression from
+earlier expected-red checkpoints. Do not claim final approval while either
+remains unresolved.
 
 ## Status, conflicts, and blockers
 

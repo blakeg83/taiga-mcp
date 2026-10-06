@@ -54,13 +54,15 @@ clarification, record the task as blocked/needs information when available, and
 do not start dependent work. Do not resolve ambiguity by demanding downstream
 implementation early or by inventing an allowed failure.
 
-For an expected-red checkpoint, record the named behavior/tests that are
-permitted to fail, the observed failure reason, and relevant safety checks that
-passed. A nonzero command exit alone is not a valid RED. An unexpected failure,
-missing regression coverage, or missing safety evidence leaves the task
-in-progress and blocks advancement. The checkpoint can be reviewable when its
-contracted RED is evidenced, but final story acceptance still requires the
-formerly red regressions to be green.
+For an expected-red checkpoint, record each named behavior/test, its exact
+permitted failure reason, the complete observed failure set, and relevant
+safety checks that passed. The observed set must match the contract one-for-one;
+additional failures and alternate reasons are defects. A nonzero command exit
+alone is not a valid RED. An unexpected failure, missing regression coverage,
+or missing safety evidence leaves the task in-progress and blocks advancement.
+The checkpoint can be reviewable when its contracted RED is evidenced, but
+final story acceptance still requires exit-0 evidence for every formerly red
+regression.
 
 ## Start, checklist, and review gates
 

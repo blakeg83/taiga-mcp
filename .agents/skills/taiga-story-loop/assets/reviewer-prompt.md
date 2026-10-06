@@ -34,12 +34,12 @@ story review.
 
 For each task, assess the declared reviewable endpoint before assessing the
 implementation: artifact, expected check outcome, deferred criteria and owner,
-and advancement gate. An expected-red checkpoint is acceptable only when the
-named behavior/tests have the permitted observed failure reason and relevant
-safety checks pass. Treat an unexpected failure, a nonzero exit without named
-failure evidence, or missing regression/safety coverage as a finding; do not
-require downstream implementation merely to make an intentionally red task
-green.
+and advancement gate. An expected-red checkpoint is acceptable only when every
+named behavior/test has its exact permitted observed failure reason, the
+complete observed failure set has no extras, and relevant safety checks pass.
+Treat an unexpected/undeclared failure, a nonzero exit without named failure
+evidence, or missing regression/safety coverage as a finding; do not require
+downstream implementation merely to make an intentionally red task green.
 
 The implementer ends its turn after each per-task ready/correction handoff.
 Your authorized findings or acceptance message wakes that same chat; include
@@ -64,8 +64,9 @@ with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
 PR. Any later source change invalidates that approval and requires re-review.
 
 For final story approval, require evidence for every deferred criterion from its
-named owner and require formerly red regressions to be green. An unresolved RED
-or deferred criterion is not compatible with `Story #<ref> approved`.
+named owner and require exit-0 evidence for every formerly red regression. An
+unresolved RED or deferred criterion is not compatible with `Story #<ref>
+approved`.
 
 For `standalone-story-direct-master`, review the exact story HEAD as the final
 story review for a direct-to-`master` PR; there is no feature branch or

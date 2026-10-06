@@ -256,6 +256,8 @@ Assert-ContractsContains 'expected outcome' '- Expected check outcome:'
 Assert-ContractsContains 'deferred owner' '- Deferred criteria:'
 Assert-ContractsContains 'advancement gate' '- Advancement gate:'
 Assert-ContractsContains 'expected-red evidence' 'A nonzero command exit by itself is not evidence of a valid RED.'
+Assert-ContractsContains 'exact expected-red reasons' 'exact permitted failure reason'
+Assert-ContractsContains 'complete expected-red set' 'one-for-one'
 Assert-ContractsContains 'ambiguous endpoint gate' 'missing or ambiguous artifact'
 Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
 Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
@@ -570,10 +572,14 @@ foreach ($endpointMarker in @(
 }
 foreach ($fixtureMarker in @(
         'Record-ExpectedRedCheckpoint'
+        'unpermitted RED reason is rejected'
+        'undeclared RED failure is rejected'
         'Record-UnexpectedFailure'
         'missing regression coverage cannot become review-ready'
         'Satisfy-DeferredCriterion'
         'Complete-StoryReview'
+        'unrelated green evidence cannot resolve a RED checkpoint'
+        'partial green evidence cannot resolve every RED regression'
         'final story review rejects unresolved expected RED')) {
     if (-not (Get-Content $taskExecutionScriptPath -Raw).Contains($fixtureMarker)) {
         throw "Task endpoint fixture assertion failed: $fixtureMarker"
