@@ -502,6 +502,7 @@ foreach ($marker in @(
         'Capability intake'
         'Supports selectable authorization'
         'Permits authorization'
+        'explicit-submission evidence'
         'preference-only or optional-question input tool is not an authorization capability'
         'selectable = supportsSelectableAuthorization'
         'exactly one setup gate'
@@ -509,19 +510,32 @@ foreach ($marker in @(
         'awaiting_confirmation'
         'resolved authorization reference'
         'scope change'
+        'active gate identity, revision, and resolved scope'
+        'duplicate, stale, or post-Cancel events are rejected'
         'Actual selectable UI behavior requires a separately authorized host observation')) {
     Assert-SetupAuthorizationContains "contract marker: $marker" $marker
 }
 foreach ($marker in @(
         'New-SetupState'
+        'HasExplicitSubmissionEvidence'
+        'GateId'
+        'rejected_stale_or_closed_gate'
+        'blocked_before_confirmation'
+        'setup_gate_replaced'
         'Resolve-SetupEvent'
         'permitted-selectable-start'
         'prohibited-selectable-tool'
         'unavailable-selectable-tool'
+        'missing-submission-evidence'
         'selectable-default-only'
         'plain-timeout'
+        'plain-blank-reply'
+        'plain-invalid-reply'
         'plain-worker-message'
+        'selectable-explicit-cancel'
         'plain-explicit-cancel'
+        'duplicate-start-event'
+        'start-after-cancel'
         'scope-change-invalidates-start'
         'Passed $($results.Count) setup-authorization decision scenarios')) {
     if (-not $setupAuthorizationScriptText.Contains($marker)) {
@@ -762,7 +776,10 @@ foreach ($recordMarker in @(
         '`ClarifyRequired(acceptance criteria)`'
         'request_user_input'
         'Permitted selectable'
+        'Missing submission evidence'
         'Default-only'
+        'Empty/blank'
+        'Explicit cancel'
         'Scope change')) {
     if (-not $normalizedWalkthrough.Contains($recordMarker)) {
         throw "Walkthrough record assertion failed: $recordMarker"

@@ -442,13 +442,20 @@ The offline decision fixture covers these outcomes:
 | Permitted selectable | submitted `Start` choice | `started`, selectable authorization persisted | none |
 | Prohibited selectable | typed `Start` fallback | `started`, plain-text authorization persisted | none |
 | Unavailable selectable | typed `Start` fallback | `started`, plain-text authorization persisted | none |
+| Missing submission evidence | selector lacks submitted-event evidence | `started` only through typed fallback | none |
 | Default-only | displayed/default `Start` without submission | `awaiting_confirmation` | none |
 | Empty/blank | empty choice or blank reply | `awaiting_confirmation` | none |
+| Invalid typed reply | typed `Maybe` | `awaiting_confirmation` | none |
 | Timeout | no submitted response | `awaiting_confirmation` | none |
 | Worker message | worker sends `Start` | `awaiting_confirmation` | none |
 | Explicit cancel | submitted/typed `Cancel` | `cancelled` | none |
+| Duplicate/closed gate | replay `Start` after Start or Cancel | prior outcome unchanged | none |
 | Scope change | old `Start`, then changed scope | old authorization invalidated; new gate required | none |
 
-These are automated synthetic assertions only. No selectable UI was opened,
-and no provider or live workflow writes were performed. A real selectable UI
-observation remains a separately authorized evidence item.
+The fixture records a gate id, revision, and scope on every selectable event;
+stale events are rejected after replacement, and a trace records one active gate,
+read-only discovery, blocked pre-confirmation mutation attempts, and authorized
+post-Start dispatch. These are automated synthetic assertions only. No
+selectable UI was opened, and no provider or live workflow writes were
+performed. A real selectable UI observation remains a separately authorized
+evidence item.

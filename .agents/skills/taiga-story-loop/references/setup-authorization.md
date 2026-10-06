@@ -39,6 +39,11 @@ An unavailable, prohibited, or unverified capability selects the explicit
 `plain-text` fallback. Do not hardcode a selectable tool name or claim live
 selectable behavior from this offline contract or its fixtures.
 
+The capability record must include explicit-submission evidence. A selector is
+not sufficient when the host does not document or expose how a human-submitted
+choice is distinguished from its default or from an empty/timeout result.
+Missing submission evidence therefore selects the typed fallback.
+
 ## One gate and its decision record
 
 Render exactly one setup gate for the current resolved scope. The selectable
@@ -59,6 +64,13 @@ Accept only:
 
 - a submitted selectable `Start` or `Cancel` event from the same gate; or
 - an explicit typed `Start` or `Cancel` response to the fallback.
+
+Each selectable decision carries the active gate identity, revision, and
+resolved scope. Accept it only while that gate is open and only when all three
+values match. `Start` and `Cancel` close the gate; duplicate, stale, or
+post-Cancel events are rejected without changing the decision or dispatching
+again. A scope change replaces the gate, increments its revision, clears the
+prior authorization, and requires a fresh decision for the new scope.
 
 Blank or invalid text, an empty response, a default-only response, a timeout,
 unrelated text, and a worker message remain `awaiting_confirmation`. They do
