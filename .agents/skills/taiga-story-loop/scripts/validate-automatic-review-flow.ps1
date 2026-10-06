@@ -207,8 +207,22 @@ function Resume-ImplementerOnReviewerMessage {
     )
 
     if ($State.Contains('provider') -and [string]$Event.kind -eq 'accepted') {
-        if ($State.acceptanceMarkers -contains ("task|$($Event.taskId)|$($Event.revision)")) {
+        $acceptanceMarker = "task|$($Event.taskId)|$($Event.revision)"
+        if ($State.acceptanceMarkers -contains $acceptanceMarker) {
             return [ordered]@{ decision = 'duplicate'; state = $State }
+        }
+
+        if ($null -ne $State.pendingAcceptance -and
+            [string]$State.pendingAcceptance.marker -ceq $acceptanceMarker -and
+            $State.turnStatus -eq 'active') {
+            $result = Reconcile-TaskAcceptance $State $Event
+            if ($result.decision -in @('advance_next_task', 'final_story_review')) {
+                Add-ImplementerAction $State 'taiga_reconcile' ([string]$Event.taskId) ([string]$Event.revision)
+            }
+            if ($result.decision -eq 'advance_next_task') {
+                Add-ImplementerAction $State 'advance_next_task' ([string](Get-CurrentTask $State).ref) 'pending'
+            }
+            return $result
         }
 
         Assert-TaskAcceptancePreflight $State $Event
@@ -225,10 +239,21 @@ function Resume-ImplementerOnReviewerMessage {
     }
 
     if ($State.Contains('provider') -and [string]$Event.kind -eq 'story_accepted') {
-        if ($State.storyAcceptanceMarker -eq ("story|$($Event.revision)")) {
+        $storyMarker = "story|$($Event.revision)"
+        if ($State.storyAcceptanceMarker -eq $storyMarker) {
             return [ordered]@{ decision = 'duplicate'; state = $State }
         }
 
+        if ($State.pendingFinalStoryAcceptance -eq $storyMarker -and $State.turnStatus -eq 'active') {
+            Assert-FinalStoryAcceptancePreflight $State $Event
+            $result = Reconcile-FinalStoryAcceptance $State $Event
+            if ($result.decision -eq 'final_story_reconciled') {
+                Add-ImplementerAction $State 'taiga_reconcile' 'story' ([string]$Event.revision)
+            }
+            return $result
+        }
+
+        Assert-FinalStoryAcceptancePreflight $State $Event
         Authorize-ImplementerResume $State
         Add-ImplementerAction $State 'reviewer_message_resume' ([string]$Event.taskId) ([string]$Event.revision)
         $result = Reconcile-FinalStoryAcceptance $State $Event
@@ -333,6 +358,7 @@ function Apply-Event {
             $task.state = 'implementation_complete'
             $task.pendingSha = [string]$Event.revision
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
+                $State.finalReviewRevision = [string]$Event.revision
                 $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
                 return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
             }
@@ -378,7 +404,10 @@ function New-ReconciliationState {
     $state.acceptanceMarkers = @()
     $state.acceptanceJournal = @{}
     $state.reconciliationHolds = @()
+    $state.pendingAcceptance = $null
     $state.storyAcceptanceMarker = $null
+    $state.pendingFinalStoryAcceptance = $null
+    $state.finalReviewRevision = $null
     $state.finalStoryState = 'pending'
     $state.storyMerged = $false
     $state.storyReleased = $false
@@ -634,6 +663,8 @@ function Assert-TaskAcceptancePreflight {
     foreach ($required in @('eventId', 'taskId', 'revision', 'authorization', 'reviewerId', 'criteria', 'repository', 'worktree', 'branch', 'headSha', 'scopeHash', 'checklistEvidence')) {
         if (-not $Event.Contains($required)) { throw "acceptance requires $required" }
     }
+    if ([string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$' -or
+        [string]$Event.headSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'acceptance requires a full 40-character reviewed SHA and observed HEAD' }
     if ([string]$Event.authorization -cne [string]$State.authorization) { throw 'acceptance authorization is stale' }
     if ([string]$Event.repository -cne [string]$State.repository -or
         [string]$Event.worktree -cne [string]$State.worktree -or
@@ -648,6 +679,30 @@ function Assert-TaskAcceptancePreflight {
     if ($null -eq $State.pendingReview -or
         [int]$State.pendingReview.taskId -ne [int]$Event.taskId -or
         [string]$State.pendingReview.revision -cne [string]$Event.revision) { throw 'acceptance is not bound to the pending exact revision' }
+}
+
+function Assert-FinalStoryAcceptancePreflight {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $Event
+    )
+
+    foreach ($required in @('eventId', 'taskId', 'revision', 'authorization', 'reviewerId', 'criteria', 'repository', 'worktree', 'branch', 'headSha', 'scopeHash')) {
+        if (-not $Event.Contains($required)) { throw "final story acceptance requires $required" }
+    }
+    if ([string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$' -or
+        [string]$Event.headSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'final story acceptance requires a full 40-character reviewed SHA and observed HEAD' }
+    if ([string]$Event.authorization -cne [string]$State.authorization -or
+        [string]$Event.repository -cne [string]$State.repository -or
+        [string]$Event.worktree -cne [string]$State.worktree -or
+        [string]$Event.branch -cne [string]$State.branch -or
+        [string]$Event.headSha -cne [string]$Event.revision -or
+        [string]$Event.scopeHash -cne [string]$State.scopeHash) { throw 'final story acceptance binding is stale' }
+    if ($null -eq $State.finalReviewRevision -or
+        [string]$Event.revision -cne [string]$State.finalReviewRevision) { throw 'final story acceptance is not bound to the pending final-review revision' }
+    if ([string]$Event.reviewerId -cne [string]$State.reviewer -or [string]$Event.criteria -cne 'complete') {
+        throw 'final story acceptance is not from the assigned reviewer with complete criteria'
+    }
 }
 
 function Reconcile-TaskAcceptance {
@@ -682,6 +737,10 @@ function Reconcile-TaskAcceptance {
     $before = Get-ProviderTaskSnapshot $provider ([int]$Event.taskId)
     $targetDescription = Merge-ProviderChecklist $before.description @($Event.checklistEvidence)
     if ($null -eq $journal.statusConfirmed) { $journal.statusConfirmed = $false }
+    if ($journal.statusConfirmed -and
+        ($before.statusId -ne [int]$provider.statusMapping.accepted -or $before.description -ne $targetDescription)) {
+        $journal.statusConfirmed = $false
+    }
     if (-not $journal.statusConfirmed) {
         $hold = Confirm-ProviderTaskWrite $State $journal $Event $before $targetDescription
         if ($null -ne $hold) { return $hold }
@@ -721,22 +780,12 @@ function Reconcile-FinalStoryAcceptance {
         [System.Collections.IDictionary] $Event
     )
 
-    foreach ($required in @('eventId', 'taskId', 'revision', 'authorization', 'reviewerId', 'criteria', 'repository', 'worktree', 'branch', 'headSha', 'scopeHash')) {
-        if (-not $Event.Contains($required)) { throw "final story acceptance requires $required" }
-    }
     $marker = "story|$($Event.revision)"
     if ($State.storyAcceptanceMarker -eq $marker) {
         return [ordered]@{ decision = 'duplicate'; state = $State }
     }
-    if ([string]$Event.authorization -cne [string]$State.authorization -or
-        [string]$Event.repository -cne [string]$State.repository -or
-        [string]$Event.worktree -cne [string]$State.worktree -or
-        [string]$Event.branch -cne [string]$State.branch -or
-        [string]$Event.headSha -cne [string]$Event.revision -or
-        [string]$Event.scopeHash -cne [string]$State.scopeHash) { throw 'final story acceptance binding is stale' }
-    if ([string]$Event.reviewerId -cne [string]$State.reviewer -or [string]$Event.criteria -cne 'complete') {
-        throw 'final story acceptance is not from the assigned reviewer with complete criteria'
-    }
+    Assert-FinalStoryAcceptancePreflight $State $Event
+    $State.pendingFinalStoryAcceptance = $marker
 
     foreach ($task in @($State.tasks)) {
         if ([string]$task.state -ne 'implementation_complete' -or [string]::IsNullOrWhiteSpace([string]$task.pendingSha)) {
@@ -745,13 +794,18 @@ function Reconcile-FinalStoryAcceptance {
         $providerTask = Get-ProviderTaskSnapshot $State.provider ([int]$task.taskId)
         $targetDescription = Merge-ProviderChecklist $providerTask.description @('Final story review evidence')
         $actionKey = "story-task|$($task.taskId)|$($Event.revision)"
-        if ($providerTask.statusId -ne [int]$State.provider.statusMapping.accepted -or $providerTask.description -ne $targetDescription) {
-            $write = Invoke-ProviderTaskWrite $State.provider ([int]$task.taskId) $providerTask.version ([int]$State.provider.statusMapping.accepted) $targetDescription $actionKey
-            $after = Get-ProviderTaskSnapshot $State.provider ([int]$task.taskId)
-            if ($after.statusId -ne [int]$State.provider.statusMapping.accepted -or $after.description -ne $targetDescription) {
-                return Add-ReconciliationHold $State $actionKey "final task write outcome '$($write.outcome)' is unresolved"
+        if (-not $State.acceptanceJournal.ContainsKey($actionKey)) {
+            $State.acceptanceJournal[$actionKey] = [ordered]@{
+                marker = $actionKey
+                statusConfirmed = $false
+                commentConfirmed = $true
+                humanDecision = $null
             }
         }
+        $journal = $State.acceptanceJournal[$actionKey]
+        $State.pendingAcceptance = $journal
+        $hold = Confirm-ProviderTaskWrite $State $journal $Event $providerTask $targetDescription
+        if ($null -ne $hold) { return $hold }
     }
 
     $commentMarker = "Story #870 final review accepted | acceptance: $marker"
@@ -771,6 +825,8 @@ function Reconcile-FinalStoryAcceptance {
         $task.pendingSha = $null
     }
     $State.storyAcceptanceMarker = $marker
+    $State.pendingFinalStoryAcceptance = $null
+    $State.pendingAcceptance = $null
     $State.finalStoryState = 'accepted'
     $State.storyMerged = $false
     $State.storyReleased = $false
@@ -979,6 +1035,8 @@ $staleAcceptance = New-TaskAcceptanceEvent $staleState 'stale-task' $staleSha 66
 Assert-Throws { Resume-ImplementerOnReviewerMessage $staleState $staleAcceptance | Out-Null } 'acceptance for another task must not close the current task'
 $oldAcceptance = New-TaskAcceptanceEvent $staleState 'stale-sha' (('c' * 40))
 Assert-Throws { Resume-ImplementerOnReviewerMessage $staleState $oldAcceptance | Out-Null } 'acceptance for an old SHA must not advance the current task'
+$invalidAcceptance = New-TaskAcceptanceEvent $staleState 'invalid-sha' 'x'
+Assert-Throws { Resume-ImplementerOnReviewerMessage $staleState $invalidAcceptance | Out-Null } 'acceptance must require a full reviewed SHA'
 Assert-True (@($staleState.provider.taskWrites).Count -eq 0 -and @($staleState.provider.storyWrites).Count -eq 0) 'stale acceptance must not reach the provider'
 
 $humanState = New-ReconciliationState 'per_task'
@@ -992,9 +1050,25 @@ Assert-True ($humanConflict.decision -eq 'reconcile_required') 'a human edit bet
 Assert-True ($humanState.provider.tasks['65'].statusId -eq $humanState.provider.humanStatusId -and $humanState.currentTaskIndex -eq 0) 'human status must be preserved while reconciliation is unresolved'
 Assert-True (@($humanState.provider.storyWrites).Count -eq 0) 'human conflict must not add progress before a decision'
 $humanAcceptance.humanDecision = 'replace_after_decision'
-$humanResolved = Reconcile-TaskAcceptance $humanState $humanAcceptance
+$humanResolved = Resume-ImplementerOnReviewerMessage $humanState $humanAcceptance
 Assert-True ($humanResolved.decision -eq 'advance_next_task' -and $humanState.provider.tasks['65'].statusId -eq $humanState.provider.statusMapping.accepted) 'explicit replacement decision must use the current version and then advance'
 Assert-True ($humanState.provider.tasks['65'].description.Contains('- [x] Human-owned note')) 'replacement must preserve the human checklist edit'
+
+$reopenedState = New-ReconciliationState 'per_task'
+$reopenedSha = ('6' * 40)
+Complete-ReviewHandoff $reopenedState @{ eventId = 'reopened-ready'; kind = 'ready_for_review'; taskId = 65; revision = $reopenedSha; reviewerId = $reopenedState.reviewer; authorization = $reopenedState.authorization } | Out-Null
+$reopenedAcceptance = New-TaskAcceptanceEvent $reopenedState 'accept-reopened' $reopenedSha
+$reopenedMarker = "task|65|$reopenedSha"
+$reopenedJournal = [ordered]@{ marker = $reopenedMarker; statusConfirmed = $false; commentConfirmed = $false; humanDecision = $null }
+$reopenedState.acceptanceJournal[$reopenedMarker] = $reopenedJournal
+$reopenedState.pendingAcceptance = $reopenedJournal
+$reopenedBefore = Get-ProviderTaskSnapshot $reopenedState.provider 65
+$reopenedDescription = Merge-ProviderChecklist $reopenedBefore.description @($reopenedAcceptance.checklistEvidence)
+$null = Confirm-ProviderTaskWrite $reopenedState $reopenedJournal $reopenedAcceptance $reopenedBefore $reopenedDescription
+$reopenedState.provider.tasks['65'].statusId = $reopenedState.provider.humanStatusId
+$reopenedState.provider.tasks['65'].version++
+$reopenedHold = Resume-ImplementerOnReviewerMessage $reopenedState $reopenedAcceptance
+Assert-True ($reopenedHold.decision -eq 'reconcile_required' -and $reopenedState.currentTaskIndex -eq 0) 'recovery must re-read status after a human reopens a confirmed task'
 
 $lostState = New-ReconciliationState 'per_task'
 $lostSha = ('e' * 40)
@@ -1043,7 +1117,14 @@ foreach ($providerTask in @($storyEndState.provider.tasks.Values)) {
 }
 Assert-True (@($storyEndState.provider.tasks.Values | Where-Object { $_.statusId -eq $storyEndState.provider.statusMapping.accepted }).Count -eq 0) 'story_end_only implementation milestones must not close tasks'
 $storyEndState.turnStatus = 'awaiting_review'
+$unrelatedStoryAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-unrelated-sha' (('5' * 40))
+Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $unrelatedStoryAcceptance | Out-Null } 'final story acceptance must match the pending final-review SHA'
 $storyEndAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-final-accept' $storyEndLastSha
+$storyEndState.provider.tasks['65'].statusId = $storyEndState.provider.humanStatusId
+$storyEndState.provider.tasks['65'].version++
+$storyEndConflict = Resume-ImplementerOnReviewerMessage $storyEndState $storyEndAcceptance
+Assert-True ($storyEndConflict.decision -eq 'reconcile_required' -and $storyEndState.finalStoryState -ne 'accepted') 'final story acceptance must preserve a human status until a decision'
+$storyEndAcceptance.humanDecision = 'replace_after_decision'
 $storyEndResult = Resume-ImplementerOnReviewerMessage $storyEndState $storyEndAcceptance
 Assert-True ($storyEndResult.decision -eq 'final_story_reconciled' -and $storyEndState.finalStoryState -eq 'accepted') 'final story acceptance must reconcile deferred task closure'
 Assert-True (@($storyEndState.provider.tasks.Values | Where-Object { $_.statusId -ne $storyEndState.provider.statusMapping.accepted }).Count -eq 0) 'final story acceptance must close every implementation task with current versions'
