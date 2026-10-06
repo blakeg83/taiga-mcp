@@ -70,6 +70,29 @@ already-confirmed operation. A version-conflicted human edit is preserved and
 requires an explicit reconciliation decision before the accepted transition or
 advancement can proceed.
 
+### Ordered continuation and implementation-start evidence
+
+After both the accepted task/status write and its marker-bearing parent-story
+comment are confirmed, the implementer rereads the next declared task and its
+current version. If the selected review mode permits advancement, it updates
+only that task to the discovered `In progress` status and confirms the returned
+version. In the same resumed turn it must begin concrete task-scoped work: the
+first source/documentation edit or first task-scoped check with actual output.
+A status-only write, plan, or intention is not evidence that the next task
+started.
+
+Record the durable start with a current-version parent-story comment using the
+idempotency marker:
+
+`Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>`
+
+An existing exact marker confirms a response-lost comment write; do not add a
+duplicate. This marker is implementation evidence, not acceptance. If the
+accepted task is final, activate no next task; freeze the exact current HEAD
+and request exactly one separate final whole-story review. In
+`story_end_only`, implementation-ready evidence follows this same concrete
+start sequence without task acceptance or per-task review dispatch.
+
 If the task includes UI/browser, wrapper, benchmark, or smoke evidence, exact
 revision acceptance also checks the evidence plan from
 `acceptance-evidence.md`: capability limitations have a documentation or probe

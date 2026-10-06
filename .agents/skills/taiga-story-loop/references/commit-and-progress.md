@@ -96,3 +96,25 @@ before retrying. If the marker is present, treat the comment as submitted; if
 it is absent, retry only with the newly authoritative story version. Preserve
 all human comments and report an unresolved result when the pages are
 incomplete.
+
+## Next-task implementation-start marker
+
+Acceptance releases only the next declared task after the accepted task write
+and acceptance marker are both confirmed. The implementer then reads the next
+task/version, writes only its current-version `In progress` status, and begins
+concrete task-scoped work in the same resumed turn. The first source or
+documentation edit, or the first task-scoped check with actual output, is
+observable implementation-start evidence; a status-only write, plan, or
+intention is insufficient.
+
+Record that evidence in one current-version parent-story comment:
+
+```text
+Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>
+```
+
+The marker is idempotent progress evidence and does not claim acceptance,
+review readiness, story approval, or merge. If the accepted task is final,
+there is no next-task marker; freeze the current HEAD and use the separate
+whole-story review endpoint. In `story_end_only`, use the same marker after
+implementation-ready evidence without task acceptance or per-task dispatch.

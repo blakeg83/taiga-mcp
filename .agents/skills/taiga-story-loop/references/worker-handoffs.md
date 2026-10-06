@@ -31,6 +31,26 @@ Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, inspect this exact revision and report findings or acceptance to the implementer.
 ```
 
+## Confirmed ready-turn endpoint
+
+The task-ready message is only the payload for a ready-turn transaction. The
+implementer first freezes the task evidence, current-version Taiga/progress
+record, commit, and revision tuple, then sends exactly one direct message to
+the assigned reviewer. A successful delivery result for that exact reviewer,
+task, and revision is the only confirmation that permits the task to enter
+`awaiting_review` and the implementer to issue its concise final response.
+That final response is the last action in the turn.
+
+If the send fails or its result is unknown, the implementer must not claim
+`awaiting_review`, release the next ordered task, or blindly redispatch. It
+preserves the pending revision and routes the delivery uncertainty to the
+coordinator for reconciliation. The same delivery endpoint applies to
+correction-ready handoffs and to the separate final-story review; final-story
+dispatch preserves the already-confirmed per-task accepted closures or
+story_end_only implementation-ready endpoint, carries the exact current
+HEAD/scope packet and one deduplication identity, and does not rewrite provider
+status merely to request review.
+
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
 truncate the SHA. Verify the expected branch/worktree and clean tracked-source
 state first. The revision tuple is immutable review input. In `per_task` mode,
@@ -108,6 +128,17 @@ the same persistent pair; it cannot advance another task or authorize a scope
 change. The coordinator is involved only when delivery, identity, revision, or
 scope reconciliation is required.
 
+## Final story-review handoff
+
+After the final task reaches the selected review-mode endpoint, the implementer
+freezes the whole-story scope, ordered revisions, definition-of-done evidence,
+deferred owners, required checks, and exact current HEAD. It sends one direct
+final-review request to the same persistent reviewer. Only a successful direct
+delivery creates the pending final review and permits the final response; the
+response is the last implementer action. A failed or unknown final-review
+delivery is a coordinator reconciliation case, not a story review wait, and
+does not authorize a blind redispatch.
+
 ## Message-driven resume
 
 A reviewer message resumes the same implementer chat under the user's existing
@@ -141,6 +172,38 @@ The coordinator's scoped recovery heartbeat handles a genuine interruption or
 missing handoff. An idle implementer in `awaiting_review` after a confirmed
 handoff is healthy: do not wake it to check status or re-send readiness. See
 [continuation recovery](continuation-note.md#healthy-heartbeat-versus-recovery).
+
+## Acceptance-to-next-task resume
+
+After the assigned reviewer sends an exact current-task acceptance, the same
+implementer chat owns the ordered continuation. It first matches the reviewer,
+task, reviewed SHA, authorization, branch/worktree/HEAD, clean source state,
+and already-handled outcome. A stale, duplicate, wrong-task, or conflicting
+message cannot write Taiga or release a newer gate.
+
+The durable sequence is:
+
+1. Read the current task/version and merge only evidence-backed checklist items.
+2. Write and confirm the accepted task status/checklist with that version.
+3. Read the parent story and write/confirm the marker-bearing acceptance
+   comment with its current version. Response-lost, interrupted, or
+   version-conflicted writes hold the pointer and resume the same journal;
+   confirmed operations are not blindly repeated.
+4. If another declared task remains and the selected review mode allows it,
+   read its complete detail/version, set only that task `In progress`, and
+   confirm the returned version.
+5. Begin concrete work on that next task in the same resumed turn. Observable
+   evidence is a task-scoped source/documentation edit or the first
+   task-scoped check with actual output; a status write, plan, or intention is
+   insufficient. Then add one current-version parent-story marker:
+
+   `Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>`
+
+The start marker is idempotent progress evidence and does not mean the task is
+accepted or review-ready. If the accepted task is final, activate no next task;
+freeze the exact current HEAD and request exactly one separate final-story
+review. In `story_end_only`, implementation-ready evidence follows the same
+next-task start sequence without task acceptance or per-task review dispatch.
 
 ## Route table
 

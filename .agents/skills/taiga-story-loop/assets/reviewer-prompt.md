@@ -41,13 +41,19 @@ Treat an unexpected/undeclared failure, a nonzero exit without named failure
 evidence, or missing regression/safety coverage as a finding; do not require
 downstream implementation merely to make an intentionally red task green.
 
-The implementer ends its turn after each per-task ready/correction handoff.
-Your authorized findings or acceptance message wakes that same chat; include
+The implementer ends its turn after each per-task ready/correction handoff only
+when the persistent reviewer received a successful direct delivery for the
+exact task and revision. Your authorized findings or acceptance message wakes that same chat; include
 the task ref and exact reviewed SHA. Do not ask it to poll or stay active, and
 do not repeat an unchanged outcome to wake it. Reconcile an unknown delivery
 with the coordinator before retrying. A failed or unknown handoff is not a
 confirmed `awaiting_review` state, and a healthy idle review wait needs no
 reminder or coordinator acknowledgement.
+
+The same confirmed-delivery terminal boundary applies to the separate final
+story-review request: inspect only the exact HEAD/scope packet after a
+successful direct delivery, and treat failed or unknown delivery as
+coordinator reconciliation rather than a review wait.
 
 The scoped workflow may dispatch these ordinary review messages automatically
 from durable task events. A ready event receives one review request, a current

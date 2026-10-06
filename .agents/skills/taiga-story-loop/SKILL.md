@@ -63,10 +63,33 @@ the coordinator receives only final story approval and exceptional escalation.
 Duplicate, stale, idle, scope-changing, and uncertain outcomes remain
 coordinator-owned.
 
+The ready-turn endpoint is one successful direct delivery to the assigned
+reviewer, followed by the worker-local `awaiting_review` state and one concise
+final response. For an initial or correction-ready task handoff, the
+implementation-complete Taiga review-ready status (or documented fallback) and
+story progress write are already confirmed and frozen in the revision packet;
+that provider mapping is not delivery confirmation. For final-story review,
+the selected review-mode endpoint is already confirmed instead: per-task review
+has exact accepted task closures and progress, while story-end-only has final
+implementation-ready evidence, status, and progress. Final-story dispatch
+does not rewrite a task or story provider status merely to request review. A
+failed or unknown delivery is an exception: it is not worker-local
+`awaiting_review`, does not release ordered work, and is not blindly retried;
+the coordinator must reconcile it first. After confirmed delivery, the final
+response is the last implementer action, with no polling, reviewer read,
+keep-alive, source edit, or next-task work.
+
 In per-task review, initial and correction-ready handoffs end the implementer
 turn in `awaiting_review`. Authorized reviewer messages resume the same chat;
 the implementer never polls the reviewer. Follow the identity/revision and
 deduplication checks in [message-driven resume](references/worker-handoffs.md#message-driven-resume).
+
+After exact current-task acceptance and version-safe Taiga reconciliation, use
+the [acceptance-to-next-task resume](references/worker-handoffs.md#acceptance-to-next-task-resume)
+sequence. It activates only the next declared task and requires concrete
+implementation or check evidence in that same resumed turn; a status-only
+write, plan, or intention is not advancement. A final task skips activation
+and proceeds to one separate whole-story review at the frozen current HEAD.
 
 Use [per-task commits and parent-story progress comments](references/commit-and-progress.md)
 for commit boundaries, exact SHA/no-change evidence, completion and blocker

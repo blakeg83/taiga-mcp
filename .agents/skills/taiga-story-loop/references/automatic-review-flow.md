@@ -34,15 +34,43 @@ authoritative.
 
 | Event | Required proof | Automatic result |
 | --- | --- | --- |
-| Implementer sends `ready_for_review` | Current task, current committed full HEAD, expected repository/worktree and branch, base/diff/path record, clean tracked-source state, the confirmed `Start` authorization and assignment identity, checklist evidence, checks, and confirmed delivery to the required reviewer | Send one direct review request to the persistent reviewer; set the task to the review-ready mapping or its documented fallback; hold the next task; issue the concise final response and end the implementer turn; do not copy the coordinator |
+| Implementer sends `ready_for_review` | Current task, current committed full HEAD, expected repository/worktree and branch, base/diff/path record, clean tracked-source state, the confirmed `Start` authorization and assignment identity, checklist evidence, checks, confirmed implementation-complete Taiga/progress writes, and confirmed delivery to the required reviewer (a successful direct-delivery result for that assigned reviewer) | Confirm the task's review-ready mapping or documented fallback before freezing the packet; Send one direct review request to the persistent reviewer exactly once; only after successful delivery record the worker-local `awaiting_review` state, hold the next task, issue the concise final response and end the implementer turn; failed/unknown delivery remains an exception and is not blindly retried. The provider write is not dispatch confirmation. |
 | Implementer sends `implementation_ready` in `story_end_only` | Current task, committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Record implementation evidence and advance the next ordered task without task acceptance or a per-task review; request one final story review after the last task directly from the implementer to the reviewer |
 | Reviewer sends `changes_requested` | Assigned reviewer, current task, exact pending SHA, finding, and requested correction | Reopen only that task and send the finding directly to the same implementer; require a new revision and review delta |
-| Implementer sends correction-ready | Same current task, assigned reviewer, previous full reviewed SHA, new committed full SHA, expected branch/worktree, clean tracked-source state, base/diff/path review delta, and confirmed delivery to that reviewer | Send the new revision directly to the same reviewer; record the new pending revision; supersede prior approval; issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle |
+| Implementer sends correction-ready | Same current task, assigned reviewer, previous full reviewed SHA, new committed full SHA, expected branch/worktree, clean tracked-source state, base/diff/path review delta, confirmed implementation-complete Taiga/progress writes, and confirmed delivery to that reviewer (a successful direct-delivery result for that reviewer) | Confirm the corrected task's review-ready mapping or documented fallback before freezing the packet and sending exactly one new revision to the same reviewer; only after successful delivery record the worker-local `awaiting_review` state and supersede prior approval, issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle; failed/unknown delivery remains an exception. The provider write is not dispatch confirmation. |
 | Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
 | Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Deliver acceptance directly to the implementer; the implementer applies the version-safe accepted/Done transition, reconciles progress, then advances the next ordered task |
-| Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
+| Implementer starts next task | Prior task has the required accepted evidence and confirmed task/progress reconciliation in `per_task`, or implementation evidence, status, comment, and commit in `story_end_only`; the next task detail/version and clean branch state are current | Mark only the next declared task active in the same implementer chat and story branch, then perform a concrete task-scoped edit or check in that same resumed turn and record the parent-story implementation-start marker; a status-only write, plan, or intention is not advancement; do not add a coordinator assignment or reminder |
 | Final task reaches the selected review-mode endpoint | `per_task`: every selected task has exact-revision acceptance; `story_end_only`: every selected task has implementation-ready evidence | Request exactly one final whole-story review from the reviewer at the exact current HEAD; do not treat the last task acceptance or implementation milestone as story approval |
 | Reviewer accepts the final story review | Assigned reviewer, final-review request identity, exact current repository/worktree/branch/HEAD/scope, definition-of-done evidence, ordered task coverage, cross-task evidence, deferred-criterion evidence, independent checks, inspected worker evidence, and limitations | Send one exact-HEAD story approval to the coordinator; only the coordinator may open the topology-specific PR; do not merge automatically |
+
+### Ready-turn transaction
+
+For initial, correction-ready, and final-story review events, the dispatch
+boundary is ordered and terminal:
+
+1. For an initial or correction-ready task handoff, complete and confirm the
+   required task/story Taiga/progress writes, including the provider
+   review-ready mapping or documented fallback, then freeze the relevant
+   revision packet before dispatch. For final-story review, preserve the
+   selected review-mode endpoint instead: per-task review requires exact
+   accepted task closures and progress, while story_end_only requires the final
+   implementation-ready evidence, status, and progress. Do not rewrite a task
+   or story provider status merely to request final review. Provider state is
+   not handoff confirmation.
+2. Send exactly one direct message to the assigned persistent reviewer and
+   require a successful delivery result for that exact identity/revision.
+3. Only then enter worker-local `awaiting_review` and issue the concise final
+   response. Do not perform a new provider status write at this endpoint. The
+   response is the last implementer action in that turn.
+4. On failed or unknown delivery, keep the event in coordinator reconciliation;
+   do not present a healthy review wait, release ordered work, or blindly
+   redispatch. A healthy idle review wait is distinct from this exception.
+
+The provider review-ready mapping is a prerequisite only for initial and
+correction-ready task handoffs. Final-story dispatch preserves its already
+confirmed accepted-closure or implementation-ready endpoint; only the
+worker-local `awaiting_review` state waits for successful delivery.
 
 ### Acceptance reconciliation transaction
 
@@ -54,6 +82,18 @@ unrelated human edits, and applies the project-specific task status mapping.
 It then confirms the status/checklist write and a marker-bearing parent-story
 progress comment separately. Advancement is legal only after both are
 authoritatively observed.
+
+When the current task is not final and the selected review mode releases the
+next task, the implementer then rereads the next declared task/version, writes
+only its project-specific `In progress` status, and confirms that write. In the
+same resumed turn it must perform a concrete task-scoped source/documentation
+edit or check with actual output and record a current-version marker of the
+form `Task #<ref> started | status: In progress | state:
+implementation_started | evidence: <path-or-command>`. A status-only write,
+plan, or intention is not implementation-start evidence. If the accepted task
+is final, no next-task status is written: freeze the current HEAD and use the
+single final-story review endpoint. `story_end_only` follows the same concrete
+start rule from implementation-ready evidence without per-task acceptance.
 
 An unknown or version-conflicted task/status/comment operation holds the
 acceptance and ordered pointer. The implementer rereads the task/story and
@@ -77,11 +117,12 @@ requirement, or new finding.
 - A ready event, idle status, timeout, elapsed time, or implementation commit
   is not reviewer acceptance.
 - After a confirmed initial or correction-ready delivery, the implementer turn
-  ends immediately. The implementer does not call `wait_threads`, read or poll
-  the reviewer chat, run a review monitor, send a keep-alive or unchanged
-  acknowledgement, or make source changes while the review is pending. Only a
-  current authorized reviewer message or evidenced recovery may resume the
-  same implementer chat.
+  ends immediately. The same terminal rule applies to final-story delivery.
+  The implementer does not call
+  `wait_threads`, read or poll the reviewer chat, run a review monitor, send a
+  keep-alive or unchanged acknowledgement, make source changes, or start the
+  next task while the review is pending. Only a current authorized reviewer
+  message or evidenced recovery may resume the same implementer chat.
 - A failed or unknown handoff delivery is an exceptional coordinator
   reconciliation, not `awaiting_review` and not permission to re-dispatch.
 - A healthy idle `awaiting_review` worker is not woken by recovery. Recovery

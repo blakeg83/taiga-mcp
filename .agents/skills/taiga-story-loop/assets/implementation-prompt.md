@@ -122,18 +122,55 @@ For each task:
    `<base SHA>..<reviewed SHA>` diff/path record. Copy the full SHA from Git;
    never shorten or transcribe it. A dirty source state or unexpected HEAD is a
    revision conflict: preserve the change and escalate it.
-7. Mark implementation-complete work `Ready for test` (or the discovered
-   project-specific review-ready status), not `Closed`/`Done`. Add one concise
-   comment to the parent story naming the task, checklist outcome, checks and
-   exit codes, endpoint/deferred evidence, commit SHA or verified no-change
-   result, and the state `ready for review`. Reviewer acceptance and a
-   closed/done transition are
+7. Before dispatch, mark implementation-complete work `Ready for test` (or the
+   discovered project-specific review-ready status), not `Closed`/`Done`, and
+   confirm that versioned provider write. Add one concise comment to the parent
+   story naming the task, checklist outcome, checks and exit codes,
+   endpoint/deferred evidence, commit SHA or verified no-change result, and the
+   state `ready for review`. This provider mapping and progress write belong in
+   the frozen packet; they are not confirmation that the reviewer received the
+   handoff. Reviewer acceptance and a closed/done transition are
    separate facts and are not implied by this worker result. In `per_task` mode,
    do not advance to the next ordered task until independent reviewer acceptance
    of this exact current task commit is recorded. In `story_end_only` mode,
    advance after the current task's implementation evidence, status write,
    parent-story comment, and commit are recorded; preserve the exact revision
    for the final story review and do not claim task acceptance.
+
+## Ready-turn transaction
+
+Every review handoff uses the same terminal delivery boundary for an initial
+task, correction, or final-story review, with the provider-state prerequisite
+qualified by review mode:
+
+1. For an initial or correction-ready task handoff, complete and confirm the
+   task evidence, current-version Taiga/progress reconciliation (including the
+   provider review-ready mapping), commit, and immutable revision packet before
+   dispatching the review message. For final-story review, do not rewrite a
+   task or story provider status: in `per_task`, confirm exact accepted task
+   closures and progress; in `story_end_only`, confirm the final
+   implementation-ready evidence, status, and progress. Freeze the immutable
+   final-story packet from that already-confirmed endpoint. Provider state is
+   never delivery confirmation.
+2. Send exactly one direct handoff to the assigned persistent reviewer. A
+   successful send result for that exact destination, task/story, and revision
+   is the delivery confirmation; an intent to send, timeout, or idle reviewer
+   is not confirmation.
+3. Only after that successful result, record the worker-local
+   `awaiting_review` state; do not perform a new provider status write at this
+   endpoint. Send the concise final response. That response is the last action
+   in the turn.
+4. If delivery fails or is unknown, do not describe the task or story as
+   `awaiting_review`, release the next task, or blindly retry. Preserve the
+   pending revision and report the delivery exception to the coordinator for
+   reconciliation.
+
+After a confirmed delivery, the implementer performs no `wait_threads`,
+reviewer read/poll, review monitor, keep-alive acknowledgement, source edit,
+or next-task action. The final-story transaction uses the same rule with the
+exact current HEAD/scope packet and one deduplication identity. In
+`story_end_only`, implementation-ready evidence may advance task order, but it
+never creates a per-task review handoff.
 
 Use the task's stable ref and commit SHA as the completion-comment idempotency
 marker. On resume, read the parent-story comments before writing: reuse an
@@ -196,12 +233,45 @@ conflicted, hold the acceptance and reconcile detail/history; resume the same
 acceptance marker without blindly repeating confirmed operations. A final story
 approval belongs to the coordinator and is bound to an exact reviewed HEAD.
 
+### Acceptance-to-next-task resume
+
+After the current task's accepted status/checklist write and marker-bearing
+parent-story acceptance comment are both authoritatively confirmed, and only
+when the selected review mode permits advancement:
+
+1. Re-read the ordered task pointer and the next declared task's complete
+   detail/version. Do not infer order from an API sort, a chat message, or a
+   stale continuation note.
+2. Update only that next task to the discovered project-specific `In progress`
+   status using its current version. Confirm the returned task/version; a
+   status change alone is not implementation-start evidence.
+3. In the same resumed implementer turn, begin concrete task-scoped work: make
+   the first source/documentation edit or run the first task-scoped check and
+   retain its actual path/output. A plan, intention, status write, or statement
+   that work will start does not satisfy this gate.
+4. Record one parent-story implementation-start marker using the current story
+   version after that concrete evidence exists:
+
+   `Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>`
+
+   Re-read comments before retrying a response-lost marker write; an existing
+   exact marker confirms it and must not be duplicated. The marker is progress
+   evidence, not task acceptance or review approval.
+
+If the reconciled task is the final ordered task, do not activate another task
+or write a replacement status. Freeze the exact current HEAD and request one
+separate final whole-story review. In `story_end_only`, the same concrete-start
+sequence follows implementation-ready evidence, status, parent-story comment,
+and commit evidence without creating per-task acceptance or review dispatch.
+
 In `per_task` mode, do not start the next task until the current task has its
 implementation evidence, status write, parent-story comment, commit outcome,
 and explicit reviewer acceptance of the exact current task commit recorded. In
 `story_end_only` mode, start the next ordered task after the current task's
 implementation evidence, status write, parent-story comment, and commit
-outcome are recorded; retain the task revision for the final review. In either
+outcome are recorded, then produce concrete implementation-start evidence and
+the parent-story start marker in the same resumed turn; retain the task
+revision for the final review. In either
 mode, a task being `Ready for test`, having a completion comment, or having any
 historical commit is not reviewer acceptance.
 

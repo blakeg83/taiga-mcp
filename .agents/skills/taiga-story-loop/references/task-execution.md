@@ -32,7 +32,7 @@ Map logical states to the discovered task metadata:
 | --- | --- | --- |
 | `not_started` | no task work has begun | project `New` or equivalent |
 | `in_progress` | the current task is being implemented or corrected | project `In progress` or equivalent |
-| `awaiting_review` | implementation evidence is complete; independent review is pending | project review-ready status |
+| `awaiting_review` | implementation evidence is complete and the direct handoff was confirmed; independent review is pending | project review-ready status written before dispatch, or the documented in-progress fallback |
 | `accepted` | the reviewer accepted the exact implementation revision | project closed/done status |
 | `blocked` | work cannot safely continue without a decision or external change | project blocked/needs-info status, when available |
 
@@ -101,10 +101,15 @@ repository/worktree and branch, record the `<base SHA>..<reviewed SHA>` diff and
 relevant paths, and verify clean tracked source. Declared ignored verification
 outputs may remain, but non-ignored source changes block readiness.
 
-At implementation completion, update the current version to
-`mapping.awaiting_review` (or the documented in-progress fallback). The worker
-must not write `mapping.accepted`. In `per_task` mode, only an independent
-reviewer acceptance for the same revision allows the current task to become
+At implementation completion, before dispatch, update and confirm the current
+version to the project-specific review-ready mapping (or the documented
+in-progress fallback). The worker must not write `mapping.accepted`. This
+provider status write, together with the story progress write, belongs in the
+frozen revision packet and is not proof that the reviewer received the
+handoff. After one successful direct delivery to the assigned reviewer, record
+the worker-local `awaiting_review` state; do not perform a new provider status
+write at that endpoint. In `per_task` mode, only an independent reviewer
+acceptance for the same revision allows the current task to become
 `mapping.accepted`/Done or releases the next ordered task. In
 `story_end_only` mode, implementation evidence may release the next ordered
 task after the current task's status, checklist, comment, and commit evidence
@@ -152,6 +157,22 @@ provider write receipt. The implementer owns one acceptance journal keyed by
 5. read the parent story and add one marker-bearing progress comment using its
    current version; and
 6. advance only after both the task transition and comment are authoritative.
+
+For a non-final task, advancement then has a second observable boundary: read
+the next declared task/version, set only that task to `mapping.in_progress`,
+confirm the returned version, and begin concrete task-scoped work in the same
+resumed turn. The first source/documentation edit or first task-scoped check
+with actual output is implementation-start evidence; a status-only write,
+plan, or intention is not. Record the evidence with one current-version
+parent-story marker:
+
+`Task #<ref> started | status: In progress | state: implementation_started | evidence: <path-or-command>`
+
+If the accepted task is final, do not activate another task. Freeze the exact
+current HEAD and use the separate final-story review endpoint. In
+`story_end_only`, apply the same concrete-start rule after implementation-ready
+evidence, status, parent-story comment, and commit evidence, without claiming
+task acceptance or dispatching a per-task review.
 
 The journal remains pending when the task write applies but its response is
 lost, when the comment sequence is interrupted, or when a human edit creates a
