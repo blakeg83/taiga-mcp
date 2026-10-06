@@ -110,12 +110,13 @@ identity and follows this read budget:
    identity opens reconciliation before any wait. Otherwise, if a recorded
    user-input, approval, or trial gate remains unanswered, end silently.
    Elapsed time is not an answer.
-2. For an active worker wait, take one compact `wait_threads` snapshot using
-   the recorded thread/host IDs and `afterCursor`, with `timeoutMs: 0`. Preserve
-   returned cursors in place when they change. Ongoing work or an unchanged
-   state ends silently, without appending tick records or timestamps. An idle
-   `awaiting_review` implementer after a confirmed worker-pair handoff is
-   healthy and does not receive a reminder or duplicate readiness request.
+2. For an actively running worker wait, take one compact `wait_threads`
+   snapshot using the recorded thread/host IDs and `afterCursor`, with
+   `timeoutMs: 0`. Preserve returned cursors in place when they change.
+   Ongoing work or an unchanged state ends silently, without appending tick
+   records or timestamps. An implementer in `awaiting_review` after a confirmed
+   worker-pair handoff is not an active worker wait: it is healthy, receives no
+   reminder, duplicate readiness request, reviewer read, or wake-up.
 3. Only new actionable worker evidence, a failure, missing/ambiguous identity,
    an unknown external result, a user response, or an explicit resume after
    interruption opens recovery. Load only the relevant evidence references
@@ -133,7 +134,8 @@ a confirmed handoff is expected. Reviewer messages resume that same chat. Do
 not treat idle/completed chat status alone as interruption, resend readiness,
 or wake the implementer to poll the reviewer. Recover only an evidenced missing
 handoff, failed delivery, or interruption before dispatch; reconcile the
-current task/revision and delivery outcome first.
+current task/revision and delivery outcome first. Unknown delivery is not a
+confirmed review wait.
 
 Record context measurements in a separate evidence report: before/after UTF-8
 bytes and line counts, the scenario and number of corrections/ticks, and
