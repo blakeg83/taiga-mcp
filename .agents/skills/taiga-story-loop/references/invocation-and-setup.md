@@ -28,6 +28,16 @@ After resolution, show one concrete prompt using the actual discovered values.
 Do not split authorization across worker prompts or silently fill unresolved
 placeholders:
 
+Before showing `Start`, inspect the selected story's real acceptance criteria
+and classify whether UI/browser evidence applies. If it does, include a short
+capability/evidence plan in the setup packet: required host/data setup,
+documented or probed capabilities, production entry point and reachability
+control, required arguments/validation, scenario cases, metrics, smoke
+commands, and safe cleanup. If it does not, record that UI/browser evidence is
+not applicable. Do not declare a capability unavailable from a wrapper's
+missing convenience method; record an observed source or probe and keep an
+unavailable result distinct from a skipped or passing check.
+
 ```text
 Taiga story loop setup — <project> <story|epic> #<ref>
 Subject: <subject>
@@ -151,6 +161,8 @@ A worker must not receive a shortened prompt that omits those facts.
 For a repeatable static contract check, run
 `powershell -NoProfile -File scripts/validate-scenarios.ps1` from this skill
 directory. It checks documented terms and expected route labels only; it does
-not execute the skill or call tools. The recorded synthetic walkthroughs in
+not execute the skill or call tools. It also runs the focused offline
+acceptance-evidence fixture; that fixture validates evidence semantics but does
+not open a browser or claim a live run. The recorded synthetic walkthroughs in
 [synthetic-walkthroughs.md](synthetic-walkthroughs.md) are the behavioral
 evidence, with concrete prompts, clarification outcomes, and tool-call traces.

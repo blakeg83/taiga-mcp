@@ -109,6 +109,16 @@ human-edit scenarios are recorded in
 exercised by `scripts/validate-task-execution.ps1`. They are offline evidence,
 not a claim of live-provider execution.
 
+Use [acceptance evidence and capability intake](references/acceptance-evidence.md)
+for UI/browser criteria and any acceptance harness that wraps production code.
+It requires capability discovery before an unavailable claim, a production-path
+control that preserves required arguments and validation, provenance-aware
+metrics, classified scenario evidence, and executable safe smoke instructions.
+The five-case synthetic fixture in
+`assets/acceptance-evidence-scenarios.json` is exercised by
+`scripts/validate-acceptance-evidence.ps1`; it is not browser or live-provider
+evidence.
+
 For authorized execution, read [scope-specific branch topology](references/branch-topology.md),
 [branch and continuation](references/branch-and-continuation.md), and
 [minimal continuation note](references/continuation-note.md). They define the

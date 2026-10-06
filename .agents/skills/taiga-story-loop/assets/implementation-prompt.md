@@ -31,6 +31,16 @@ instructions, and the confirmed branch/worktree receipt. The story's declared
 order is authoritative. Do not infer order from API response order, work on
 later tasks early, silently skip a prerequisite, or expand the scope.
 
+Before implementing a criterion that involves a UI, browser, wrapper,
+benchmark, or smoke flow, create the short acceptance-evidence plan from
+`references/acceptance-evidence.md`. Read the applicable installed skill/tool
+documentation and inspect or probe the authorized host before calling a
+capability unavailable. Record the capability source/result, production entry
+point and reachability control, required arguments/evidence hints and
+validation, scenario classifications, metric conditions/baseline, and safe
+smoke setup/actions/cleanup. For a non-UI change, record that UI/browser
+evidence is not applicable.
+
 Every review handoff uses `references/revision-freeze.md`. The review input is
 the expected repository, absolute worktree, branch, captured base SHA, full
 40-character SHA copied directly from `git rev-parse HEAD`, the relevant diff
@@ -84,6 +94,11 @@ For each task:
    observable criterion from the task description and endpoint. A checked item
    needs direct evidence; a comment or intention is not evidence. If a
    criterion is not applicable, explain why rather than silently checking it.
+   Acceptance wrappers and fakes must reach the production path and preserve
+   required arguments, evidence hints, validation, and result semantics; add a
+   control that would fail for a bypass. Keep intended-operation metrics
+   separate from adjacent cache/stage counts and distinguish automated,
+   visible, and unavailable scenario evidence.
 4. Run the focused checks required by the packet and repository instructions.
    For an authoritative expected-red checkpoint, name each permitted
    behavior/test and exact failure reason, record the complete observed failure
@@ -93,7 +108,8 @@ For each task:
    remain defects. Preserve the command, actual exit code, and concise
    output/evidence.
    If a required check is unavailable, report it as unavailable; never report
-   it as passing.
+   it as passing. A synthetic fixture or capability listing is not browser
+   execution; retain its limitation in the handoff.
 5. Commit all task changes before moving to the next task, using the
    repository's short imperative subject convention. If no file changed, do
    not invent a commit; report the verified no-change result.

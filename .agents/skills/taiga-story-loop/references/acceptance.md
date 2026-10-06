@@ -70,6 +70,18 @@ already-confirmed operation. A version-conflicted human edit is preserved and
 requires an explicit reconciliation decision before the accepted transition or
 advancement can proceed.
 
+If the task includes UI/browser, wrapper, benchmark, or smoke evidence, exact
+revision acceptance also checks the evidence plan from
+`acceptance-evidence.md`: capability limitations have a documentation or probe
+source; the production-path control preserves required arguments, evidence
+hints, validation, and result semantics; metrics identify the intended work
+and comparable conditions; and each required scenario is classified as an
+automated assertion, visible observation, or honest unavailable check. Smoke
+instructions include executable setup/actions/expected results/cleanup and
+safe authorized data. A capability listing, static fixture, or synthetic
+walkthrough is not a browser execution result. Non-UI work must not be held to
+invented UI criteria.
+
 Before applying acceptance, follow the identity, current pending revision, and
 already-handled outcome checks in [message-driven resume](worker-handoffs.md#message-driven-resume).
 A duplicate acceptance is a no-op; acceptance for an old task/revision cannot
