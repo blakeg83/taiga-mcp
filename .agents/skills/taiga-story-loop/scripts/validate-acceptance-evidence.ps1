@@ -236,6 +236,9 @@ Assert-Throws {
     Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'unavailable'; source = 'wrapper convenience API'; sourceType = 'probe'; reason = 'wrapper has no viewport helper' })
 } "$($manifestCases.capability.id) must reject a wrapper-based unavailable claim"
 Assert-Throws {
+    Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'viewport'; status = 'unavailable'; source = 'synthetic host capability probe'; sourceType = 'probe'; reason = 'capability reported missing' })
+} "$($manifestCases.capability.id) must reject an unavailable claim when observed availability is true"
+Assert-Throws {
     Assert-CapabilityClaim -Observed $observedCapabilities -Claim ([ordered]@{ name = 'console'; status = 'available'; source = 'synthetic authorized capability probe'; sourceType = 'probe' })
 } 'an available claim must not contradict an unavailable observation'
 Assert-Throws {

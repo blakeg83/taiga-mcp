@@ -651,6 +651,7 @@ foreach ($marker in @(
 }
 foreach ($marker in @(
         'Assert-CapabilityClaim'
+        'observed availability is true'
         'production-path control'
         'Invoke-BypassingWrapper'
         'Assert-MetricRecord'
