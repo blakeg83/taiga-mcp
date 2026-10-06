@@ -18,10 +18,17 @@ function New-DeliveryReceipt {
         [ValidateSet('standalone','legacy-standalone-feature','epic')] [string] $RunKind = 'epic',
         [string] $Repository = 'TaigaMCP',
         [string] $StoryBranch = 'codex/story-50-run1',
+        [string] $ExpectedBranch = 'codex/story-50-run1',
+        [string] $ExpectedWorktree = 'C:\\Temp\\story-50-run1',
         [string] $FeatureBranch = 'codex/feature-taiga-mcp-run1',
         [string] $PrBase = 'codex/feature-taiga-mcp-run1',
+        [string] $ReviewBaseSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         [string] $ApprovedHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         [string] $BranchHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        [string] $DiffRange = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        [ValidateSet('clean-tracked-source','dirty-tracked-source')]
+        [string] $SourceState = 'clean-tracked-source',
+        [bool] $IgnoredOutputsDeclared = $true,
         [bool] $Clean = $true,
         [bool] $ChecksPassed = $true,
         [string] $ChecksHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -30,10 +37,16 @@ function New-DeliveryReceipt {
         runKind = $RunKind
         repository = $Repository
         storyBranch = $StoryBranch
+        expectedBranch = $ExpectedBranch
+        expectedWorktree = $ExpectedWorktree
         featureBranch = $FeatureBranch
         prBase = $PrBase
+        reviewBaseSha = $ReviewBaseSha
         approvedHead = $ApprovedHead
         branchHead = $BranchHead
+        diffRange = $DiffRange
+        sourceState = $SourceState
+        ignoredOutputsDeclared = $IgnoredOutputsDeclared
         clean = $Clean
         checksPassed = $ChecksPassed
         checksHead = $ChecksHead
@@ -42,6 +55,13 @@ function New-DeliveryReceipt {
 
 function Test-DeliveryPreflight {
     param([hashtable] $Receipt)
+    if ($Receipt.storyBranch -ne $Receipt.expectedBranch) { return 'unexpected_story_branch' }
+    if ([string]::IsNullOrWhiteSpace($Receipt.expectedWorktree)) { return 'missing_story_worktree' }
+    if ($Receipt.reviewBaseSha -notmatch '^[0-9a-f]{40}$') { return 'invalid_review_base' }
+    if ($Receipt.branchHead -notmatch '^[0-9a-f]{40}$') { return 'invalid_review_head' }
+    if ($Receipt.diffRange -ne "$($Receipt.reviewBaseSha)..$($Receipt.branchHead)") { return 'stale_review_range' }
+    if ($Receipt.sourceState -ne 'clean-tracked-source') { return 'dirty_tracked_source' }
+    if (-not $Receipt.ignoredOutputsDeclared) { return 'ignored_output_state_unknown' }
     if (-not $Receipt.clean) { return 'dirty_story_branch' }
     if ($Receipt.approvedHead -ne $Receipt.branchHead) { return 'stale_review' }
     if (-not $Receipt.checksPassed) { return 'failed_checks' }
@@ -62,7 +82,8 @@ function New-PrBody {
         [string] $StoryRef,
         [string] $PrBase,
         [string] $Head,
-        [string[]] $Checks
+        [string[]] $Checks,
+        [hashtable] $Receipt
     )
     @(
         '## Problem'
@@ -76,6 +97,9 @@ function New-PrBody {
         ''
         '## Review'
         "- Reviewed HEAD: ``$Head``"
+        "- Review input: repository ``$($Receipt.repository)`` | worktree ``$($Receipt.expectedWorktree)`` | branch ``$($Receipt.expectedBranch)``"
+        "- Base/diff: ``$($Receipt.reviewBaseSha)`` | ``$($Receipt.diffRange)`` | paths ``<relevant changed paths>``"
+        "- Source state: ``$($Receipt.sourceState)``; ignored verification outputs: ``declared``"
         '- Review profile: ``gpt-6.1-sol/medium``'
         '- Review state: accepted for PR delivery; merge still requires user approval'
         ''
@@ -139,13 +163,25 @@ function New-StoryLink {
 $valid = New-DeliveryReceipt
 Assert-True ((Test-DeliveryPreflight $valid) -eq 'ready') 'matching clean approved HEAD should be deliverable'
 
+$wrongExpectedBranch = New-DeliveryReceipt -ExpectedBranch 'codex/other-story'
+Assert-True ((Test-DeliveryPreflight $wrongExpectedBranch) -eq 'unexpected_story_branch') 'unexpected story branch must block delivery'
+
+$missingWorktree = New-DeliveryReceipt -ExpectedWorktree ''
+Assert-True ((Test-DeliveryPreflight $missingWorktree) -eq 'missing_story_worktree') 'missing story worktree must block delivery'
+
+$staleRange = New-DeliveryReceipt -DiffRange 'cccccccccccccccccccccccccccccccccccccccc..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+Assert-True ((Test-DeliveryPreflight $staleRange) -eq 'stale_review_range') 'stale review diff range must block delivery'
+
+$dirtySource = New-DeliveryReceipt -SourceState 'dirty-tracked-source'
+Assert-True ((Test-DeliveryPreflight $dirtySource) -eq 'dirty_tracked_source') 'dirty tracked source must block delivery'
+
 $standalone = New-DeliveryReceipt -RunKind standalone -FeatureBranch '' -PrBase 'master'
 Assert-True ((Test-DeliveryPreflight $standalone) -eq 'ready') 'standalone story should deliver directly to master without a feature branch'
 
 $legacy = New-DeliveryReceipt -RunKind legacy-standalone-feature
 Assert-True ((Test-DeliveryPreflight $legacy) -eq 'ready') 'legacy standalone resume should preserve its recorded feature PR base'
 
-$stale = New-DeliveryReceipt -BranchHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+$stale = New-DeliveryReceipt -BranchHead 'cccccccccccccccccccccccccccccccccccccccc' -DiffRange 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..cccccccccccccccccccccccccccccccccccccccc'
 Assert-True ((Test-DeliveryPreflight $stale) -eq 'stale_review') 'changed branch HEAD must invalidate review approval'
 
 $dirty = New-DeliveryReceipt -Clean $false
@@ -211,9 +247,12 @@ Assert-True ($standalonePr.state -eq 'create' -and $standalonePr.pr.base -eq 'ma
 $legacyPr = Resolve-Pr @() $legacy 'https://example.invalid/pr/legacy'
 Assert-True ($legacyPr.state -eq 'create' -and $legacyPr.pr.base -eq $legacy.featureBranch -and $legacyPr.pr.head -eq $legacy.branchHead) 'legacy standalone PR must target the preserved feature branch and reviewed HEAD'
 
-$body = New-PrBody '50' $valid.prBase $valid.branchHead @('- `dotnet test` — exit 0; passed', '- `validate-pr-delivery.ps1` — exit 0; passed')
+$body = New-PrBody '50' $valid.prBase $valid.branchHead @('- `dotnet test` — exit 0; passed', '- `validate-pr-delivery.ps1` — exit 0; passed') $valid
 foreach ($marker in @('## Problem', '## Changes', '## Validation', '## Review', '## Scope', $valid.featureBranch, $valid.branchHead)) {
     Assert-True $body.Contains($marker) "PR body must include $marker"
+}
+foreach ($marker in @($valid.expectedWorktree, $valid.expectedBranch, $valid.reviewBaseSha, $valid.diffRange, 'clean-tracked-source', 'ignored verification outputs')) {
+    Assert-True $body.Contains($marker) "PR body must include review-input marker $marker"
 }
 
 $link = New-StoryLink $created.pr $valid @('dotnet test: exit 0', 'contract fixture: exit 0')

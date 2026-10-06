@@ -1,5 +1,9 @@
 # Ordered task execution and truthful Taiga updates
 
+Every implementation-ready revision follows the [clean committed revision
+contract](revision-freeze.md). A status or checklist transition never makes a
+dirty or moved checkout reviewable.
+
 This reference is the Taiga update contract for the story-loop implementer.
 The implementer owns status/checklist writes for the selected story tasks and
 the parent-story progress comments. All tasks in one story remain on that
@@ -90,6 +94,12 @@ Merge endpoint evidence into the existing task checklist/comment rather than
 creating a mandatory receipt schema or duplicating the ticket transcript. Keep
 deferred criteria and their owners visible until their later evidence is
 recorded.
+
+At implementation completion, commit all source changes before sending a
+handoff. Copy the full SHA from `git rev-parse HEAD`, verify the expected
+repository/worktree and branch, record the `<base SHA>..<reviewed SHA>` diff and
+relevant paths, and verify clean tracked source. Declared ignored verification
+outputs may remain, but non-ignored source changes block readiness.
 
 At implementation completion, update the current version to
 `mapping.awaiting_review` (or the documented in-progress fallback). The worker

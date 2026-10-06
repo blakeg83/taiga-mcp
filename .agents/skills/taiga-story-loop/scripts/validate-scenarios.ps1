@@ -39,6 +39,7 @@ $finalEpicReviewPath = Join-Path $skillRoot 'references/final-epic-review.md'
 $finalEpicReviewScriptPath = Join-Path $PSScriptRoot 'validate-final-epic-review.ps1'
 $finalDeliveryPath = Join-Path $skillRoot 'references/final-delivery.md'
 $finalDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-final-delivery.ps1'
+$revisionFreezePath = Join-Path $skillRoot 'references/revision-freeze.md'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -78,6 +79,9 @@ if (-not (Test-Path $finalEpicReviewPath) -or -not (Test-Path $finalEpicReviewSc
 }
 if (-not (Test-Path $finalDeliveryPath) -or -not (Test-Path $finalDeliveryScriptPath)) {
     throw 'Missing final feature-to-master delivery contract or fixture.'
+}
+if (-not (Test-Path $revisionFreezePath)) {
+    throw 'Missing clean committed revision contract.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -120,6 +124,8 @@ $finalEpicReviewText = Get-Content $finalEpicReviewPath -Raw
 $normalizedFinalEpicReview = [regex]::Replace($finalEpicReviewText, '\s+', ' ')
 $finalDeliveryText = Get-Content $finalDeliveryPath -Raw
 $normalizedFinalDelivery = [regex]::Replace($finalDeliveryText, '\s+', ' ')
+$revisionFreezeText = Get-Content $revisionFreezePath -Raw
+$normalizedRevisionFreeze = [regex]::Replace($revisionFreezeText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -244,6 +250,48 @@ Assert-DocumentContains 'feature branch gate' 'creates one uniquely named featur
 Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
 Assert-DocumentContains 'merge advancement gate' 'provider confirms the previous PR merged'
 Assert-DocumentContains 'dirty checkout preservation' 'dirty user checkout'
+if (-not $normalizedRevisionFreeze.Contains('Reviewed SHA: <full 40-character SHA copied from')) {
+    throw 'Revision-freeze assertion failed: full Git SHA review input'
+}
+foreach ($marker in @(
+        'clean tracked source'
+        'git -C <worktree> diff --quiet HEAD --'
+        'git -C <worktree> diff --cached --quiet'
+        'git -C <worktree> ls-files --others --exclude-standard'
+        'Ignored verification outputs'
+        'expected branch'
+        'relevant diff range'
+        'Do not reset, clean, stash, force-push'
+        'previous reviewed SHA'
+        'new full SHA')) {
+    if (-not $normalizedRevisionFreeze.Contains($marker)) {
+        throw "Revision-freeze assertion failed: $marker"
+    }
+}
+if (-not $normalizedHandoff.Contains('Worktree: <absolute story worktree>') -or
+    -not $normalizedHandoff.Contains('Source state: clean tracked source')) {
+    throw 'Handoff assertion failed: complete clean revision input'
+}
+if (-not $normalizedAcceptance.Contains('clean tracked-source state') -or
+    -not $normalizedAcceptance.Contains('hold acceptance')) {
+    throw 'Acceptance assertion failed: clean revision gate'
+}
+if (-not $normalizedPrDelivery.Contains('clean tracked source') -or
+    -not $normalizedPrDelivery.Contains('relevant `<base SHA>..<reviewed SHA>` diff range')) {
+    throw 'PR delivery assertion failed: clean revision preflight'
+}
+foreach ($marker in @(
+        'dirty source at handoff'
+        'tracked source edit during the pending review'
+        'dirty source at handoff must hold delivery'
+        'old acceptance must not survive a changed HEAD'
+        'delivery must wait for review of the correction'
+        'ignored verification output is present'
+        'correction records the new diff range')) {
+    if (-not $normalizedBranchScenario.Contains($marker)) {
+        throw "Branch scenario assertion failed: $marker"
+    }
+}
 Assert-DocumentContains 'persistent pair reference' 'persistent story worker pair'
 Assert-DocumentContains 'pair resolution gate' 'resolves both results to usable'
 Assert-DocumentContains 'pending ID guard' 'pending `clientThreadId` is never a message destination'
@@ -252,6 +300,7 @@ Assert-DocumentContains 'epic topology setup' 'epic-shared-feature'
 Assert-DocumentContains 'legacy topology setup' 'legacy-standalone-feature'
 Assert-ContractsContains 'reviewable endpoint template' '### Reviewable endpoint'
 Assert-ContractsContains 'endpoint artifact' '- Artifact:'
+Assert-ContractsContains 'endpoint revision input' '- Review input:'
 Assert-ContractsContains 'expected outcome' '- Expected check outcome:'
 Assert-ContractsContains 'deferred owner' '- Deferred criteria:'
 Assert-ContractsContains 'advancement gate' '- Advancement gate:'
@@ -282,7 +331,7 @@ if (-not $normalizedAcceptance.Contains('per_task (default)') -or
     throw 'Acceptance assertion failed: review mode choices'
 }
 if (-not $normalizedAcceptance.Contains('Story #<ref> approved') -or
-    -not $normalizedAcceptance.Contains('Reviewed HEAD: <exact commit SHA>')) {
+    -not $normalizedAcceptance.Contains('Reviewed HEAD: <exact full 40-character commit SHA>')) {
     throw 'Acceptance assertion failed: final story approval binding'
 }
 Assert-TaskExecutionContains 'explicit human status decision' 'A human status is never replaced automatically'
@@ -317,7 +366,7 @@ Assert-ContinuationContains 'epic migration classification' 'If the scope identi
 Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
 Assert-ContinuationContains 'ambiguous migration guard' 'feature fields alone do not select the legacy exception'
 Assert-BranchScenarioContains 'story-two starting HEAD guard' 'story two starts at the current feature HEAD'
-Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits story-one content'
+Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits the authoritative corrected story-one content'
 Assert-BranchScenarioContains 'reloaded resume receipt' 'Assert-ResumeReceipt $resumed'
 Assert-BranchScenarioContains 'mismatched lineage guard' 'incorrect saved feature lineage is rejected'
 Assert-BranchScenarioContains 'unknown outcome guard' 'unknown merge does not create the next story branch'
@@ -480,7 +529,7 @@ foreach ($marker in @(
         'Legacy standalone: Yes — merge this exact PR and continue to final release'
         'legacy standalone run has no next-story dispatch'
         'Do not dispatch workers or send repeated notifications'
-        'An approval is bound to the PR URL, repository, base branch, reviewed head, and story scope shown in the prompt.')) {
+        'An approval is bound to the PR URL, repository, expected worktree/branch, base and diff range, clean tracked-source state, full reviewed head, and story scope')) {
     if (-not $normalizedMergeApproval.Contains($marker)) {
         throw "Merge approval assertion failed: $marker"
     }

@@ -1,5 +1,11 @@
 # Final feature-to-master delivery
 
+Final delivery uses the [clean committed revision
+contract](revision-freeze.md). The exact feature input includes the expected
+repository/worktree and branch, full reviewed HEAD, captured base, relevant
+diff range, and clean tracked-source state. A changed source file or HEAD
+holds delivery and invalidates prior approval.
+
 This contract applies to an epic or to an active legacy standalone run. The
 final delivery is a release handoff, not an automatic merge. For an epic it is
 available only after every story PR has been verified merged into the shared
@@ -43,7 +49,7 @@ and is recorded in this form:
 
 ```text
 Legacy final review accepted
-Feature HEAD: <exact refreshed commit SHA>
+Feature HEAD: <exact refreshed full 40-character commit SHA>
 Coverage: <story outcome, preserved integration evidence, and required checks>
 Checks: `<command>` — exit <code>; <concise result>
 Next: coordinator, prepare the final feature-to-master PR; do not merge it.
@@ -68,7 +74,7 @@ The description identifies the path that produced it:
 - Run: <epic or legacy-standalone-feature>
 - Feature branch: `<branch>`
 - Base: `master`
-- Head: `<exact feature SHA>`
+- Head: `<exact full 40-character feature SHA>`
 
 ## Integrated evidence
 - Story integration: <ordered story refs and verified feature merges, including the preserved legacy story merge when applicable>

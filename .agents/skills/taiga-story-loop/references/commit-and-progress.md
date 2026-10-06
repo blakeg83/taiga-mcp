@@ -17,7 +17,8 @@ git commit -m "<short imperative task subject>"
 git rev-parse HEAD
 ```
 
-The implementation worker must report the exact commit SHA and changed paths.
+The implementation worker must report the exact full 40-character commit SHA
+copied from Git and the changed paths.
 Do not add `bin/`, `obj/`, `.vs/`, credentials, temporary files, or unrelated
 user changes. If the task made no file change, run the relevant read-only check
 and report `no-change-verified`; do not invent an empty commit. A failed check

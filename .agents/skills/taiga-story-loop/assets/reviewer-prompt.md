@@ -63,6 +63,16 @@ ordered work. After the final task, send one story approval to the coordinator
 with the exact reviewed HEAD; a task acceptance alone cannot authorize a story
 PR. Any later source change invalidates that approval and requires re-review.
 
+Before inspecting or accepting, apply `references/revision-freeze.md`: verify
+the expected repository, absolute worktree, branch, captured base, exact full
+`git rev-parse HEAD`, relevant diff range/paths, and clean tracked-source
+state. Declared ignored build/test outputs may remain, but a tracked or
+non-ignored source change, unexpected ignored path, branch movement, or changed
+HEAD is a revision conflict. Preserve it, hold acceptance, and escalate to the
+coordinator; never reset, clean, stash, force-push, or silently inspect another
+revision. A correction must name the previous reviewed SHA and the new full SHA
+and receive a fresh review.
+
 For final story approval, require evidence for every deferred criterion from its
 named owner and require exit-0 evidence for every formerly red regression. An
 unresolved RED or deferred criterion is not compatible with `Story #<ref>

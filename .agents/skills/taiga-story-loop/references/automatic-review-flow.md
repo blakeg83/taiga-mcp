@@ -1,5 +1,12 @@
 # Automatic review and ordered-task flow
 
+Every event carries the [clean committed revision
+contract](revision-freeze.md). A ready or correction event is valid only when
+the expected repository/worktree and branch, full current SHA, relevant diff
+range, and clean tracked-source state are verified. Ignored verification
+outputs may be declared; source changes or unexpected HEAD movement require
+revision-conflict reconciliation.
+
 The confirmed story scope authorizes routine review handoffs for the selected
 story. After `Start`, the worker pair must drive the ordinary task loop without
 waiting for the user or coordinator to request each review, re-review, or next
@@ -27,10 +34,10 @@ authoritative.
 
 | Event | Required proof | Automatic result |
 | --- | --- | --- |
-| Implementer sends `ready_for_review` | Current task, current committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, checks, and confirmed delivery to the required reviewer | Send one direct review request to the persistent reviewer; set the task to the review-ready mapping or its documented fallback; hold the next task; issue the concise final response and end the implementer turn; do not copy the coordinator |
+| Implementer sends `ready_for_review` | Current task, current committed full HEAD, expected repository/worktree and branch, base/diff/path record, clean tracked-source state, the confirmed `Start` authorization and assignment identity, checklist evidence, checks, and confirmed delivery to the required reviewer | Send one direct review request to the persistent reviewer; set the task to the review-ready mapping or its documented fallback; hold the next task; issue the concise final response and end the implementer turn; do not copy the coordinator |
 | Implementer sends `implementation_ready` in `story_end_only` | Current task, committed HEAD, the confirmed `Start` authorization and assignment identity, checklist evidence, and checks | Record implementation evidence and advance the next ordered task without task acceptance or a per-task review; request one final story review after the last task directly from the implementer to the reviewer |
 | Reviewer sends `changes_requested` | Assigned reviewer, current task, exact pending SHA, finding, and requested correction | Reopen only that task and send the finding directly to the same implementer; require a new revision and review delta |
-| Implementer sends correction-ready | Same current task, assigned reviewer, prior reviewed SHA, new committed SHA, review delta, and confirmed delivery to that reviewer | Send the new revision directly to the same reviewer; record the new pending revision; issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle |
+| Implementer sends correction-ready | Same current task, assigned reviewer, previous full reviewed SHA, new committed full SHA, expected branch/worktree, clean tracked-source state, base/diff/path review delta, and confirmed delivery to that reviewer | Send the new revision directly to the same reviewer; record the new pending revision; supersede prior approval; issue the concise final response and end the implementer turn; keep the coordinator out of the routine correction cycle |
 | Coordinator reconciles an exceptional escalation | The exact pending escalation, current task/revision, and coordinator reconciliation decision | Clear the escalation hold; only then may the routine review flow resume |
 | Reviewer accepts in `per_task` | Assigned reviewer, exact current task, exact current SHA, complete task criteria, and acceptance evidence | Deliver acceptance directly to the implementer; the implementer applies the version-safe accepted/Done transition, reconciles progress, then advances the next ordered task |
 | Implementer starts next task | Prior task has the required accepted evidence in `per_task`, or implementation evidence in `story_end_only` | Mark only the next declared task active in the same implementer chat and story branch; do not add a coordinator assignment or reminder |
@@ -58,11 +65,15 @@ authoritative.
 - `story_end_only` never turns implementation evidence into task acceptance and
   never dispatches a per-task review; only the selected final story review can
   accept those task revisions.
-- A stale SHA, wrong task, wrong reviewer, changed branch HEAD, duplicate
+- A stale SHA, wrong task, wrong reviewer, changed branch/worktree, dirty
+  tracked-source state, changed branch HEAD, duplicate
   message, or already-consumed action is ignored or routed to reconciliation;
   it cannot write Taiga or advance the task pointer.
 - An uncertain or version-conflicted Taiga write is reconciled through the
   existing task-write contract before another write is prepared.
+- A source or HEAD change discovered during review holds acceptance and
+  advancement. Preserve the change and escalate the revision conflict; never
+  reset, clean, stash, force-push, or silently review another revision.
 - A changed task list, scope, acceptance criterion, or substantive requirement
   stops the loop for user input and creates no replacement task or branch.
 - Unknown message delivery, missing destinations, revision conflicts, merge

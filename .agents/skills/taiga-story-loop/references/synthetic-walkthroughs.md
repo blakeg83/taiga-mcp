@@ -148,13 +148,13 @@ The same pair carries every task review. A synthetic task handoff sequence is:
 [synthetic-impl-46] → [synthetic-review-46]
 Task #53 ready for review
 Branch: codex/story-46
-Revision: 1111111
+Revision: 1111111111111111111111111111111111111111
 Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; contract routes passed
 Next: reviewer, inspect this exact revision and report findings or acceptance.
 
 [synthetic-review-46] → [synthetic-impl-46]
 Task #53 findings
-Reviewed: 1111111
+Reviewed: 1111111111111111111111111111111111111111
 Severity: blocking
 Finding: reviewer prompt is missing the exact reviewer host destination
 Evidence: reviewer assignment fixture
@@ -163,8 +163,8 @@ Next: implementer, correct the same story branch and return a new revision for r
 
 [synthetic-impl-46] → [synthetic-review-46]
 Task #53 correction ready
-Previous review: 1111111
-Revision: 2222222
+Previous review: 1111111111111111111111111111111111111111
+Revision: 2222222222222222222222222222222222222222
 Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; corrected assignment passed
 Next: reviewer, re-review the new revision; prior acceptance is superseded.
 ```
@@ -191,21 +191,21 @@ coordinator using the same persistent pair:
 ```text
 [synthetic-review-46] → [synthetic-impl-46]
 Task #53 accepted
-Reviewed: 2222222
+Reviewed: 2222222222222222222222222222222222222222
 Criteria: assignment destinations are explicit — passed
 Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; corrected assignment passed
 Next: implementer, update the task in Taiga and advance to task #54.
 
 [synthetic-review-46] → [synthetic-coordinator-46]
 Story #46 approved
-Reviewed HEAD: 4444444
+Reviewed HEAD: 4444444444444444444444444444444444444444
 Tasks: #53 accepted, #54 accepted, #55 accepted, #56 accepted
 Definition of done: setup, routing, and ordered review gates — passed
 Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; full story contract passed
 Next: coordinator, use this HEAD for the story PR/review decision.
 ```
 
-A new source commit after `4444444` makes the story approval stale. The
+A new source commit after `4444444444444444444444444444444444444444` makes the story approval stale. The
 `story_end_only` mode may defer task acceptance until this final review, but it
 must be selected in the setup confirmation rather than inferred later.
 

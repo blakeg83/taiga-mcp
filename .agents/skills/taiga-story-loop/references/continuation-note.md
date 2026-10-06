@@ -20,6 +20,7 @@ Story branch: <branch> | worktree: <absolute path> | base: <sha>
 Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
 Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
 Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
+Review input: repository <path> | worktree <path> | branch <branch> | base <sha> | reviewed <full SHA or pending> | diff <base..reviewed> | source <clean tracked source/blocked>
 PR: <url or pending> | base: <master or feature branch> | head: <sha>
 PR delivery: <not_ready/ready/reused/created/unknown> | link evidence: <url or pending>
 Approval: <pending/yes/no/stale> | prompt: <selectable/plain-text>

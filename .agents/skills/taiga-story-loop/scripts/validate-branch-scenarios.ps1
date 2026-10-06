@@ -83,6 +83,67 @@ function Assert-WorktreeReceipt {
     Assert-True ((Invoke-Git $Path @('status', '--porcelain')).Output.Count -eq 0) "worktree is clean: $Path"
 }
 
+function Assert-CleanTrackedSource {
+    param([string] $Repository)
+    $trackedDiff = Invoke-Git $Repository @('diff', '--quiet', 'HEAD', '--') -AllowFailure
+    $stagedDiff = Invoke-Git $Repository @('diff', '--cached', '--quiet') -AllowFailure
+    $untrackedSource = Invoke-Git $Repository @('ls-files', '--others', '--exclude-standard')
+    Assert-True ($trackedDiff.ExitCode -eq 0) "tracked source is clean: $Repository"
+    Assert-True ($stagedDiff.ExitCode -eq 0) "staged source is clean: $Repository"
+    Assert-True ($untrackedSource.Output.Count -eq 0) "no non-ignored source is untracked: $Repository"
+}
+
+function Assert-ReviewInput {
+    param(
+        [string] $Repository,
+        [string] $Worktree,
+        [string] $ExpectedBranch,
+        [string] $BaseSha,
+        [string] $ExpectedHead
+    )
+    $root = Invoke-Git $Worktree @('rev-parse', '--show-toplevel')
+    $branch = Get-Branch $Worktree
+    $head = Get-Head $Worktree
+    Assert-True (([IO.Path]::GetFullPath(([string]$root.Output[-1]).Trim())) -eq [IO.Path]::GetFullPath($Worktree)) 'review worktree matches receipt'
+    Assert-True ($branch -eq $ExpectedBranch) 'review branch matches receipt'
+    Assert-True ($head -eq $ExpectedHead) 'review HEAD matches receipt'
+    Assert-CleanTrackedSource $Worktree
+    $diff = Invoke-Git $Worktree @('diff', '--name-status', "$BaseSha..$ExpectedHead")
+    Assert-True ($diff.ExitCode -eq 0) 'review diff range resolves'
+    [pscustomobject]@{
+        repository = $Repository
+        worktree = $Worktree
+        branch = $branch
+        baseSha = $BaseSha
+        reviewedSha = $head
+        diffRange = "$BaseSha..$head"
+        sourceState = 'clean tracked source'
+    }
+}
+
+function Assert-ExactReviewAccepted {
+    param(
+        [string] $Worktree,
+        [string] $ExpectedBranch,
+        [string] $BaseSha,
+        [string] $ReviewedSha,
+        [System.Collections.Generic.HashSet[string]] $ReviewedRevisions
+    )
+    [void](Assert-ReviewInput $Worktree $Worktree $ExpectedBranch $BaseSha $ReviewedSha)
+    Assert-True $ReviewedRevisions.Contains($ReviewedSha) 'acceptance must name a reviewed exact revision'
+}
+
+function Assert-DeliveryReady {
+    param(
+        [string] $Worktree,
+        [string] $ExpectedBranch,
+        [string] $BaseSha,
+        [string] $ReviewedSha,
+        [System.Collections.Generic.HashSet[string]] $ReviewedRevisions
+    )
+    Assert-ExactReviewAccepted $Worktree $ExpectedBranch $BaseSha $ReviewedSha $ReviewedRevisions
+}
+
 function Assert-ResumeReceipt {
     param([psobject] $Note)
     $repository = [string]$Note.repository
@@ -100,7 +161,7 @@ function Assert-ResumeReceipt {
     Assert-True ((Get-Head $storyWorktree "$storyBranch^") -eq $storyBase) 'resumed story base matches its recorded starting SHA'
     $inheritedStoryOne = Join-Path $storyWorktree 'story-one.txt'
     Assert-True (Test-Path -LiteralPath $inheritedStoryOne) 'resumed story worktree retains story-one content'
-    Assert-True ((Get-Content -Raw -LiteralPath $inheritedStoryOne).Trim() -eq 'story one') 'resumed story-one content is authoritative'
+    Assert-True ((Get-Content -Raw -LiteralPath $inheritedStoryOne).Trim() -eq 'story one corrected') 'resumed corrected story-one content is authoritative'
 }
 
 try {
@@ -111,7 +172,8 @@ try {
     Invoke-Git $userPath @('config', 'user.name', 'Taiga story-loop fixture') | Out-Null
     Invoke-Git $userPath @('config', 'user.email', 'story-loop@example.invalid') | Out-Null
     Set-Content -LiteralPath (Join-Path $userPath 'README.md') -Value 'fixture base' -NoNewline
-    Invoke-Git $userPath @('add', 'README.md') | Out-Null
+    Set-Content -LiteralPath (Join-Path $userPath '.gitignore') -Value "verification-output/`n" -NoNewline
+    Invoke-Git $userPath @('add', 'README.md', '.gitignore') | Out-Null
     Invoke-Git $userPath @('commit', '-m', 'fixture base') | Out-Null
     Invoke-Git $userPath @('remote', 'add', 'origin', $remotePath) | Out-Null
     Invoke-Git $userPath @('push', '-u', 'origin', 'master') | Out-Null
@@ -161,6 +223,36 @@ try {
     Assert-True ((Get-Head $featurePath) -eq $featureHeadBeforeStoryOne) 'feature ref does not move from story-one work'
     Assert-WorktreeReceipt $userPath $storyOnePath $storyOneBranch $storyOneHead
 
+    # Review input is the complete clean committed revision, not just a SHA.
+    $reviewedStoryOneRevisions = [System.Collections.Generic.HashSet[string]]::new()
+    $readyInput = Assert-ReviewInput $userPath $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $storyOneHead
+    [void]$reviewedStoryOneRevisions.Add($readyInput.reviewedSha)
+    $ignoredOutput = Join-Path $storyOnePath 'verification-output'
+    New-Item -ItemType Directory -Path $ignoredOutput -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $ignoredOutput 'test.log') -Value 'ignored test output' -NoNewline
+    Assert-ReviewInput $userPath $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $storyOneHead | Out-Null
+    Assert-True (@((Invoke-Git $storyOnePath @('status', '--short', '--ignored')).Output | Where-Object { $_ -like '!!*verification-output*' }).Count -gt 0) 'ignored verification output is present'
+
+    # A tracked source edit during the pending review/handoff is preserved and blocks both acceptance and delivery.
+    Set-Content -LiteralPath (Join-Path $storyOnePath 'story-one.txt') -Value 'dirty source during handoff' -NoNewline
+    Assert-Throws { Assert-ReviewInput $userPath $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $storyOneHead } 'dirty source at handoff must block review input'
+    Assert-Throws { Assert-DeliveryReady $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $storyOneHead $reviewedStoryOneRevisions } 'dirty source at handoff must hold delivery'
+    Assert-True ((Get-Content -Raw -LiteralPath (Join-Path $storyOnePath 'story-one.txt')).Trim() -eq 'dirty source during handoff') 'dirty source is preserved'
+
+    # The authorized correction commits a new revision; the previous review is stale.
+    Set-Content -LiteralPath (Join-Path $storyOnePath 'story-one.txt') -Value 'story one corrected' -NoNewline
+    Invoke-Git $storyOnePath @('add', 'story-one.txt') | Out-Null
+    Invoke-Git $storyOnePath @('commit', '-m', 'correct story one review input') | Out-Null
+    $correctedStoryOneHead = Get-Head $storyOnePath
+    Assert-True ($correctedStoryOneHead -ne $storyOneHead) 'correction creates a new HEAD'
+    Assert-Throws { Assert-ExactReviewAccepted $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $storyOneHead $reviewedStoryOneRevisions } 'old acceptance must not survive a changed HEAD'
+    Assert-Throws { Assert-DeliveryReady $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $correctedStoryOneHead $reviewedStoryOneRevisions } 'delivery must wait for review of the correction'
+    $correctionInput = Assert-ReviewInput $userPath $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $correctedStoryOneHead
+    Assert-True ($correctionInput.diffRange -eq "$featureHeadBeforeStoryOne..$correctedStoryOneHead") 'correction records the new diff range'
+    [void]$reviewedStoryOneRevisions.Add($correctedStoryOneHead)
+    Assert-ExactReviewAccepted $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $correctedStoryOneHead $reviewedStoryOneRevisions
+    Assert-DeliveryReady $storyOnePath $storyOneBranch $featureHeadBeforeStoryOne $correctedStoryOneHead $reviewedStoryOneRevisions
+
     # A confirmed merge advances the feature branch, which becomes story two's base.
     Invoke-Git $featurePath @('merge', '--no-ff', $storyOneBranch, '-m', 'merge story one') | Out-Null
     $featureHeadAfterStoryOne = Get-Head $featurePath
@@ -177,7 +269,7 @@ try {
     Assert-True ((Get-Head $storyTwoPath) -eq $featureHeadForStoryTwo) 'story two starts at the current feature HEAD'
     $inheritedStoryOne = Join-Path $storyTwoPath 'story-one.txt'
     Assert-True (Test-Path -LiteralPath $inheritedStoryOne) 'story two inherits story-one content from the feature branch'
-    Assert-True ((Get-Content -Raw -LiteralPath $inheritedStoryOne).Trim() -eq 'story one') 'story two inherits the authoritative story-one content'
+    Assert-True ((Get-Content -Raw -LiteralPath $inheritedStoryOne).Trim() -eq 'story one corrected') 'story two inherits the authoritative corrected story-one content'
     Set-Content -LiteralPath (Join-Path $storyTwoPath 'merge-conflict.txt') -Value 'story two' -NoNewline
     Invoke-Git $storyTwoPath @('add', 'merge-conflict.txt') | Out-Null
     Invoke-Git $storyTwoPath @('commit', '-m', 'story two') | Out-Null
@@ -235,7 +327,7 @@ try {
     $mismatchedStory.storyWorktree = $featurePath
     Assert-Throws { Assert-ResumeReceipt $mismatchedStory } 'incorrect saved story worktree lineage is rejected'
 
-    Write-Output 'Passed disposable branch isolation, PR base, failed-merge, preservation, and continuation-note resume scenarios.'
+    Write-Output 'Passed disposable branch isolation, frozen clean revision, dirty-source/changed-HEAD conflict, ignored verification output, correction re-review, PR base, failed-merge, preservation, and continuation-note resume scenarios.'
     exit 0
 }
 finally {

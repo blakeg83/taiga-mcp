@@ -14,7 +14,8 @@ Repository: <repository>
 Scope: <story scope>
 Topology: <standalone-story-direct-master, epic-shared-feature, or legacy-standalone-feature>
 Base: <master for new standalone, recorded feature branch for epic or legacy>
-Head: <reviewed commit SHA>
+Head: <reviewed full 40-character commit SHA>
+Review input: <expected repository/worktree and branch> | base <SHA> | diff <base..head> | clean tracked source
 
 Epic: Yes — merge and continue to the next ordered story
 Standalone: Yes — merge this exact PR
@@ -59,7 +60,8 @@ change requiring reconciliation, a recovery check may inspect the recorded PR,
 current head, and Taiga state. Follow the read budget in
 [minimal continuation note](continuation-note.md).
 
-An approval is bound to the PR URL, repository, base branch, reviewed head, and
-story scope shown in the prompt. Any source change or material scope change
+An approval is bound to the PR URL, repository, expected worktree/branch, base
+and diff range, clean tracked-source state, full reviewed head, and story scope
+shown in the prompt. Any source, HEAD, branch, or material scope change
 invalidates it. Re-read those facts immediately before a merge attempt and
 reconcile unknown provider results before any further write.

@@ -65,6 +65,12 @@ available.
 
 ## Task contract
 
+The reviewable endpoint includes the [clean committed revision
+contract](revision-freeze.md): expected repository/worktree and branch, full
+committed SHA copied from Git, captured base and relevant diff range/paths, and
+clean tracked-source state. A task endpoint that names only a file or behavior
+without the revision input is incomplete.
+
 ```markdown
 ## Task <position>/<total>: <project> #<ref> — <subject>
 
@@ -78,6 +84,7 @@ available.
 
 ### Reviewable endpoint
 - Artifact: <the file, fixture, contract, or behavior the reviewer can inspect>
+- Review input: <repository/worktree, expected branch, base SHA, full reviewed SHA, diff range/paths, clean tracked-source state>
 - Expected check outcome: <pass, or an expected-red checkpoint>
 - Expected-red checkpoint: <each named behavior/test, its exact permitted observed failure reason, and safety checks that must pass; use “not applicable” when the expected outcome is pass>
 - Deferred criteria: <criterion and its later task/story owner, or “none”>

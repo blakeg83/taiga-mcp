@@ -1,5 +1,9 @@
 # Direct worker handoffs
 
+Every handoff uses the [clean committed revision contract](revision-freeze.md).
+The branch, absolute worktree, captured base SHA, full current SHA, relevant
+diff range, and clean tracked-source state are part of the review input.
+
 The persistent pair sends short, plain-language messages directly to the worker
 that owns the next review action. A handoff carries only the context needed for
 that action; the assignment packet, repository, Taiga pages, and Git history
@@ -16,14 +20,19 @@ evidence and commit exist:
 ```text
 Task #<ref> ready for review
 Branch: <story-branch>
-Revision: <commit SHA or stable revision range>
+Worktree: <absolute story worktree>
+Base: <captured base SHA>
+Revision: <full 40-character commit SHA>
+Diff: <base SHA>..<revision>; paths: <relevant changed paths>
+Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Changes: <one-sentence summary>
 Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, inspect this exact revision and report findings or acceptance to the implementer.
 ```
 
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
-truncate the SHA. The revision is immutable review input. In `per_task` mode,
+truncate the SHA. Verify the expected branch/worktree and clean tracked-source
+state first. The revision tuple is immutable review input. In `per_task` mode,
 the confirmed endpoint is one successful direct delivery to the required
 reviewer, followed by `awaiting_review` and a concise final response naming the
 task, branch/worktree, full revision, pair identities, authorization, and
@@ -68,8 +77,12 @@ The implementer returns to the same reviewer chat:
 ```text
 Task #<ref> correction ready
 Branch: <story-branch>
+Worktree: <absolute story worktree>
 Previous review: <old SHA>
-Revision: <new commit SHA or stable range>
+Revision: <new full 40-character commit SHA>
+Base: <captured base SHA>
+Diff: <previous reviewed SHA>..<new revision>; paths: <correction delta>
+Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Changes: <what addressed the finding>
 Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, re-review the new revision; prior acceptance is superseded.
@@ -102,10 +115,11 @@ do not create a correction chat or expand that snapshot into a message log.
 
 Before acting, match the sender to the assigned reviewer, the task to the
 current pending task, and the reviewed SHA to the pending revision. Reconcile
-the branch HEAD and current task/review evidence. A wrong task, stale SHA,
-unknown sender, or already-handled outcome cannot reopen work, duplicate a
-comment/status write, or release the gate. An unexplained HEAD change or
-conflicting outcomes goes to the coordinator for reconciliation.
+the expected branch/worktree, branch HEAD, clean tracked-source state, and
+current task/review evidence. A wrong task, stale SHA, unknown sender, or
+already-handled outcome cannot reopen work, duplicate a comment/status write,
+or release the gate. An unexplained source change, HEAD change, or conflicting
+outcomes goes to the coordinator for reconciliation; preserve the change.
 
 For current blocking findings, reopen only the affected task, correct it in
 the same branch, and send a new revision for review. For current exact-revision

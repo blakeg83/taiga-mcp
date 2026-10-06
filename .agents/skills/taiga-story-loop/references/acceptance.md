@@ -1,5 +1,12 @@
 # Task and story acceptance
 
+All task and story acceptance follows the [clean committed revision
+contract](revision-freeze.md). A reviewer accepts a complete review input:
+expected repository/worktree and branch, captured base, full reviewed SHA,
+relevant diff range, and clean tracked-source state. Ignored verification
+outputs are allowed only when they are declared and the tracked-source checks
+remain clean.
+
 Review mode is part of the confirmed setup. `per_task` is the default: the
 implementer ends its turn after each task-ready or correction-ready handoff
 and resumes on an authorized reviewer message until the reviewer accepts
@@ -28,20 +35,30 @@ the acceptance directly to the implementer:
 
 ```text
 Task #<ref> accepted
-Reviewed: <exact commit SHA>
+Repository: <absolute repository path>
+Worktree: <absolute story worktree>
+Branch: <expected story branch>
+Base: <captured base SHA>
+Reviewed: <exact full 40-character commit SHA>
+Diff: <base SHA>..<reviewed SHA>; paths: <relevant changed paths>
+Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Criteria: <criterion/result summary>
 Checks: `<command>` — exit <code>; <concise result>
 Next: implementer, reconcile the current Taiga version and advance to the next ordered task.
 ```
 
-The implementer then rereads the task, merges only evidence-backed checklist
+Before sending acceptance, the reviewer repeats the branch/worktree, exact HEAD,
+diff-range, and clean tracked-source checks. A changed source file, unexpected
+untracked source, or changed HEAD is a revision conflict: hold acceptance,
+preserve the change, and escalate it. The implementer then repeats the same
+checks before applying the acceptance. It merges only evidence-backed checklist
 changes, writes the accepted status using the current Taiga version, records
 the parent-story progress evidence, and begins the next task only when the
 selected review mode allows it. No coordinator acknowledgement, next-task
 assignment, or reminder is an additional gate. A task acceptance is bound to
-the named SHA; a later source change
-supersedes it and requires a new ready handoff and review. A reviewer never
-accepts a SHA it did not inspect.
+the complete named input; a later source change, branch movement, or HEAD
+change supersedes it and requires a new committed ready handoff and review. A
+reviewer never accepts a SHA it did not inspect.
 
 Before applying acceptance, follow the identity, current pending revision, and
 already-handled outcome checks in [message-driven resume](worker-handoffs.md#message-driven-resume).
@@ -62,8 +79,9 @@ stops at reconciliation.
 ## Final story acceptance
 
 After the last task's required reviews, the reviewer checks the complete story
-against its definition of done, ordered-task evidence, cross-task behavior, and
-the current branch HEAD. The reviewer sends the coordinator:
+against its definition of done, ordered-task evidence, cross-task behavior, the
+expected branch/worktree, clean tracked-source state, and the current branch
+HEAD. The reviewer sends the coordinator:
 
 Final story acceptance must also prove every deferred criterion through its
 named later task or story-review owner and must verify exit-0 evidence for every
@@ -74,21 +92,30 @@ approval.
 
 ```text
 Story #<ref> approved
-Reviewed HEAD: <exact commit SHA>
+Repository: <absolute repository path>
+Worktree: <absolute story worktree>
+Branch: <expected story branch>
+Base: <captured base SHA>
+Reviewed HEAD: <exact full 40-character commit SHA>
+Diff: <base SHA>..<reviewed HEAD>; paths: <relevant changed paths>
+Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Tasks: <ordered task refs and acceptance state>
 Definition of done: <criterion/result summary>
 Checks: `<command>` — exit <code>; <concise result>
 Next: coordinator, use this HEAD for the story PR/review decision.
 ```
 
+Before using the message, the coordinator repeats the expected repository,
+worktree, branch, exact HEAD, diff range, and clean tracked-source preflight.
 Only the coordinator may treat this message as final story approval or prepare
 the story PR. A task acceptance alone cannot create the PR. Before using the
 approval, the coordinator verifies that the story branch still points at the
-reviewed HEAD and that the requirements and scope are unchanged. Any source
-commit, branch movement, material task change, or new review finding makes the
-approval stale; the affected work returns through the same implementer/reviewer
-pair. A comment, timeout, or unchanged Taiga status cannot substitute for the
-reviewer's exact HEAD approval.
+reviewed HEAD and that the requirements and scope are unchanged. Any tracked or
+non-ignored source change, branch movement, material task change, or new review
+finding makes the approval stale; the affected work returns through the same
+implementer/reviewer pair. Preserve conflicts; never reset, clean, stash,
+force-push, or silently review another revision. A comment, timeout, or
+unchanged Taiga status cannot substitute for the reviewer's exact clean input.
 
 The coordinator follows [reviewed story PR delivery](pr-delivery.md) after this
 approval. For a new standalone story, the resulting delivery PR targets

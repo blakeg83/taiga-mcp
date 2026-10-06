@@ -15,6 +15,11 @@ one worker branch.
 A standalone story has one managed story branch from the captured base SHA.
 
 After setup, fetch the configured remote and capture the immutable base SHA.
+Every story or feature review then uses the expected worktree/branch, full
+current SHA, relevant base-to-HEAD diff, and clean tracked-source state from
+[the revision-freeze contract](revision-freeze.md). An ignored verification
+output is not a source revision change when it is declared; a tracked or
+non-ignored source change holds the gate.
 Create one managed worker worktree from that SHA and create the story branch
 there. The story branch is the only run branch. The coordinator and worker
 must record `Feature: none (standalone direct-to-master)` and its story PR

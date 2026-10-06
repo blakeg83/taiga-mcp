@@ -1,5 +1,9 @@
 # Reviewed story PR delivery
 
+PR delivery uses the [clean committed revision contract](revision-freeze.md).
+The delivery input is the expected repository/worktree and branch, captured
+base, full reviewed HEAD, relevant diff range, and clean tracked-source state.
+
 The coordinator owns delivery of a reviewed story revision. A task-ready
 handoff or a task acceptance is not enough to create a pull request. Delivery
 starts only after the reviewer has approved the complete story at an exact
@@ -12,9 +16,10 @@ Before pushing or creating/reusing a PR, reconcile the authoritative records:
 
 1. Read the continuation note, the story's current requirements/comments, and
    the provider's current PR records.
-2. Verify the story branch is the expected branch in the expected repository,
-   has no uncommitted changes, and currently resolves to the reviewer's
-   approved HEAD.
+2. Verify the story branch is the expected branch in the expected repository
+   and worktree, has clean tracked source (non-ignored untracked source is also
+   absent), and currently resolves to the reviewer's approved full HEAD. Record
+   the captured base and relevant `<base SHA>..<reviewed SHA>` diff range.
 3. Re-run the required repository checks or verify their recorded results are
    for that same HEAD. A missing, failed, or stale check blocks delivery.
 4. Verify the topology-specific PR base: `master` for a new
@@ -26,9 +31,11 @@ Before pushing or creating/reusing a PR, reconcile the authoritative records:
    epic must not substitute `master` or a similarly named branch.
 
 If any preflight result is unknown, preserve the state and reconcile it before
-retrying. A changed HEAD, story requirement, branch base, or check result makes
-the approval stale and returns the story to the existing implementer/reviewer
-pair.
+retrying. A tracked or non-ignored source change, changed HEAD, unexpected
+branch/worktree, changed diff range, story requirement, branch base, or check
+result makes the approval stale and returns the story to the existing
+implementer/reviewer pair. Do not reset, clean, stash, force-push, or silently
+review another revision.
 
 ## Push and PR identity
 
@@ -56,14 +63,17 @@ review evidence in its description:
 - `<check>` — exit <code>; <result>
 
 ## Review
-- Reviewed HEAD: `<exact commit SHA>`
+- Reviewed HEAD: `<exact full 40-character commit SHA>`
+- Review input: `<repository>` | worktree `<absolute path>` | branch `<expected branch>`
+- Base/diff: `<base SHA>` | `<base SHA>..<reviewed SHA>` | paths `<relevant changed paths>`
+- Source state: `clean tracked source`; ignored verification outputs: `<none or declared paths>`
 - Review profile: `<configured reviewer profile>`
 - Review state: accepted for PR delivery; merge still requires user approval
 
 ## Scope
 - Story: #<ref>
 - Base: `<master for new standalone, feature branch for epic or legacy active standalone>`
-- Head: `<exact commit SHA>`
+- Head: `<exact full 40-character commit SHA>`
 ```
 
 For a legacy active standalone run, this is still the old story-to-feature PR;

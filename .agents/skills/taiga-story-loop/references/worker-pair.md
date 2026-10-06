@@ -13,8 +13,8 @@ effort:
 
 | Chat | Model | Effort | Responsibility |
 | --- | --- | --- | --- |
-| Implementer | `gpt-5.6-luna` | `xhigh` | source changes, checks, commits, and Taiga task progress |
-| Reviewer | `gpt-6.1-sol` | `medium` | read-only review, findings, task acceptance, and final story approval |
+| Implementer | `gpt-5.6-luna` | `xhigh` | sole source writer, checks, commits, and Taiga task progress |
+| Reviewer | `gpt-6.1-sol` | `medium` | read-only review of the frozen revision, findings, task acceptance, and final story approval |
 
 After the story branch/worktree receipt is verified, the coordinator:
 
@@ -71,7 +71,10 @@ relay. The implementer owns current-version Taiga checklist/status/
 progress reconciliation and next-task advancement after the direct acceptance
 when the selected review mode allows it.
 
-The coordinator records the pair IDs, host IDs, creation/reuse outcome, branch
+The implementer is the sole source writer while the pair is active. Once a
+review handoff is confirmed, it ends its turn and does not edit source, move the
+branch, or start later-task work until a current reviewer message or explicit
+reconciliation resumes it. The coordinator records the pair IDs, host IDs, creation/reuse outcome, branch
 receipt, authorization summary, and a reference to the first assignment message
 in the continuation snapshot, replacing superseded values. Retain current
 worker cursors; keep assignment text in the worker chat. This is connection

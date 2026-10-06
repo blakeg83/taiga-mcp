@@ -31,6 +31,13 @@ instructions, and the confirmed branch/worktree receipt. The story's declared
 order is authoritative. Do not infer order from API response order, work on
 later tasks early, silently skip a prerequisite, or expand the scope.
 
+Every review handoff uses `references/revision-freeze.md`. The review input is
+the expected repository, absolute worktree, branch, captured base SHA, full
+40-character SHA copied directly from `git rev-parse HEAD`, the relevant diff
+range and paths, and clean tracked-source state. Ignored build/test outputs are
+allowed only when they are declared verification artifacts; non-ignored source
+changes block readiness.
+
 ## Branch and delivery boundary
 
 Follow the supplied topology exactly. For `standalone-story-direct-master`,
@@ -90,7 +97,12 @@ For each task:
 5. Commit all task changes before moving to the next task, using the
    repository's short imperative subject convention. If no file changed, do
    not invent a commit; report the verified no-change result.
-6. Mark implementation-complete work `Ready for test` (or the discovered
+6. Before any ready or correction handoff, verify the expected repository root,
+   branch, worktree, exact `git rev-parse HEAD`, clean tracked source, and
+   `<base SHA>..<reviewed SHA>` diff/path record. Copy the full SHA from Git;
+   never shorten or transcribe it. A dirty source state or unexpected HEAD is a
+   revision conflict: preserve the change and escalate it.
+7. Mark implementation-complete work `Ready for test` (or the discovered
    project-specific review-ready status), not `Closed`/`Done`. Add one concise
    comment to the parent story naming the task, checklist outcome, checks and
    exit codes, endpoint/deferred evidence, commit SHA or verified no-change
@@ -109,6 +121,14 @@ existing matching record, and create a new comment only for a new revision,
 new evidence, or a correction. For a blocker, comment immediately with the
 obstacle, attempted work, evidence, decision/help needed, and the fact that
 dependent tasks were not started.
+
+The implementer is the sole source writer in the supplied worktree. Once a
+ready or correction handoff is delivered and review is pending, make no source
+edits, verification-driven source changes, branch movement, or later-task
+changes. A reviewer inspects the frozen input read-only. If the branch HEAD or
+source state changes, preserve the change and escalate a revision conflict;
+acceptance and advancement remain held until a new committed revision is
+reviewed.
 
 For worker communication, use the short task-ready and correction handoff
 formats from `references/worker-handoffs.md`: name the task, branch, stable

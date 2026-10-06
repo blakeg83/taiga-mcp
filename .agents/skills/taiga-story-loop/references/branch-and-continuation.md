@@ -1,5 +1,10 @@
 # Branch, worktree, and continuation contract
 
+Review state follows the [clean committed revision
+contract](revision-freeze.md). A branch/worktree receipt is not review
+evidence until its expected branch, full HEAD, relevant diff range, and clean
+tracked-source state are rechecked.
+
 This contract keeps the story loop small while making its branch lineage and
 resume point observable. It is a short note, not a registry or a workflow
 state machine. Git, Taiga, Codex, and the pull-request provider remain the
@@ -18,6 +23,7 @@ scope:
 | Topology | `standalone-story-direct-master` or `epic-shared-feature` |
 | Feature integration | Epic: unique `codex/feature-<slug>-<run-suffix>` branch, worktree path, and current HEAD; standalone: `none (standalone direct-to-master)` |
 | Current story | story ref, unique `codex/story-<ref>-<slug>-<run-suffix>` branch, worktree path, and base SHA |
+| Review input | expected repository/worktree and branch, base SHA, pending full reviewed SHA, diff range/paths, and clean tracked-source state |
 | Workers | implementer and reviewer chat IDs, when created |
 | Review | PR URL, PR base/head, approval or wait state, and the next required action |
 | Recovery | one recovery automation ID, when authorized and created |
@@ -40,11 +46,11 @@ After the single setup confirmation and before worker dispatch:
    for this run. A fetch failure, missing ref, or changed mapping blocks setup.
 3. For a standalone story, create one managed Codex worktree from that captured
    SHA and create the unique story branch there. Verify the absolute path,
-   branch, HEAD, captured base, clean status, and repository identity. Record
+   branch, HEAD, captured base, clean tracked-source state, and repository identity. Record
    `Feature: none (standalone direct-to-master)` and `PR: ... | base: master`.
 4. For an epic, create one managed Codex worktree from that captured SHA and
    create a unique `codex/feature-<slug>-<run-suffix>` branch there. Verify the
-   absolute path, branch, HEAD, captured base, clean status, and repository
+   absolute path, branch, HEAD, captured base, clean tracked-source state, and repository
    identity, then write the feature branch and current feature HEAD into the
    continuation note before creating a story worktree.
 5. Never reuse a path or branch whose ownership cannot be reconciled. New
@@ -81,11 +87,15 @@ git -C <workspace> rev-parse --show-toplevel
 git -C <workspace> branch --show-current
 git -C <workspace> rev-parse HEAD
 git -C <workspace> status --porcelain
+git -C <workspace> diff --quiet HEAD --
+git -C <workspace> diff --cached --quiet
+git -C <workspace> ls-files --others --exclude-standard
 ```
 
 The coordinator records the returned absolute path and verifies that the
-repository root, story branch, HEAD/base SHA, and clean status match the
-topology mapping. A pending worktree operation has no usable path; wait for
+repository root, story branch, HEAD/base SHA, and clean tracked-source checks
+match the topology mapping. Declared ignored verification outputs may exist,
+but an unexpected ignored path is reconciled separately. A pending worktree operation has no usable path; wait for
 its completion rather than inventing one. A path or branch collision is
 reconciled against the recorded scope and ownership, or blocks for user
 input. The same receipt is passed to the implementer and reviewer chat. The
