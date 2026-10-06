@@ -26,6 +26,7 @@ Revision: <full 40-character commit SHA>
 Diff: <base SHA>..<revision>; paths: <relevant changed paths>
 Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Changes: <one-sentence summary>
+Acceptance evidence: <plan reference or “UI/browser evidence not applicable”; capability/production-path/scenario/metric/smoke summary>
 Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, inspect this exact revision and report findings or acceptance to the implementer.
 ```
@@ -85,6 +86,7 @@ Review range: <base SHA>..<new revision>; paths: <relevant changed paths>
 Correction delta: <previous reviewed SHA>..<new revision>; paths: <correction delta>
 Source state: clean tracked source; ignored verification outputs: <none or declared paths>
 Changes: <what addressed the finding>
+Acceptance evidence: <updated plan reference or “UI/browser evidence not applicable”; correction delta and any limitation>
 Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, re-review the new revision; prior acceptance is superseded.
 ```

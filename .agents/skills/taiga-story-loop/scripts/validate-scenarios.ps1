@@ -1,8 +1,8 @@
-# STATIC CONTRACT CHECK ONLY.
-# This file checks documented contract text against a small route matrix. It
-# does not execute the skill, call Taiga/Git/Codex tools, or establish
-# behavioral evidence. See references/synthetic-walkthroughs.md for recorded
-# synthetic walkthrough evidence.
+# CONTRACT AND FOCUSED EVIDENCE CHECK.
+# This file checks documented contract text against a small route matrix and
+# runs the local synthetic acceptance-evidence fixture. It does not execute the
+# skill, call Taiga/Git/Codex tools, or establish live browser evidence. See
+# references/synthetic-walkthroughs.md for recorded synthetic walkthroughs.
 
 [CmdletBinding()]
 param()
@@ -40,6 +40,9 @@ $finalEpicReviewScriptPath = Join-Path $PSScriptRoot 'validate-final-epic-review
 $finalDeliveryPath = Join-Path $skillRoot 'references/final-delivery.md'
 $finalDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-final-delivery.ps1'
 $revisionFreezePath = Join-Path $skillRoot 'references/revision-freeze.md'
+$acceptanceEvidencePath = Join-Path $skillRoot 'references/acceptance-evidence.md'
+$acceptanceEvidenceManifestPath = Join-Path $skillRoot 'assets/acceptance-evidence-scenarios.json'
+$acceptanceEvidenceScriptPath = Join-Path $PSScriptRoot 'validate-acceptance-evidence.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -82,6 +85,11 @@ if (-not (Test-Path $finalDeliveryPath) -or -not (Test-Path $finalDeliveryScript
 }
 if (-not (Test-Path $revisionFreezePath)) {
     throw 'Missing clean committed revision contract.'
+}
+if (-not (Test-Path $acceptanceEvidencePath) -or
+    -not (Test-Path $acceptanceEvidenceManifestPath) -or
+    -not (Test-Path $acceptanceEvidenceScriptPath)) {
+    throw 'Missing acceptance-evidence contract, manifest, or executable fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -126,6 +134,10 @@ $finalDeliveryText = Get-Content $finalDeliveryPath -Raw
 $normalizedFinalDelivery = [regex]::Replace($finalDeliveryText, '\s+', ' ')
 $revisionFreezeText = Get-Content $revisionFreezePath -Raw
 $normalizedRevisionFreeze = [regex]::Replace($revisionFreezeText, '\s+', ' ')
+$acceptanceEvidenceText = Get-Content $acceptanceEvidencePath -Raw
+$normalizedAcceptanceEvidence = [regex]::Replace($acceptanceEvidenceText, '\s+', ' ')
+$acceptanceEvidenceScriptText = Get-Content $acceptanceEvidenceScriptPath -Raw
+$acceptanceEvidenceManifestText = Get-Content $acceptanceEvidenceManifestPath -Raw
 
 function Assert-DocumentContains {
     param(
@@ -245,6 +257,9 @@ Assert-DocumentContains 'cancel behavior' '`Cancel` leaves the external systems 
 Assert-DocumentContains 'clarification behavior' 'Ask only for a missing or ambiguous'
 Assert-DocumentContains 'behavioral evidence reference' 'synthetic-walkthroughs.md'
 Assert-DocumentContains 'branch contract reference' 'branch and continuation'
+Assert-DocumentContains 'durable acceptance evidence plan' 'Acceptance evidence plan (conditional on the real story/repository):'
+Assert-DocumentContains 'acceptance production path intake' 'Production path and inputs:'
+Assert-DocumentContains 'acceptance smoke intake' 'Smoke and limitations:'
 Assert-DocumentContains 'fresh base capture' 'captures a fresh base SHA'
 Assert-DocumentContains 'feature branch gate' 'creates one uniquely named feature branch'
 Assert-DocumentContains 'story branch lineage' 'distinct managed worktree and story branch'
@@ -387,6 +402,7 @@ Assert-HandoffContains 'correction route' 'returns to the same reviewer chat'
 Assert-HandoffContains 'stable branch gate' 'does not start the next ordered task'
 Assert-HandoffContains 'no receipt requirement' 'Do not require a JSON receipt'
 Assert-HandoffContains 'full revision handoff evidence' 'full revision, pair identities, authorization'
+Assert-HandoffContains 'durable acceptance evidence handoff' 'Acceptance evidence: <plan reference'
 Assert-HandoffContains 'end-of-turn endpoint' 'The final response is the last action in the turn'
 Assert-HandoffContains 'failed delivery gate' 'An unsuccessful or unknown delivery is not a confirmed review dispatch'
 Assert-WorkerPairContains 'direct routine pair' 'routine findings and corrections stay within the worker pair'
@@ -607,6 +623,46 @@ if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) 
     throw 'Missing disposable branch scenario check.'
 }
 
+foreach ($marker in @(
+        'Capability discovery comes before a limitation claim'
+        'production arguments, evidence hints, validation, and result semantics'
+        'production entry point and a control'
+        'cache hit is not evidence reuse'
+        'automated_assertion'
+        'visible_observation'
+        '`unavailable`'
+        'setup, start, actions, expected results, and cleanup'
+        'synthetic fixtures do not become browser execution')) {
+    if (-not $normalizedAcceptanceEvidence.Contains($marker)) {
+        throw "Acceptance-evidence contract assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'false-unavailable-claim'
+        'wrapper-bypass'
+        'mislabeled-metric'
+        'missing-scenario-evidence'
+        'honest-limitation'
+        'scenarioMatrix'
+        'liveProvider')) {
+    if (-not $acceptanceEvidenceManifestText.Contains($marker)) {
+        throw "Acceptance-evidence manifest assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Assert-CapabilityClaim'
+        'observed availability is true'
+        'production-path control'
+        'Invoke-BypassingWrapper'
+        'Assert-MetricRecord'
+        'Assert-ScenarioCoverage'
+        'Assert-SmokePlan'
+        'Passed acceptance-evidence fixture')) {
+    if (-not $acceptanceEvidenceScriptText.Contains($marker)) {
+        throw "Acceptance-evidence fixture assertion failed: $marker"
+    }
+}
+
 foreach ($recordMarker in @(
         '## 1. Single-repository story'
         '## 2. Multi-repository epic'
@@ -823,4 +879,10 @@ $results = foreach ($scenario in $scenarios) {
 }
 
 $results | Format-Table Name, Input, Observed, Detail -AutoSize | Out-String | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus contract, endpoint-walkthrough, and recorded-walkthrough assertions; this is not behavioral evidence."
+$acceptanceOutput = @(& pwsh -NoProfile -File $acceptanceEvidenceScriptPath 2>&1 | ForEach-Object { [string]$_ })
+$acceptanceExit = $LASTEXITCODE
+if ($acceptanceExit -ne 0) {
+    throw "Acceptance-evidence fixture exited ${acceptanceExit}: $($acceptanceOutput -join [Environment]::NewLine)"
+}
+$acceptanceOutput | Write-Output
+Write-Output "Passed $($results.Count) static setup scenarios plus contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

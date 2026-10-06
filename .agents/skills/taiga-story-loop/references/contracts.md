@@ -96,6 +96,34 @@ without the revision input is incomplete.
 - [ ] <review/status/comment/commit handoff result, when applicable>
 ```
 
+### Verification and acceptance-evidence intake
+
+When a criterion involves a rendered UI, browser, wrapper, benchmark, or
+smoke flow, add this evidence plan before implementation. For documentation-
+only or non-UI work, record `UI/browser evidence: not applicable` and do not
+invent viewport, focus, console, or visible-acceptance requirements.
+
+```markdown
+## Acceptance evidence plan
+- UI/browser evidence: <not applicable, or the conditional criterion>
+- Capability sources/probes: <documentation/tool schema, observed provider and result>
+- Production path: <entry point and control proving it was reached>
+- Preserved inputs: <required arguments, evidence hints, validation, result semantics>
+- Metrics: <operation, counter, unit, sample, warm-up, conditions, baseline, limitations>
+- Scenario matrix: <scenario, setup/action, expected/observed, automated|visible|unavailable>
+- Smoke: <setup/start/actions/expected results/cleanup, working directory, disposable data>
+- Limitations: <unavailable checks and their source, reason, owner, or next action>
+```
+
+The plan is conditional on the real story and repository. Read the applicable
+installed skill/tool documentation before claiming a capability is missing;
+host capability availability is not proof that a check succeeded. A wrapper
+or fake must reach the production entry point and preserve the inputs that
+matter. Cache hits, adjacent-stage counts, and incomparable timings are not
+evidence of reuse or speedup. Scenario records distinguish automated
+assertions, visible observations, and unavailable checks. Synthetic fixtures
+may validate these rules but must never be reported as browser execution.
+
 Keep each checklist item observable and specific enough to verify. The
 reviewable endpoint is part of the assignment before implementation starts; a
 missing or ambiguous artifact, expected outcome, deferred owner, or advancement
