@@ -44,9 +44,12 @@ That final response is the last action in the turn.
 If the send fails or its result is unknown, the implementer must not claim
 `awaiting_review`, release the next ordered task, or blindly redispatch. It
 preserves the pending revision and routes the delivery uncertainty to the
-coordinator for reconciliation. The same endpoint applies to correction-ready
-handoffs and to the separate final-story review; final-story dispatch carries
-the exact current HEAD/scope packet and one deduplication identity.
+coordinator for reconciliation. The same delivery endpoint applies to
+correction-ready handoffs and to the separate final-story review; final-story
+dispatch preserves the already-confirmed per-task accepted closures or
+story_end_only implementation-ready endpoint, carries the exact current
+HEAD/scope packet and one deduplication identity, and does not rewrite provider
+status merely to request review.
 
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
 truncate the SHA. Verify the expected branch/worktree and clean tracked-source

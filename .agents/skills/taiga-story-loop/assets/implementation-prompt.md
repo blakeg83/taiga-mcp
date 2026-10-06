@@ -139,14 +139,19 @@ For each task:
 
 ## Ready-turn transaction
 
-Every review handoff uses the same terminal transaction for an initial task,
-correction, or final-story review:
+Every review handoff uses the same terminal delivery boundary for an initial
+task, correction, or final-story review, with the provider-state prerequisite
+qualified by review mode:
 
-1. Complete and confirm the task evidence, current-version Taiga/progress
-   reconciliation (including the provider review-ready mapping), commit, and
-   immutable revision packet before dispatching the review message. The
-   provider mapping is complete before dispatch and is not delivery
-   confirmation.
+1. For an initial or correction-ready task handoff, complete and confirm the
+   task evidence, current-version Taiga/progress reconciliation (including the
+   provider review-ready mapping), commit, and immutable revision packet before
+   dispatching the review message. For final-story review, do not rewrite a
+   task or story provider status: in `per_task`, confirm exact accepted task
+   closures and progress; in `story_end_only`, confirm the final
+   implementation-ready evidence, status, and progress. Freeze the immutable
+   final-story packet from that already-confirmed endpoint. Provider state is
+   never delivery confirmation.
 2. Send exactly one direct handoff to the assigned persistent reviewer. A
    successful send result for that exact destination, task/story, and revision
    is the delivery confirmation; an intent to send, timeout, or idle reviewer

@@ -49,9 +49,14 @@ authoritative.
 For initial, correction-ready, and final-story review events, the dispatch
 boundary is ordered and terminal:
 
-1. Complete and confirm the required task/story Taiga/progress writes,
-   including the provider review-ready mapping or documented fallback, then
-   freeze the relevant revision packet before dispatch. The provider mapping is
+1. For an initial or correction-ready task handoff, complete and confirm the
+   required task/story Taiga/progress writes, including the provider
+   review-ready mapping or documented fallback, then freeze the relevant
+   revision packet before dispatch. For final-story review, preserve the
+   selected review-mode endpoint instead: per-task review requires exact
+   accepted task closures and progress, while story_end_only requires the final
+   implementation-ready evidence, status, and progress. Do not rewrite a task
+   or story provider status merely to request final review. Provider state is
    not handoff confirmation.
 2. Send exactly one direct message to the assigned persistent reviewer and
    require a successful delivery result for that exact identity/revision.
@@ -62,10 +67,10 @@ boundary is ordered and terminal:
    do not present a healthy review wait, release ordered work, or blindly
    redispatch. A healthy idle review wait is distinct from this exception.
 
-The shorthand “only after successful delivery set the task to the review-ready
-mapping” must not be read as a post-dispatch provider write. The mapping is
-confirmed before dispatch; only the worker-local `awaiting_review` state waits
-for successful delivery.
+The provider review-ready mapping is a prerequisite only for initial and
+correction-ready task handoffs. Final-story dispatch preserves its already
+confirmed accepted-closure or implementation-ready endpoint; only the
+worker-local `awaiting_review` state waits for successful delivery.
 
 ### Acceptance reconciliation transaction
 
