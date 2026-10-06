@@ -401,3 +401,54 @@ a setup summary or request Start.
 
 Observed outcome: `ClarifyRequired(acceptance criteria)`. No setup prompt was
 emitted and mutation calls were `[]`.
+
+## 6. Setup authorization input decisions
+
+The setup gate performs capability intake before presenting one authorization
+prompt. The capability record includes the provider/context, source, whether
+selectable authorization is supported, whether it is permitted, and how an
+explicit submission is identified.
+
+For a synthetic provider with both capabilities and explicit submission
+events, the setup packet shows exactly two mutually exclusive choices:
+
+```text
+Setup authorization: [Start] [Cancel]
+Scope: taiga-mcp story #97, resolved repository and ordered task scope
+No choice is preselected. Submit one choice to continue.
+```
+
+An explicit submitted `Start` produces one immutable authorization record with
+the mode, resolved scope, `submitted=true`, and a resolved authorization
+reference. The same record is rendered into the existing continuation note and
+both worker assignments. An explicit submitted `Cancel` ends setup and leaves
+the external mutation trace empty.
+
+The current Codex `request_user_input` route is recorded as a tool-schema
+limitation in this context: it is an optional-question mechanism available
+only in Plan mode, not a permission-capable selectable gate. A preference-only,
+optional-question, unavailable, or unverified route therefore renders the
+plain-text fallback:
+
+```text
+Selectable Start/Cancel is unavailable or not permitted in this interface.
+Reply exactly Start or Cancel for the resolved scope above.
+```
+
+The offline decision fixture covers these outcomes:
+
+| Scenario | Input | Expected outcome | External mutations before decision |
+| --- | --- | --- | --- |
+| Permitted selectable | submitted `Start` choice | `started`, selectable authorization persisted | none |
+| Prohibited selectable | typed `Start` fallback | `started`, plain-text authorization persisted | none |
+| Unavailable selectable | typed `Start` fallback | `started`, plain-text authorization persisted | none |
+| Default-only | displayed/default `Start` without submission | `awaiting_confirmation` | none |
+| Empty/blank | empty choice or blank reply | `awaiting_confirmation` | none |
+| Timeout | no submitted response | `awaiting_confirmation` | none |
+| Worker message | worker sends `Start` | `awaiting_confirmation` | none |
+| Explicit cancel | submitted/typed `Cancel` | `cancelled` | none |
+| Scope change | old `Start`, then changed scope | old authorization invalidated; new gate required | none |
+
+These are automated synthetic assertions only. No selectable UI was opened,
+and no provider or live workflow writes were performed. A real selectable UI
+observation remains a separately authorized evidence item.

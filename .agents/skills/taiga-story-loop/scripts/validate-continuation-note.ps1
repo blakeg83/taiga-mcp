@@ -272,6 +272,7 @@ try {
         'Story branch' = 'codex/story-52-synthetic | worktree: C:\Synthetic\story | base: feature-sha'
         'Implementer' = 'impl-id @ local | reviewer: review-id @ local'
         'Pair' = 'reused | IDs resolved: yes | authorization: setup-message-ref'
+        'Setup authorization' = 'start | mode: selectable | submitted: true | reference: auth-synthetic-52'
         'Review mode' = 'per_task | approved HEAD: pending'
         'PR' = 'pending | base: codex/feature-synthetic | head: revision-000'
         'Approval' = 'pending | prompt: none | identity: pending'
@@ -380,7 +381,7 @@ try {
         $text = [IO.File]::ReadAllText($path)
         Assert-True (-not $text.Contains('historical review findings')) 'history is absent from routine snapshot'
         Assert-True (@($text -split "`n" | Where-Object { $_.StartsWith('Next: ') }).Count -eq 1) 'only one next action'
-        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'automation-id', 'setup-message-ref')) {
+        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'automation-id', 'setup-message-ref', 'auth-synthetic-52')) {
             Assert-True ($text.Contains($identity)) "preserves $identity"
         }
     }
@@ -541,7 +542,7 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, authoritative stale-snapshot recovery, missing/conflicting evidence holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, setup-authorization persistence, authoritative stale-snapshot recovery, missing/conflicting evidence holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
