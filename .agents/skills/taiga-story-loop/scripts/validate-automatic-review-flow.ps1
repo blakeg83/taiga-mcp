@@ -45,6 +45,8 @@ function New-StoryState {
         currentTurnId = 1
         turnStatus = 'active'
         finalReviewRevision = $null
+        finalReviewInvalidatedRevision = $null
+        finalReviewInvalidationKind = $null
         finalReviewStatus = 'not_started'
         finalReviewRequest = $null
         finalReviewFindings = @()
@@ -383,6 +385,16 @@ function Apply-Event {
         }
         'revision_conflict' {
             if ($State.Contains('finalReviewStatus') -and $State.finalReviewStatus -in @('awaiting_review', 'accepted')) {
+                $State.finalReviewInvalidatedRevision = if (-not [string]::IsNullOrWhiteSpace([string]$State.finalReviewRevision)) {
+                    [string]$State.finalReviewRevision
+                } elseif ($null -ne $State.finalReviewRequest) {
+                    [string]$State.finalReviewRequest.reviewedHead
+                } elseif ($null -ne $State.finalStoryApproval) {
+                    [string]$State.finalStoryApproval.revision
+                } else {
+                    $null
+                }
+                $State.finalReviewInvalidationKind = [string]$Event.kind
                 $State.finalReviewStatus = 'invalidated'
                 $State.finalReviewRevision = $null
                 $State.finalReviewRequest = $null
@@ -396,6 +408,16 @@ function Apply-Event {
         }
         'scope_changed' {
             if ($State.Contains('finalReviewStatus') -and $State.finalReviewStatus -in @('awaiting_review', 'accepted')) {
+                $State.finalReviewInvalidatedRevision = if (-not [string]::IsNullOrWhiteSpace([string]$State.finalReviewRevision)) {
+                    [string]$State.finalReviewRevision
+                } elseif ($null -ne $State.finalReviewRequest) {
+                    [string]$State.finalReviewRequest.reviewedHead
+                } elseif ($null -ne $State.finalStoryApproval) {
+                    [string]$State.finalStoryApproval.revision
+                } else {
+                    $null
+                }
+                $State.finalReviewInvalidationKind = [string]$Event.kind
                 $State.finalReviewStatus = 'invalidated'
                 $State.finalReviewRevision = $null
                 $State.finalReviewRequest = $null
@@ -494,6 +516,8 @@ function Apply-Event {
                 finding = [string]$Event.finding
             }
             $State.finalReviewStatus = 'correction_requested'
+            $State.finalReviewInvalidatedRevision = $null
+            $State.finalReviewInvalidationKind = $null
             $State.finalReviewRevision = $null
             $State.finalReviewRequest = $null
             $State.pendingFinalStoryAcceptance = $null
@@ -502,11 +526,16 @@ function Apply-Event {
             return [ordered]@{ decision = if ($created) { 'route_final_story_correction' } else { 'duplicate' }; state = $State }
         }
         'final_story_ready_for_review' {
-            if ($State.finalReviewStatus -ne 'correction_requested') {
-                throw 'final story correction is not awaiting a new implementation revision.'
+            $priorRevisionIsKnown = if ($State.finalReviewStatus -eq 'correction_requested') {
+                [string]$Event.previousRevision -in @($State.finalReviewFindings | ForEach-Object { [string]$_.reviewedRevision })
+            } elseif ($State.finalReviewStatus -eq 'invalidated' -and
+                $State.finalReviewInvalidationKind -eq 'revision_conflict') {
+                [string]$Event.previousRevision -ceq [string]$State.finalReviewInvalidatedRevision
+            } else {
+                $false
             }
-            if ([string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$' -or
-                [string]$Event.previousRevision -notin @($State.finalReviewFindings | ForEach-Object { [string]$_.reviewedRevision })) {
+            if (-not $priorRevisionIsKnown) { throw 'final story correction is not awaiting a new implementation revision.' }
+            if ([string]$Event.revision -notmatch '^[0-9a-fA-F]{40}$') {
                 throw 'final story correction must identify the prior reviewed HEAD.'
             }
             $task = Get-CurrentTask $State
@@ -536,6 +565,8 @@ function New-ReconciliationState {
     $state.storyAcceptanceMarker = $null
     $state.pendingFinalStoryAcceptance = $null
     $state.finalReviewRevision = $null
+    $state.finalReviewInvalidatedRevision = $null
+    $state.finalReviewInvalidationKind = $null
     $state.finalReviewStatus = 'not_started'
     $state.finalReviewRequest = $null
     $state.finalReviewFindings = @()
@@ -617,7 +648,13 @@ function New-FinalStoryReviewRequest {
         taskCoverage = $taskCoverage
         definitionOfDone = @('Complete the story definition of done at the exact reviewed HEAD.')
         crossTaskCriteria = @('Review behavior and regression risk across the ordered tasks.')
-        deferredCriteria = @('none')
+        deferredCriteria = @(
+            [ordered]@{
+                id = 'deferred-none'
+                criterion = 'No deferred criterion remains unresolved.'
+                owner = 'story-reviewer'
+            }
+        )
         requiredChecks = @([ordered]@{ command = 'focused story checks'; exitCode = 0; result = 'pass' })
     }
 }
@@ -641,6 +678,8 @@ function Request-FinalStoryReview {
 
     $State.finalReviewRequest = New-FinalStoryReviewRequest $State $Revision $PreviousRevision
     $State.finalReviewRevision = $Revision
+    $State.finalReviewInvalidatedRevision = $null
+    $State.finalReviewInvalidationKind = $null
     $State.finalReviewStatus = 'awaiting_review'
     $State.finalStoryState = 'pending'
     if ($State.Contains('provider')) {
@@ -689,6 +728,42 @@ function Get-ProviderStorySnapshot {
         version = [int]$Provider.story.version
         comments = @($Provider.story.comments)
     }
+}
+
+function Get-DeferredCriterionKey {
+    param([object] $Criterion)
+
+    if ($Criterion -is [System.Collections.IDictionary]) {
+        $id = [string]$Criterion.id
+        $owner = [string]$Criterion.owner
+        $text = [string]$Criterion.criterion
+        if ([string]::IsNullOrWhiteSpace($id) -or
+            [string]::IsNullOrWhiteSpace($owner) -or
+            [string]::IsNullOrWhiteSpace($text)) {
+            throw 'frozen deferred criteria require an id, owner, and criterion.'
+        }
+        return "$id|$owner|$text"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$Criterion)) { throw 'deferred criteria cannot be blank.' }
+    return "legacy|$Criterion"
+}
+
+function Get-DeferredEvidenceKey {
+    param([object] $Evidence)
+
+    if ($Evidence -is [System.Collections.IDictionary]) {
+        $id = [string]$Evidence.id
+        $owner = [string]$Evidence.owner
+        $text = [string]$Evidence.evidence
+        if ([string]::IsNullOrWhiteSpace($id) -or
+            [string]::IsNullOrWhiteSpace($owner) -or
+            [string]::IsNullOrWhiteSpace($text)) {
+            throw 'deferred evidence requires a criterion id, owner, and evidence.'
+        }
+        return "$id|$owner"
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$Evidence)) { throw 'deferred evidence cannot be blank.' }
+    return "legacy|$Evidence"
 }
 
 function Add-ProviderHistory {
@@ -967,6 +1042,20 @@ function Assert-FinalStoryAcceptancePreflight {
     if (($expectedCoverage -join '|') -cne ($actualCoverage -join '|')) {
         throw 'final story approval task coverage must match the frozen review request'
     }
+    $expectedDeferredCriteria = @($State.finalReviewRequest.deferredCriteria | ForEach-Object { Get-DeferredCriterionKey $_ } | Sort-Object)
+    $actualDeferredCriteria = @($Event.deferredCriteria | ForEach-Object { Get-DeferredCriterionKey $_ } | Sort-Object)
+    if (($expectedDeferredCriteria -join '|') -cne ($actualDeferredCriteria -join '|')) {
+        throw 'final story approval deferred criteria must match the frozen review request'
+    }
+    $expectedDeferredEvidence = @($State.finalReviewRequest.deferredCriteria | ForEach-Object {
+            if ($_ -is [System.Collections.IDictionary]) { "$($_.id)|$($_.owner)" } else { "legacy|$_" }
+        } | Sort-Object)
+    $actualDeferredEvidence = @($Event.deferredEvidence | ForEach-Object { Get-DeferredEvidenceKey $_ } | Sort-Object -Unique)
+    foreach ($requiredDeferredEvidence in $expectedDeferredEvidence) {
+        if ($actualDeferredEvidence -notcontains $requiredDeferredEvidence) {
+            throw 'final story approval must provide evidence for every frozen deferred criterion and owner'
+        }
+    }
     $requiredCheckCommands = @($State.finalReviewRequest.requiredChecks | ForEach-Object { [string]$_.command })
     foreach ($requiredCheckCommand in $requiredCheckCommands) {
         if (@($Event.checks | Where-Object { [string]$_.command -ceq $requiredCheckCommand -and [int]$_.exitCode -eq 0 -and [string]$_.result -ceq 'pass' }).Count -eq 0) {
@@ -1162,8 +1251,12 @@ function New-StoryAcceptanceEvent {
                 [ordered]@{ taskId = [int]$_.taskId; ref = [string]$_.ref; revision = Get-TaskReviewRevision $_ }
             })
         crossTaskEvidence = @('Reviewer inspected cross-task behavior and regression risk across the ordered task set.')
-        deferredCriteria = @('none')
-        deferredEvidence = @('No deferred criterion remains unresolved.')
+        deferredCriteria = @($State.finalReviewRequest.deferredCriteria | ForEach-Object {
+                [ordered]@{ id = [string]$_.id; criterion = [string]$_.criterion; owner = [string]$_.owner }
+            })
+        deferredEvidence = @($State.finalReviewRequest.deferredCriteria | ForEach-Object {
+                [ordered]@{ id = [string]$_.id; owner = [string]$_.owner; evidence = 'No deferred criterion remains unresolved.' }
+            })
         independentVerification = @('Reviewer independently ran the focused story checks at the exact HEAD.')
         inspectedWorkerEvidence = @('Reviewer inspected each task revision and its recorded worker evidence.')
         limitations = @('Synthetic provider fixture only; no live provider or PR operation was performed.')
@@ -1424,8 +1517,20 @@ $finalTaskApproved = Resume-ImplementerOnReviewerMessage $finalTaskState $finalT
 Assert-True ($finalTaskApproved.decision -eq 'final_story_reconciled' -and $finalTaskState.finalStoryState -eq 'accepted') 'per_task final story review must reconcile after all task acceptances'
 Assert-True (-not $finalTaskState.storyReleased) 'per_task final story approval must not release the PR or merge gate'
 Apply-Event $finalTaskState @{ eventId = 'final-story-head-changed'; kind = 'revision_conflict'; taskId = 66; revision = ('c' * 40); authorization = $finalTaskState.authorization } | Out-Null
-Assert-True ($finalTaskState.finalReviewStatus -eq 'invalidated' -and $null -eq $finalTaskState.storyAcceptanceMarker) 'changed final HEAD must invalidate whole-story approval'
+Assert-True ($finalTaskState.finalReviewStatus -eq 'invalidated' -and
+    $finalTaskState.finalReviewInvalidatedRevision -eq $lastFinalSha -and
+    $null -eq $finalTaskState.storyAcceptanceMarker) 'changed final HEAD must invalidate whole-story approval'
 Assert-True (-not $finalTaskState.storyMerged -and -not $finalTaskState.storyReleased) 'final task acceptance must not merge or release the story'
+Apply-Event $finalTaskState @{ eventId = 'final-story-head-change-reconciled'; kind = 'coordinator_reconciled'; taskId = 66; revision = ('c' * 40); escalationId = 'final-story-head-changed'; coordinatorId = $finalTaskState.coordinator; authorization = $finalTaskState.authorization } | Out-Null
+$finalTaskCorrectedSha = ('d' * 40)
+$finalTaskRecovery = Apply-Event $finalTaskState @{ eventId = 'final-story-recovery-ready'; kind = 'final_story_ready_for_review'; taskId = 66; revision = $finalTaskCorrectedSha; previousRevision = $lastFinalSha; authorization = $finalTaskState.authorization }
+Assert-True ($finalTaskRecovery.decision -eq 'final_story_review' -and
+    $finalTaskState.finalReviewStatus -eq 'awaiting_review' -and
+    $finalTaskState.finalReviewRequest.reviewedHead -eq $finalTaskCorrectedSha) 'coordinator-reconciled invalidation must allow a corrected per_task final review'
+$finalTaskCorrectedApproval = New-StoryAcceptanceEvent $finalTaskState 'final-story-corrected-accept' $finalTaskCorrectedSha
+$finalTaskCorrectedResult = Resume-ImplementerOnReviewerMessage $finalTaskState $finalTaskCorrectedApproval
+Assert-True ($finalTaskCorrectedResult.decision -eq 'final_story_reconciled' -and
+    $finalTaskState.finalStoryApproval.revision -eq $finalTaskCorrectedSha) 'corrected per_task final review must reconcile at the new HEAD'
 
 $escalatedFinalState = New-ReconciliationState 'story_end_only'
 $escalatedFinalFirstSha = ('9' * 40)
@@ -1469,9 +1574,25 @@ $missingFinalEvidence.crossTaskEvidence = @()
 Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $missingFinalEvidence | Out-Null } 'final story approval must include cross-task evidence'
 $missingDeferredEvidence = Copy-ReconciliationEvent (New-StoryAcceptanceEvent $storyEndState 'story-end-missing-deferred-evidence' $storyEndLastSha)
 $missingDeferredEvidence.eventId = 'story-end-missing-deferred-evidence'
-$missingDeferredEvidence.deferredCriteria = @('criterion-owner-pending')
+$missingDeferredEvidence.deferredCriteria = @($storyEndState.finalReviewRequest.deferredCriteria)
 $missingDeferredEvidence.deferredEvidence = @()
 Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $missingDeferredEvidence | Out-Null } 'final story approval must not hide unresolved deferred criteria'
+
+$deferredMismatchState = New-ReconciliationState 'story_end_only'
+Apply-Event $deferredMismatchState @{ eventId = 'deferred-mismatch-ready-1'; kind = 'implementation_ready'; taskId = 65; revision = ('e' * 40); authorization = $deferredMismatchState.authorization } | Out-Null
+Apply-Event $deferredMismatchState @{ eventId = 'deferred-mismatch-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = ('f' * 40); authorization = $deferredMismatchState.authorization } | Out-Null
+$deferredMismatchState.finalReviewRequest.deferredCriteria = @(
+    [ordered]@{ id = 'deferred-owner-1'; criterion = 'Follow-up migration evidence'; owner = 'task-66' }
+)
+$deferredMismatchApproval = New-StoryAcceptanceEvent $deferredMismatchState 'deferred-mismatch-approval' ('f' * 40)
+$deferredMismatchApproval.deferredCriteria = @(
+    [ordered]@{ id = 'deferred-none'; criterion = 'No deferred criterion remains unresolved.'; owner = 'story-reviewer' }
+)
+$deferredMismatchApproval.deferredEvidence = @(
+    [ordered]@{ id = 'deferred-none'; owner = 'story-reviewer'; evidence = 'No deferred criterion remains unresolved.' }
+)
+Assert-Throws { Resume-ImplementerOnReviewerMessage $deferredMismatchState $deferredMismatchApproval | Out-Null } 'final story approval must match each frozen deferred criterion and owner'
+
 $storyEndAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-final-accept' $storyEndLastSha
 $storyEndConflict = Resume-ImplementerOnReviewerMessage $storyEndState $storyEndAcceptance
 Assert-True ($storyEndConflict.decision -eq 'reconcile_required' -and $storyEndState.finalStoryState -ne 'accepted') 'final story acceptance must preserve a human status until a decision'

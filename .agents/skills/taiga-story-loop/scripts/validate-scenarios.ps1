@@ -348,6 +348,7 @@ if (-not $normalizedAcceptance.Contains('per_task (default)') -or
     throw 'Acceptance assertion failed: review mode choices'
 }
 if (-not $normalizedAcceptance.Contains('Story #<ref> approved') -or
+    -not $normalizedAcceptance.Contains('Final review request: <request ID>') -or
     -not $normalizedAcceptance.Contains('Reviewed HEAD: <exact full 40-character commit SHA>') -or
     -not $normalizedAcceptance.Contains('Exactly one explicit final whole-story review') -or
     -not $normalizedAcceptance.Contains('a task acceptance never closes or releases the story PR gate') -or

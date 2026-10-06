@@ -130,6 +130,7 @@ approval.
 
 ```text
 Story #<ref> approved
+Final review request: <request ID>
 Repository: <absolute repository path>
 Worktree: <absolute story worktree>
 Branch: <expected story branch>
