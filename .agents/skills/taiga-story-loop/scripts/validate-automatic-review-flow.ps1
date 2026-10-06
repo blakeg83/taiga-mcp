@@ -368,15 +368,16 @@ function Apply-Event {
         if (-not $Event.Contains($required) -or [string]::IsNullOrWhiteSpace([string]$Event[$required])) { throw "$required is required." }
     }
     if ([string]$Event.authorization -cne [string]$State.authorization) { throw 'Start authorization binding is stale.' }
-    if (-not (Add-Unique $State ([string]$Event.eventId))) { return [ordered]@{ decision = 'duplicate'; state = $State } }
+    if ($State.consumedEvents -contains [string]$Event.eventId) { return [ordered]@{ decision = 'duplicate'; state = $State } }
 
     $task = Get-CurrentTask $State
     if ([long]$Event.taskId -ne [long]$task.taskId) { throw 'event is not for the current ordered task.' }
 
     if ((@($State.pendingEscalations).Count -gt 0) -and
-        (@('ready_for_review', 'changes_requested', 'implementation_ready', 'accepted') -contains [string]$Event.kind)) {
+        (@('ready_for_review', 'changes_requested', 'implementation_ready', 'accepted', 'final_story_ready_for_review') -contains [string]$Event.kind)) {
         throw 'coordinator reconciliation is required before resuming the review flow.'
     }
+    [void](Add-Unique $State ([string]$Event.eventId))
 
     switch ([string]$Event.kind) {
         'unknown_delivery' {
@@ -1521,9 +1522,14 @@ Assert-True ($finalTaskState.finalReviewStatus -eq 'invalidated' -and
     $finalTaskState.finalReviewInvalidatedRevision -eq $lastFinalSha -and
     $null -eq $finalTaskState.storyAcceptanceMarker) 'changed final HEAD must invalidate whole-story approval'
 Assert-True (-not $finalTaskState.storyMerged -and -not $finalTaskState.storyReleased) 'final task acceptance must not merge or release the story'
-Apply-Event $finalTaskState @{ eventId = 'final-story-head-change-reconciled'; kind = 'coordinator_reconciled'; taskId = 66; revision = ('c' * 40); escalationId = 'final-story-head-changed'; coordinatorId = $finalTaskState.coordinator; authorization = $finalTaskState.authorization } | Out-Null
 $finalTaskCorrectedSha = ('d' * 40)
-$finalTaskRecovery = Apply-Event $finalTaskState @{ eventId = 'final-story-recovery-ready'; kind = 'final_story_ready_for_review'; taskId = 66; revision = $finalTaskCorrectedSha; previousRevision = $lastFinalSha; authorization = $finalTaskState.authorization }
+$finalTaskRecoveryEvent = @{ eventId = 'final-story-recovery-ready'; kind = 'final_story_ready_for_review'; taskId = 66; revision = $finalTaskCorrectedSha; previousRevision = $lastFinalSha; authorization = $finalTaskState.authorization }
+Assert-Throws { Apply-Event $finalTaskState $finalTaskRecoveryEvent | Out-Null } 'final story recovery must remain blocked while coordinator reconciliation is pending'
+Assert-True ($finalTaskState.finalReviewStatus -eq 'invalidated' -and
+    @($finalTaskState.actions | Where-Object kind -eq 'story_review').Count -eq 1 -and
+    @($finalTaskState.pendingEscalations).Count -eq 1) 'blocked final recovery must not dispatch or mutate review state'
+Apply-Event $finalTaskState @{ eventId = 'final-story-head-change-reconciled'; kind = 'coordinator_reconciled'; taskId = 66; revision = ('c' * 40); escalationId = 'final-story-head-changed'; coordinatorId = $finalTaskState.coordinator; authorization = $finalTaskState.authorization } | Out-Null
+$finalTaskRecovery = Apply-Event $finalTaskState $finalTaskRecoveryEvent
 Assert-True ($finalTaskRecovery.decision -eq 'final_story_review' -and
     $finalTaskState.finalReviewStatus -eq 'awaiting_review' -and
     $finalTaskState.finalReviewRequest.reviewedHead -eq $finalTaskCorrectedSha) 'coordinator-reconciled invalidation must allow a corrected per_task final review'
