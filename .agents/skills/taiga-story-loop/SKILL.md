@@ -26,6 +26,11 @@ templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
 
+Before showing the setup gate, read [setup authorization](references/setup-authorization.md).
+It defines capability intake, the selectable Start/Cancel decision, the
+explicit typed fallback, and the authorization record passed to assignments.
+Preference-only input must never be repurposed as permission.
+
 After `Start`, pass the confirmed values and ordered task list to the Luna
 implementation worker using [the implementation prompt](assets/implementation-prompt.md).
 The worker processes one task at a time in the declared order, records direct

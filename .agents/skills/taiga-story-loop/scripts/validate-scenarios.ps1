@@ -16,6 +16,7 @@ $topologyPath = Join-Path $skillRoot 'references/branch-topology.md'
 $branchPath = Join-Path $skillRoot 'references/branch-and-continuation.md'
 $continuationPath = Join-Path $skillRoot 'references/continuation-note.md'
 $continuationScriptPath = Join-Path $PSScriptRoot 'validate-continuation-note.ps1'
+$continuationWriterPath = Join-Path $PSScriptRoot 'write-continuation-note.ps1'
 $promptPath = Join-Path $skillRoot 'assets/implementation-prompt.md'
 $branchScenarioPath = Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'
 $walkthroughPath = Join-Path $skillRoot 'references/synthetic-walkthroughs.md'
@@ -43,6 +44,8 @@ $revisionFreezePath = Join-Path $skillRoot 'references/revision-freeze.md'
 $acceptanceEvidencePath = Join-Path $skillRoot 'references/acceptance-evidence.md'
 $acceptanceEvidenceManifestPath = Join-Path $skillRoot 'assets/acceptance-evidence-scenarios.json'
 $acceptanceEvidenceScriptPath = Join-Path $PSScriptRoot 'validate-acceptance-evidence.ps1'
+$setupAuthorizationPath = Join-Path $skillRoot 'references/setup-authorization.md'
+$setupAuthorizationScriptPath = Join-Path $PSScriptRoot 'validate-setup-authorization.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -91,6 +94,10 @@ if (-not (Test-Path $acceptanceEvidencePath) -or
     -not (Test-Path $acceptanceEvidenceScriptPath)) {
     throw 'Missing acceptance-evidence contract, manifest, or executable fixture.'
 }
+if (-not (Test-Path $setupAuthorizationPath) -or
+    -not (Test-Path $setupAuthorizationScriptPath)) {
+    throw 'Missing setup-authorization contract or executable fixture.'
+}
 
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
@@ -138,6 +145,9 @@ $acceptanceEvidenceText = Get-Content $acceptanceEvidencePath -Raw
 $normalizedAcceptanceEvidence = [regex]::Replace($acceptanceEvidenceText, '\s+', ' ')
 $acceptanceEvidenceScriptText = Get-Content $acceptanceEvidenceScriptPath -Raw
 $acceptanceEvidenceManifestText = Get-Content $acceptanceEvidenceManifestPath -Raw
+$setupAuthorizationText = Get-Content $setupAuthorizationPath -Raw
+$normalizedSetupAuthorization = [regex]::Replace($setupAuthorizationText, '\s+', ' ')
+$setupAuthorizationScriptText = Get-Content $setupAuthorizationScriptPath -Raw
 
 function Assert-DocumentContains {
     param(
@@ -249,9 +259,21 @@ function Assert-HandoffContains {
     }
 }
 
+function Assert-SetupAuthorizationContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedSetupAuthorization.Contains($Text)) {
+        throw "Setup-authorization assertion failed: $Label"
+    }
+}
+
 Assert-DocumentContains 'per-repository mapping' 'one row per resolved repository'
 Assert-DocumentContains 'epic mapping guard' 'An epic setup must not collapse multiple repositories'
 Assert-DocumentContains 'start gate' 'Reply Start or Cancel.'
+Assert-DocumentContains 'setup authorization reference' 'setup authorization input contract'
 Assert-DocumentContains 'read-only discovery' 'Discovery is read-only.'
 Assert-DocumentContains 'cancel behavior' '`Cancel` leaves the external systems unchanged'
 Assert-DocumentContains 'clarification behavior' 'Ask only for a missing or ambiguous'
@@ -381,6 +403,10 @@ Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/cha
 Assert-ContinuationContains 'legacy final review state' 'Final review: <not_applicable/pending/findings/accepted>'
 Assert-ContinuationContains 'legacy snapshot compatibility' 'optional when reading or replacing an older snapshot'
 Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
+Assert-ContinuationContains 'submitted setup decision' 'Setup authorization: <pending/start/cancelled>'
+if (-not (Get-Content $continuationWriterPath -Raw).Contains("'Setup authorization'")) {
+    throw 'Continuation persistence assertion failed: setup authorization field is not accepted by the writer.'
+}
 Assert-ContinuationContains 'resume reconciliation' 'Inspect existing managed worktrees and branches'
 Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged'
 Assert-ContinuationContains 'snapshot ownership' 'The coordinator owns this compact snapshot'
@@ -469,6 +495,51 @@ foreach ($marker in @(
         'independent verification separately from inspected worker evidence')) {
     if (-not $normalizedAutomaticFlow.Contains($marker)) {
         throw "Automatic review-flow assertion failed: $marker"
+    }
+}
+
+foreach ($marker in @(
+        'Capability intake'
+        'Supports selectable authorization'
+        'Permits authorization'
+        'explicit-submission evidence'
+        'preference-only or optional-question input tool is not an authorization capability'
+        'selectable = supportsSelectableAuthorization'
+        'exactly one setup gate'
+        'A displayed default'
+        'awaiting_confirmation'
+        'resolved authorization reference'
+        'scope change'
+        'active gate identity, revision, and resolved scope'
+        'duplicate, stale, or post-Cancel events are rejected'
+        'Actual selectable UI behavior requires a separately authorized host observation')) {
+    Assert-SetupAuthorizationContains "contract marker: $marker" $marker
+}
+foreach ($marker in @(
+        'New-SetupState'
+        'HasExplicitSubmissionEvidence'
+        'GateId'
+        'rejected_stale_or_closed_gate'
+        'blocked_before_confirmation'
+        'setup_gate_replaced'
+        'Resolve-SetupEvent'
+        'permitted-selectable-start'
+        'prohibited-selectable-tool'
+        'unavailable-selectable-tool'
+        'missing-submission-evidence'
+        'selectable-default-only'
+        'plain-timeout'
+        'plain-blank-reply'
+        'plain-invalid-reply'
+        'plain-worker-message'
+        'selectable-explicit-cancel'
+        'plain-explicit-cancel'
+        'duplicate-start-event'
+        'start-after-cancel'
+        'scope-change-invalidates-start'
+        'Passed $($results.Count) setup-authorization decision scenarios')) {
+    if (-not $setupAuthorizationScriptText.Contains($marker)) {
+        throw "Setup-authorization fixture assertion failed: $marker"
     }
 }
 if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains('Passed automatic review-flow fixture')) {
@@ -683,6 +754,7 @@ foreach ($recordMarker in @(
         '## 3. Ambiguous scope'
         '## 4. Valid scope'
         '## 5. Missing acceptance criteria'
+        '## 6. Setup authorization input decisions'
         'Synthetic user reply and trace:'
         'Start'
         'Cancel'
@@ -701,7 +773,14 @@ foreach ($recordMarker in @(
         'no implementer `wait_threads`'
         'failed or unknown delivery remains a coordinator reconciliation'
         '`ClarifyRequired(project)`'
-        '`ClarifyRequired(acceptance criteria)`')) {
+        '`ClarifyRequired(acceptance criteria)`'
+        'request_user_input'
+        'Permitted selectable'
+        'Missing submission evidence'
+        'Default-only'
+        'Empty/blank'
+        'Explicit cancel'
+        'Scope change')) {
     if (-not $normalizedWalkthrough.Contains($recordMarker)) {
         throw "Walkthrough record assertion failed: $recordMarker"
     }
@@ -899,4 +978,10 @@ if ($acceptanceExit -ne 0) {
     throw "Acceptance-evidence fixture exited ${acceptanceExit}: $($acceptanceOutput -join [Environment]::NewLine)"
 }
 $acceptanceOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+$authorizationOutput = @(& pwsh -NoProfile -File $setupAuthorizationScriptPath 2>&1 | ForEach-Object { [string]$_ })
+$authorizationExit = $LASTEXITCODE
+if ($authorizationExit -ne 0) {
+    throw "Setup-authorization fixture exited ${authorizationExit}: $($authorizationOutput -join [Environment]::NewLine)"
+}
+$authorizationOutput | Write-Output
+Write-Output "Passed $($results.Count) static setup scenarios plus setup-authorization, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

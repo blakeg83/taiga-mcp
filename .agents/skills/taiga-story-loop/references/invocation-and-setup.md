@@ -28,6 +28,16 @@ After resolution, show one concrete prompt using the actual discovered values.
 Do not split authorization across worker prompts or silently fill unresolved
 placeholders:
 
+Before rendering the prompt, follow [the setup authorization input contract](setup-authorization.md).
+Inspect the actual host/tool documentation or an authorized capability probe and
+record the provider/context, source, selectable-support result,
+authorization-permission result, explicit-submission evidence, and any
+limitation. A preference-only or optional-question input tool is not an
+authorization capability; never repurpose it for this gate. Select the
+selectable form only when the interface both supports and permits authorization
+and distinguishes a submitted choice from a default. Otherwise use the
+explicit typed fallback and state the limitation briefly.
+
 Before showing `Start`, inspect the selected story's real acceptance criteria
 and classify whether UI/browser evidence applies. If it does, include a short
 capability/evidence plan in the setup packet: required host/data setup,
@@ -66,6 +76,11 @@ Workers and review cadence:
 - Final epic review: gpt-6.1-sol, high, after all scoped stories are ready
 - Review mode: per_task (default); story_end_only is an explicit alternative
 - No silent profile substitution; an unavailable exact profile is a blocker.
+
+Setup authorization input:
+- Capability: <provider/context; source; selectable supported/permitted or limitation>
+- Gate: <one selectable Start/Cancel gate, or explicit typed fallback>
+- Decision record: <pending until explicit submission; otherwise mode/decision/scope/authorization reference>
 
 The story worker pair is persistent for the whole story: the coordinator
 creates or reuses one ordinary implementer chat and one ordinary reviewer chat
@@ -107,17 +122,23 @@ its healthy read budget: unanswered user gates end silently; active worker waits
 use recorded IDs/cursors for at most one compact snapshot. History and full
 reconciliation are loaded only for actionable change or recovery investigation.
 
-Reply Start or Cancel.
+If selectable authorization is supported and permitted, submit exactly one of
+the visible `Start` or `Cancel` choices. A displayed default, empty response,
+timeout, unrelated text, or worker message is not a decision. Otherwise reply
+exactly Start or Cancel using the stated text fallback.
+For the text fallback: Reply Start or Cancel.
 ```
 
 `Start` is the user's single confirmation for the listed scope and operations;
-record the approval with the resolved scope and pass that record to every
-worker assignment. `Cancel` leaves the external systems unchanged and ends
-setup. A later worker message is never treated as a substitute for either
-reply. The listed pull-request creation or update is included in that one
-`Start` authorization; do not ask for another PR-creation confirmation after
-final story approval. If the user changes the scope, regenerate the summary and
-obtain a new confirmation.
+record the submitted decision and resolved authorization reference with the
+resolved scope, then pass the immutable record to every worker assignment.
+`Cancel` leaves the external systems unchanged and ends setup. A later worker
+message is never treated as a substitute for either reply. The listed
+pull-request creation or update is included in that one `Start` authorization;
+do not ask for another PR-creation confirmation after final story approval. If
+the user changes the scope, invalidate the old decision, regenerate the summary,
+and obtain one new confirmation. See [the setup authorization input contract](setup-authorization.md)
+for the accepted decision states and offline evidence boundary.
 
 After `Start`, the coordinator follows
 [scope-specific branch topology](branch-topology.md) and

@@ -19,6 +19,7 @@ Current: story #<ref> | task/stage: <ref or stage>
 Story branch: <branch> | worktree: <absolute path> | base: <sha>
 Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
 Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
+Setup authorization: <pending/start/cancelled> | mode: <selectable/plain-text> | submitted: <true/false> | reference: <resolved authorization reference or none>
 Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
 Review input: repository <path> | worktree <path> | branch <branch> | base <sha> | reviewed <full SHA or pending> | diff <base..reviewed> | source <clean tracked source/blocked>
 PR: <url or pending> | base: <master or feature branch> | head: <sha>
@@ -64,7 +65,8 @@ Pending action: <none or external operation identity and unknown outcome>
 Evidence: <current handoff/review/check references; no copied findings>
 ```
 
-Keep authorization boundaries, topology, PR/base/head approval identity, final
+Keep the submitted setup decision, mode, scope reference, resolved
+authorization reference, and authorization boundaries, along with topology, PR/base/head approval identity, final
 review state, worker hosts and cursors, automation identity, and unresolved
 trial inputs in the current note. For a newly created standalone run, `Topology` is
 `standalone-story-direct-master`; for an epic it is `epic-shared-feature`.
