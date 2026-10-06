@@ -133,6 +133,14 @@ function Authorize-ImplementerResume {
     $State.turnStatus = 'active'
 }
 
+function Assert-NoPendingAcceptanceEscalations {
+    param([System.Collections.IDictionary] $State)
+
+    if (@($State.pendingEscalations).Count -gt 0) {
+        throw 'coordinator reconciliation is required before resuming the review flow.'
+    }
+}
+
 function End-ImplementerReviewTurn {
     param(
         [System.Collections.IDictionary] $State,
@@ -207,6 +215,7 @@ function Resume-ImplementerOnReviewerMessage {
     )
 
     if ($State.Contains('provider') -and [string]$Event.kind -eq 'accepted') {
+        Assert-NoPendingAcceptanceEscalations $State
         $acceptanceMarker = "task|$($Event.taskId)|$($Event.revision)"
         if ($State.acceptanceMarkers -contains $acceptanceMarker) {
             return [ordered]@{ decision = 'duplicate'; state = $State }
@@ -239,6 +248,7 @@ function Resume-ImplementerOnReviewerMessage {
     }
 
     if ($State.Contains('provider') -and [string]$Event.kind -eq 'story_accepted') {
+        Assert-NoPendingAcceptanceEscalations $State
         $storyMarker = "story|$($Event.revision)"
         if ($State.storyAcceptanceMarker -eq $storyMarker) {
             return [ordered]@{ decision = 'duplicate'; state = $State }
@@ -596,13 +606,22 @@ function Confirm-ProviderTaskWrite {
     $provider = $State.provider
     $targetStatusId = [int]$provider.statusMapping.accepted
     $actionKey = [string]$Journal.marker
+    if (-not $Journal.Contains('baselineVersion') -or $null -eq $Journal.baselineVersion) {
+        $Journal.baselineVersion = [int]$Before.version
+        $Journal.baselineStatusId = [int]$Before.statusId
+        $Journal.baselineDescription = [string]$Before.description
+    }
+    $changedFromBaseline = ([int]$Before.version -ne [int]$Journal.baselineVersion -or
+        [int]$Before.statusId -ne [int]$Journal.baselineStatusId -or
+        [string]$Before.description -cne [string]$Journal.baselineDescription)
     if ($Before.statusId -eq $targetStatusId -and $Before.description -eq $TargetDescription) {
         $Journal.statusConfirmed = $true
         return $null
     }
 
     $humanDecision = if ($Event.Contains('humanDecision')) { [string]$Event.humanDecision } else { '' }
-    if ($Before.statusId -eq [int]$provider.humanStatusId -and $humanDecision -eq '') {
+    if ($humanDecision -eq '' -and
+        ($changedFromBaseline -or $Before.statusId -eq [int]$provider.humanStatusId)) {
         return Add-ReconciliationHold $State $actionKey 'authoritative human status changed after the acceptance snapshot; an explicit preserve-or-replace decision is required'
     }
     if ($humanDecision -eq 'preserve_human_status') {
@@ -1039,6 +1058,14 @@ $invalidAcceptance = New-TaskAcceptanceEvent $staleState 'invalid-sha' 'x'
 Assert-Throws { Resume-ImplementerOnReviewerMessage $staleState $invalidAcceptance | Out-Null } 'acceptance must require a full reviewed SHA'
 Assert-True (@($staleState.provider.taskWrites).Count -eq 0 -and @($staleState.provider.storyWrites).Count -eq 0) 'stale acceptance must not reach the provider'
 
+$escalatedTaskState = New-ReconciliationState 'per_task'
+$escalatedTaskSha = ('8' * 40)
+Complete-ReviewHandoff $escalatedTaskState @{ eventId = 'escalated-ready'; kind = 'ready_for_review'; taskId = 65; revision = $escalatedTaskSha; reviewerId = $escalatedTaskState.reviewer; authorization = $escalatedTaskState.authorization } | Out-Null
+Apply-Event $escalatedTaskState @{ eventId = 'escalated-conflict'; kind = 'revision_conflict'; taskId = 65; revision = $escalatedTaskSha; authorization = $escalatedTaskState.authorization } | Out-Null
+$escalatedTaskAcceptance = New-TaskAcceptanceEvent $escalatedTaskState 'escalated-acceptance' $escalatedTaskSha
+Assert-Throws { Resume-ImplementerOnReviewerMessage $escalatedTaskState $escalatedTaskAcceptance | Out-Null } 'task acceptance must honor pending coordinator reconciliation'
+Assert-True ($escalatedTaskState.currentTaskIndex -eq 0 -and @($escalatedTaskState.provider.taskWrites).Count -eq 0 -and @($escalatedTaskState.pendingEscalations).Count -eq 1) 'task acceptance must not bypass an unresolved escalation'
+
 $humanState = New-ReconciliationState 'per_task'
 $humanSha = ('d' * 40)
 Complete-ReviewHandoff $humanState @{ eventId = 'human-ready'; kind = 'ready_for_review'; taskId = 65; revision = $humanSha; reviewerId = $humanState.reviewer; authorization = $humanState.authorization } | Out-Null
@@ -1069,6 +1096,17 @@ $reopenedState.provider.tasks['65'].statusId = $reopenedState.provider.humanStat
 $reopenedState.provider.tasks['65'].version++
 $reopenedHold = Resume-ImplementerOnReviewerMessage $reopenedState $reopenedAcceptance
 Assert-True ($reopenedHold.decision -eq 'reconcile_required' -and $reopenedState.currentTaskIndex -eq 0) 'recovery must re-read status after a human reopens a confirmed task'
+
+$humanNewState = New-ReconciliationState 'per_task'
+$humanNewSha = ('7' * 40)
+Complete-ReviewHandoff $humanNewState @{ eventId = 'human-new-ready'; kind = 'ready_for_review'; taskId = 65; revision = $humanNewSha; reviewerId = $humanNewState.reviewer; authorization = $humanNewState.authorization } | Out-Null
+$humanNewAcceptance = New-TaskAcceptanceEvent $humanNewState 'accept-human-new' $humanNewSha
+$humanNewMarker = "task|65|$humanNewSha"
+$humanNewState.provider.barriers.humanBeforeTaskWrite[$humanNewMarker] = [ordered]@{ statusId = $humanNewState.provider.statusMapping.not_started; append = '- [x] Human-owned note' }
+$humanNewConflict = Resume-ImplementerOnReviewerMessage $humanNewState $humanNewAcceptance
+Assert-True ($humanNewConflict.decision -eq 'reconcile_required') 'a human change to another status must hold acceptance'
+$humanNewRecovery = Resume-ImplementerOnReviewerMessage $humanNewState $humanNewAcceptance
+Assert-True ($humanNewRecovery.decision -eq 'reconcile_required' -and $humanNewState.provider.tasks['65'].statusId -eq $humanNewState.provider.statusMapping.not_started -and @($humanNewState.provider.taskWrites).Count -eq 0) 'normal recovery must not overwrite a changed human status without a decision'
 
 $lostState = New-ReconciliationState 'per_task'
 $lostSha = ('e' * 40)
@@ -1105,6 +1143,21 @@ $lastFinalAcceptance = New-TaskAcceptanceEvent $finalTaskState 'final-last-accep
 $finalTaskResult = Resume-ImplementerOnReviewerMessage $finalTaskState $lastFinalAcceptance
 Assert-True ($finalTaskResult.decision -eq 'final_story_review' -and @($finalTaskState.actions | Where-Object kind -eq 'story_review').Count -eq 1) 'the final task must hand off final story review after reconciliation'
 Assert-True (-not $finalTaskState.storyMerged -and -not $finalTaskState.storyReleased) 'final task acceptance must not merge or release the story'
+
+$escalatedFinalState = New-ReconciliationState 'story_end_only'
+$escalatedFinalFirstSha = ('9' * 40)
+$escalatedFinalLastSha = ('a' * 40)
+Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-ready-1'; kind = 'implementation_ready'; taskId = 65; revision = $escalatedFinalFirstSha; authorization = $escalatedFinalState.authorization } | Out-Null
+Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
+foreach ($providerTask in @($escalatedFinalState.provider.tasks.Values)) {
+    $providerTask.statusId = $escalatedFinalState.provider.statusMapping.awaiting_review
+    $providerTask.version++
+}
+$escalatedFinalState.turnStatus = 'awaiting_review'
+Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-conflict'; kind = 'revision_conflict'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
+$escalatedFinalAcceptance = New-StoryAcceptanceEvent $escalatedFinalState 'escalated-final-acceptance' $escalatedFinalLastSha
+Assert-Throws { Resume-ImplementerOnReviewerMessage $escalatedFinalState $escalatedFinalAcceptance | Out-Null } 'final story acceptance must honor pending coordinator reconciliation'
+Assert-True ($escalatedFinalState.finalStoryState -eq 'pending' -and @($escalatedFinalState.provider.taskWrites).Count -eq 0 -and @($escalatedFinalState.pendingEscalations).Count -eq 1) 'final story acceptance must not bypass an unresolved escalation'
 
 $storyEndState = New-ReconciliationState 'story_end_only'
 $storyEndFirstSha = ('3' * 40)
