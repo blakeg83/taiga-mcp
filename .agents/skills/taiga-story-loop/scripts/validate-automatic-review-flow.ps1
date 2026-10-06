@@ -201,6 +201,9 @@ function Complete-ReviewHandoff {
 
     $result = Apply-Event $State $Event
     if ($result.decision -eq 'dispatch_review') {
+        if ($State.Contains('provider')) {
+            Capture-ProviderReviewBaseline $State @([int]$Event.taskId)
+        }
         $handoffKind = 'initial'
         if ($Event.Contains('previousRevision')) { $handoffKind = 'correction' }
         End-ImplementerReviewTurn $State (Get-CurrentTask $State) $handoffKind
@@ -369,6 +372,9 @@ function Apply-Event {
             $task.pendingSha = [string]$Event.revision
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
                 $State.finalReviewRevision = [string]$Event.revision
+                if ($State.Contains('provider')) {
+                    Capture-ProviderReviewBaseline $State @($State.tasks | ForEach-Object { [int]$_.taskId })
+                }
                 $created = Add-Action $State 'story_review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
                 return [ordered]@{ decision = if ($created) { 'final_story_review' } else { 'duplicate' }; state = $State }
             }
@@ -413,6 +419,7 @@ function New-ReconciliationState {
     $state.scopeHash = 'scope-87'
     $state.acceptanceMarkers = @()
     $state.acceptanceJournal = @{}
+    $state.providerReviewBaselines = @{}
     $state.reconciliationHolds = @()
     $state.pendingAcceptance = $null
     $state.storyAcceptanceMarker = $null
@@ -466,6 +473,23 @@ function Get-ProviderTaskSnapshot {
         statusId = [int]$task.statusId
         description = [string]$task.description
         comments = @($task.comments)
+    }
+}
+
+function Capture-ProviderReviewBaseline {
+    param(
+        [System.Collections.IDictionary] $State,
+        [int[]] $TaskIds
+    )
+
+    foreach ($taskId in @($TaskIds)) {
+        $snapshot = Get-ProviderTaskSnapshot $State.provider $taskId
+        $State.providerReviewBaselines[[string]$taskId] = [ordered]@{
+            version = [int]$snapshot.version
+            statusId = [int]$snapshot.statusId
+            description = [string]$snapshot.description
+            historyCount = @($State.provider.tasks[[string]$taskId].history).Count
+        }
     }
 }
 
@@ -606,10 +630,14 @@ function Confirm-ProviderTaskWrite {
     $provider = $State.provider
     $targetStatusId = [int]$provider.statusMapping.accepted
     $actionKey = [string]$Journal.marker
+    if (-not $State.providerReviewBaselines.ContainsKey([string]$Before.id)) {
+        throw "provider review baseline is missing for task $($Before.id)"
+    }
+    $baseline = $State.providerReviewBaselines[[string]$Before.id]
     if (-not $Journal.Contains('baselineVersion') -or $null -eq $Journal.baselineVersion) {
-        $Journal.baselineVersion = [int]$Before.version
-        $Journal.baselineStatusId = [int]$Before.statusId
-        $Journal.baselineDescription = [string]$Before.description
+        $Journal.baselineVersion = [int]$baseline.version
+        $Journal.baselineStatusId = [int]$baseline.statusId
+        $Journal.baselineDescription = [string]$baseline.description
     }
     $changedFromBaseline = ([int]$Before.version -ne [int]$Journal.baselineVersion -or
         [int]$Before.statusId -ne [int]$Journal.baselineStatusId -or
@@ -1101,8 +1129,9 @@ $humanNewState = New-ReconciliationState 'per_task'
 $humanNewSha = ('7' * 40)
 Complete-ReviewHandoff $humanNewState @{ eventId = 'human-new-ready'; kind = 'ready_for_review'; taskId = 65; revision = $humanNewSha; reviewerId = $humanNewState.reviewer; authorization = $humanNewState.authorization } | Out-Null
 $humanNewAcceptance = New-TaskAcceptanceEvent $humanNewState 'accept-human-new' $humanNewSha
-$humanNewMarker = "task|65|$humanNewSha"
-$humanNewState.provider.barriers.humanBeforeTaskWrite[$humanNewMarker] = [ordered]@{ statusId = $humanNewState.provider.statusMapping.not_started; append = '- [x] Human-owned note' }
+$humanNewState.provider.tasks['65'].statusId = $humanNewState.provider.statusMapping.not_started
+$humanNewState.provider.tasks['65'].version++
+Add-ProviderHistory $humanNewState.provider.tasks['65'] 'human_edit' 'human-new-before-acceptance'
 $humanNewConflict = Resume-ImplementerOnReviewerMessage $humanNewState $humanNewAcceptance
 Assert-True ($humanNewConflict.decision -eq 'reconcile_required') 'a human change to another status must hold acceptance'
 $humanNewRecovery = Resume-ImplementerOnReviewerMessage $humanNewState $humanNewAcceptance
@@ -1148,11 +1177,11 @@ $escalatedFinalState = New-ReconciliationState 'story_end_only'
 $escalatedFinalFirstSha = ('9' * 40)
 $escalatedFinalLastSha = ('a' * 40)
 Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-ready-1'; kind = 'implementation_ready'; taskId = 65; revision = $escalatedFinalFirstSha; authorization = $escalatedFinalState.authorization } | Out-Null
-Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
 foreach ($providerTask in @($escalatedFinalState.provider.tasks.Values)) {
     $providerTask.statusId = $escalatedFinalState.provider.statusMapping.awaiting_review
     $providerTask.version++
 }
+Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
 $escalatedFinalState.turnStatus = 'awaiting_review'
 Apply-Event $escalatedFinalState @{ eventId = 'escalated-final-conflict'; kind = 'revision_conflict'; taskId = 66; revision = $escalatedFinalLastSha; authorization = $escalatedFinalState.authorization } | Out-Null
 $escalatedFinalAcceptance = New-StoryAcceptanceEvent $escalatedFinalState 'escalated-final-acceptance' $escalatedFinalLastSha
@@ -1163,18 +1192,19 @@ $storyEndState = New-ReconciliationState 'story_end_only'
 $storyEndFirstSha = ('3' * 40)
 $storyEndLastSha = ('4' * 40)
 Apply-Event $storyEndState @{ eventId = 'story-end-ready-1'; kind = 'implementation_ready'; taskId = 65; revision = $storyEndFirstSha; authorization = $storyEndState.authorization } | Out-Null
-Apply-Event $storyEndState @{ eventId = 'story-end-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $storyEndLastSha; authorization = $storyEndState.authorization } | Out-Null
 foreach ($providerTask in @($storyEndState.provider.tasks.Values)) {
     $providerTask.statusId = $storyEndState.provider.statusMapping.awaiting_review
     $providerTask.version++
 }
+Apply-Event $storyEndState @{ eventId = 'story-end-ready-2'; kind = 'implementation_ready'; taskId = 66; revision = $storyEndLastSha; authorization = $storyEndState.authorization } | Out-Null
 Assert-True (@($storyEndState.provider.tasks.Values | Where-Object { $_.statusId -eq $storyEndState.provider.statusMapping.accepted }).Count -eq 0) 'story_end_only implementation milestones must not close tasks'
 $storyEndState.turnStatus = 'awaiting_review'
 $unrelatedStoryAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-unrelated-sha' (('5' * 40))
 Assert-Throws { Resume-ImplementerOnReviewerMessage $storyEndState $unrelatedStoryAcceptance | Out-Null } 'final story acceptance must match the pending final-review SHA'
 $storyEndAcceptance = New-StoryAcceptanceEvent $storyEndState 'story-end-final-accept' $storyEndLastSha
-$storyEndState.provider.tasks['65'].statusId = $storyEndState.provider.humanStatusId
+$storyEndState.provider.tasks['65'].statusId = $storyEndState.provider.statusMapping.not_started
 $storyEndState.provider.tasks['65'].version++
+Add-ProviderHistory $storyEndState.provider.tasks['65'] 'human_edit' 'story-end-human-before-acceptance'
 $storyEndConflict = Resume-ImplementerOnReviewerMessage $storyEndState $storyEndAcceptance
 Assert-True ($storyEndConflict.decision -eq 'reconcile_required' -and $storyEndState.finalStoryState -ne 'accepted') 'final story acceptance must preserve a human status until a decision'
 $storyEndAcceptance.humanDecision = 'replace_after_decision'
