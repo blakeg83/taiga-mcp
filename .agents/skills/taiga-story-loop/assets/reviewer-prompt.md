@@ -36,7 +36,9 @@ The implementer ends its turn after each per-task ready/correction handoff.
 Your authorized findings or acceptance message wakes that same chat; include
 the task ref and exact reviewed SHA. Do not ask it to poll or stay active, and
 do not repeat an unchanged outcome to wake it. Reconcile an unknown delivery
-with the coordinator before retrying.
+with the coordinator before retrying. A failed or unknown handoff is not a
+confirmed `awaiting_review` state, and a healthy idle review wait needs no
+reminder or coordinator acknowledgement.
 
 The scoped workflow may dispatch these ordinary review messages automatically
 from durable task events. A ready event receives one review request, a current

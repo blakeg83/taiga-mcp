@@ -24,9 +24,12 @@ Next: reviewer, inspect this exact revision and report findings or acceptance to
 
 Copy the exact revision from Git (`git rev-parse HEAD`); do not transcribe or
 truncate the SHA. The revision is immutable review input. In `per_task` mode,
-after the reviewer handoff is confirmed, the implementer records `awaiting_review`
-and ends its turn with a final response naming the task, branch, revision, and
-pending reviewer action.
+the confirmed endpoint is one successful direct delivery to the required
+reviewer, followed by `awaiting_review` and a concise final response naming the
+task, branch/worktree, full revision, pair identities, authorization, and
+pending reviewer action. The final response is the last action in the turn.
+There is no coordinator copy, unchanged acknowledgement, or keep-alive update.
+An unsuccessful or unknown delivery is not a confirmed review dispatch.
 It must not call `wait_threads`, poll/read the reviewer chat, schedule its own
 review monitor, or keep the turn alive. While review is pending, it makes no
 source edits and does not start the next ordered task. A failed or unknown
@@ -72,13 +75,15 @@ Checks: `<command>` — exit <code>; <concise result>
 Next: reviewer, re-review the new revision; prior acceptance is superseded.
 ```
 
-The new revision is a new review input. After sending the correction only to the
-same reviewer, the implementer follows the same end-of-turn rule as the initial
-ready handoff. The coordinator observes the durable correction event but takes
-no routine action, keeps the branch stable through its workflow state, and
-never creates a correction chat or allows the next task to race the active
-per-task review. An unknown delivery outcome or conflicting revision is
-escalated to the coordinator before retrying.
+The new revision is a new review input. After confirming successful delivery of
+the correction only to the same reviewer, the implementer follows the same
+end-of-turn rule as the initial ready handoff: record the new pending revision,
+issue the concise final response, and stop. The coordinator observes the
+durable correction event but takes no routine action, keeps the branch stable
+through its workflow state, and never creates a correction chat or allows the
+next task to race the active per-task review. An unknown delivery outcome or
+conflicting revision is escalated to the coordinator before retrying and never
+becomes a confirmed review wait.
 
 An automatic correction route is valid only for the current task, assigned
 reviewer, pending reviewed SHA, branch receipt, and the immutable `Start`

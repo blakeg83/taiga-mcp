@@ -169,6 +169,16 @@ Checks: `pwsh -NoProfile -File scripts/validate-scenarios.ps1` — exit 0; corre
 Next: reviewer, re-review the new revision; prior acceptance is superseded.
 ```
 
+Each confirmed ready or correction-ready delivery is the end of that
+implementer turn: the worker records `awaiting_review`, sends one concise final
+response with the full revision and pair identity, and stops. The synthetic
+trace contains no implementer `wait_threads`, reviewer read, review monitor,
+keep-alive, or unchanged acknowledgement. A reviewer finding or exact
+acceptance resumes the same implementer chat; a duplicate or stale outcome is
+ignored. A failed or unknown delivery remains a coordinator reconciliation and
+does not create a false review wait. Healthy idle `awaiting_review` recovery is
+a no-op and does not wake the worker.
+
 The branch remains stable while the reviewer inspects each named revision; no
 new chat, copied transcript, or mandatory structured receipt is introduced.
 

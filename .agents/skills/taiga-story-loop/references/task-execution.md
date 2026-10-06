@@ -80,7 +80,9 @@ reviewer polling or source edits. Resume on an authorized reviewer message
 using the identity, exact-revision, and deduplication checks in
 [message-driven resume](worker-handoffs.md#message-driven-resume). A timeout or
 idle worker cannot release the review gate. Coordinator recovery handles
-interrupted or missing handoffs, not routine review waits.
+interrupted or missing handoffs, not routine review waits. The final response
+after a confirmed handoff is the last implementer action; failed or unknown
+delivery remains an escalation and never enters `awaiting_review`.
 
 The ordinary handoff can be automated after the scope-bound `Start`: consume a
 durable `ready_for_review` event once, send the review request directly to the

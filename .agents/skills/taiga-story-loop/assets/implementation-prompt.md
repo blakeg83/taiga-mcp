@@ -104,26 +104,31 @@ revision, checks with exit codes, and one next action. A task-ready handoff goes
 only to the reviewer; a reviewer finding comes back directly to this same chat;
 a correction-ready handoff returns only to that same reviewer. A reviewer
 acceptance also returns only to this chat. In `per_task` mode, after confirming
-the task-ready or correction-ready handoff to the reviewer, record
-`awaiting_review` and end your turn with a final response naming the current
-task, branch/worktree, pending revision, pair IDs, authorization reference, and
-next reviewer action. Routine correction and acceptance cycles require no
-coordinator action: after exact acceptance, you own the current-version Taiga
-reconciliation and next-task advancement permitted by the selected review mode.
-Report only exceptional delivery or revision outcomes to the coordinator. Do
-not call `wait_threads`, poll/read the reviewer chat, schedule a review monitor,
-or keep the turn alive. Do not edit source or start the next task while review
-is pending. Recovery belongs to the coordinator.
+the direct delivery to the required reviewer, record `awaiting_review`, and end
+your turn with a concise final response naming the current task,
+branch/worktree, full pending revision, pair IDs, authorization reference, and
+next reviewer action. That final response is the last action in the turn: do
+not send a coordinator copy, unchanged acknowledgement, or keep-alive update.
+A failed or unknown delivery is not a confirmed review wait; report it to the
+coordinator for reconciliation instead. Routine correction and acceptance
+cycles require no coordinator action: after exact acceptance, you own the
+current-version Taiga reconciliation and next-task advancement permitted by
+the selected review mode. Report only exceptional delivery or revision
+outcomes to the coordinator. Do not call `wait_threads`, poll/read the reviewer
+chat, schedule a review monitor, or keep the turn alive. Do not edit source or
+start the next task while review is pending. Recovery belongs to the
+coordinator.
 
 Once `Start` has authorized the scope, the coordinator or workflow driver may
 automate this ordinary handoff: a durable `ready_for_review` event dispatches
 one review request for the current task; a current reviewer finding reopens
 only that task and sends the correction directly to this chat; a correction-
-ready handoff sends the new revision directly to the same reviewer. The
-implementer performs the version-safe task write and releases the next ordered
-task only under the declared review mode. The worker still does not poll, infer
-acceptance from idle status, or widen scope; duplicate, stale, unknown-delivery,
-and conflicting-revision events are no-ops or coordinator reconciliation cases.
+ready handoff sends the new revision directly to the same reviewer and ends
+this turn at the same endpoint. The implementer performs the version-safe task
+write and releases the next ordered task only under the declared review mode.
+The worker still does not poll, infer acceptance from idle status, or widen
+scope; duplicate, stale, unknown-delivery, and conflicting-revision events are
+no-ops or coordinator reconciliation cases.
 
 Resume this same chat only for an authorized actionable message or scoped
 recovery. Follow `references/worker-handoffs.md#message-driven-resume`: verify

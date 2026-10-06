@@ -109,6 +109,11 @@ and `.agents/skills/taiga-story-loop/scripts/validate-routing.ps1`.
 The milestone-routing change and its exact offline commands are recorded in
 [issue #89 validation](issue-89-validation.md).
 
+The end-of-turn handoff contract and no-polling recovery fixture are recorded
+in [issue #90 validation](issue-90-validation.md). Confirmed initial and
+correction-ready deliveries now stop the implementer turn; only a current
+reviewer message or evidenced recovery resumes the same chat.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the

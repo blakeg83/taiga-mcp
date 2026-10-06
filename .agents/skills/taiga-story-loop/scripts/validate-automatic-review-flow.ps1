@@ -9,6 +9,13 @@ function Assert-True {
     if (-not $Condition) { throw "Automatic review-flow assertion failed: $Message" }
 }
 
+function Assert-Throws {
+    param([scriptblock] $Action, [string] $Message)
+    $threw = $false
+    try { & $Action } catch { $threw = $true }
+    Assert-True $threw $Message
+}
+
 function New-StoryState {
     param([ValidateSet('per_task', 'story_end_only')] [string] $ReviewMode)
 
@@ -28,6 +35,12 @@ function New-StoryState {
         pendingEscalations = @()
         consumedEvents = @()
         actions = @()
+        turns = @()
+        implementerActions = @()
+        rejectedImplementerActions = @()
+        recoveryObservations = @()
+        currentTurnId = 1
+        turnStatus = 'active'
     }
 }
 
@@ -65,6 +78,167 @@ function Add-Action {
         worker = if ($Kind -eq 'review') { $State.reviewer } else { $State.implementer }
     }
     return $true
+}
+
+function Add-ImplementerAction {
+    param(
+        [System.Collections.IDictionary] $State,
+        [string] $Kind,
+        [string] $TaskRef,
+        [string] $Revision
+    )
+
+    $currentTurnActions = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
+    $forbiddenWhileReviewPending = @(
+        'wait_threads'
+        'read_reviewer_chat'
+        'review_monitor'
+        'keep_alive'
+        'unchanged_acknowledgement'
+        'source_edit'
+        'coordinator_copy'
+    )
+    $reviewEndpointActions = @('send_review_handoff', 'final_response')
+    if ($State.turnStatus -eq 'awaiting_review' -or
+        $Kind -eq 'coordinator_copy' -or
+        ($null -ne $State.pendingReview -and $Kind -notin $reviewEndpointActions)) {
+        $State.rejectedImplementerActions = @($State.rejectedImplementerActions) + [ordered]@{
+            kind = $Kind
+            task = $TaskRef
+            revision = $Revision
+            turn = [int]$State.currentTurnId
+        }
+        if ($State.turnStatus -eq 'awaiting_review') {
+            throw "implementer action '$Kind' is forbidden after the review handoff turn ended"
+        }
+        throw "implementer action '$Kind' is forbidden while review is pending"
+    }
+
+    $State.implementerActions = @($State.implementerActions) + [ordered]@{
+        kind = $Kind
+        task = $TaskRef
+        revision = $Revision
+        chat = $State.implementer
+        turn = [int]$State.currentTurnId
+        ordinal = $currentTurnActions.Count + 1
+    }
+}
+
+function Authorize-ImplementerResume {
+    param([System.Collections.IDictionary] $State)
+
+    Assert-True ($State.turnStatus -eq 'awaiting_review') 'reviewer resume requires an ended implementer turn'
+    $State.currentTurnId = [int]$State.currentTurnId + 1
+    $State.turnStatus = 'active'
+}
+
+function End-ImplementerReviewTurn {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $Task,
+        [string] $HandoffKind
+    )
+
+    Assert-True ($null -ne $State.pendingReview) "$HandoffKind requires a pending review"
+    Add-ImplementerAction $State 'send_review_handoff' $Task.ref ([string]$Task.pendingSha)
+    Add-ImplementerAction $State 'final_response' $Task.ref ([string]$Task.pendingSha)
+    $trace = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
+    $authorizedPrefixKinds = @('reviewer_message_resume', 'source_edit', 'taiga_reconcile', 'advance_next_task')
+    $prefix = @()
+    if ($trace.Count -gt 2) {
+        $prefix = @($trace | Select-Object -First ($trace.Count - 2))
+    }
+    $invalidPrefix = @($prefix | Where-Object { [string]$_.kind -notin $authorizedPrefixKinds })
+    $hasTerminalHandoffSuffix = ($trace.Count -ge 2 -and
+        [string]$trace[-2].kind -ceq 'send_review_handoff' -and
+        [string]$trace[-1].kind -ceq 'final_response')
+    $ended = ($hasTerminalHandoffSuffix -and $invalidPrefix.Count -eq 0)
+    Assert-True $ended "$HandoffKind must terminate from the exact action trace"
+    $State.turnStatus = 'awaiting_review'
+    $State.turns = @($State.turns) + [ordered]@{
+        actor = 'implementer'
+        chat = $State.implementer
+        turn = [int]$State.currentTurnId
+        handoff = $HandoffKind
+        task = $Task.ref
+        branch = $State.branch
+        revision = [string]$Task.pendingSha
+        reviewer = $State.reviewer
+        authorization = $State.authorization
+        state = 'awaiting_review'
+        ended = $ended
+        lastAction = [string]$trace[-1].kind
+        actionCount = $trace.Count
+    }
+}
+
+function Complete-ReviewHandoff {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $Event,
+        [switch] $DeliveryFailed
+    )
+
+    if ($DeliveryFailed) {
+        $failure = [ordered]@{
+            eventId = "$($Event.eventId)-delivery-failed"
+            kind = 'unknown_delivery'
+            taskId = $Event.taskId
+            revision = $Event.revision
+            authorization = $Event.authorization
+        }
+        return Apply-Event $State $failure
+    }
+
+    $result = Apply-Event $State $Event
+    if ($result.decision -eq 'dispatch_review') {
+        $handoffKind = 'initial'
+        if ($Event.Contains('previousRevision')) { $handoffKind = 'correction' }
+        End-ImplementerReviewTurn $State (Get-CurrentTask $State) $handoffKind
+    }
+    return $result
+}
+
+function Resume-ImplementerOnReviewerMessage {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $Event
+    )
+
+    $result = Apply-Event $State $Event
+    if ($result.decision -ne 'duplicate') {
+        Authorize-ImplementerResume $State
+        Add-ImplementerAction $State 'reviewer_message_resume' ([string]$Event.taskId) ([string]$Event.revision)
+        if ($result.decision -in @('advance_next_task', 'final_story_review')) {
+            Add-ImplementerAction $State 'taiga_reconcile' ([string]$Event.taskId) ([string]$Event.revision)
+        }
+        if ($result.decision -eq 'advance_next_task') {
+            Add-ImplementerAction $State 'advance_next_task' ([string](Get-CurrentTask $State).ref) 'pending'
+        }
+    }
+    return $result
+}
+
+function Observe-HealthyReviewRecovery {
+    param([System.Collections.IDictionary] $State)
+
+    if (@($State.pendingEscalations).Count -gt 0) {
+        $State.recoveryObservations = @($State.recoveryObservations) + [ordered]@{
+            decision = 'reconcile_required'
+            escalationCount = @($State.pendingEscalations).Count
+            implementerAction = 'none'
+        }
+        return [ordered]@{ decision = 'reconcile_required'; state = $State }
+    }
+
+    Assert-True ($null -ne $State.pendingReview) 'healthy review recovery requires a pending review'
+    $State.recoveryObservations = @($State.recoveryObservations) + [ordered]@{
+        decision = 'healthy_idle_no_wake'
+        task = [string]$State.pendingReview.taskId
+        revision = [string]$State.pendingReview.revision
+        implementerAction = 'none'
+    }
+    return [ordered]@{ decision = 'healthy_idle_no_wake'; state = $State }
 }
 
 function Apply-Event {
@@ -162,24 +336,53 @@ function Apply-Event {
 }
 
 $state = New-StoryState 'per_task'
-$ready = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
+$ready = Complete-ReviewHandoff $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($ready.decision -eq 'dispatch_review') 'per_task should dispatch the initial review'
 Assert-True (@($state.actions | Where-Object kind -eq 'review').Count -eq 1) 'per_task should prepare one review action'
 Assert-True ($state.actions[0].sender -eq $state.implementer -and $state.actions[0].destination -eq $state.reviewer) 'initial review must stay direct between the worker pair'
 Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordinator }).Count -eq 0) 'initial readiness must not notify the coordinator'
-$duplicate = Apply-Event $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
+Assert-True (@($state.turns).Count -eq 1) 'initial handoff must end one implementer turn'
+$initialTurn = @($state.turns)[0]
+$initialTrace = @($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$initialTurn.turn })
+$initialTraceKinds = @($initialTrace | ForEach-Object { [string]$_.kind })
+$traceEnded = ($initialTraceKinds.Count -eq 2 -and $initialTraceKinds[0] -eq 'send_review_handoff' -and $initialTraceKinds[1] -eq 'final_response')
+Assert-True ($initialTurn.ended -eq $traceEnded -and $initialTurn.lastAction -eq [string]$initialTrace[-1].kind -and $initialTurn.actionCount -eq $initialTrace.Count) 'initial handoff termination must be derived from its action trace'
+Assert-True ($initialTurn.chat -eq $state.implementer -and $initialTurn.reviewer -eq $state.reviewer) 'initial handoff must retain the same worker pair'
+Assert-True ($initialTurn.branch -eq $state.branch -and $initialTurn.revision -eq 'sha-a1') 'initial handoff must retain branch and full pending revision'
+foreach ($forbiddenAction in @('wait_threads', 'read_reviewer_chat', 'review_monitor', 'keep_alive', 'unchanged_acknowledgement', 'source_edit', 'coordinator_copy')) {
+    Assert-Throws { Add-ImplementerAction $state $forbiddenAction '#65' 'sha-a1' } "pending review must reject implementer $forbiddenAction"
+}
+Assert-True (@($state.rejectedImplementerActions).Count -eq 7) 'fixture must attempt every forbidden post-termination action'
+Assert-True (@($state.implementerActions | Where-Object { $_.kind -in @('wait_threads', 'read_reviewer_chat', 'review_monitor', 'keep_alive', 'unchanged_acknowledgement', 'source_edit', 'coordinator_copy') }).Count -eq 0) 'implementer trace must contain no polling, monitor, keep-alive, unchanged acknowledgement, source edit, or coordinator copy after termination'
+Assert-True (@($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$initialTurn.turn }).Count -eq $initialTurn.actionCount) 'post-termination attempts must not append to the ended turn trace'
+$healthyRecovery = Observe-HealthyReviewRecovery $state
+Assert-True ($healthyRecovery.decision -eq 'healthy_idle_no_wake' -and $state.recoveryObservations[0].implementerAction -eq 'none') 'healthy awaiting_review recovery must not wake or poll the implementer'
+$duplicate = Complete-ReviewHandoff $state @{ eventId = 'ready-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($duplicate.decision -eq 'duplicate') 'per_task should ignore duplicate ready events'
+Assert-True (@($state.turns).Count -eq 1) 'duplicate ready must not start another implementer turn'
 $stale = $false
 try { Apply-Event $state @{ eventId = 'stale-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-old'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' } | Out-Null } catch { $stale = $true }
 Assert-True $stale 'per_task should reject stale acceptance'
-$finding = Apply-Event $state @{ eventId = 'finding-per_task'; kind = 'changes_requested'; taskId = 65; reviewedRevision = 'sha-a1'; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
+$finding = Resume-ImplementerOnReviewerMessage $state @{ eventId = 'finding-per_task'; kind = 'changes_requested'; taskId = 65; reviewedRevision = 'sha-a1'; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
 Assert-True ($finding.decision -eq 'route_correction') 'per_task should route correction to the same pair'
+Assert-True ($state.turnStatus -eq 'active' -and $state.currentTurnId -eq 2) 'current reviewer finding must authorize a new implementer turn'
+Add-ImplementerAction $state 'source_edit' '#65' 'working-tree'
 $correctionAction = @($state.actions | Where-Object kind -eq 'correction')[0]
 Assert-True ($correctionAction.sender -eq $state.reviewer -and $correctionAction.destination -eq $state.implementer) 'routine findings must go directly to the implementer'
 Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordinator }).Count -eq 0) 'routine findings and corrections must not notify the coordinator'
+$correctionReady = Complete-ReviewHandoff $state @{ eventId = 'ready-correction-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; previousRevision = 'sha-a1'; authorization = 'start-87' }
+Assert-True ($correctionReady.decision -eq 'dispatch_review') 'per_task should dispatch correction re-review'
+Assert-True (@($state.turns).Count -eq 2 -and @($state.turns)[1].handoff -eq 'correction') 'correction-ready handoff must end the same implementer chat turn'
+$correctionTurn = @($state.turns)[1]
+$correctionTrace = @($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$correctionTurn.turn })
+Assert-True ($correctionTurn.ended -and $correctionTurn.actionCount -eq $correctionTrace.Count -and [string]$correctionTrace[-1].kind -eq $correctionTurn.lastAction) 'correction termination must be derived from its action trace'
+Assert-True (@($state.implementerActions | Where-Object kind -eq 'final_response').Count -eq 2) 'initial and correction handoffs must each have one final response'
 $actionCountBeforeEscalation = @($state.actions).Count
 $unknownDelivery = Apply-Event $state @{ eventId = 'unknown-delivery-per_task'; kind = 'unknown_delivery'; taskId = 65; revision = 'sha-a2'; authorization = 'start-87' }
 Assert-True ($unknownDelivery.decision -eq 'escalate_coordinator') 'unknown delivery must escalate to the coordinator'
+Assert-True ($state.tasks[0].state -eq 'awaiting_review' -and $state.pendingReview.revision -eq 'sha-a2') 'an already confirmed review remains pending while delivery evidence is reconciled'
+$unknownRecovery = Observe-HealthyReviewRecovery $state
+Assert-True ($unknownRecovery.decision -eq 'reconcile_required' -and $state.recoveryObservations[-1].implementerAction -eq 'none') 'unresolved unknown delivery must require reconciliation rather than appear healthy'
 $revisionConflict = Apply-Event $state @{ eventId = 'revision-conflict-per_task'; kind = 'revision_conflict'; taskId = 65; revision = 'sha-a2'; authorization = 'start-87' }
 Assert-True ($revisionConflict.decision -eq 'escalate_coordinator') 'revision conflicts must escalate to the coordinator'
 Assert-True (@($state.actions).Count -eq $actionCountBeforeEscalation -and $state.currentTaskIndex -eq 0) 'escalation events must not mutate routine review state'
@@ -190,9 +393,9 @@ $reconcileUnknown = Apply-Event $state @{ eventId = 'reconcile-unknown-delivery-
 Assert-True ($reconcileUnknown.decision -eq 'reconciled' -and @($state.pendingEscalations).Count -eq 1) 'coordinator must reconcile the unknown delivery before resume'
 $reconcileConflict = Apply-Event $state @{ eventId = 'reconcile-revision-conflict-per_task'; kind = 'coordinator_reconciled'; taskId = 65; revision = 'sha-a2'; escalationId = 'revision-conflict-per_task'; coordinatorId = 'coordinator-story-87'; authorization = 'start-87' }
 Assert-True ($reconcileConflict.decision -eq 'reconciled' -and @($state.pendingEscalations).Count -eq 0) 'coordinator must reconcile the revision conflict before resume'
-$readyCorrection = Apply-Event $state @{ eventId = 'ready-correction-per_task'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; previousRevision = 'sha-a1'; authorization = 'start-87' }
-Assert-True ($readyCorrection.decision -eq 'dispatch_review') 'per_task should dispatch correction re-review'
-$accepted = Apply-Event $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }
+$healthyAfterReconciliation = Observe-HealthyReviewRecovery $state
+Assert-True ($healthyAfterReconciliation.decision -eq 'healthy_idle_no_wake') 'reconciled confirmed delivery may return to healthy quiet recovery'
+$accepted = Resume-ImplementerOnReviewerMessage $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }
 Assert-True ($accepted.decision -eq 'advance_next_task') 'per_task should advance only after exact acceptance'
 Assert-True ($state.currentTaskIndex -eq 1 -and $state.tasks[1].state -eq 'in_progress') 'per_task should start the next declared task'
 $acceptanceAction = @($state.actions | Where-Object kind -eq 'acceptance')[0]
@@ -202,8 +405,32 @@ Assert-True ($taigaAction.sender -eq $state.implementer -and $taigaAction.destin
 $advanceAction = @($state.actions | Where-Object kind -eq 'advance_next_task')[0]
 Assert-True ($advanceAction.sender -eq $state.implementer -and $advanceAction.destination -eq $state.implementer) 'implementer must own next-task advancement without a coordinator gate'
 Assert-True (@($state.actions | Where-Object { $_.destination -eq $state.coordinator }).Count -eq 0) 'task acceptance must not notify the coordinator'
-$idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-a2'; authorization = 'start-87' }
+$implementerActionCountAfterAcceptance = @($state.implementerActions).Count
+$duplicateAcceptance = Resume-ImplementerOnReviewerMessage $state @{ eventId = 'accepted-per_task'; kind = 'accepted'; taskId = 65; revision = 'sha-a2'; reviewerId = 'reviewer-story-87'; criteria = 'complete'; authorization = 'start-87' }
+Assert-True ($duplicateAcceptance.decision -eq 'duplicate' -and @($state.implementerActions).Count -eq $implementerActionCountAfterAcceptance) 'duplicate acceptance must not resume or write again'
+$nextReady = Complete-ReviewHandoff $state @{ eventId = 'ready-next-task-per_task'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
+Assert-True ($nextReady.decision -eq 'dispatch_review') 'accepted task should allow next task review handoff'
+Assert-True (@($state.turns).Count -eq 3 -and @($state.turns)[2].task -eq '#66') 'next task review handoff must end a new implementer turn'
+$nextTurn = @($state.turns)[2]
+$nextTrace = @($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$nextTurn.turn })
+$nextPrefix = @($nextTrace | Select-Object -First ($nextTrace.Count - 2))
+$nextTerminal = @($nextTrace | Select-Object -Last 2)
+Assert-True (($nextPrefix | ForEach-Object { [string]$_.kind }) -join ',' -eq 'reviewer_message_resume,taiga_reconcile,advance_next_task') 'next task handoff must allow authorized preceding work'
+Assert-True ($nextTurn.ended -and $nextTurn.lastAction -eq 'final_response' -and $nextTerminal.Count -eq 2 -and $nextTerminal[0].kind -eq 'send_review_handoff' -and $nextTerminal[1].kind -eq 'final_response') 'next task handoff must validate the terminal handoff suffix'
+$idle = Apply-Event $state @{ eventId = 'idle-per_task'; kind = 'idle'; taskId = 66; revision = 'sha-b1'; authorization = 'start-87' }
 Assert-True ($idle.decision -eq 'wait') 'per_task should not infer acceptance from idle'
+
+$failedDeliveryState = New-StoryState 'per_task'
+$failedDelivery = Complete-ReviewHandoff $failedDeliveryState @{ eventId = 'failed-initial-delivery'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-f1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' } -DeliveryFailed
+Assert-True ($failedDelivery.decision -eq 'escalate_coordinator') 'failed handoff delivery must escalate to the coordinator'
+Assert-True ($failedDeliveryState.tasks[0].state -eq 'in_progress' -and $null -eq $failedDeliveryState.pendingReview) 'failed delivery must not enter awaiting_review'
+Assert-True (@($failedDeliveryState.turns).Count -eq 0) 'failed delivery must not end a false review-wait turn'
+$failedRecovery = Observe-HealthyReviewRecovery $failedDeliveryState
+Assert-True ($failedRecovery.decision -eq 'reconcile_required') 'failed delivery recovery must require reconciliation'
+$reconciledFailedDelivery = Apply-Event $failedDeliveryState @{ eventId = 'reconcile-failed-initial-delivery'; kind = 'coordinator_reconciled'; taskId = 65; revision = 'sha-f1'; escalationId = 'failed-initial-delivery-delivery-failed'; coordinatorId = 'coordinator-story-87'; authorization = 'start-87' }
+Assert-True ($reconciledFailedDelivery.decision -eq 'reconciled' -and @($failedDeliveryState.pendingEscalations).Count -eq 0) 'failed delivery must be reconciled before retry'
+$retryAfterFailedDelivery = Complete-ReviewHandoff $failedDeliveryState @{ eventId = 'retry-initial-delivery'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-f1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
+Assert-True ($retryAfterFailedDelivery.decision -eq 'dispatch_review' -and @($failedDeliveryState.turns).Count -eq 1) 'reconciled delivery may dispatch exactly one review and end the turn'
 
 $storyEndState = New-StoryState 'story_end_only'
 $implementationReady = Apply-Event $storyEndState @{ eventId = 'implementation-ready-story-end-1'; kind = 'implementation_ready'; taskId = 65; revision = 'sha-b1'; authorization = 'start-87' }
@@ -227,4 +454,4 @@ $scopeError = $false
 try { Apply-Event $scopeState @{ eventId = 'scope-change'; kind = 'ready_for_review'; taskId = 65; revision = 'sha-a1'; reviewerId = 'reviewer-story-87'; authorization = 'changed-start' } | Out-Null } catch { $scopeError = $true }
 Assert-True $scopeError 'scope changes must stop automatic dispatch'
 
-Write-Output 'Passed automatic review-flow fixture: direct readiness/correction/acceptance, implementer-owned reconciliation and advancement, both review modes, duplicate/stale/idle guards, coordinator escalation, and scope gating.'
+Write-Output 'Passed automatic review-flow fixture: trace-derived end-of-turn initial/correction handoffs with post-termination action rejection, reviewer-message resume, no implementer polling/monitor/keep-alive/unchanged acknowledgement, healthy-versus-unresolved-delivery recovery, direct acceptance/advancement, both review modes, duplicate/stale/idle guards, coordinator escalation, and scope gating.'

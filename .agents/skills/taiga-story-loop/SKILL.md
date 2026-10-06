@@ -118,9 +118,10 @@ The note is deliberately smaller than a state registry; existing Git, Taiga,
 Codex, and pull-request records remain authoritative.
 
 Persist current state by replacing the continuation snapshot, not appending
-milestones. Healthy recovery ticks read that snapshot and at most one compact
-worker wait; unanswered user gates stay silent. Follow the replacement and
-heartbeat read budget in [minimal continuation note](references/continuation-note.md)
+milestones. Healthy recovery ticks read that snapshot and take at most one
+compact wait for an actively running worker; they never wake an
+`awaiting_review` implementer. Unanswered user gates stay silent. Follow the
+replacement and heartbeat read budget in [minimal continuation note](references/continuation-note.md)
 and run `scripts/validate-continuation-note.ps1` for offline persistence and
 stale-snapshot recovery checks.
 
