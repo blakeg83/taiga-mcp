@@ -76,15 +76,39 @@ available.
 - May start when: <prerequisite and status gate>
 - Expected result: <artifact or behavior that can be inspected>
 
+### Reviewable endpoint
+- Artifact: <the file, fixture, contract, or behavior the reviewer can inspect>
+- Expected check outcome: <pass, or an expected-red checkpoint>
+- Expected-red checkpoint: <each named behavior/test, its exact permitted observed failure reason, and safety checks that must pass; use “not applicable” when the expected outcome is pass>
+- Deferred criteria: <criterion and its later task/story owner, or “none”>
+- Advancement gate: <the evidence and review-mode condition that permits the next task or final story review>
+
 ### Completion checklist
 - [ ] <observable implementation or documentation result>
 - [ ] <focused check and evidence>
 - [ ] <review/status/comment/commit handoff result, when applicable>
 ```
 
-Keep each checklist item observable and specific enough to verify. A task is
-ready for review when its implementation evidence is complete; that is distinct
-from reviewer acceptance or a closed/done status.
+Keep each checklist item observable and specific enough to verify. The
+reviewable endpoint is part of the assignment before implementation starts; a
+missing or ambiguous artifact, expected outcome, deferred owner, or advancement
+gate requires a narrow clarification before dependent work. A task is ready for
+review when its implementation evidence and endpoint evidence are complete;
+that is distinct from reviewer acceptance or a closed/done status.
+
+For an authoritative test-first checkpoint, the expected-red entry names each
+behavior/test and its exact permitted failure reason. The observed failure set
+must match those declarations one-for-one: every declared test has its
+permitted reason, and no undeclared test or alternate reason is accepted. The
+entry also shows the relevant safety checks passing. A nonzero command exit by
+itself is not evidence of a valid RED. Unexpected failures or missing
+regression/safety coverage keep the task in progress and cannot release
+dependent work.
+
+Deferred criteria remain visible on the task until the named later task or
+final story review supplies evidence. The advancement gate states whether the
+selected `per_task` or `story_end_only` mode controls release; it never silently
+waives a deferred criterion or invents an allowed failure.
 
 ## Discovery and clarification rules
 

@@ -15,6 +15,14 @@ milestone.
 
 ## Task acceptance
 
+The reviewer first checks the task's declared reviewable endpoint: artifact,
+expected outcome, deferred criteria and owner, and advancement gate. The task
+may be accepted at an expected-red checkpoint only when the contract names each
+permitted behavior/test and exact reason, the complete observed failure set
+matches those declarations with no extras, and the relevant safety checks pass.
+A nonzero command exit alone, an unexpected/undeclared failure, or missing
+regression/safety coverage is a finding and cannot release the next task.
+
 After inspecting the exact revision and all task criteria, the reviewer sends
 the acceptance directly to the implementer:
 
@@ -56,6 +64,13 @@ stops at reconciliation.
 After the last task's required reviews, the reviewer checks the complete story
 against its definition of done, ordered-task evidence, cross-task behavior, and
 the current branch HEAD. The reviewer sends the coordinator:
+
+Final story acceptance must also prove every deferred criterion through its
+named later task or story-review owner and must verify exit-0 evidence for every
+required regression that was intentionally red at an earlier checkpoint. An
+unresolved expected RED, unexpected failure, missing regression coverage, or
+deferred criterion without evidence is a rejection/blocker, not a partial
+approval.
 
 ```text
 Story #<ref> approved
