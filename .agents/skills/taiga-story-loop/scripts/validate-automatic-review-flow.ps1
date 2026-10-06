@@ -203,7 +203,7 @@ function End-ImplementerReviewTurn {
     Add-ImplementerAction $State 'send_review_handoff' $Task.ref ([string]$Task.pendingSha)
     Add-ImplementerAction $State 'final_response' $Task.ref ([string]$Task.pendingSha)
     $trace = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
-    $authorizedPrefixKinds = @('reviewer_message_resume', 'source_edit', 'taiga_reconcile', 'advance_next_task')
+    $authorizedPrefixKinds = @('reviewer_message_resume', 'source_edit', 'scoped_check', 'taiga_reconcile', 'advance_next_task')
     $prefix = @()
     if ($trace.Count -gt 2) {
         $prefix = @($trace | Select-Object -First ($trace.Count - 2))
@@ -1499,6 +1499,11 @@ $scopedCheckAdvance = Resume-ImplementerOnReviewerMessage $scopedCheckState $sco
 Assert-True ($scopedCheckAdvance.decision -eq 'advance_next_task' -and $scopedCheckState.implementationStartPending) 'scoped-check continuation must begin behind the next-task gate'
 Add-ImplementerAction $scopedCheckState 'scoped_check' '#66' 'task-66-focused-check'
 Assert-True (-not $scopedCheckState.implementationStartPending -and @($scopedCheckState.implementationStartEvidence)[0].kind -eq 'scoped_check' -and [string]@($scopedCheckState.implementationStartEvidence)[0].task -eq '#66') 'a nonblank current-task scoped check in the resumed turn must release the next-task gate'
+$scopedCheckReview = Complete-ReviewHandoff $scopedCheckState @{ eventId = 'scoped-check-dispatch'; kind = 'ready_for_review'; taskId = 66; revision = ('e' * 40); reviewerId = $scopedCheckState.reviewer; authorization = $scopedCheckState.authorization }
+Assert-True ($scopedCheckReview.decision -eq 'dispatch_review' -and @($scopedCheckState.actions | Where-Object kind -eq 'review').Count -eq 2) 'scoped-check continuation must dispatch exactly one next-task review'
+$scopedCheckTurn = @($scopedCheckState.turns)[1]
+$scopedCheckTrace = @($scopedCheckState.implementerActions | Where-Object { [int]$_.turn -eq [int]$scopedCheckTurn.turn })
+Assert-True (($scopedCheckTrace | ForEach-Object { [string]$_.kind }) -join ',' -eq 'reviewer_message_resume,taiga_reconcile,advance_next_task,scoped_check,send_review_handoff,final_response' -and $scopedCheckTurn.ended -and $scopedCheckTurn.lastAction -eq 'final_response') 'scoped-check continuation must preserve the terminal review handoff trace'
 Add-ImplementerAction $state 'source_edit' '#66' 'task-66-first-edit'
 Assert-True (-not $state.implementationStartPending -and @($state.implementationStartEvidence).Count -ge 2 -and [string]$state.implementationStartEvidence[-1].task -eq '#66' -and [string]$state.implementationStartEvidence[-1].kind -eq 'source_edit') 'next task must record task-bound concrete implementation-start evidence before review'
 $nextReady = Complete-ReviewHandoff $state @{ eventId = 'ready-next-task-per_task'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
