@@ -81,7 +81,9 @@ function Get-ReviewCoverage {
 function Route-ReviewFinding {
     param([string] $ReviewedHead)
     [ordered]@{
+        sender = 'epic-reviewer'
         destination = 'fresh-epic-fix-implementer'
+        coordinatorRelay = $false
         correctionBranch = 'codex/integration-fix-run1'
         reviewedHead = $ReviewedHead
         isolated = $true
@@ -112,6 +114,7 @@ $wrongProfile.reviewerEffort = 'medium'
 Assert-True ((Test-ReviewRequest $wrongProfile) -eq 'wrong_reviewer_profile') 'medium review must not substitute for final high review'
 
 $finding = Route-ReviewFinding $ready.currentHead
+Assert-True ($finding.sender -eq 'epic-reviewer' -and -not $finding.coordinatorRelay) 'the reviewer must deliver findings directly without a coordinator relay'
 Assert-True ($finding.destination -eq 'fresh-epic-fix-implementer' -and $finding.isolated -and $finding.correctionBranch -like 'codex/integration-fix-*') 'findings must route to the fresh implementer on an isolated integration correction branch'
 Assert-True ($finding.rereviewProfile -eq 'gpt-6.1-sol/high' -and $finding.sameFreshPair -and $finding.priorApprovalSuperseded) 'corrections must reuse the fresh pair for exact-head high re-review'
 

@@ -473,7 +473,8 @@ foreach ($marker in @(
         'fresh correction implementer'
         'gpt-5.6-luna` with `xhigh`'
         'distinct from every story implementer chat'
-        'Wait for a coordinator-delivered finding'
+        'Wait for a finding delivered directly by the assigned epic reviewer'
+        'Verify the sender, scope, and exact reviewed HEAD'
         'reuse this fresh epic-fix implementer chat')) {
     if (-not $normalizedEpicFixPrompt.Contains($marker)) {
         throw "Epic-fix prompt assertion failed: $marker"
@@ -713,7 +714,8 @@ foreach ($marker in @(
         'every linked story in authoritative order'
         'combined behavior across stories'
         'cross-story state transitions'
-        'routes it to the fresh epic-fix implementer on an isolated integration-correction branch'
+        'sends it directly to the fresh epic-fix implementer on an isolated integration-correction branch'
+        'The coordinator does not relay findings'
         'resulting exact feature HEAD again')) {
     if (-not $normalizedFinalEpicReview.Contains($marker)) {
         throw "Final epic review assertion failed: $marker"

@@ -71,9 +71,11 @@ contradictory evidence.
 
 Before inspecting or accepting, the reviewer verifies the expected worktree,
 branch, exact full HEAD, diff range, and clean tracked-source state. If the
-review finds a defect, the coordinator records the finding against the exact
-feature HEAD and routes it to the fresh epic-fix implementer on an isolated
-integration-correction branch. The implementer returns a focused commit and
+review finds a defect, the reviewer records the finding against the exact
+feature HEAD and sends it directly to the fresh epic-fix implementer on an isolated
+integration-correction branch. The implementer verifies the assigned reviewer,
+scope, and exact reviewed HEAD, then resumes correction work in the same chat.
+The coordinator does not relay findings. The implementer returns a focused commit and
 integration checks; the correction is incorporated into the feature branch
 only through the normal reviewed path. The same fresh Sol 6.1 high reviewer
 then reviews the resulting exact feature HEAD again. Prior approval is

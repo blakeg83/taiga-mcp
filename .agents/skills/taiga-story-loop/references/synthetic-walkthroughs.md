@@ -348,6 +348,15 @@ Coordinator state: Integrated pair =
 `synthetic-epic-45-fix` / `synthetic-epic-45-review`; reviewer active;
 implementer waiting for a finding. A finding reuses this pair for the focused
 correction and exact-HEAD re-review; it does not create a new chat.
+
+Epic reviewer → epic-fix implementer (direct delivery):
+mcp__codex_app__send_message_to_thread({"threadId":"synthetic-epic-45-fix","prompt":"Finding for integrated feature HEAD feature-sha: combined behavior fails the epic criterion. Evidence: synthetic integration check. Correct only this defect in the assigned correction worktree and return the committed correction evidence to the coordinator."})
+→ {"delivered":true}
+
+The same implementer chat verifies the assigned reviewer, scope, and reviewed
+HEAD, then resumes the focused correction. The coordinator does not send or
+relay the finding; it receives correction evidence for integration and dispatches
+the exact-HEAD re-review to the same epic reviewer.
 ```
 
 ## 3. Ambiguous scope — clarify before setup

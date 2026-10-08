@@ -21,7 +21,9 @@ of a new epic-review pair; it is distinct from every story implementer chat.
 | Finding packet | `{{findingPacket}}` |
 
 The reviewer is already working from the frozen integrated epic packet. Wait
-for a coordinator-delivered finding before editing. Read the repository
+for a finding delivered directly by the assigned epic reviewer before editing.
+Verify the sender, scope, and exact reviewed HEAD before resuming correction
+work in this same chat. Read the repository
 instructions, the exact reviewed HEAD, the finding evidence, the relevant
 epic/story criteria, and the required checks. Make only the focused correction
 needed to resolve the finding, run the required verification, and commit the
