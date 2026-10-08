@@ -36,6 +36,8 @@ function New-FinalRequest {
         base = $Base
         finalResponse = $FinalResponse
         mergeResult = $MergeResult
+        heartbeatId = 'synthetic-heartbeat-final'
+        heartbeatState = 'PAUSED'
         finalPrCreated = $false
         epicComplete = $false
         masterComplete = $false
@@ -70,6 +72,8 @@ function New-StandaloneRequest {
         base = $Base
         finalResponse = $FinalResponse
         mergeResult = $MergeResult
+        heartbeatId = 'synthetic-heartbeat-final'
+        heartbeatState = 'PAUSED'
     }
 }
 
@@ -130,6 +134,17 @@ function Resolve-FinalDecision {
     [ordered]@{ state = 'master_release_verified'; release = $true; epicComplete = $true; masterComplete = $true }
 }
 
+function Resolve-FinalHeartbeat {
+    param([hashtable] $Request)
+    $action = if ($Request.heartbeatState -eq 'PAUSED') { 'none' } else { 'pause' }
+    [ordered]@{
+        automationId = $Request.heartbeatId
+        target = 'PAUSED'
+        action = $action
+        restart = $false
+    }
+}
+
 function Test-NextStoryGate {
     param([string] $PreviousPrState, [bool] $FeatureHeadRefreshed)
     $PreviousPrState -eq 'merged_verified' -and $FeatureHeadRefreshed
@@ -169,6 +184,14 @@ function New-FinalBody {
 $standalone = New-StandaloneRequest
 $epic = New-FinalRequest -RunKind epic
 $legacy = New-FinalRequest -RunKind legacy-standalone-feature
+foreach ($request in @($standalone, $epic, $legacy)) {
+    $schedule = Resolve-FinalHeartbeat $request
+    Assert-True ($schedule.target -eq 'PAUSED' -and -not $schedule.restart -and $schedule.automationId -eq $request.heartbeatId) 'final delivery must retain the same heartbeat identity without restarting it'
+}
+$activeFinal = New-FinalRequest -RunKind epic
+$activeFinal.heartbeatState = 'ACTIVE'
+$activeFinalSchedule = Resolve-FinalHeartbeat $activeFinal
+Assert-True ($activeFinalSchedule.target -eq 'PAUSED' -and $activeFinalSchedule.action -eq 'pause') 'final delivery must pause an accidentally active heartbeat before waiting'
 Assert-True ((Test-StandalonePreflight $standalone) -eq 'ready') 'standalone exact story review should permit direct master PR preparation'
 Assert-True ((Test-FinalPreflight $epic) -eq 'ready') 'epic final integrated review should permit final PR preparation'
 Assert-True ((Test-FinalPreflight $legacy) -eq 'ready') 'legacy standalone story merge should permit preserved feature final PR preparation'
@@ -239,4 +262,4 @@ $createdOnly = New-FinalRequest -RunKind epic
 $createdOnly.finalPrCreated = $true
 Assert-True (-not $createdOnly.epicComplete -and -not $createdOnly.masterComplete) 'creating final PR alone must not complete epic or master'
 
-Write-Output 'Passed offline final delivery fixture: standalone direct-master story release, legacy preserved-feature final release, epic integrated feature release, master base, exact-head review, approval/hold/failure/invalidation paths, sequence gate, evidence bodies, and completion separation.'
+Write-Output 'Passed offline final delivery fixture: terminal heartbeat pause and identity preservation, standalone direct-master story release, legacy preserved-feature final release, epic integrated feature release, master base, exact-head review, approval/hold/failure/invalidation paths, sequence gate, evidence bodies, and completion separation.'

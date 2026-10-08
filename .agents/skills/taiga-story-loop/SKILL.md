@@ -116,7 +116,10 @@ provider writes.
 Use [the Yes/No story merge gate](references/merge-approval.md) after a PR is
 ready. It keeps explicit user authorization separate from PR review and merge
 verification, preserves quiet waits, routes changes back to the same worker
-pair, and blocks next-story dispatch until the provider confirms the merge.
+pair, and blocks next-story dispatch until the provider confirms the merge. The
+single recovery heartbeat is paused before the approval gate, reactivated with
+the same automation identity only when a verified epic merge starts the next
+story, and left paused for standalone or final-story completion.
 Run `scripts/validate-merge-approval.ps1` for its offline decision fixture.
 
 For an epic run after all stories are integrated, use [the final integrated epic
@@ -163,9 +166,14 @@ Codex, and pull-request records remain authoritative.
 Persist current state by replacing the continuation snapshot, not appending
 milestones. Healthy recovery ticks read that snapshot and take at most one
 compact wait for an actively running worker; they never wake an
-`awaiting_review` implementer. Unanswered user gates stay silent. Follow the
-replacement and heartbeat read budget in [minimal continuation note](references/continuation-note.md)
-and run `scripts/validate-continuation-note.ps1` for offline persistence and
+`awaiting_review` implementer. Before an unanswered PR approval gate, the
+reusable heartbeat is explicitly paused and its confirmed schedule state is
+recorded; no scheduled tick runs while that gate is pending. The same
+automation is reactivated only after a verified epic merge and the start of
+the next ordered story. Standalone and final-story paths leave it paused.
+Follow the replacement and heartbeat read budget in [minimal continuation
+note](references/continuation-note.md) and run
+`scripts/validate-continuation-note.ps1` for offline persistence and
 stale-snapshot recovery checks.
 
 For the shortest entry, use `Use $taiga-story-loop for <project> story #<ref>`

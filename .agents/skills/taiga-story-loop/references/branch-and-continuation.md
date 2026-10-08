@@ -27,7 +27,7 @@ scope:
 | Workers | current story implementer and reviewer chat IDs, when created |
 | Integrated review workers | fresh epic-fix implementer and epic reviewer chat IDs/hosts, when the epic gate is reached |
 | Review | PR URL, PR base/head, approval or wait state, and the next required action |
-| Recovery | one recovery automation ID, when authorized and created |
+| Recovery | one recovery automation ID, confirmed schedule state (`ACTIVE` or `PAUSED`), and any pending target |
 
 Do not copy a ticket transcript, model output, full diff, or a second state
 registry into the note. A missing value is an unresolved setup fact, not a
@@ -151,7 +151,7 @@ Story branch: <story-branch> | worktree: <absolute path> | base: <sha>
 Workers: implementer <chat-id> | reviewer <chat-id>
 PR: <url or pending> | base <master or feature-branch> | head <sha>
 Approval: <pending/approved/merged/blocked> | next: <one action>
-Recovery: <automation-id or none>
+Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
 ```
 
 Replace the complete snapshot only after an authoritative fact changes; never

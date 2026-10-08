@@ -260,6 +260,9 @@ function Resolve-MigrationTopology([System.Collections.IDictionary] $Snapshot) {
 }
 
 try {
+    # The Recovery field preserves the confirmed provider schedule state and
+    # any pending target so paused approval gates cannot look active. The
+    # same identity is reactivated only after the next ordered story actually begins.
     [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
     $snapshot = [ordered]@{
         'Run' = 'synthetic-story-52'
@@ -281,7 +284,7 @@ try {
         'Final review' = 'not_applicable | profile: none | head: pending'
         'Merge' = 'pending'
         'Next' = 'wait for correction of task #77'
-        'Recovery' = 'automation-id | current note: current.md'
+        'Recovery' = 'automation-id | schedule: PAUSED | target: none'
         'Worker cursors' = 'implementer cursor-000 | reviewer cursor-000'
         'Task state' = 'revision-000 | implementing'
         'Gate' = 'none'
@@ -382,18 +385,19 @@ try {
         $text = [IO.File]::ReadAllText($path)
         Assert-True (-not $text.Contains('historical review findings')) 'history is absent from routine snapshot'
         Assert-True (@($text -split "`n" | Where-Object { $_.StartsWith('Next: ') }).Count -eq 1) 'only one next action'
-        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'epic-fix-id @ local', 'epic-review-id @ local', 'automation-id', 'setup-message-ref', 'auth-synthetic-52')) {
+        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'epic-fix-id @ local', 'epic-review-id @ local', 'automation-id', 'schedule: PAUSED', 'setup-message-ref', 'auth-synthetic-52')) {
             Assert-True ($text.Contains($identity)) "preserves $identity"
         }
     }
 
     # Preserve actionable uncertainty and approvals instead of truncating them.
     $snapshot['Approval'] = 'pending | PR: https://example.invalid/pr/1 | base: feature | head: revision-100 | prompt: decision-ref'
+    $snapshot['Recovery'] = 'automation-id | schedule: PAUSED | target: none'
     $snapshot['Pending action'] = 'comment-operation-id | outcome: unknown | reconcile before retry'
     $snapshot['Gate'] = 'trial | user-selected trial refs required | question: trial-input-ref'
     & $writer -NotePath $path -Snapshot $snapshot | Out-Null
     $saved = [IO.File]::ReadAllText($path)
-    Assert-True ($saved.Contains($snapshot['Approval']) -and $saved.Contains($snapshot['Pending action']) -and $saved.Contains($snapshot['Gate'])) 'preserves approval identity, unknown operation, and trial gate'
+    Assert-True ($saved.Contains($snapshot['Approval']) -and $saved.Contains($snapshot['Recovery']) -and $saved.Contains($snapshot['Pending action']) -and $saved.Contains($snapshot['Gate'])) 'preserves approval identity, heartbeat schedule, unknown operation, and trial gate'
 
     # Identical observations cannot add tick history, rewrite the note, or rotate backup.
     $fixedTime = [DateTime]::SpecifyKind([DateTime]'2020-01-01', [DateTimeKind]::Utc)

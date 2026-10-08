@@ -52,13 +52,25 @@ recorded delivery step.
 
 ## Waiting and recovery
 
-While waiting for the decision, keep one prompt and one pending approval record.
-Do not dispatch workers or send repeated notifications because the user has
-not answered. Healthy ticks read only the current continuation snapshot and end
-silently while the gate is unanswered. After a user response or a meaningful
-change requiring reconciliation, a recovery check may inspect the recorded PR,
-current head, and Taiga state. Follow the read budget in
-[minimal continuation note](continuation-note.md).
+While waiting for the decision, keep one prompt and one pending approval record,
+then pause the existing recovery automation by updating that same automation ID
+to `PAUSED`. Persist and confirm the provider schedule result before waiting;
+an `ACTIVE` schedule with `Approval: pending` is an unresolved lifecycle
+state, not a healthy quiet wait. Once `PAUSED` is confirmed, the scheduled wait
+is stopped. Do not dispatch workers or send repeated notifications because the
+user has not answered, and no scheduled heartbeat tick should run. A user
+response or a meaningful change
+requiring reconciliation may inspect the recorded PR, current head, Taiga
+state, and schedule receipt. Follow the read budget in [minimal continuation
+note](continuation-note.md).
+
+After an epic PR is confirmed merged, the feature branch is refreshed to the
+authoritative result, and the next ordered story actually begins, reactivate
+the same automation ID with an `ACTIVE` schedule and confirm that result before
+continuing. A standalone merge, the final story merge in an epic, and the
+legacy story-to-feature merge do not start another story; keep the automation
+`PAUSED` through terminal or final-delivery review. A failed, stale, or unknown
+merge also keeps it `PAUSED` until reconciliation determines the next action.
 
 An approval is bound to the PR URL, repository, expected worktree/branch, base
 and diff range, clean tracked-source state, full reviewed head, and story scope

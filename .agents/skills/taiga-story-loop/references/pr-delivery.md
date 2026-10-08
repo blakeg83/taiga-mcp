@@ -100,10 +100,13 @@ the story Done, claim a merge, or authorize the next epic story.
 ## Delivery result and recovery
 
 Persist the confirmed PR URL, repository, base branch, head SHA, and
-`Approval: pending` in the continuation note. A provider approval is not a
-merge. The coordinator must verify a later user Yes before merging, and must
-verify the merge result before changing Taiga completion state or advancing the
-feature branch.
+`Approval: pending` in the continuation note with a pending heartbeat target
+of `PAUSED`. A provider approval is not a merge. Before waiting on the user,
+update the existing recovery automation to `PAUSED` with the same automation
+identity and confirm the provider schedule result. A provider approval is not
+allowed to leave the heartbeat active. The coordinator must verify a later
+user Yes before merging, and must verify the merge result before changing Taiga
+completion state or advancing the feature branch.
 
 If PR creation, attachment, the Taiga link, or the state of an exact-match PR
 has an unknown result, read the provider/chat/story records first. Reuse a
