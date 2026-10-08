@@ -272,6 +272,7 @@ try {
         'Story branch' = 'codex/story-52-synthetic | worktree: C:\Synthetic\story | base: feature-sha'
         'Implementer' = 'impl-id @ local | reviewer: review-id @ local'
         'Pair' = 'reused | IDs resolved: yes | authorization: setup-message-ref'
+        'Integrated pair' = 'epic-fix-id @ local | epic-review-id @ local | created, resolved yes'
         'Setup authorization' = 'start | mode: selectable | submitted: true | reference: auth-synthetic-52'
         'Review mode' = 'per_task | approved HEAD: pending'
         'PR' = 'pending | base: codex/feature-synthetic | head: revision-000'
@@ -381,7 +382,7 @@ try {
         $text = [IO.File]::ReadAllText($path)
         Assert-True (-not $text.Contains('historical review findings')) 'history is absent from routine snapshot'
         Assert-True (@($text -split "`n" | Where-Object { $_.StartsWith('Next: ') }).Count -eq 1) 'only one next action'
-        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'automation-id', 'setup-message-ref', 'auth-synthetic-52')) {
+        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'epic-fix-id @ local', 'epic-review-id @ local', 'automation-id', 'setup-message-ref', 'auth-synthetic-52')) {
             Assert-True ($text.Contains($identity)) "preserves $identity"
         }
     }

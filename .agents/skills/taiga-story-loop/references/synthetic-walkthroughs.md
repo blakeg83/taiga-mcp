@@ -100,7 +100,7 @@ Repositories and branch/worktree mapping:
 Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
 - Story/task reviews: gpt-6.1-sol, medium, after each task
-- Final epic review: gpt-6.1-sol, high, when the epic gate is reached
+- Final epic review pair: fresh gpt-5.6-luna, xhigh implementer and fresh gpt-6.1-sol, high reviewer, when the epic gate is reached
 
 Start authorizes the scoped worker chats, messages, one story worktree/branch,
 commits, pushes, Taiga updates, direct story pull request to `master`, and
@@ -293,7 +293,7 @@ Repositories and branch/worktree mapping:
 Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
 - Story/task reviews: gpt-6.1-sol, medium, after each task
-- Final epic review: gpt-6.1-sol, high, after all linked stories are ready
+- Final epic review pair: fresh gpt-5.6-luna, xhigh implementer and fresh gpt-6.1-sol, high reviewer, after all linked stories are ready
 
 Start authorizes only these mapped repositories and their scoped workers,
 messages, commits, pushes, Taiga updates, story pull requests into the shared
@@ -327,6 +327,27 @@ target, so the calling repository is correct.
 
 Observed outcome: SetupReady; two repository mappings are retained and no
 worker receives authority for an unmapped repository.
+```
+
+After the last ordered story PR is verified merged, the coordinator creates a
+separate integrated-epic review pair. This pair is fresh relative to every
+story worker pair and uses the final-review profile, while preserving the
+normal coordinator-owned creation order:
+
+```text
+mcp__codex_app__create_thread({"title":"epic-45 integrated-fix implementer","prompt":"Wait for an integrated epic review finding, then implement only the confirmed correction in the supplied integration-correction worktree. Use the exact feature HEAD and return focused evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+→ {"threadId":"synthetic-epic-45-fix"}
+
+mcp__codex_app__create_thread({"title":"epic-45 integrated reviewer","prompt":"Review only the frozen integrated epic HEAD and the ordered story evidence supplied by the coordinator. Use the exact gpt-6.1-sol/high profile and report the epic result to the coordinator; route correctable findings to the supplied fresh implementer.","model":"gpt-6.1-sol","thinking":"high","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+→ {"threadId":"synthetic-epic-45-review"}
+
+mcp__codex_app__send_message_to_thread({"threadId":"synthetic-epic-45-review","prompt":"Review request: integrated feature HEAD feature-sha; stories #46/#47 accepted and merged; verify combined behavior, sequencing, approvals, regressions, and required checks."})
+→ {"delivered":true}
+
+Coordinator state: Integrated pair =
+`synthetic-epic-45-fix` / `synthetic-epic-45-review`; reviewer active;
+implementer waiting for a finding. A finding reuses this pair for the focused
+correction and exact-HEAD re-review; it does not create a new chat.
 ```
 
 ## 3. Ambiguous scope — clarify before setup
