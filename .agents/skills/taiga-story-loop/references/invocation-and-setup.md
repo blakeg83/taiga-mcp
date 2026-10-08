@@ -77,6 +77,12 @@ Workers and review cadence:
 - Review mode: per_task (default); story_end_only is an explicit alternative
 - No silent profile substitution; an unavailable exact profile is a blocker.
 
+Conversation names:
+- Coordinator: `<work-item kind> #<ref> Coordinator`
+- Implementer: `<work-item kind> #<ref> Implementer`
+- Reviewer: `<work-item kind> #<ref> Reviewer`
+- Tasks use the parent user-story conversation; issue conversations are not supported.
+
 Setup authorization input:
 - Capability: <provider/context; source; selectable supported/permitted or limitation>
 - Gate: <one selectable Start/Cancel gate, or explicit typed fallback>
@@ -89,7 +95,15 @@ implementer is `gpt-5.6-luna`/`xhigh`; the reviewer is
 `gpt-6.1-sol`/`medium`. The coordinator resolves both results to usable
 `threadId`/`hostId` values before sending full assignments or starting a task;
 a pending `clientThreadId` is never a message destination. See
-[persistent story worker pair](worker-pair.md).
+[work-item conversation names](conversation-naming.md) and [persistent story
+worker pair](worker-pair.md).
+
+Immediately after the submitted `Start` decision, rename the current
+coordinator chat once with `mcp__codex_app__set_thread_title`: use
+`User Story #<ref> Coordinator` for a story run and `Epic #<ref> Coordinator`
+for an epic run. Do this before dispatching workers, and do not change the
+title when the work-item subject changes. Worker `create_thread` calls use the
+matching implementer/reviewer titles from the conversation-naming contract.
 
 An epic also has a separate integrated-review pair. After every scoped story
 PR is verified merged into the shared feature branch, the coordinator creates
@@ -104,6 +118,7 @@ chat for each finding. Render the assignments from
 `assets/epic-reviewer-prompt.md`.
 
 Start authorizes, for this scope only:
+- renaming the current coordinator chat to its stable work-item/role title;
 - creating or reusing the scoped worker chats and their worktrees/branches;
 - worker-to-worker messages for routine review, correction, acceptance, and
   ordered-task advancement, plus worker-to-coordinator messages for final

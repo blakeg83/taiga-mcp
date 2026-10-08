@@ -28,6 +28,11 @@ mechanics intentionally follow the persistent story worker pair:
 | Epic-fix implementer | `gpt-5.6-luna` | `xhigh` | Focused corrections on an integration-correction branch |
 | Epic reviewer | `gpt-6.1-sol` | `high` | Read-only integrated epic review and exact-HEAD re-review |
 
+Name the pair with the stable epic role titles from
+[work-item conversation names](conversation-naming.md): `Epic #<ref>
+Implementer` and `Epic #<ref> Reviewer`. Pass those names in the
+`create_thread` `title` fields; keep the epic reference in both assignments.
+
 The coordinator creates the implementer chat first, resolves a usable
 `threadId`/`hostId`, creates the reviewer chat second, resolves its usable
 identity, and sends the full role assignments only after both identities are

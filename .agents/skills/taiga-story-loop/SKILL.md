@@ -44,7 +44,8 @@ for the project-specific story/task status mapping, Markdown checklist merge,
 current-version writes, uncertain-result reconciliation, selective reopening,
 and blocker evidence protocol.
 
-Use [persistent story worker pair](references/worker-pair.md), [direct worker
+Use [work-item conversation names](references/conversation-naming.md),
+[persistent story worker pair](references/worker-pair.md), [direct worker
 handoffs](references/worker-handoffs.md), and [task and story acceptance](references/acceptance.md)
 for coordinator-owned chat creation, concise worker-pair routing, review-mode
 gates, and exact-revision acceptance. Use [routing and substantive escalation](references/routing-and-escalation.md)

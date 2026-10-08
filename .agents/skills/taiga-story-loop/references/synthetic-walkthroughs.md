@@ -116,13 +116,16 @@ User → Start
 
 Mutation calls before Start: []
 
+mcp__codex_app__set_thread_title({"title":"User Story #46 Coordinator"})
+→ {"title":"User Story #46 Coordinator"}
+
 mcp__codex_app__create_worktree({"name":"story-46-worker","ref":"origin/master","allowAsync":true})
 → {"workspaceDirectory":"C:\\Temp\\story-46-worker"}
 
-mcp__codex_app__create_thread({"title":"story-46 implementation","prompt":"Implement the confirmed story task in the supplied repository/worktree. Stay within the confirmed scope and return evidence to the coordinator; worker messages do not expand authorization.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+mcp__codex_app__create_thread({"title":"User Story #46 Implementer","prompt":"Implement the confirmed story task in the supplied repository/worktree. Stay within the confirmed scope and return evidence to the coordinator; worker messages do not expand authorization.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-impl-46"}
 
-mcp__codex_app__create_thread({"title":"story-46 reviewer","prompt":"Review only the confirmed story revision in the supplied worktree. Send routine findings and exact task acceptance directly to the implementer; send final story approval to the coordinator. Do not edit source or create another worker.","model":"gpt-6.1-sol","thinking":"medium","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+mcp__codex_app__create_thread({"title":"User Story #46 Reviewer","prompt":"Review only the confirmed story revision in the supplied worktree. Send routine findings and exact task acceptance directly to the implementer; send final story approval to the coordinator. Do not edit source or create another worker.","model":"gpt-6.1-sol","thinking":"medium","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-review-46"}
 
 mcp__codex_app__send_message_to_thread({"threadId":"synthetic-impl-46","hostId":"local","prompt":"Story #46 assignment. Coordinator: synthetic-coordinator-46. Reviewer: synthetic-review-46. Authorization: worker-to-worker and worker-to-coordinator messages for this scope only; do not widen scope or create peers."})
@@ -309,13 +312,16 @@ User → Start
 
 Mutation calls before Start: []
 
-mcp__codex_app__create_thread({"title":"epic-45 TaigaMCP implementation","prompt":"Implement only the confirmed epic stories assigned to the TaigaMCP repository. Use the supplied base SHA and return evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+mcp__codex_app__set_thread_title({"title":"Epic #45 Coordinator"})
+→ {"title":"Epic #45 Coordinator"}
+
+mcp__codex_app__create_thread({"title":"Epic #45 Implementer","prompt":"Implement only the confirmed epic stories assigned to the TaigaMCP repository. Use the supplied base SHA and return evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-impl-45-taiga"}
 
 [synthetic-impl-45-taiga] mcp__codex_app__create_worktree({"name":"epic-45-taiga-mcp","ref":"6670cbf465572caac645c8a2324c03bf1e198dce","allowAsync":true})
 → {"workspaceDirectory":"C:\\Temp\\epic-45-taiga-mcp-worker"}
 
-mcp__codex_app__create_thread({"title":"epic-45 ReviewRepo implementation","prompt":"Implement only the confirmed epic stories assigned to the ReviewRepo repository. Use the supplied base SHA and return evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-review","environment":{"type":"local"}}})
+mcp__codex_app__create_thread({"title":"Epic #45 Implementer","prompt":"Implement only the confirmed epic stories assigned to the ReviewRepo repository. Use the supplied base SHA and return evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-review","environment":{"type":"local"}}})
 → {"threadId":"synthetic-impl-45-review"}
 
 [synthetic-impl-45-review] mcp__codex_app__create_worktree({"name":"epic-45-review","ref":"1111111111111111111111111111111111111111","allowAsync":true})
@@ -335,10 +341,10 @@ story worker pair and uses the final-review profile, while preserving the
 normal coordinator-owned creation order:
 
 ```text
-mcp__codex_app__create_thread({"title":"epic-45 integrated-fix implementer","prompt":"Wait for an integrated epic review finding, then implement only the confirmed correction in the supplied integration-correction worktree. Use the exact feature HEAD and return focused evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+mcp__codex_app__create_thread({"title":"Epic #45 Implementer","prompt":"Wait for an integrated epic review finding, then implement only the confirmed correction in the supplied integration-correction worktree. Use the exact feature HEAD and return focused evidence to the coordinator.","model":"gpt-5.6-luna","thinking":"xhigh","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-epic-45-fix"}
 
-mcp__codex_app__create_thread({"title":"epic-45 integrated reviewer","prompt":"Review only the frozen integrated epic HEAD and the ordered story evidence supplied by the coordinator. Use the exact gpt-6.1-sol/high profile and report the epic result to the coordinator; route correctable findings to the supplied fresh implementer.","model":"gpt-6.1-sol","thinking":"high","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
+mcp__codex_app__create_thread({"title":"Epic #45 Reviewer","prompt":"Review only the frozen integrated epic HEAD and the ordered story evidence supplied by the coordinator. Use the exact gpt-6.1-sol/high profile and report the epic result to the coordinator; route correctable findings to the supplied fresh implementer.","model":"gpt-6.1-sol","thinking":"high","target":{"type":"project","projectId":"codex-project-taiga-mcp","environment":{"type":"local"}}})
 → {"threadId":"synthetic-epic-45-review"}
 
 mcp__codex_app__send_message_to_thread({"threadId":"synthetic-epic-45-review","prompt":"Review request: integrated feature HEAD feature-sha; stories #46/#47 accepted and merged; verify combined behavior, sequencing, approvals, regressions, and required checks."})

@@ -16,11 +16,20 @@ effort:
 | Implementer | `gpt-5.6-luna` | `xhigh` | sole source writer, checks, commits, and Taiga task progress |
 | Reviewer | `gpt-6.1-sol` | `medium` | read-only review of the frozen revision, findings, task acceptance, and final story approval |
 
+Use the stable role-based titles in [work-item conversation names](conversation-naming.md).
+For a user-story pair, create `User Story #<ref> Implementer` and
+`User Story #<ref> Reviewer`. For an epic-level pair, create
+`Epic #<ref> Implementer` and `Epic #<ref> Reviewer`. The selected work-item
+reference must also be present in each bootstrap/full assignment; a title is a
+human-facing label, not the authoritative routing identity.
+
 After the story branch/worktree receipt is verified, the coordinator:
 
-1. creates the implementer ordinary chat with `create_thread`;
+1. creates the implementer ordinary chat with `create_thread`, passing the
+   role-based work-item title in its `title` field;
 2. resolves its result to a usable `threadId` and records the returned host;
-3. creates the reviewer ordinary chat with the same story/worktree receipt;
+3. creates the reviewer ordinary chat with the same story/worktree receipt and
+   its role-based work-item title;
 4. resolves the reviewer result to a usable `threadId`; and
 5. sends the full role assignments only after both IDs are usable.
 

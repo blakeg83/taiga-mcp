@@ -25,6 +25,7 @@ $taskExecutionPath = Join-Path $skillRoot 'references/task-execution-walkthrough
 $taskExecutionGuidancePath = Join-Path $skillRoot 'references/task-execution.md'
 $taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
 $workerPairPath = Join-Path $skillRoot 'references/worker-pair.md'
+$conversationNamingPath = Join-Path $skillRoot 'references/conversation-naming.md'
 $handoffPath = Join-Path $skillRoot 'references/worker-handoffs.md'
 $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
 $epicReviewerPromptPath = Join-Path $skillRoot 'assets/epic-reviewer-prompt.md'
@@ -63,6 +64,9 @@ if (-not (Test-Path $taskExecutionPath) -or -not (Test-Path $taskExecutionScript
 }
 if (-not (Test-Path $workerPairPath)) {
     throw 'Missing persistent worker-pair contract.'
+}
+if (-not (Test-Path $conversationNamingPath)) {
+    throw 'Missing work-item conversation-naming contract.'
 }
 if (-not (Test-Path $handoffPath) -or -not (Test-Path $reviewerPromptPath)) {
     throw 'Missing direct worker handoff or reviewer prompt contract.'
@@ -126,6 +130,8 @@ $taskExecutionGuidanceText = Get-Content $taskExecutionGuidancePath -Raw
 $normalizedTaskExecutionGuidance = [regex]::Replace($taskExecutionGuidanceText, '\s+', ' ')
 $workerPairText = Get-Content $workerPairPath -Raw
 $normalizedWorkerPair = [regex]::Replace($workerPairText, '\s+', ' ')
+$conversationNamingText = Get-Content $conversationNamingPath -Raw
+$normalizedConversationNaming = [regex]::Replace($conversationNamingText, '\s+', ' ')
 $handoffText = Get-Content $handoffPath -Raw
 $normalizedHandoff = [regex]::Replace($handoffText, '\s+', ' ')
 $reviewerPromptText = Get-Content $reviewerPromptPath -Raw
@@ -254,6 +260,17 @@ function Assert-WorkerPairContains {
 
     if (-not $normalizedWorkerPair.Contains($Text)) {
         throw "Worker-pair assertion failed: $Label"
+    }
+}
+
+function Assert-ConversationNamingContains {
+    param(
+        [Parameter(Mandatory)] [string] $Label,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    if (-not $normalizedConversationNaming.Contains($Text)) {
+        throw "Conversation-naming assertion failed: $Label"
     }
 }
 
@@ -450,6 +467,17 @@ Assert-WorkerPairContains 'direct routine pair' 'routine findings and correction
 Assert-WorkerPairContains 'no routine relay' 'The coordinator is not a routine finding, correction, task-ready, or task-acceptance relay'
 Assert-WorkerPairContains 'no task-ready relay' 'task-ready, or task-acceptance relay'
 Assert-WorkerPairContains 'implementer owns advancement' 'implementer owns current-version Taiga checklist/status/'
+Assert-ConversationNamingContains 'story coordinator title' 'User Story #<ref> Coordinator'
+Assert-ConversationNamingContains 'story implementer title' 'User Story #<ref> Implementer'
+Assert-ConversationNamingContains 'story reviewer title' 'User Story #<ref> Reviewer'
+Assert-ConversationNamingContains 'epic coordinator title' 'Epic #<ref> Coordinator'
+Assert-ConversationNamingContains 'epic implementer title' 'Epic #<ref> Implementer'
+Assert-ConversationNamingContains 'epic reviewer title' 'Epic #<ref> Reviewer'
+Assert-ConversationNamingContains 'current chat rename' 'set_thread_title'
+Assert-ConversationNamingContains 'creation title field' 'title` field'
+Assert-ConversationNamingContains 'stable subject-independent name' 'do not change when the work-item subject changes'
+Assert-ConversationNamingContains 'task parent conversation' 'Tasks do not receive separate conversations'
+Assert-ConversationNamingContains 'issue scope boundary' 'Issue conversations are not currently supported'
 if ($normalizedHandoff.Contains('same reviewer and coordinator')) {
     throw 'Handoff assertion failed: routine corrections must not copy the coordinator'
 }
@@ -799,7 +827,8 @@ foreach ($recordMarker in @(
         'mcp__taiga__resolve_project('
         'mcp__taiga__get_task('
         'mcp__codex_app__create_worktree('
-        'mcp__codex_app__create_thread({"title":"story-46 reviewer"'
+        'mcp__codex_app__set_thread_title({"title":"User Story #46 Coordinator"})'
+        'mcp__codex_app__create_thread({"title":"User Story #46 Reviewer"'
         'mcp__codex_app__send_message_to_thread('
         'synthetic-review-46'
         'mcp__codex_app__automation_update('
@@ -818,8 +847,9 @@ foreach ($recordMarker in @(
         'Empty/blank'
         'Explicit cancel'
         'Scope change'
-        'epic-45 integrated-fix implementer'
-        'epic-45 integrated reviewer'
+        'mcp__codex_app__set_thread_title({"title":"Epic #45 Coordinator"})'
+        'mcp__codex_app__create_thread({"title":"Epic #45 Implementer"'
+        'mcp__codex_app__create_thread({"title":"Epic #45 Reviewer"'
         'synthetic-epic-45-review'
         'reviewer active'
         'implementer waiting for a finding')) {
@@ -857,7 +887,7 @@ foreach ($fixtureMarker in @(
 }
 
 $worktreeMarker = 'mcp__codex_app__create_worktree({"name":"story-46-worker"'
-$implementationThreadMarker = 'mcp__codex_app__create_thread({"title":"story-46 implementation"'
+$implementationThreadMarker = 'mcp__codex_app__create_thread({"title":"User Story #46 Implementer"'
 $worktreeIndex = $normalizedWalkthrough.IndexOf($worktreeMarker, [StringComparison]::Ordinal)
 $implementationThreadIndex = $normalizedWalkthrough.IndexOf($implementationThreadMarker, [StringComparison]::Ordinal)
 if ($worktreeIndex -lt 0 -or $implementationThreadIndex -lt 0 -or $worktreeIndex -gt $implementationThreadIndex) {
