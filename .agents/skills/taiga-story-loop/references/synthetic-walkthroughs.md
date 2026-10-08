@@ -103,10 +103,10 @@ Workers and review cadence:
 - Final epic review pair: fresh gpt-5.6-luna, xhigh implementer and fresh gpt-6.1-sol, high reviewer, when the epic gate is reached
 
 Start authorizes the scoped worker chats, messages, one story worktree/branch,
-commits, pushes, Taiga updates, direct story pull request to `master`, and
-30-minute recovery automation. The exact story review is followed by its own
-Yes merge gate; no feature branch or second final PR exists. Reply Start or
-Cancel.
+commits, pushes, Taiga updates, direct story pull request to `master`, and one
+reusable 30-minute recovery automation. The automation is active while the
+story can advance, then pauses before the exact story's Yes merge gate; no
+feature branch or second final PR exists. Reply Start or Cancel.
 ```
 
 Synthetic user reply and trace:
@@ -138,7 +138,7 @@ mcp__taiga__update_task({"taskId":604,"version":2,"status":57})
 → {"id":604,"status":"In progress","version":3}
 
 mcp__codex_app__automation_update({"kind":"heartbeat","mode":"create","name":"story-46 recovery","prompt":"Check the scoped run every 30 minutes; stay quiet when unchanged and notify only on meaningful progress, failure, completion, or required user action.","rrule":{"intervalMinutes":30},"status":"ACTIVE","destination":"thread","targetThreadId":"synthetic-coordinator-46","notificationPolicy":"failed_runs_only"})
-→ {"status":"ACTIVE","targetThreadId":"synthetic-coordinator-46"}
+→ {"id":"synthetic-heartbeat-46","status":"ACTIVE","targetThreadId":"synthetic-coordinator-46"}
 
 Observed outcome: SetupReady; the confirmed scope record is passed to the
 worker pair and both real destinations are connected before the listed scoped
@@ -211,6 +211,18 @@ Next: coordinator, use this HEAD for the story PR/review decision.
 A new source commit after `4444444444444444444444444444444444444444` makes the story approval stale. The
 `story_end_only` mode may defer task acceptance until this final review, but it
 must be selected in the setup confirmation rather than inferred later.
+
+When the reviewed story PR is ready, the coordinator records the pending
+approval and pauses the same recovery automation before waiting:
+
+```text
+mcp__codex_app__automation_update({"id":"synthetic-heartbeat-46","mode":"update","status":"PAUSED"})
+→ {"id":"synthetic-heartbeat-46","status":"PAUSED"}
+
+Continuation: Approval = pending | Recovery = synthetic-heartbeat-46 | schedule: PAUSED | target: none
+Observed outcome: the standalone approval wait has no scheduled heartbeat tick,
+and the paused automation is not reactivated after the story's terminal merge.
+```
 
 The dedicated routing fixture (`scripts/validate-routing.ps1`) also exercises
 two task correction rounds with the same implementer/reviewer IDs, verifies that
@@ -300,9 +312,12 @@ Workers and review cadence:
 
 Start authorizes only these mapped repositories and their scoped workers,
 messages, commits, pushes, Taiga updates, story pull requests into the shared
-feature branches, and 30-minute recovery automation. Each story merge into its
-feature branch requires its own Yes; the final feature-to-master merge is
-separate. Reply Start or Cancel.
+feature branches, and one reusable 30-minute recovery automation. The
+automation pauses at each story PR approval gate. Each story merge into its
+feature branch requires its own Yes; after a verified merge and refreshed
+feature HEAD, the next story reactivates the same automation. The final
+feature-to-master merge is separate and leaves it paused. Reply Start or
+Cancel.
 ```
 
 Synthetic user reply and trace:

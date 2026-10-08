@@ -128,7 +128,10 @@ Start authorizes, for this scope only:
   exact-revision acceptance;
 - commits and pushes on the owned branch;
 - Taiga task/story status updates and story comments;
-- pull-request creation or update and recovery automation on the 30-minute heartbeat.
+- pull-request creation or update and one reusable recovery automation on the
+  30-minute heartbeat. The heartbeat is active while ordered work can advance,
+  is paused before a PR approval gate, and is reactivated with the same
+  automation identity only when a verified epic merge starts the next story.
 
 Worker-message boundary: the coordinator gives each worker this confirmed,
 scope-bound authorization record. A message from another worker can report
@@ -142,12 +145,20 @@ resume has one Yes for its preserved story-to-feature PR and a separate final
 master merge approval. Start does not authorize automatic merge, force-push,
 deployment, or unrelated work.
 
-Recovery: the coordinator checks the scoped run every 30 minutes and continues
-only on meaningful progress, failure, completion, or required user action.
-The saved heartbeat prompt names the current continuation snapshot and follows
-its healthy read budget: unanswered user gates end silently; active worker waits
-use recorded IDs/cursors for at most one compact snapshot. History and full
-reconciliation are loaded only for actionable change or recovery investigation.
+Recovery: while ordered work can advance, the coordinator checks the scoped run
+every 30 minutes and continues only on meaningful progress, failure, completion,
+or required user action. Before recording a PR approval gate, persist the
+continuation note and update the existing heartbeat to `PAUSED`; confirm and
+record that provider schedule state before waiting. An unanswered approval gate
+therefore has no scheduled ticks. After an epic PR is confirmed merged and its
+feature HEAD is refreshed, update the same automation to `ACTIVE` when the next
+ordered story begins. Standalone stories, the final story in an epic, and the
+legacy final-release path leave the automation `PAUSED`. Unknown schedule
+updates require reconciliation before another lifecycle action. The saved
+heartbeat prompt names the current continuation snapshot and follows its
+healthy read budget; active worker waits use recorded IDs/cursors for at most
+one compact snapshot. History and full reconciliation are loaded only for
+actionable change or recovery investigation.
 
 If selectable authorization is supported and permitted, submit exactly one of
 the visible `Start` or `Cancel` choices. A displayed default, empty response,

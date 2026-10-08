@@ -705,7 +705,10 @@ foreach ($marker in @(
         'recovery holds when authoritative evidence conflicts'
         'empty acceptance lookup holds recovery'
         'unknown write outcome holds recovery'
-        'unconfirmed implementer lookup holds recovery')) {
+        'unconfirmed implementer lookup holds recovery'
+        'schedule: PAUSED'
+        'confirmed provider schedule state'
+        'next ordered story actually begins')) {
     if (-not (Get-Content $continuationScriptPath -Raw).Contains($marker)) {
         throw "Continuation recovery fixture assertion failed: $marker"
     }
@@ -719,6 +722,10 @@ foreach ($marker in @(
         'Legacy standalone: Yes — merge this exact PR and continue to final release'
         'legacy standalone run has no next-story dispatch'
         'Do not dispatch workers or send repeated notifications'
+        'pause the existing recovery automation'
+        'same automation ID'
+        'reactivate the same automation ID'
+        'final story merge in an epic'
         'An approval is bound to the PR URL, repository, expected worktree/branch, base and diff range, clean tracked-source state, full reviewed head, and story scope')) {
     if (-not $normalizedMergeApproval.Contains($marker)) {
         throw "Merge approval assertion failed: $marker"
@@ -727,7 +734,7 @@ foreach ($marker in @(
 if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains('Passed offline merge-gate fixture')) {
     throw 'Merge approval assertion failed: offline fixture coverage'
 }
-foreach ($marker in @('CurrentPrUrl', 'CurrentRepository', 'CurrentBase', 'CurrentScope', 'changed PR URL', 'changed repository', 'changed base', 'changed story scope')) {
+foreach ($marker in @('CurrentPrUrl', 'CurrentRepository', 'CurrentBase', 'CurrentScope', 'Resolve-HeartbeatSchedule', 'approval-gate pause', 'same-heartbeat epic reactivation', 'terminal standalone/final-epic/legacy pause', 'changed PR URL', 'changed repository', 'changed base', 'changed story scope')) {
     if (-not (Get-Content $mergeApprovalScriptPath -Raw).Contains($marker)) {
         throw "Merge approval assertion failed: identity fixture marker $marker"
     }
@@ -768,6 +775,11 @@ foreach ($marker in @(
 }
 if (-not (Get-Content $finalDeliveryScriptPath -Raw).Contains('Passed offline final delivery fixture')) {
     throw 'Final delivery assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('Resolve-FinalHeartbeat', 'terminal heartbeat pause and identity preservation', 'final delivery must pause an accidentally active heartbeat')) {
+    if (-not (Get-Content $finalDeliveryScriptPath -Raw).Contains($marker)) {
+        throw "Final delivery assertion failed: heartbeat fixture marker $marker"
+    }
 }
 if (-not (Test-Path (Join-Path $PSScriptRoot 'validate-branch-scenarios.ps1'))) {
     throw 'Missing disposable branch scenario check.'

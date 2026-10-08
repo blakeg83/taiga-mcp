@@ -26,12 +26,17 @@ function New-Gate {
         [string] $Base = 'codex/feature-taiga-mcp-run1',
         [string] $CurrentBase = '',
         [string] $Scope = 'story-50',
-        [string] $CurrentScope = ''
+        [string] $CurrentScope = '',
+        [ValidateSet('ACTIVE','PAUSED')] [string] $HeartbeatState = 'ACTIVE',
+        [string] $CurrentHeartbeatState = '',
+        [bool] $HasNextStory = $true,
+        [bool] $NextStoryStarted = $false
     )
     if ([string]::IsNullOrEmpty($CurrentPrUrl)) { $CurrentPrUrl = $PrUrl }
     if ([string]::IsNullOrEmpty($CurrentRepository)) { $CurrentRepository = $Repository }
     if ([string]::IsNullOrEmpty($CurrentBase)) { $CurrentBase = $Base }
     if ([string]::IsNullOrEmpty($CurrentScope)) { $CurrentScope = $Scope }
+    if ([string]::IsNullOrEmpty($CurrentHeartbeatState)) { $CurrentHeartbeatState = $HeartbeatState }
     [ordered]@{
         runKind = $RunKind
         prUrl = $PrUrl
@@ -46,6 +51,11 @@ function New-Gate {
         currentHead = $CurrentHead
         reply = $Reply
         mergeResult = $MergeResult
+        hasNextStory = $HasNextStory
+        nextStoryStarted = $NextStoryStarted
+        heartbeatId = 'synthetic-heartbeat-50'
+        heartbeatState = $HeartbeatState
+        currentHeartbeatState = $CurrentHeartbeatState
         promptCount = 1
         workerDispatchCount = 0
     }
@@ -79,7 +89,38 @@ function Resolve-Decision {
     if ($Gate.mergeResult -ne 'merged') {
         return [ordered]@{ state = 'merge_unverified'; merge = $false; advance = $false; dispatch = 0 }
     }
-    [ordered]@{ state = 'merged_verified'; merge = $true; advance = ($Gate.runKind -eq 'epic'); dispatch = if ($Gate.runKind -eq 'epic') { 1 } else { 0 }; complete = ($Gate.runKind -eq 'standalone'); finalDelivery = ($Gate.runKind -eq 'legacy-standalone-feature') }
+    [ordered]@{
+        state = 'merged_verified'
+        merge = $true
+        advance = ($Gate.runKind -eq 'epic' -and $Gate.hasNextStory)
+        dispatch = if ($Gate.runKind -eq 'epic' -and $Gate.hasNextStory) { 1 } else { 0 }
+        complete = ($Gate.runKind -eq 'standalone')
+        finalDelivery = ($Gate.runKind -eq 'legacy-standalone-feature')
+        integratedReview = ($Gate.runKind -eq 'epic' -and -not $Gate.hasNextStory)
+    }
+}
+
+function Resolve-HeartbeatSchedule {
+    param([hashtable] $Gate, [hashtable] $Decision)
+    $target = if ($Decision.state -eq 'merged_verified' -and
+        $Gate.runKind -eq 'epic' -and
+        $Gate.hasNextStory -and
+        $Gate.nextStoryStarted) { 'ACTIVE' } else { 'PAUSED' }
+    $action = if ($Gate.currentHeartbeatState -eq $target) {
+        'none'
+    }
+    elseif ($target -eq 'ACTIVE') {
+        'reactivate'
+    }
+    else {
+        'pause'
+    }
+    [ordered]@{
+        automationId = $Gate.heartbeatId
+        current = $Gate.currentHeartbeatState
+        target = $target
+        action = $action
+    }
 }
 
 function Route-RequestedChanges {
@@ -109,18 +150,41 @@ Assert-True ($no.state -eq 'hold_feedback' -and -not $no.merge -and -not $no.adv
 
 $silent = Resolve-Decision (New-Gate)
 Assert-True ($silent.state -eq 'wait_for_user' -and -not $silent.merge -and -not $silent.advance -and $silent.dispatch -eq 0) 'missing response must not authorize merge'
+$silentSchedule = Resolve-HeartbeatSchedule (New-Gate) $silent
+Assert-True ($silentSchedule.target -eq 'PAUSED' -and $silentSchedule.action -eq 'pause') 'pending approval must pause the active heartbeat'
+$alreadyPaused = New-Gate -HeartbeatState 'PAUSED'
+$alreadyPausedSchedule = Resolve-HeartbeatSchedule $alreadyPaused (Resolve-Decision $alreadyPaused)
+Assert-True ($alreadyPausedSchedule.target -eq 'PAUSED' -and $alreadyPausedSchedule.action -eq 'none') 'paused approval must not schedule another update'
 
-$yesMerged = Resolve-Decision (New-Gate -Reply 'Yes' -MergeResult 'merged')
+$yesMergedGate = New-Gate -Reply 'Yes' -MergeResult 'merged' -HeartbeatState 'PAUSED' -NextStoryStarted $true
+$yesMerged = Resolve-Decision $yesMergedGate
 Assert-True ($yesMerged.state -eq 'merged_verified' -and $yesMerged.merge -and $yesMerged.advance -and $yesMerged.dispatch -eq 1) 'explicit Yes plus verified merge must advance'
+$yesMergedSchedule = Resolve-HeartbeatSchedule $yesMergedGate $yesMerged
+Assert-True ($yesMergedSchedule.target -eq 'ACTIVE' -and $yesMergedSchedule.action -eq 'reactivate' -and $yesMergedSchedule.automationId -eq $yesMergedGate.heartbeatId) 'verified epic merge must reactivate the same heartbeat when the next story starts'
+
+$mergedBeforeNextStory = New-Gate -Reply 'Yes' -MergeResult 'merged' -HeartbeatState 'PAUSED'
+$mergedBeforeNextStoryDecision = Resolve-Decision $mergedBeforeNextStory
+$mergedBeforeNextStorySchedule = Resolve-HeartbeatSchedule $mergedBeforeNextStory $mergedBeforeNextStoryDecision
+Assert-True ($mergedBeforeNextStorySchedule.target -eq 'PAUSED' -and $mergedBeforeNextStorySchedule.action -eq 'none') 'verified merge must remain paused until the next story actually starts'
 
 $standaloneMerged = Resolve-Decision (New-Gate -RunKind standalone -Base 'master' -Reply 'Yes' -MergeResult 'merged')
 Assert-True ($standaloneMerged.state -eq 'merged_verified' -and $standaloneMerged.merge -and -not $standaloneMerged.advance -and $standaloneMerged.dispatch -eq 0 -and $standaloneMerged.complete) 'standalone merge must complete without dispatching a next story'
+$standaloneScheduleGate = New-Gate -RunKind standalone -Base 'master' -Reply 'Yes' -MergeResult 'merged'
+Assert-True ((Resolve-HeartbeatSchedule $standaloneScheduleGate $standaloneMerged).target -eq 'PAUSED') 'standalone completion must leave the heartbeat paused'
 
 $legacyMerged = Resolve-Decision (New-Gate -RunKind legacy-standalone-feature -Reply 'Yes' -MergeResult 'merged')
 Assert-True ($legacyMerged.state -eq 'merged_verified' -and $legacyMerged.merge -and -not $legacyMerged.advance -and $legacyMerged.dispatch -eq 0 -and $legacyMerged.finalDelivery -and -not $legacyMerged.complete) 'legacy standalone merge must unlock final delivery without dispatching a next story'
+$legacyScheduleGate = New-Gate -RunKind legacy-standalone-feature -Reply 'Yes' -MergeResult 'merged'
+Assert-True ((Resolve-HeartbeatSchedule $legacyScheduleGate $legacyMerged).target -eq 'PAUSED') 'legacy final-delivery transition must leave the heartbeat paused'
+
+$finalEpicGate = New-Gate -Reply 'Yes' -MergeResult 'merged' -HasNextStory $false
+$finalEpic = Resolve-Decision $finalEpicGate
+Assert-True ($finalEpic.state -eq 'merged_verified' -and -not $finalEpic.advance -and $finalEpic.dispatch -eq 0 -and $finalEpic.integratedReview) 'final epic story must enter integrated review without dispatching another story'
+Assert-True ((Resolve-HeartbeatSchedule $finalEpicGate $finalEpic).target -eq 'PAUSED') 'final epic story must leave the heartbeat paused'
 
 $yesFailed = Resolve-Decision (New-Gate -Reply 'Yes' -MergeResult 'failed')
 Assert-True ($yesFailed.state -eq 'merge_unverified' -and -not $yesFailed.advance -and $yesFailed.dispatch -eq 0) 'failed merge must hold the current story'
+Assert-True ((Resolve-HeartbeatSchedule (New-Gate -Reply 'Yes' -MergeResult 'failed') $yesFailed).target -eq 'PAUSED') 'failed merge must keep the heartbeat paused until reconciliation'
 
 $yesStale = Resolve-Decision (New-Gate -Reply 'Yes' -CurrentHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
 Assert-True ($yesStale.state -eq 'approval_stale' -and -not $yesStale.merge) 'changed HEAD must invalidate Yes'
@@ -143,4 +207,4 @@ $recovery.promptCount = 1
 $recovery.workerDispatchCount = 0
 Assert-True ($recovery.promptCount -eq 1 -and $recovery.workerDispatchCount -eq 0) 'recovery while waiting must not repeat prompt or dispatch'
 
-Write-Output 'Passed offline merge-gate fixture: standalone direct-master completion, legacy preserved-feature final-delivery transition, and epic feature advancement, exact PR identity prompt, Yes/No/no-response handling, stale identity or HEAD approval, failed merge hold, correction routing, and quiet recovery.'
+Write-Output 'Passed offline merge-gate fixture: approval-gate pause, same-heartbeat epic reactivation only when the next story starts, terminal standalone/final-epic/legacy pause, exact PR identity prompt, Yes/No/no-response handling, stale identity or HEAD approval, failed merge hold, correction routing, and quiet recovery.'

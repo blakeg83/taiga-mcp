@@ -32,7 +32,7 @@ Final review: <not_applicable/pending/findings/accepted> | profile: <model/effor
 Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha or pending>
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
-Recovery: <automation-id or none>
+Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
 ```
 
 Values are updated only after their source system confirms a change. Keep the
@@ -109,11 +109,35 @@ Do not migrate or edit another active run without authorization.
 ## Healthy heartbeat versus recovery
 
 The scheduled prompt names the current note path, run identity, and automation
-identity and follows this read budget:
+identity and follows this read budget. The saved `Recovery` value is the
+confirmed provider schedule state, not an assumption based on elapsed time:
+
+- `ACTIVE` means ordered work is currently allowed to advance.
+- `PAUSED` means no scheduled heartbeat tick should occur while the workflow is
+  waiting for a PR approval decision or is on a terminal story/final-delivery
+  path.
+- `pending` means an `automation_update` schedule change has an unresolved
+  provider result; reconcile it before waiting or issuing another schedule
+  change.
+
+At the PR-ready boundary, persist the approval identity and a pending target
+of `PAUSED`, then update the existing automation with the same ID and confirm
+the provider result. Do not leave the heartbeat `ACTIVE` while `Approval:
+pending` is recorded. A user response or an evidenced provider change may
+open reconciliation, but a healthy paused approval gate does not run recovery.
+
+After an epic PR is confirmed merged, the feature HEAD is refreshed, and the
+next ordered story actually begins, update that same automation to `ACTIVE`
+and persist the confirmed state before continuing. A standalone story, the
+final story in an epic, and the legacy final-release path do not have a next
+story to wake; keep the automation `PAUSED`.
+
+The remaining healthy read budget is:
 
 1. Read only the current snapshot. An unresolved external outcome or missing
    identity opens reconciliation before any wait. Otherwise, if a recorded
-   user-input, approval, or trial gate remains unanswered, end silently.
+   user-input, approval, or trial gate remains unanswered and the schedule is
+   confirmed `PAUSED`, end silently.
    Elapsed time is not an answer.
 2. For an actively running worker wait, take one compact `wait_threads`
    snapshot using the recorded thread/host IDs and `afterCursor`, with
