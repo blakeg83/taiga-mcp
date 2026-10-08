@@ -119,9 +119,13 @@ pair, and blocks next-story dispatch until the provider confirms the merge.
 Run `scripts/validate-merge-approval.ps1` for its offline decision fixture.
 
 For an epic run after all stories are integrated, use [the final integrated epic
-review](references/final-epic-review.md). It pins the final review to
-`gpt-6.1-sol`/`high`, covers cross-story behavior and regressions, and routes
-findings through isolated corrections with exact-HEAD re-review. Run
+review](references/final-epic-review.md). The coordinator creates a fresh
+epic-review pair: `gpt-6.1-sol`/`high` reviews the frozen integrated HEAD and
+`gpt-5.6-luna`/`xhigh` waits as the correction implementer. The pair is reused
+for isolated corrections and exact-HEAD re-review; story-level chats are not
+reused and no new chat is created for each ordinary finding. Use the dedicated
+[epic reviewer prompt](assets/epic-reviewer-prompt.md) and [epic-fix
+implementation prompt](assets/epic-fix-implementation-prompt.md), and run
 `scripts/validate-final-epic-review.ps1` for its offline fixture.
 
 Use [final feature-to-master delivery](references/final-delivery.md) for an

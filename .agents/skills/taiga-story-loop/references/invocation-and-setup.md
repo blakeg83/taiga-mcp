@@ -73,7 +73,7 @@ cannot be resolved, ask for clarification before showing Start/Cancel.
 Workers and review cadence:
 - Implementation: gpt-5.6-luna, xhigh
 - Story/task reviews: gpt-6.1-sol, medium, after each task's implementation evidence
-- Final epic review: gpt-6.1-sol, high, after all scoped stories are ready
+- Final epic review pair: fresh gpt-5.6-luna, xhigh implementer and fresh gpt-6.1-sol, high reviewer, after all scoped stories are integrated
 - Review mode: per_task (default); story_end_only is an explicit alternative
 - No silent profile substitution; an unavailable exact profile is a blocker.
 
@@ -90,6 +90,18 @@ implementer is `gpt-5.6-luna`/`xhigh`; the reviewer is
 `threadId`/`hostId` values before sending full assignments or starting a task;
 a pending `clientThreadId` is never a message destination. See
 [persistent story worker pair](worker-pair.md).
+
+An epic also has a separate integrated-review pair. After every scoped story
+PR is verified merged into the shared feature branch, the coordinator creates
+one fresh Luna/xhigh epic-fix implementer chat and one fresh Sol/high epic
+reviewer chat. This pair is distinct from every story pair. The coordinator
+resolves both real thread IDs before assigning either worker; the reviewer
+starts from the frozen integrated HEAD while the implementer waits for a
+finding. Reuse this pair for ordinary corrections and exact-HEAD re-review;
+do not change an existing story reviewer's reasoning level or create a new
+chat for each finding. Render the assignments from
+`assets/epic-fix-implementation-prompt.md` and
+`assets/epic-reviewer-prompt.md`.
 
 Start authorizes, for this scope only:
 - creating or reusing the scoped worker chats and their worktrees/branches;
@@ -165,7 +177,9 @@ for a standalone story, the single story worktree and branch are created from
 the captured base and target `master` directly.
 For an epic, the provider confirms the previous PR merged before the next
 story is dispatched.
-The persisted fields and restart/merge decision table are defined in the
+After the last story merge, persist the integrated-review pair identities
+before dispatching the final review. The persisted fields and restart/merge
+decision table are defined in the
 [minimal continuation note](continuation-note.md); no second state registry is
 created.
 

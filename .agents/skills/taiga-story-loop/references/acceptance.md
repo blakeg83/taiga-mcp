@@ -201,14 +201,17 @@ legacy standalone run proceeds only to its preserved final feature-to-`master`
 delivery; it never dispatches another story.
 
 When the scope is an epic, all story merges are followed by the [final
-integrated epic review](final-epic-review.md) at `gpt-6.1-sol`/`high` before
-final feature-to-master PR delivery. An active legacy standalone run skips the
-epic review but requires a separate final legacy review of the refreshed
-preserved feature HEAD before the final feature-to-master PR. A new standalone
-story uses its final story acceptance as the exact-HEAD review for the
-direct-to-master story PR; the epic review and a second feature-to-master PR
-are not added. Do not add a redundant feature or integrated review gate to a
-standalone story.
+integrated epic review](final-epic-review.md) using a fresh coordinator-created
+pair: `gpt-6.1-sol`/`high` reviews the integrated feature HEAD and
+`gpt-5.6-luna`/`xhigh` is reserved for isolated integration corrections. The
+pair is separate from every story pair and is reused for exact-HEAD re-review
+before final feature-to-master PR delivery. An active legacy standalone run
+skips the epic review but requires a separate final legacy review of the
+refreshed preserved feature HEAD before the final feature-to-master PR. A new
+standalone story uses its final story acceptance as the exact-HEAD review for
+the direct-to-master story PR; the epic review and a second feature-to-master
+PR are not added. Do not add a redundant feature or integrated review gate to
+a standalone story.
 
 Final delivery follows [final feature-to-master delivery](final-delivery.md).
 Opening that PR hands the user a release candidate and never claims epic or

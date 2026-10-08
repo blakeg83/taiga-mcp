@@ -24,7 +24,8 @@ scope:
 | Feature integration | Epic: unique `codex/feature-<slug>-<run-suffix>` branch, worktree path, and current HEAD; standalone: `none (standalone direct-to-master)` |
 | Current story | story ref, unique `codex/story-<ref>-<slug>-<run-suffix>` branch, worktree path, and base SHA |
 | Review input | expected repository/worktree and branch, base SHA, pending full reviewed SHA, diff range/paths, and clean tracked-source state |
-| Workers | implementer and reviewer chat IDs, when created |
+| Workers | current story implementer and reviewer chat IDs, when created |
+| Integrated review workers | fresh epic-fix implementer and epic reviewer chat IDs/hosts, when the epic gate is reached |
 | Review | PR URL, PR base/head, approval or wait state, and the next required action |
 | Recovery | one recovery automation ID, when authorized and created |
 

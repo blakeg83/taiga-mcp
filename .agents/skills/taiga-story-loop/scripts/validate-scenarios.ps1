@@ -27,6 +27,8 @@ $taskExecutionScriptPath = Join-Path $PSScriptRoot 'validate-task-execution.ps1'
 $workerPairPath = Join-Path $skillRoot 'references/worker-pair.md'
 $handoffPath = Join-Path $skillRoot 'references/worker-handoffs.md'
 $reviewerPromptPath = Join-Path $skillRoot 'assets/reviewer-prompt.md'
+$epicReviewerPromptPath = Join-Path $skillRoot 'assets/epic-reviewer-prompt.md'
+$epicFixPromptPath = Join-Path $skillRoot 'assets/epic-fix-implementation-prompt.md'
 $acceptancePath = Join-Path $skillRoot 'references/acceptance.md'
 $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
@@ -64,6 +66,9 @@ if (-not (Test-Path $workerPairPath)) {
 }
 if (-not (Test-Path $handoffPath) -or -not (Test-Path $reviewerPromptPath)) {
     throw 'Missing direct worker handoff or reviewer prompt contract.'
+}
+if (-not (Test-Path $epicReviewerPromptPath) -or -not (Test-Path $epicFixPromptPath)) {
+    throw 'Missing integrated epic reviewer or epic-fix implementer prompt contract.'
 }
 if (-not (Test-Path $acceptancePath)) {
     throw 'Missing task/story acceptance contract.'
@@ -125,6 +130,10 @@ $handoffText = Get-Content $handoffPath -Raw
 $normalizedHandoff = [regex]::Replace($handoffText, '\s+', ' ')
 $reviewerPromptText = Get-Content $reviewerPromptPath -Raw
 $normalizedReviewerPrompt = [regex]::Replace($reviewerPromptText, '\s+', ' ')
+$epicReviewerPromptText = Get-Content $epicReviewerPromptPath -Raw
+$normalizedEpicReviewerPrompt = [regex]::Replace($epicReviewerPromptText, '\s+', ' ')
+$epicFixPromptText = Get-Content $epicFixPromptPath -Raw
+$normalizedEpicFixPrompt = [regex]::Replace($epicFixPromptText, '\s+', ' ')
 $acceptanceText = Get-Content $acceptancePath -Raw
 $normalizedAcceptance = [regex]::Replace($acceptanceText, '\s+', ' ')
 $routingText = Get-Content $routingPath -Raw
@@ -401,6 +410,7 @@ Assert-BranchContractContains 'implementer ownership' 'implementer may write sou
 Assert-BranchContractContains 'reviewer read-only boundary' 'reviewer is read-only'
 Assert-ContinuationContains 'minimal note fields' 'Review: <pending/approved/changes_requested>'
 Assert-ContinuationContains 'legacy final review state' 'Final review: <not_applicable/pending/findings/accepted>'
+Assert-ContinuationContains 'integrated review pair state' 'Integrated pair: <epic-fix implementer thread-id>'
 Assert-ContinuationContains 'legacy snapshot compatibility' 'optional when reading or replacing an older snapshot'
 Assert-ContinuationContains 'ordered story scope' 'stories: <ordered story refs>'
 Assert-ContinuationContains 'submitted setup decision' 'Setup authorization: <pending/start/cancelled>'
@@ -448,6 +458,27 @@ if ($normalizedPrompt.Contains('correction-ready handoff to both reviewer and co
 }
 if (-not $normalizedReviewerPrompt.Contains('Do not copy or restate routine findings to the coordinator')) {
     throw 'Reviewer prompt assertion failed: routine findings must not be relayed'
+}
+foreach ($marker in @(
+        'fresh, read-only reviewer'
+        'gpt-6.1-sol` with `high`'
+        'fresh epic-review pair'
+        'Do not reuse or ask to reuse a story reviewer chat'
+        'Re-review through this same fresh epic-review pair')) {
+    if (-not $normalizedEpicReviewerPrompt.Contains($marker)) {
+        throw "Epic reviewer prompt assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'fresh correction implementer'
+        'gpt-5.6-luna` with `xhigh`'
+        'distinct from every story implementer chat'
+        'Wait for a finding delivered directly by the assigned epic reviewer'
+        'Verify the sender, scope, and exact reviewed HEAD'
+        'reuse this fresh epic-fix implementer chat')) {
+    if (-not $normalizedEpicFixPrompt.Contains($marker)) {
+        throw "Epic-fix prompt assertion failed: $marker"
+    }
 }
 if (-not $normalizedReviewerPrompt.Contains('only blocked verification') -or
     $normalizedReviewerPrompt.Contains('only blockers/check failures')) {
@@ -675,10 +706,16 @@ foreach ($marker in @('CurrentPrUrl', 'CurrentRepository', 'CurrentBase', 'Curre
 }
 foreach ($marker in @(
         '`gpt-6.1-sol` with `high` effort'
+        'fresh relative to every story-level pair'
+        'creates a new ordinary implementer/reviewer pair'
+        'reviewer begins work immediately'
+        'implementer receives the same scope-bound assignment but remains idle'
+        'The fresh pair is reused for ordinary correction and exact-HEAD re-review rounds'
         'every linked story in authoritative order'
         'combined behavior across stories'
         'cross-story state transitions'
-        'routes it to an appropriate implementer on an isolated integration-correction branch'
+        'sends it directly to the fresh epic-fix implementer on an isolated integration-correction branch'
+        'The coordinator does not relay findings'
         'resulting exact feature HEAD again')) {
     if (-not $normalizedFinalEpicReview.Contains($marker)) {
         throw "Final epic review assertion failed: $marker"
@@ -780,7 +817,12 @@ foreach ($recordMarker in @(
         'Default-only'
         'Empty/blank'
         'Explicit cancel'
-        'Scope change')) {
+        'Scope change'
+        'epic-45 integrated-fix implementer'
+        'epic-45 integrated reviewer'
+        'synthetic-epic-45-review'
+        'reviewer active'
+        'implementer waiting for a finding')) {
     if (-not $normalizedWalkthrough.Contains($recordMarker)) {
         throw "Walkthrough record assertion failed: $recordMarker"
     }

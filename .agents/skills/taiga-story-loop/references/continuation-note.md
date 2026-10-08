@@ -19,6 +19,7 @@ Current: story #<ref> | task/stage: <ref or stage>
 Story branch: <branch> | worktree: <absolute path> | base: <sha>
 Implementer: <thread-id> @ <host-id> | reviewer: <thread-id> @ <host-id>
 Pair: <created/reused> | IDs resolved: <yes/no> | authorization: <scope marker>
+Integrated pair: <epic-fix implementer thread-id> @ <host-id> | epic reviewer <thread-id> @ <host-id> | <created/reused, resolved yes/no, or not_applicable>
 Setup authorization: <pending/start/cancelled> | mode: <selectable/plain-text> | submitted: <true/false> | reference: <resolved authorization reference or none>
 Review mode: <per_task/story_end_only> | approved HEAD: <sha or pending>
 Review input: repository <path> | worktree <path> | branch <branch> | base <sha> | reviewed <full SHA or pending> | diff <base..reviewed> | source <clean tracked source/blocked>
@@ -67,7 +68,8 @@ Evidence: <current handoff/review/check references; no copied findings>
 
 Keep the submitted setup decision, mode, scope reference, resolved
 authorization reference, and authorization boundaries, along with topology, PR/base/head approval identity, final
-review state, worker hosts and cursors, automation identity, and unresolved
+review state, story worker hosts and cursors, integrated-review pair identities
+when the epic gate is reached, automation identity, and unresolved
 trial inputs in the current note. For a newly created standalone run, `Topology` is
 `standalone-story-direct-master`; for an epic it is `epic-shared-feature`.
 Older active notes may omit `Topology`: determine it from the recorded
@@ -163,7 +165,11 @@ On restart, process the note in this order:
 3. Inspect the recorded implementer/reviewer thread and host IDs, pair outcome,
    and PR URL. Reuse matching chats/PRs; do not create duplicates because the
    note is stale or incomplete. A pending client ID is not a worker ID; resolve
-   it through the authoritative thread inventory before messaging.
+   it through the authoritative thread inventory before messaging. When the
+   scope is an epic and the note is at the integrated-review gate, inspect the
+   separately recorded `Integrated pair` and reuse both matching chats. Do not
+   fall back to a story pair or create a replacement without provider
+   confirmation that the recorded chat cannot be used.
 4. Read Taiga status/comments and the provider's PR state, then refresh the
    note with the authoritative result. Conflicting ownership or lineage is a
    blocker for user input.
