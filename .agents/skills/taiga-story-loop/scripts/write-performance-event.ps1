@@ -22,7 +22,9 @@ param(
 
     [int] $LockTimeoutMilliseconds = 5000,
 
-    [int] $FaultAfterBytes = -1
+    [int] $FaultAfterBytes = -1,
+
+    [string] $LockReadyPath
 )
 
 Set-StrictMode -Version Latest
@@ -708,17 +710,22 @@ function Convert-ToCanonicalJson {
     return (Convert-ToCanonicalValue -Value $Value | ConvertTo-Json -Compress -Depth 50)
 }
 
-function Get-Sha256Hex {
-    param([Parameter(Mandatory)] [string] $Text)
+function Get-Sha256HexBytes {
+    param([Parameter(Mandatory)] [byte[]] $Bytes)
 
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
     $hash = [Security.Cryptography.SHA256]::Create()
     try {
-        return ([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+        return ([BitConverter]::ToString($hash.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
     }
     finally {
         $hash.Dispose()
     }
+}
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)] [string] $Text)
+
+    return Get-Sha256HexBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($Text))
 }
 
 function Get-UtcNowText {
@@ -728,12 +735,18 @@ function Get-UtcNowText {
 function Acquire-LedgerLock {
     param(
         [Parameter(Mandatory)] [string] $LedgerPath,
-        [Parameter(Mandatory)] [int] $TimeoutMilliseconds
+        [Parameter(Mandatory)] [int] $TimeoutMilliseconds,
+        [AllowNull()] [string] $ReadyPath
     )
 
     $lockPath = "$LedgerPath.lock"
     $clock = [Diagnostics.Stopwatch]::StartNew()
+    $readySignaled = $false
     while ($clock.ElapsedMilliseconds -le $TimeoutMilliseconds) {
+        if (-not $readySignaled -and -not [string]::IsNullOrWhiteSpace($ReadyPath)) {
+            [IO.File]::WriteAllText($ReadyPath, 'ready', [Text.UTF8Encoding]::new($false))
+            $readySignaled = $true
+        }
         try {
             return [IO.FileStream]::new(
                 $lockPath,
@@ -751,6 +764,20 @@ function Acquire-LedgerLock {
         }
     }
     throw [TimeoutException]::new('ledger lock wait exceeded the configured bound')
+}
+
+function Copy-ByteRange {
+    param(
+        [Parameter(Mandatory)] [byte[]] $Bytes,
+        [Parameter(Mandatory)] [int] $Offset,
+        [Parameter(Mandatory)] [int] $Count
+    )
+
+    $result = [byte[]]::new($Count)
+    if ($Count -gt 0) {
+        [Array]::Copy($Bytes, $Offset, $result, 0, $Count)
+    }
+    return $result
 }
 
 function Read-LedgerState {
@@ -776,37 +803,28 @@ function Read-LedgerState {
     }
 
     $encoding = [Text.UTF8Encoding]::new($false, $true)
-    $text = $encoding.GetString($bytes)
-    $needsSeparator = $bytes[$bytes.Length - 1] -ne [byte] 0x0A
-    $rawLines = @($text -split "`n", -1)
-    if (-not $needsSeparator -and $rawLines.Count -gt 0 -and $rawLines[-1] -eq '') {
-        $rawLines = @($rawLines[0..($rawLines.Count - 2)])
-    }
-
     $records = @()
     $corrupt = @()
-    $incompleteTail = $null
-    for ($index = 0; $index -lt $rawLines.Count; $index++) {
-        $lineNumber = $index + 1
-        $line = $rawLines[$index].TrimEnd("`r")
-        if ($needsSeparator -and $index -eq $rawLines.Count - 1) {
-            $incompleteTail = [pscustomobject]@{
-                lineNumber = $lineNumber
-                byteLength = [Text.UTF8Encoding]::new($false).GetByteCount($line)
-                digest = Get-Sha256Hex -Text $line
-            }
-            continue
-        }
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            $corrupt += [pscustomobject]@{
-                lineNumber = $lineNumber
-                byteLength = 0
-                digest = Get-Sha256Hex -Text $line
-            }
+    $lineStart = 0
+    $lineNumber = 0
+    for ($offset = 0; $offset -lt $bytes.Length; $offset++) {
+        if ($bytes[$offset] -ne [byte] 0x0A) {
             continue
         }
 
+        $lineNumber++
+        $lineLength = $offset - $lineStart
+        $contentLength = $lineLength
+        if ($contentLength -gt 0 -and $bytes[$offset - 1] -eq [byte] 0x0D) {
+            $contentLength--
+        }
+        $lineBytes = Copy-ByteRange -Bytes $bytes -Offset $lineStart -Count $contentLength
+        $lineStart = $offset + 1
         try {
+            $line = $encoding.GetString($lineBytes)
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                throw [FormatException]::new('ledger record is blank')
+            }
             $candidate = $line | ConvertFrom-Json -DateKind String
             $eventIdProperty = if ($null -eq $candidate) { $null } else { Get-Property -Object $candidate -Name 'eventId' }
             if ($null -eq $candidate -or $candidate -is [System.Array] -or
@@ -822,9 +840,20 @@ function Read-LedgerState {
         catch {
             $corrupt += [pscustomobject]@{
                 lineNumber = $lineNumber
-                byteLength = [Text.UTF8Encoding]::new($false).GetByteCount($line)
-                digest = Get-Sha256Hex -Text $line
+                byteLength = $contentLength
+                digest = Get-Sha256HexBytes -Bytes $lineBytes
             }
+        }
+    }
+
+    $tailLength = $bytes.Length - $lineStart
+    $incompleteTail = $null
+    if ($tailLength -gt 0) {
+        $tailBytes = Copy-ByteRange -Bytes $bytes -Offset $lineStart -Count $tailLength
+        $incompleteTail = [pscustomobject]@{
+            lineNumber = $lineNumber + 1
+            byteLength = $tailLength
+            digest = Get-Sha256HexBytes -Bytes $tailBytes
         }
     }
 
@@ -832,7 +861,7 @@ function Read-LedgerState {
         Records = $records
         CorruptRecords = $corrupt
         IncompleteTail = $incompleteTail
-        NeedsSeparator = $needsSeparator
+        NeedsSeparator = $tailLength -gt 0
     }
 }
 
@@ -916,6 +945,9 @@ if ($LockTimeoutMilliseconds -lt 0) {
 if ($FaultAfterBytes -lt -1) {
     Fail-Recorder "'FaultAfterBytes' must be -1 or nonnegative"
 }
+if (-not [string]::IsNullOrWhiteSpace($LockReadyPath) -and -not [IO.Path]::IsPathRooted($LockReadyPath)) {
+    Fail-Recorder "'LockReadyPath' must be absolute when supplied"
+}
 
 $eventText = Read-EventJson
 $event = Parse-Event -Json $eventText
@@ -947,7 +979,7 @@ $diagnosticPaths = @()
 $conflictDiagnosticPath = $null
 
 try {
-    $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds
+    $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds -ReadyPath $LockReadyPath
     $ledgerState = Read-LedgerState -LedgerPath $ledgerPath
 
     foreach ($corruptRecord in @($ledgerState.CorruptRecords)) {

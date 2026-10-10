@@ -25,7 +25,8 @@ function Invoke-Recorder {
         [Parameter(Mandatory)] [string] $RunId,
         [Parameter(Mandatory)] [string] $EventJson,
         [int] $LockTimeoutMilliseconds = -1,
-        [int] $FaultAfterBytes = -1
+        [int] $FaultAfterBytes = -1,
+        [string] $LockReadyPath
     )
 
     $pwsh = Join-Path $PSHOME 'pwsh.exe'
@@ -45,6 +46,9 @@ function Invoke-Recorder {
     }
     if ($FaultAfterBytes -ge 0) {
         $arguments += @('-FaultAfterBytes', [string] $FaultAfterBytes)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
+        $arguments += @('-LockReadyPath', $LockReadyPath)
     }
     $output = & $pwsh @arguments 2>&1
     return [pscustomobject]@{
@@ -67,6 +71,23 @@ function Get-RecorderResult {
     catch {
         throw "Performance-event assertion failed: $Context returned non-JSON output '$($jsonLines[-1])'"
     }
+}
+
+function Wait-ForFiles {
+    param(
+        [Parameter(Mandatory)] [string[]] $Paths,
+        [int] $TimeoutMilliseconds = 60000
+    )
+
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -le $TimeoutMilliseconds) {
+        $ready = @($Paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+        if ($ready.Count -eq $Paths.Count) {
+            return
+        }
+        [Threading.Thread]::Yield() | Out-Null
+    }
+    throw "Performance-event assertion failed: readiness files did not appear within the bounded wait"
 }
 
 function Convert-EventToJson {
@@ -526,6 +547,49 @@ try {
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $confirmedEvent.eventId)) 'recovery preserves the confirmed complete event'
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $recoveredEvent.eventId)) 'recovery appends the new complete event'
 
+    $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
+    $unicodeRunId = 'synthetic-run-150-unicode-tail'
+    $unicodeLedgerPath = Join-Path (Join-Path $unicodeRoot $unicodeRunId) 'events.jsonl'
+    $unicodeConfirmed = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-unicode-confirmed'
+        runId = $unicodeRunId
+        transitionId = 'unicode-confirmed'
+    }
+    $unicodeConfirmedResult = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $unicodeRoot -RunId $unicodeRunId -EventJson (Convert-EventToJson $unicodeConfirmed)
+    Assert-True ($unicodeConfirmedResult.ExitCode -eq 0) 'confirmed event before a multibyte fault appends'
+    $unicodeInterrupted = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-é-interrupted'
+        runId = $unicodeRunId
+        transitionId = 'unicode-interrupted'
+    }
+    $unicodeJson = Convert-EventToJson -Event $unicodeInterrupted
+    $unicodeBytes = [Text.UTF8Encoding]::new($false).GetBytes($unicodeJson + [Environment]::NewLine)
+    $accentOffset = -1
+    for ($offset = 0; $offset -lt ($unicodeBytes.Length - 1); $offset++) {
+        if ($unicodeBytes[$offset] -eq [byte] 0xC3 -and $unicodeBytes[$offset + 1] -eq [byte] 0xA9) {
+            $accentOffset = $offset
+            break
+        }
+    }
+    Assert-True ($accentOffset -ge 0) 'Unicode fault fixture contains a UTF-8 multibyte sequence'
+    $unicodeFaulted = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $unicodeRoot -RunId $unicodeRunId -EventJson $unicodeJson -FaultAfterBytes ($accentOffset + 1)
+    $unicodeFaultedResult = Get-RecorderResult -Invocation $unicodeFaulted -Context 'multibyte interrupted write'
+    Assert-True ($unicodeFaulted.ExitCode -eq 2 -and $unicodeFaultedResult.errorCategory -ceq 'write_failed') 'multibyte interrupted write never reports success'
+    $unicodeRecovered = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-unicode-recovered'
+        runId = $unicodeRunId
+        transitionId = 'unicode-recovered'
+    }
+    $unicodeRecovery = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $unicodeRoot -RunId $unicodeRunId -EventJson (Convert-EventToJson $unicodeRecovered)
+    $unicodeRecoveryResult = Get-RecorderResult -Invocation $unicodeRecovery -Context 'multibyte tail recovery'
+    Assert-True ($unicodeRecovery.ExitCode -eq 0 -and [bool] $unicodeRecoveryResult.recoveredIncompleteTail) 'multibyte tail recovery preserves and reports the incomplete tail'
+    Assert-True (Test-Path -LiteralPath ([string] $unicodeRecoveryResult.diagnosticPath) -PathType Leaf) 'multibyte tail recovery writes evidence'
+    $unicodeDiagnostics = [IO.File]::ReadAllText([string] $unicodeRecoveryResult.diagnosticPath)
+    Assert-True ($unicodeDiagnostics -match '"diagnosticType":"incomplete_tail"') 'multibyte tail recovery records incomplete-tail evidence'
+    $unicodeLedgerText = [IO.File]::ReadAllText($unicodeLedgerPath)
+    Assert-True ($unicodeLedgerText -match [regex]::Escape([string] $unicodeConfirmed.eventId)) 'multibyte-tail recovery preserves the earlier confirmed event'
+    Assert-True ($unicodeLedgerText -match [regex]::Escape([string] $unicodeRecovered.eventId)) 'multibyte-tail recovery appends the next complete event'
+
     $concurrentRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-concurrent-' + [guid]::NewGuid().ToString('N'))
     $concurrentRunId = 'synthetic-run-150-concurrent'
     $concurrentDirectory = Join-Path $concurrentRoot $concurrentRunId
@@ -533,12 +597,14 @@ try {
     $concurrentLockPath = Join-Path $concurrentDirectory 'events.jsonl.lock'
     $concurrentLockHolder = $null
     $concurrentJobs = @()
+    $sameIdJobs = @()
     $concurrentJobScript = {
         param(
             [string] $RecorderPath,
             [string] $RunRoot,
             [string] $RunName,
-            [string] $Payload
+            [string] $Payload,
+            [string] $ReadyPath
         )
 
         $pwshPath = Join-Path $PSHOME 'pwsh.exe'
@@ -546,7 +612,8 @@ try {
             -ExternalRunRoot $RunRoot `
             -RunId $RunName `
             -EventJson $Payload `
-            -LockTimeoutMilliseconds 30000 2>&1 | ForEach-Object { [string] $_ })
+            -LockTimeoutMilliseconds 30000 `
+            -LockReadyPath $ReadyPath 2>&1 | ForEach-Object { [string] $_ })
         [pscustomobject]@{
             ExitCode = [int] $LASTEXITCODE
             Output = $captured
@@ -564,8 +631,11 @@ try {
             runId = $concurrentRunId
             transitionId = 'concurrent-b'
         }
-        $concurrentJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, (Convert-EventToJson $concurrentEventA)
-        $concurrentJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, (Convert-EventToJson $concurrentEventB)
+        $readyA = Join-Path $concurrentDirectory 'ready-a.signal'
+        $readyB = Join-Path $concurrentDirectory 'ready-b.signal'
+        $concurrentJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, (Convert-EventToJson $concurrentEventA), $readyA
+        $concurrentJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, (Convert-EventToJson $concurrentEventB), $readyB
+        Wait-ForFiles -Paths @($readyA, $readyB)
         $concurrentLockHolder.Dispose()
         $concurrentLockHolder = $null
         $completedConcurrentJobs = @(Wait-Job -Job $concurrentJobs -Timeout 60)
@@ -584,6 +654,36 @@ try {
         Assert-True (@($concurrentIds | Sort-Object -Unique).Count -eq 2) 'concurrent distinct events persist once each'
         Assert-True ($concurrentIds -contains [string] $concurrentEventA.eventId) 'concurrent event A is present'
         Assert-True ($concurrentIds -contains [string] $concurrentEventB.eventId) 'concurrent event B is present'
+
+        $concurrentLockHolder = [IO.FileStream]::new($concurrentLockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $sameIdEvent = New-EventVariant -Base $validEvent -Changes @{
+            eventId = 'synthetic-concurrent-identical'
+            runId = $concurrentRunId
+            transitionId = 'concurrent-identical'
+        }
+        $sameIdReadyA = Join-Path $concurrentDirectory 'ready-identical-a.signal'
+        $sameIdReadyB = Join-Path $concurrentDirectory 'ready-identical-b.signal'
+        $sameIdPayload = Convert-EventToJson $sameIdEvent
+        $sameIdJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, $sameIdPayload, $sameIdReadyA
+        $sameIdJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, $sameIdPayload, $sameIdReadyB
+        Wait-ForFiles -Paths @($sameIdReadyA, $sameIdReadyB)
+        $concurrentLockHolder.Dispose()
+        $concurrentLockHolder = $null
+        $completedSameIdJobs = @(Wait-Job -Job $sameIdJobs -Timeout 60)
+        Assert-True ($completedSameIdJobs.Count -eq 2) 'concurrent identical replay fixtures complete within the bounded wait'
+        $sameIdResults = @($sameIdJobs | Receive-Job)
+        Assert-True ($sameIdResults.Count -eq 2) 'both concurrent identical replay fixtures return results'
+        $sameIdStatuses = @()
+        foreach ($sameIdResult in $sameIdResults) {
+            Assert-True ($sameIdResult.ExitCode -eq 0) 'concurrent identical replay exits zero'
+            $sameIdStatuses += [string] (Get-RecorderResult -Invocation $sameIdResult -Context 'concurrent identical replay').status
+        }
+        Assert-True (@($sameIdStatuses | Where-Object { $_ -ceq 'appended' }).Count -eq 1) 'concurrent identical replay has one append'
+        Assert-True (@($sameIdStatuses | Where-Object { $_ -ceq 'noop' }).Count -eq 1) 'concurrent identical replay has one no-op'
+        $finalConcurrentLines = @(Get-Content -LiteralPath $concurrentLedgerPath)
+        $finalConcurrentIds = @($finalConcurrentLines | ForEach-Object { ([string] (($_ | ConvertFrom-Json -DateKind String).eventId)) })
+        Assert-True ($finalConcurrentLines.Count -eq 3) 'concurrent identical replay persists one additional line'
+        Assert-True (@($finalConcurrentIds | Where-Object { $_ -ceq [string] $sameIdEvent.eventId }).Count -eq 1) 'concurrent identical replay persists exactly one event'
     }
     finally {
         if ($null -ne $concurrentLockHolder) {
@@ -591,6 +691,9 @@ try {
         }
         if ($concurrentJobs.Count -gt 0) {
             Remove-Job -Job $concurrentJobs -Force -ErrorAction SilentlyContinue
+        }
+        if ($sameIdJobs.Count -gt 0) {
+            Remove-Job -Job $sameIdJobs -Force -ErrorAction SilentlyContinue
         }
     }
 
