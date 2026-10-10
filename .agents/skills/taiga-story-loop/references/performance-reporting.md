@@ -152,7 +152,9 @@ When attributable worker usage is unavailable, the supported fallback is:
 
 The validator exercises synthetic unavailable and partial examples and checks
 that the observed host example is not mislabeled as usage telemetry. It makes
-no network calls and writes no state.
+no network calls. Its recorder lifecycle cases write only under a unique
+disposable external run root and remove that root in a `finally` cleanup; they
+do not write tracked repository state.
 
 ## Acceptance evidence plan
 
@@ -161,9 +163,12 @@ no network calls and writes no state.
 - Capability sources/probes: current Codex App tool schemas, the bounded
   `list_threads` probe, the current-worker `get_goal` probe, the setup
   assignment, and repository search results listed above.
-- Production path: no runtime production path is changed in this task. The
-  validator reaches the contract by reading the checked-in reference and
-  validates its sanitized examples and fallback semantics.
+- Production path: no workflow authority or live provider path is changed by
+  the validator. It invokes the recorder entry point in a fresh PowerShell
+  process with synthetic events, an explicit external run root, and fixed
+  timestamps. The recorder cases validate the persisted ledger, lock and
+  diagnostic siblings, preserve a historical report sibling, and distinguish
+  synthetic measurement failures from host observations.
 - Preserved inputs: exact role identities, assigned profiles, probe names,
   state names, explicit null/unknown values, and no prompt/transcript data.
 - Metrics: no performance number is claimed. The validator counts contract
@@ -172,14 +177,43 @@ no network calls and writes no state.
 - Scenario matrix: observed coordinator metadata is an automated contract
   assertion; per-worker usage is an honest unavailable case; synthetic partial
   counters are an automated fixture only.
-- Smoke: from the repository root, run the validator with PowerShell 7 and a
-  disposable external working directory if one is needed by the caller. It
-  reads tracked files only, has no service start, live data, or cleanup.
+- Smoke: from the repository root, run `pwsh -NoProfile -File
+  .agents/skills/taiga-story-loop/scripts/validate-performance-reporting.ps1`
+  with PowerShell 7. The validator creates its own unique external run root,
+  invokes the recorder in child processes, exercises same-run restart/replay,
+  separate run/story isolation, interrupted-tail recovery, deterministic
+  file-as-directory and read-only I/O failures, malformed-middle diagnostics,
+  and historical-report retention, then removes only that disposable root.
+  It has no service start, live data, Git/Taiga/workflow-state write, or
+  transcript export.
 - Limitations: no per-worker App token counters, no attributable account
   limits, no worker status from the bounded listing, and no live transition
   timestamps were available in this discovery context. Recorder, aggregation,
   workflow hooks, review counting, and integrated overhead evidence are owned
   by later tasks/stories.
+
+### Recorder lifecycle and cleanup contract
+
+The recorder entry point is `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`.
+Callers pass an absolute `-ExternalRunRoot` outside the source worktree and a
+path-safe `-RunId`; the recorder owns only
+`<external-run-root>/<runId>/events.jsonl` plus its lock and diagnostic
+siblings. A run ledger is bound by its first valid event's `runId`,
+`projectId`, `storyId`, and `storyRef`. A later event with a different binding
+is a safe run-binding failure and does not append. Complete records that fail
+the version-1 envelope or strict UTF-8 decoding remain byte-preserved and are
+reported through digest/length/line diagnostics without copying raw payloads.
+
+Restart is an ordinary new recorder process against the same external root:
+the ledger is reread, identical event IDs are no-ops, confirmed complete
+records remain authoritative, and an interrupted tail is reported before a
+subsequent complete append. Measurement or I/O failures return a safe error
+and never change workflow authorization, review, advancement, PR, or merge
+state. Historical report siblings are retained; the recorder never performs
+automatic report deletion. Operators explicitly remove a disposable run root
+only after its evidence is no longer needed. Production or retained history
+must be archived or removed by its owning lifecycle process, not by recorder
+recovery.
 
 ## Deferred ownership and boundaries
 
