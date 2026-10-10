@@ -184,30 +184,35 @@ function Invoke-RecorderEvent {
     }
 }
 
-function Invoke-WorkflowReadyTransition {
+function Invoke-AutomaticReviewMeasurementScenario {
     param(
-        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $Path,
         [Parameter(Mandatory)] [string] $ExternalRoot,
         [Parameter(Mandatory)] [string] $RunId,
-        [Parameter(Mandatory)] [object] $Event,
+        [Parameter(Mandatory)] [string] $TracePath,
         [int] $FaultAfterBytes = -1
     )
 
-    $recorder = Invoke-RecorderEvent -RecorderPath $RecorderPath -ExternalRoot $ExternalRoot -RunId $RunId -Event $Event -FaultAfterBytes $FaultAfterBytes
-    # This is the controlled transition contract exercised by the automatic
-    # review fixture: measurement is a side effect of the ready boundary. A
-    # recorder failure changes coverage only; authorization, gate, dispatch,
-    # and the next-task hold remain workflow decisions.
-    return [pscustomobject][ordered]@{
-        authorization = 'start-synthetic-145'
-        taskStateBefore = 'in_progress'
-        gate = 'ready_for_review'
-        decision = 'dispatch_review'
-        taskStateAfter = 'awaiting_review'
-        nextTask = 'held'
-        measurement = if ($recorder.ExitCode -eq 0) { 'recorded' } else { 'unavailable' }
-        recorderExitCode = $recorder.ExitCode
-        recorderStatus = [string] $recorder.Result.status
+    $arguments = @(
+        '-NoProfile',
+        '-File', $Path,
+        '-MeasurementExternalRunRoot', $ExternalRoot,
+        '-MeasurementRunId', $RunId,
+        '-MeasurementTracePath', $TracePath
+    )
+    if ($FaultAfterBytes -ge 0) {
+        $arguments += @('-MeasurementFaultAfterBytes', [string]$FaultAfterBytes)
+    }
+    $output = & pwsh @arguments 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    $diagnostic = [string]($output -join [Environment]::NewLine)
+    Assert-True ($exitCode -eq 0) "automatic review measurement fixture '$RunId' failed with exit ${exitCode}: $diagnostic"
+    Assert-True (Test-Path -LiteralPath $TracePath -PathType Leaf) "automatic review measurement fixture '$RunId' must write a trace"
+    try {
+        return [IO.File]::ReadAllText($TracePath) | ConvertFrom-Json -Depth 50 -DateKind String
+    }
+    catch {
+        throw "automatic review measurement fixture '$RunId' wrote invalid trace JSON: $($_.Exception.Message)"
     }
 }
 
@@ -1028,19 +1033,28 @@ try {
     Assert-True (@($recoveryReport.reviewAttempts).Count -eq 1 -and @($recoveryReport.anomalies | Where-Object { $_.code -eq 'malformed_event' }).Count -ge 1) 'recovered report must retain one review attempt and disclose the quarantined interrupted fragment'
 
     # Pair a healthy ready-turn control with the same transition under a real
-    # recorder fault. Only measurement coverage may differ; the automatic
-    # review authorization, gate, dispatch decision, and next-task hold must
-    # remain identical.
-    $measurementEvent = New-Event -EventId 'integrated-measurement-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T11:00:00Z' -Scope 'task' -TaskRef 302 -PhaseId 'integrated-measurement-ready' -Revision $revisionA -Role 'implementer'
-    $measurementEvent.runId = 'synthetic-measurement-healthy'
-    $healthyTransition = Invoke-WorkflowReadyTransition -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId 'synthetic-measurement-healthy' -Event $measurementEvent
-    $faultedMeasurementEvent = $measurementEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -DateKind String
-    $faultedMeasurementEvent.runId = 'synthetic-measurement-fault'
-    $faultedTransition = Invoke-WorkflowReadyTransition -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId 'synthetic-measurement-fault' -Event $faultedMeasurementEvent -FaultAfterBytes 9
-    foreach ($decisionField in @('authorization', 'taskStateBefore', 'gate', 'decision', 'taskStateAfter', 'nextTask')) {
-        Assert-True ([string]$healthyTransition.$decisionField -ceq [string]$faultedTransition.$decisionField) "measurement failure must not change workflow decision field $decisionField"
+    # recorder fault. The child fixture invokes the existing
+    # Complete-ReviewHandoff -> Apply-Event -> End-ImplementerReviewTurn path;
+    # this wrapper only supplies the recorder fault and inspects the resulting
+    # workflow trace.
+    $automaticReviewFixturePath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts\validate-automatic-review-flow.ps1'))
+    $measurementRoot = Join-Path $root 'automatic-review-measurement'
+    $healthyTrace = Invoke-AutomaticReviewMeasurementScenario -Path $automaticReviewFixturePath -ExternalRoot $measurementRoot -RunId 'synthetic-measurement-healthy' -TracePath (Join-Path $measurementRoot 'healthy-trace.json')
+    $faultedTrace = Invoke-AutomaticReviewMeasurementScenario -Path $automaticReviewFixturePath -ExternalRoot $measurementRoot -RunId 'synthetic-measurement-fault' -TracePath (Join-Path $measurementRoot 'faulted-trace.json') -FaultAfterBytes 9
+    foreach ($workflowField in @('decision', 'authorization', 'reviewerId', 'workflowRevision', 'taskState', 'reviewGate', 'pendingReview', 'pendingRevision', 'currentTaskIndex', 'nextTaskState', 'reviewActionCount', 'reviewDestination', 'reviewActionRevision', 'turnCount', 'turnRevision')) {
+        Assert-True ([string]$healthyTrace.workflow.$workflowField -ceq [string]$faultedTrace.workflow.$workflowField) "measurement failure must not change actual workflow trace field $workflowField"
     }
-    Assert-True ([string]$healthyTransition.measurement -ceq 'recorded' -and [string]$faultedTransition.measurement -ceq 'unavailable' -and [int]$faultedTransition.recorderExitCode -ne 0) 'measurement failure must change only measurement coverage and retain a nonzero recorder failure'
+    Assert-True ([string]$healthyTrace.measurement.state -ceq 'recorded' -and [string]$faultedTrace.measurement.state -ceq 'unavailable' -and [int]$faultedTrace.measurement.recorderExitCode -ne 0) 'measurement failure must change only measurement coverage and retain a nonzero recorder failure'
+    foreach ($trace in @($healthyTrace, $faultedTrace)) {
+        Assert-True ([string]$trace.workflow.decision -ceq 'dispatch_review' -and [string]$trace.workflow.taskState -ceq 'awaiting_review' -and [string]$trace.workflow.reviewGate -ceq 'awaiting_review') 'actual ready transition must dispatch and end in awaiting_review'
+        Assert-True ([bool]$trace.workflow.pendingReview -and [string]$trace.workflow.pendingRevision -ceq ('e' * 40) -and [string]$trace.workflow.workflowRevision -ceq ('e' * 40)) 'actual review must retain the supplied exact revision'
+        Assert-True ([int]$trace.workflow.currentTaskIndex -eq 0 -and [string]$trace.workflow.nextTaskState -ceq 'not_started') 'actual ready transition must hold the next ordered task'
+        Assert-True ([int]$trace.workflow.reviewActionCount -eq 1 -and [string]$trace.workflow.reviewDestination -ceq 'reviewer-story-87' -and [string]$trace.workflow.reviewActionRevision -ceq ('e' * 40)) 'actual dispatch trace must target the assigned reviewer once'
+        Assert-True ([int]$trace.workflow.turnCount -eq 1 -and [string]$trace.workflow.turnRevision -ceq ('e' * 40)) 'actual dispatch must end exactly one implementer turn'
+        $terminalKinds = @($trace.workflow.terminalActionKinds)
+        Assert-True ($terminalKinds.Count -eq 2 -and [string]$terminalKinds[0] -ceq 'send_review_handoff' -and [string]$terminalKinds[1] -ceq 'final_response') 'actual terminal action trace must be the review handoff and final response'
+        Assert-True ([bool]$trace.invalidAuthorization.rejected -and [int]$trace.invalidAuthorization.actionCount -eq 0 -and [int]$trace.invalidAuthorization.turnCount -eq 0 -and [string]$trace.invalidAuthorization.taskState -ceq 'in_progress' -and -not [bool]$trace.invalidAuthorization.pendingReview -and [string]$trace.invalidAuthorization.error -match 'stale') 'invalid authorization must be rejected without workflow mutation'
+    }
 
     # Run the workflow-owned contract fixtures as part of this integrated
     # matrix. They invoke the production recorder (and, where applicable,
@@ -1069,7 +1083,7 @@ try {
         [ordered]@{ scenario = 'unknown or partial telemetry'; setup = 'missing source-backed counters'; action = 'aggregate usage windows'; expected = 'null unavailable/partial state, no estimate'; observed = 'usage fallback assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'usage counter reset'; setup = 'synthetic cumulative stream with an intermediate decrease'; action = 'aggregate the reset window'; expected = 'partial null total with reset anomaly'; observed = 'usage_counter_reset assertion passed'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'PR reuse and new reviewed HEAD'; setup = 'same PR identity with changed full HEAD'; action = 'publish artifacts'; expected = 'reuse identical bytes, retain new sibling'; observed = 'artifact identity assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'measurement failure'; setup = 'paired healthy/faulted ready-turn control with real recorder fault'; action = 'continue workflow without telemetry'; expected = 'authorization, gate, dispatch, and next-task hold unchanged'; observed = 'paired transition assertions passed; only measurement became unavailable'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'measurement failure'; setup = 'paired healthy/faulted ready-turn control through Complete-ReviewHandoff and Apply-Event with real recorder fault'; action = 'continue workflow without telemetry'; expected = 'actual dispatch trace, awaiting-review terminal state, next-task hold, and stale-authorization rejection unchanged'; observed = 'workflow-owned traces matched; only measurement became unavailable'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'attributable host token counters'; setup = '.agents/skills/taiga-story-loop/references/performance-reporting.md discovery dated 2026-10-09; probes: create_thread schema, get_usage_limits schema, list_threads({limit:50}), get_goal({}), repository search'; action = 'not_run by this validator; retain prior bounded discovery'; expected = 'measure only when worker/session counters are attributable'; observed = 'no fresh host probe claimed; prior discovery records per-worker counters unavailable'; evidence = 'unavailable'; status = 'not_run' }
     )
     Write-Output 'Scenario evidence (synthetic unless explicitly marked unavailable):'
