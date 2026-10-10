@@ -76,7 +76,18 @@ foreach ($marker in @(
         'Executable fallback'
         'validate-performance-reporting.ps1'
         'Task #147'
-        'Task #148')) {
+        'Task #148'
+        'Review-attempt counting and bounded-overhead acceptance cases'
+        'reviewKind'
+        'reviewAttemptOrdinal'
+        'duplicate no-op'
+        'marked stale'
+        'story_end_only deliberately has zero per-task reviews'
+        'source-backed usage boundary'
+        'addedAgents'
+        'measurement-only messages'
+        'same-SHA retry'
+        'synthetic-overhead-baseline-candidate')) {
     Assert-Contains $normalized $marker "reference is missing '$marker'"
 }
 
@@ -85,7 +96,7 @@ Assert-Contains $normalized 'Account-level limits' 'account-level limits must be
 Assert-True ($normalized.Contains('unknown, not zero')) 'unknown values must not be converted to zero'
 
 $jsonMatches = [regex]::Matches($reference, '(?ms)^```json\s*\r?\n(?<json>.*?)\r?\n```')
-Assert-True ($jsonMatches.Count -ge 9) 'reference must contain discovery, phase, token, event, and report examples'
+Assert-True ($jsonMatches.Count -ge 14) 'reference must contain discovery, phase, token, event, report, review, usage, and overhead examples'
 
 $examples = @()
 foreach ($match in $jsonMatches) {
@@ -133,7 +144,7 @@ foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', '
 $event = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-run-141/story-started'
 Assert-True ([string]$event.kind -ceq 'story_performance_event') 'event example must use the versioned event kind'
 Assert-True ([int]$event.schemaVersion -eq 1) 'event example must use schema version 1'
-foreach ($field in @('eventId', 'runId', 'projectId', 'storyId', 'storyRef', 'scope', 'phaseId', 'role', 'transitionId', 'eventType', 'occurredAtUtc', 'reviewMode', 'provenance')) {
+foreach ($field in @('eventId', 'runId', 'projectId', 'storyId', 'storyRef', 'scope', 'phaseId', 'role', 'transitionId', 'reviewKind', 'reviewAttemptOrdinal', 'eventType', 'occurredAtUtc', 'reviewMode', 'provenance')) {
     $property = $event.PSObject.Properties[$field]
     Assert-True ($null -ne $property) "event example must include $field"
 }
@@ -176,7 +187,63 @@ Assert-True (@($finalFindings.events).Count -eq 2) 'final findings example must 
 Assert-True ([string]$finalFindings.events[0].scope -ceq 'final_story' -and [string]$finalFindings.events[1].scope -ceq 'final_story') 'final findings must use final-story scope'
 Assert-True ([string]$finalFindings.events[0].phaseId -ceq [string]$finalFindings.events[1].phaseId) 'final review findings must share phase identity'
 Assert-True ([string]$finalFindings.events[0].reviewAttemptId -ceq [string]$finalFindings.events[1].reviewAttemptId) 'final review findings must share attempt identity'
+Assert-True ([string]$finalFindings.events[0].reviewKind -ceq 'final_story' -and [int]$finalFindings.events[0].reviewAttemptOrdinal -eq 1) 'final review example must identify its first final attempt'
 Assert-True ([string]$finalFindings.events[1].eventType -ceq 'review_findings') 'final review findings must close through review_findings'
+
+$perTaskReviews = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-review-counts-per-task'
+Assert-True ([string]$perTaskReviews.reviewMode -ceq 'per_task') 'per-task review fixture must preserve per_task mode'
+Assert-True (@($perTaskReviews.events | Where-Object { [string]$_.eventType -ceq 'review_started' }).Count -eq 3) 'per-task fixture must contain three authoritative review starts'
+Assert-True ([string]$perTaskReviews.events[0].reviewKind -ceq 'initial_task') 'initial review must use initial_task kind'
+Assert-True ([int]$perTaskReviews.events[0].reviewAttemptOrdinal -eq 1) 'initial review must start at ordinal one'
+Assert-True (@($perTaskReviews.events | Where-Object { [string]$_.eventType -ceq 'correction_ready' }).Count -eq 1) 'per-task fixture must include the correction-ready boundary'
+$correctionReviewStart = @($perTaskReviews.events | Where-Object { [string]$_.eventType -ceq 'review_started' -and [string]$_.reviewKind -ceq 'correction_rereview' })[0]
+Assert-True ([string]$correctionReviewStart.reviewKind -ceq 'correction_rereview') 'correction re-review must use correction_rereview kind'
+Assert-True ([string]$correctionReviewStart.revision -ceq 'cccccccccccccccccccccccccccccccccccccccc') 'correction re-review must use the corrected revision'
+Assert-True ([string]$perTaskReviews.events[0].revision -ceq [string]$perTaskReviews.events[1].revision) 'review start and acceptance must retain the same revision'
+Assert-True ([string]$perTaskReviews.observations[0].kind -ceq 'duplicate' -and [string]$perTaskReviews.observations[0].effect -ceq 'no_new_attempt') 'duplicate observation must not create an attempt'
+Assert-True ([string]$perTaskReviews.observations[1].kind -ceq 'stale' -and [string]$perTaskReviews.observations[1].effect -ceq 'no_new_attempt') 'stale observation must not create an attempt'
+Assert-True ([int]$perTaskReviews.expectedCounts.initialTaskReviews -eq 2) 'per-task fixture must count initial tasks once'
+Assert-True ([int]$perTaskReviews.expectedCounts.correctionReReviews -eq 1) 'per-task fixture must count correction re-reviews'
+Assert-True ([int]$perTaskReviews.expectedCounts.tasksWithInitialReview -eq 2) 'per-task fixture must set the first-pass denominator'
+Assert-True ([int]$perTaskReviews.expectedCounts.acceptedFirstAttemptTasks -eq 1) 'per-task fixture must set the first-pass numerator'
+Assert-True ([string]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.state -ceq 'measured') 'per-task first-pass rate must be measured'
+Assert-True ([double]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.value -eq 0.5) 'per-task first-pass rate must use numerator divided by denominator'
+
+$storyEndOnlyReviews = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-review-counts-story-end-only'
+Assert-True ([string]$storyEndOnlyReviews.reviewMode -ceq 'story_end_only') 'story-end-only fixture must preserve story_end_only mode'
+Assert-True (@($storyEndOnlyReviews.events | Where-Object { [string]$_.scope -ceq 'task' }).Count -eq 0) 'story-end-only fixture must have no task review events'
+Assert-True ([int]$storyEndOnlyReviews.constraints.taskReviewEvents -eq 0) 'story-end-only fixture must declare zero task reviews'
+Assert-True ([int]$storyEndOnlyReviews.constraints.correctionReReviews -eq 0) 'story-end-only fixture must declare zero correction re-reviews'
+Assert-True ([int]$storyEndOnlyReviews.constraints.addedAgents -eq 0 -and [int]$storyEndOnlyReviews.constraints.pollingEvents -eq 0 -and [int]$storyEndOnlyReviews.constraints.measurementOnlyMessages -eq 0) 'story-end-only fixture must prohibit added agents, polling, and measurement-only messages'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.initialTaskReviews -eq 0) 'story-end-only initial task reviews must be zero'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.finalStoryReviews -eq 1) 'story-end-only final review must remain countable'
+Assert-True ([string]$storyEndOnlyReviews.expectedCounts.firstPassAcceptanceRate.state -ceq 'not_applicable') 'story-end-only first-pass rate must be not applicable'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.firstPassAcceptanceRate.denominator -eq 0) 'story-end-only first-pass denominator must be zero'
+
+$sameHeadReReviews = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-final-rereviews-same-head'
+$sameHeadRevisions = @($sameHeadReReviews.events | ForEach-Object { [string]$_.revision } | Select-Object -Unique)
+Assert-True ($sameHeadRevisions.Count -eq 1) 'same-head fixture must keep one reviewed revision'
+Assert-True (@($sameHeadReReviews.events | Where-Object { [string]$_.reviewKind -ceq 'final_story_rereview' }).Count -eq 2) 'same-head fixture must contain two final re-review attempts'
+Assert-True (@($sameHeadReReviews.events | Where-Object { [int]$_.reviewAttemptOrdinal -eq 2 }).Count -eq 1) 'same-head fixture must distinguish a real retry by ordinal'
+Assert-True ([int]$sameHeadReReviews.expectedCounts.finalStoryReviews -eq 1 -and [int]$sameHeadReReviews.expectedCounts.finalStoryReReviews -eq 2) 'same-head fixture must separate first and later final attempts'
+Assert-True ([bool]$sameHeadReReviews.expectedCounts.sameHeadDistinctAttempts) 'same-head fixture must preserve distinct attempts'
+
+$reviewUsageFallback = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-review-usage-unavailable-fallback'
+Assert-True ([string]$reviewUsageFallback.sourceBackedUsage.state -ceq 'unavailable') 'review usage fallback must be explicitly unavailable'
+Assert-True ($null -eq $reviewUsageFallback.sourceBackedUsage.streamId -and $null -eq $reviewUsageFallback.sourceBackedUsage.counters) 'review usage fallback must not invent a stream or counters'
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$reviewUsageFallback.sourceBackedUsage.reason)) 'review usage fallback must explain its source limitation'
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$reviewUsageFallback.sourceBackedUsage.fallback)) 'review usage fallback must name a safe fallback'
+Assert-True (@($reviewUsageFallback.forbiddenEstimates).Count -ge 4) 'review usage fallback must name forbidden estimates'
+
+$overhead = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-overhead-baseline-candidate'
+Assert-True ([string]$overhead.baseline.outcomeFingerprint -ceq [string]$overhead.candidate.outcomeFingerprint) 'overhead fixture must compare equivalent outcomes'
+Assert-True ([string]$overhead.workloadId -ceq 'fixed-review-contract-workload-1') 'overhead fixture must identify one fixed workload'
+Assert-True ([int]$overhead.baseline.addedAgents -eq 0 -and [int]$overhead.candidate.addedAgents -eq 0) 'overhead fixture must add no agents'
+Assert-True ([int]$overhead.baseline.pollingEvents -eq 0 -and [int]$overhead.candidate.pollingEvents -eq 0) 'overhead fixture must add no polling'
+Assert-True ([int]$overhead.baseline.measurementOnlyMessages -eq 0 -and [int]$overhead.candidate.measurementOnlyMessages -eq 0) 'overhead fixture must add no measurement-only messages'
+Assert-True ([int]$overhead.candidate.eventCount -eq 14 -and [int]$overhead.budget.maxAddedEvents -eq 14) 'overhead fixture must bound lifecycle event additions'
+Assert-True ([string]$overhead.overhead.state -ceq 'measured' -and [string]$overhead.overhead.usageOverhead -ceq 'unavailable') 'overhead fixture must separate elapsed evidence from unavailable usage'
+Assert-True ([bool]$overhead.acceptance.sameOutcome -and [bool]$overhead.acceptance.sameWorkload -and [bool]$overhead.acceptance.withinBudget -and [bool]$overhead.acceptance.noExtraAgentsPollingOrMeasurementMessages) 'overhead fixture acceptance must require equivalent bounded execution'
 
 $tokenSubtotalExample = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-token-subtotal'
 Assert-True ([string]$tokenSubtotalExample.counterSemantics.cachedInput -ceq 'included_in_input') 'token example must declare cached-input inclusion'
@@ -215,7 +282,12 @@ foreach ($fixtureId in @(
         'usage-subtotals'
         'report-identity'
         'metric-semantics'
-        'privacy-unavailable')) {
+        'privacy-unavailable'
+        'synthetic-review-counts-per-task'
+        'synthetic-review-counts-story-end-only'
+        'synthetic-final-rereviews-same-head'
+        'synthetic-review-usage-unavailable-fallback'
+        'synthetic-overhead-baseline-candidate')) {
     Assert-Contains $normalized $fixtureId "requirement-to-fixture matrix is missing $fixtureId"
 }
 foreach ($contractMarker in @(
@@ -463,5 +535,5 @@ Assert-NoPrivateFields -Payload $safePayload
 $privatePayload = [ordered]@{ provenance = [ordered]@{ source = 'workflow_transition' }; prompt = 'not allowed' }
 Assert-Throws { Assert-NoPrivateFields -Payload $privatePayload } 'privacy fixture must reject prompt/transcript/secret fields'
 
-Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, stable phase identities, final findings closure, recursive replay/no-op/conflict identity, interval coverage/overlap, external recovery pointer, report identity, exact token subtotal semantics, cumulative baseline/reset handling, privacy rejection, and unavailable fallback; synthetic and non-live.'
+Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, stable phase identities, final findings closure, recursive replay/no-op/conflict identity, interval coverage/overlap, external recovery pointer, report identity, exact token subtotal semantics, cumulative baseline/reset handling, privacy rejection, review-attempt counting in both modes, same-head re-reviews, unavailable review usage, and bounded baseline/candidate overhead; synthetic and non-live.'
 exit 0

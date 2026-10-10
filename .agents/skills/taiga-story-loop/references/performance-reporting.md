@@ -222,6 +222,8 @@ are:
 | `phaseId` | nonblank for implementation, review, and correction phase boundaries; otherwise `null` | The same phase ID is carried by the start and end observations even when the starting revision is `null`. `story_started`, `pr_ready`, `wait_started`, and `wait_ended` use story/wait identity instead and leave this field `null`. |
 | `correctionId` | nonblank for correction boundaries; otherwise `null` | Binds a correction start/ready pair and is distinct from the resulting revision and review attempt. |
 | `reviewRequestId` / `reviewAttemptId` | nullable outside review events | A request identifies the handoff; an attempt identifies one actual review. They are separate from `revision` and from `eventId`. |
+| `reviewKind` | `initial_task`, `correction_rereview`, `final_story`, or `final_story_rereview` on review events; otherwise `null` | Classification derived from the ordered lifecycle, not from the SHA. It makes first reviews, correction re-reviews, final reviews, and later final attempts countable. |
+| `reviewAttemptOrdinal` | positive integer on review events; otherwise `null` | One-based attempt number within a `reviewRequestId`. A retry of the same request increments it; a duplicate observation does not. |
 | `supersedesReviewAttemptId` | nullable outside correction events | Links a correction or final-story correction to the finding that caused it without rewriting the prior attempt. |
 | `eventType` | one event vocabulary value below | No free-form event type is accepted by the contract. |
 | `occurredAtUtc` | UTC ISO 8601 timestamp ending in `Z` | Generated at the actual transition. It is not an LLM estimate or a local-time conversion. |
@@ -251,12 +253,12 @@ phase ends; a generic `phase_ended` event is unnecessary and prohibited.
 | `story_started` | `scope=story`, story identity; coordinator role | `pr_ready` with `scope=story` | `phaseId` is `null`; missing start makes time-to-PR unknown. |
 | `implementation_started` | `scope=task`, `taskRef`, `phaseId`; implementer role | `task_ready_for_review` with the same `phaseId` | `revision` may be `null` before a commit exists; missing end leaves the interval uncovered. |
 | `task_ready_for_review` | `scope=task`, `taskRef`, same `phaseId`, full `revision`; implementer role | next `review_started` for the same request | It is an implementation boundary, not proof that delivery or review occurred. |
-| `review_started` | scope, `phaseId`, `reviewRequestId`, `reviewAttemptId`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same phase/attempt identity | Missing end leaves review duration unknown. |
+| `review_started` | scope, `phaseId`, `reviewRequestId`, `reviewAttemptId`, `reviewKind`, `reviewAttemptOrdinal`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same phase/attempt identity | Missing end leaves review duration unknown. |
 | `review_findings` | same phase/request/attempt and revision | `correction_started` for a task or final-story correction | Findings close the current review phase; they do not count as acceptance. This also closes a final review when `scope=final_story`. |
 | `review_accepted` | same review request/attempt and revision | acceptance of that task revision | Acceptance is evidence, not a provider write receipt or merge. |
 | `correction_started` | `scope`, `phaseId`, `correctionId`; `taskRef` for task scope; implementer role | `correction_ready` with the same phase/correction ID | Missing end leaves the correction interval uncovered. For final-story correction, `taskRef` is `null` and `supersedesReviewAttemptId` names the final finding. |
 | `correction_ready` | same scope/phase/correction ID; new full `revision`; implementer role | a new `review_started` request, or `final_review_started` when `scope=final_story` | The new revision supersedes the prior review input; it does not mutate history. |
-| `final_review_started` | `scope=final_story`, final `phaseId`, `reviewRequestId`, `reviewAttemptId`, exact HEAD; reviewer role | `final_review_accepted` or `review_findings` with the same phase/attempt identity | Both acceptance and findings close the final review duration. |
+| `final_review_started` | `scope=final_story`, final `phaseId`, `reviewRequestId`, `reviewAttemptId`, `reviewKind`, `reviewAttemptOrdinal`, exact HEAD; reviewer role | `final_review_accepted` or `review_findings` with the same phase/attempt identity | Both acceptance and findings close the final review duration. |
 | `final_review_accepted` | same final request/attempt and exact HEAD | final-story approval | Does not authorize PR creation or merge by itself. |
 | `pr_ready` | `scope=story`, PR identity and exact reviewed HEAD; coordinator role | report identity | `phaseId` is `null`; missing PR readiness prevents a confirmed PR report. Unknown provider delivery is not readiness. |
 | `wait_started` | stable `waitId`, wait kind, affected scope | `wait_ended` with the same `waitId` | `phaseId` is `null`; an open wait is reported as uncovered/unknown, never inferred from elapsed wall time. |
@@ -384,7 +386,7 @@ coverage is not a complete total.
 | `implementationTokens`, `reviewTokens`, `coordinationTokens` | tokens | Sum valid cumulative deltas by role and stream | source-backed usage samples | Null when unavailable; partial when only some streams/intervals are covered. |
 | `totalTokens` | tokens | Sum attributable role totals only when their states/semantics permit | role usage metrics | Partial remains partial; never treat unavailable roles as zero. |
 | `tasksCompleted` | tasks | Count accepted task identities in the declared ordered task set | accepted lifecycle events and story task metadata | Unknown when the ordered set or acceptance evidence is incomplete. |
-| `initialTaskReviews`, `correctionReReviews`, `finalStoryReviews`, `finalStoryReReviews` | review attempts | Count distinct request/attempt identities by event scope | actual review handoff/acceptance events | Zero per-task reviews in `story_end_only` is valid; incomplete identity coverage is partial. Detailed cases are locked by #148. |
+| `initialTaskReviews`, `correctionReReviews`, `finalStoryReviews`, `finalStoryReReviews` | review requests/attempts | Count authoritative review identities using the #148 rules; initial task reviews count tasks with an initial attempt, correction re-reviews count actual correction attempts, and final metrics separate first from later final attempts | actual review handoff/acceptance events | Zero per-task reviews in `story_end_only` is valid; incomplete identity coverage is partial. Duplicate and stale observations never increment a count. |
 | `firstPassAcceptanceRate` | ratio and coverage counts | accepted-on-first-attempt tasks / tasks with an initial review | review request/acceptance identities | Zero denominator is `not_applicable`; report numerator, denominator, and coverage. |
 | `reviewMode` | enum | Assigned mode copied unchanged | setup authorization | Unavailable if setup mode is absent; never infer from observed event order. |
 | `modelsAndReasoning` | metadata records | Exact role/profile records, including changes | setup/host provenance | Unverified profile remains explicitly unverified; it is not a token estimate. |
@@ -457,18 +459,22 @@ number, and token values are fixtures, not observations from this run.
     {
       "eventType": "final_review_started",
       "scope": "final_story",
+      "reviewKind": "final_story",
       "phaseId": "story-141-final-review-1",
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
+      "reviewAttemptOrdinal": 1,
       "revision": "3333333333333333333333333333333333333333",
       "occurredAtUtc": "2026-10-09T10:40:00Z"
     },
     {
       "eventType": "review_findings",
       "scope": "final_story",
+      "reviewKind": "final_story",
       "phaseId": "story-141-final-review-1",
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
+      "reviewAttemptOrdinal": 1,
       "revision": "3333333333333333333333333333333333333333",
       "occurredAtUtc": "2026-10-09T10:50:00Z"
     }
@@ -519,6 +525,8 @@ number, and token values are fixtures, not observations from this run.
   "transitionId": "story-started",
   "reviewRequestId": null,
   "reviewAttemptId": null,
+  "reviewKind": null,
+  "reviewAttemptOrdinal": null,
   "eventType": "story_started",
   "occurredAtUtc": "2026-10-09T10:00:00Z",
   "revision": null,
@@ -611,3 +619,430 @@ The matrix is synthetic executable evidence, not a claim that a recorder or
 host telemetry source is already available. Task #148 owns the detailed
 review-attempt and bounded-overhead acceptance cases that build on these
 identities and metrics.
+
+## Review-attempt counting and bounded-overhead acceptance cases (task #148)
+
+This section fixes the review-counting rules for both authorized review modes.
+It is a contract and synthetic fixture set; it does not add agents, polling,
+measurement-only messages, a recorder, or workflow authority.
+
+### Review request and attempt identity
+
+reviewRequestId identifies one authorized handoff for a target scope and
+revision. reviewAttemptId identifies one actual reviewer attempt under that
+request. Neither identity is the revision: two real reviews of the same full
+SHA receive distinct request/attempt identities, and a changed SHA does not
+reuse an old attempt identity. reviewAttemptOrdinal starts at 1 for the
+first actual attempt within a request and increases for a real retry of that
+request.
+
+reviewKind is assigned from the ordered lifecycle:
+
+| Kind | Meaning | Count |
+| --- | --- | --- |
+| initial_task | First authoritative review request for a task before any correction | One initialTaskReviews task when at least one real attempt exists |
+| correction_rereview | A task review after correction_ready, linked to the finding that caused the correction | One correctionReReviews per authoritative review attempt |
+| final_story | First authoritative final-story review attempt | One finalStoryReviews |
+| final_story_rereview | Any later final-story attempt, whether a retry of the same request or a new request after findings/correction | One finalStoryReReviews per authoritative attempt, even on the same SHA |
+
+An exact replay of an already recorded event ID and canonical payload is a
+duplicate no-op. Re-observing the same reviewAttemptId and event boundary
+with the same payload is also a duplicate no-op. A reused event or attempt ID
+with a changed revision, kind, ordinal, timestamp, or other payload is a
+conflict; the first complete record remains authoritative. An observation
+that arrives after its attempt has already closed, does not introduce a new
+attempt, and is marked stale for diagnostics. Duplicates and stale
+observations never increment review counts.
+
+Review counts are calculated as follows:
+
+1. initialTaskReviews is the number of declared task identities with an
+   authoritative initial_task attempt. A task contributes once even if a
+   duplicate handoff is observed.
+2. correctionReReviews counts authoritative correction_rereview attempts.
+   A retry under the same request and a second real review on the same SHA are
+   separate attempts and both count.
+3. finalStoryReviews counts the first authoritative final_story attempt.
+   finalStoryReReviews counts every later authoritative
+   final_story_rereview attempt, including a same-SHA retry.
+4. tasksWithInitialReview is the denominator for firstPassAcceptanceRate.
+   acceptedFirstAttemptTasks counts tasks whose first initial attempt closes
+   with review_accepted before any findings or correction. The rate is
+   acceptedFirstAttemptTasks / tasksWithInitialReview, with numerator,
+   denominator, and coverage retained. A zero denominator is
+   not_applicable, never zero.
+5. An open attempt can count as an observed review for the count metrics, but
+   its duration and first-pass outcome remain partial or unavailable until an
+   authoritative closing event exists. Missing identity or ambiguous ordering
+   makes the affected metric partial rather than inventing a count.
+
+per_task permits task review events and correction re-reviews before the
+mandatory final-story review. story_end_only deliberately has zero per-task
+reviews and zero correction re-reviews; that is a valid mode, not a missing
+implementation. Its final-story review attempts remain countable. Review-mode
+selection is copied from setup authorization and is never inferred from
+whichever event types happen to be present.
+
+### Usage capture and unavailable fallback for review evidence
+
+When a source exposes attributable counters, a review usage sample retains the
+role, session, stream, source, counter semantics, exact start-boundary
+baseline, end sample, and coverage. The same cumulative-delta and reset rules
+from the version-1 contract apply. Review tokens are measured only when the
+request/attempt boundaries and counter semantics are attributable.
+
+When review usage is unavailable, the fixture/report records
+state=unavailable, counters=null, a source/coverage reason, and the safe
+fallback. It never turns an absent counter into zero, uses account limits,
+message length, file size, agent count, polling count, or review count as a
+token estimate, and never changes review or advancement authority.
+
+### Bounded-overhead acceptance
+
+Overhead evidence compares a baseline and candidate run over the same
+sanitized workload, inputs, environment, and fixed transition schedule. The
+evidence records outcome equivalence, candidate lifecycle-event count,
+elapsed-time delta, attributable usage state, and explicit budgets. A
+candidate is accepted only when:
+
+- baseline and candidate outcomes match;
+- addedAgents, pollingEvents, and measurementOnlyMessages are all zero;
+- candidate event count is limited to the declared lifecycle events and
+  explicit wait boundaries;
+- every measured overhead value is within its supplied budget; and
+- unknown usage stays unavailable or partial instead of being treated as zero.
+
+If no comparable baseline, candidate, source-backed usage boundary, or
+declared budget exists, overhead state is partial or unavailable, not a pass.
+Fixed clocks and controlled barriers are valid fixture controls; timing
+sleeps, live provider writes, extra worker creation, polling, and
+measurement-only messages are prohibited. Story #145 owns integrated
+cross-story overhead evidence and any production threshold; this task locks
+the acceptance shape without claiming a live performance number.
+
+### Synthetic review-count fixtures
+
+The following fixtures are sanitized contract examples. Their IDs, timestamps,
+SHA values, counters, and expected values are synthetic.
+
+```json
+{
+  "exampleId": "synthetic-review-counts-per-task",
+  "evidenceClass": "synthetic_fixture",
+  "reviewMode": "per_task",
+  "events": [
+    {
+      "eventId": "task-146-review-start",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 146,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-146-request-1",
+      "reviewAttemptId": "task-146-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "occurredAtUtc": "2026-10-09T11:00:00Z"
+    },
+    {
+      "eventId": "task-146-review-accepted",
+      "eventType": "review_accepted",
+      "scope": "task",
+      "taskRef": 146,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-146-request-1",
+      "reviewAttemptId": "task-146-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "occurredAtUtc": "2026-10-09T11:05:00Z"
+    },
+    {
+      "eventId": "task-147-review-start",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 147,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-147-request-1",
+      "reviewAttemptId": "task-147-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "occurredAtUtc": "2026-10-09T11:10:00Z"
+    },
+    {
+      "eventId": "task-147-review-findings",
+      "eventType": "review_findings",
+      "scope": "task",
+      "taskRef": 147,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-147-request-1",
+      "reviewAttemptId": "task-147-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "occurredAtUtc": "2026-10-09T11:15:00Z"
+    },
+    {
+      "eventId": "task-147-correction-ready",
+      "eventType": "correction_ready",
+      "scope": "task",
+      "taskRef": 147,
+      "phaseId": "task-147-correction-1",
+      "correctionId": "task-147-correction-1",
+      "revision": "cccccccccccccccccccccccccccccccccccccccc",
+      "occurredAtUtc": "2026-10-09T11:22:00Z"
+    },
+    {
+      "eventId": "task-147-rereview-start",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 147,
+      "reviewKind": "correction_rereview",
+      "reviewRequestId": "task-147-correction-request-1",
+      "reviewAttemptId": "task-147-correction-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "cccccccccccccccccccccccccccccccccccccccc",
+      "occurredAtUtc": "2026-10-09T11:25:00Z"
+    },
+    {
+      "eventId": "task-147-rereview-accepted",
+      "eventType": "review_accepted",
+      "scope": "task",
+      "reviewKind": "correction_rereview",
+      "reviewRequestId": "task-147-correction-request-1",
+      "reviewAttemptId": "task-147-correction-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "cccccccccccccccccccccccccccccccccccccccc",
+      "occurredAtUtc": "2026-10-09T11:30:00Z"
+    }
+  ],
+  "observations": [
+    {
+      "eventId": "task-146-review-start",
+      "kind": "duplicate",
+      "effect": "no_new_attempt"
+    },
+    {
+      "reviewAttemptId": "task-147-attempt-1",
+      "kind": "stale",
+      "effect": "no_new_attempt",
+      "reason": "initial attempt is already closed by review_findings"
+    }
+  ],
+  "expectedCounts": {
+    "initialTaskReviews": 2,
+    "correctionReReviews": 1,
+    "finalStoryReviews": 0,
+    "finalStoryReReviews": 0,
+    "tasksWithInitialReview": 2,
+    "acceptedFirstAttemptTasks": 1,
+    "firstPassAcceptanceRate": {
+      "state": "measured",
+      "value": 0.5,
+      "numerator": 1,
+      "denominator": 2,
+      "coverage": "two of two initial task review outcomes are authoritative"
+    }
+  }
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-review-counts-story-end-only",
+  "evidenceClass": "synthetic_fixture",
+  "reviewMode": "story_end_only",
+  "events": [
+    {
+      "eventId": "story-141-final-start",
+      "eventType": "final_review_started",
+      "scope": "final_story",
+      "reviewKind": "final_story",
+      "reviewRequestId": "story-141-final-request-1",
+      "reviewAttemptId": "story-141-final-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "dddddddddddddddddddddddddddddddddddddddd",
+      "occurredAtUtc": "2026-10-09T12:00:00Z"
+    },
+    {
+      "eventId": "story-141-final-accepted",
+      "eventType": "final_review_accepted",
+      "scope": "final_story",
+      "reviewKind": "final_story",
+      "reviewRequestId": "story-141-final-request-1",
+      "reviewAttemptId": "story-141-final-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "dddddddddddddddddddddddddddddddddddddddd",
+      "occurredAtUtc": "2026-10-09T12:10:00Z"
+    }
+  ],
+  "constraints": {
+    "taskReviewEvents": 0,
+    "correctionReReviews": 0,
+    "addedAgents": 0,
+    "pollingEvents": 0,
+    "measurementOnlyMessages": 0
+  },
+  "expectedCounts": {
+    "initialTaskReviews": 0,
+    "correctionReReviews": 0,
+    "finalStoryReviews": 1,
+    "finalStoryReReviews": 0,
+    "tasksWithInitialReview": 0,
+    "acceptedFirstAttemptTasks": 0,
+    "firstPassAcceptanceRate": {
+      "state": "not_applicable",
+      "value": null,
+      "numerator": 0,
+      "denominator": 0,
+      "coverage": "story_end_only intentionally has no per-task review denominator"
+    }
+  }
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-final-rereviews-same-head",
+  "evidenceClass": "synthetic_fixture",
+  "reviewMode": "per_task",
+  "events": [
+    {
+      "eventId": "final-review-1-start",
+      "eventType": "final_review_started",
+      "scope": "final_story",
+      "reviewKind": "final_story",
+      "reviewRequestId": "story-141-final-request-1",
+      "reviewAttemptId": "story-141-final-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "occurredAtUtc": "2026-10-09T13:00:00Z"
+    },
+    {
+      "eventId": "final-review-1-findings",
+      "eventType": "review_findings",
+      "scope": "final_story",
+      "reviewKind": "final_story",
+      "reviewRequestId": "story-141-final-request-1",
+      "reviewAttemptId": "story-141-final-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "occurredAtUtc": "2026-10-09T13:05:00Z"
+    },
+    {
+      "eventId": "final-review-2-start",
+      "eventType": "final_review_started",
+      "scope": "final_story",
+      "reviewKind": "final_story_rereview",
+      "reviewRequestId": "story-141-final-request-2",
+      "reviewAttemptId": "story-141-final-attempt-2",
+      "reviewAttemptOrdinal": 1,
+      "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "occurredAtUtc": "2026-10-09T13:10:00Z"
+    },
+    {
+      "eventId": "final-review-2-retry",
+      "eventType": "final_review_started",
+      "scope": "final_story",
+      "reviewKind": "final_story_rereview",
+      "reviewRequestId": "story-141-final-request-2",
+      "reviewAttemptId": "story-141-final-attempt-2-retry",
+      "reviewAttemptOrdinal": 2,
+      "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "occurredAtUtc": "2026-10-09T13:15:00Z"
+    }
+  ],
+  "expectedCounts": {
+    "finalStoryReviews": 1,
+    "finalStoryReReviews": 2,
+    "sameHeadDistinctAttempts": true
+  }
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-review-usage-unavailable-fallback",
+  "evidenceClass": "synthetic_fixture",
+  "reviewRequestId": "task-147-correction-request-1",
+  "reviewAttemptId": "task-147-correction-attempt-1",
+  "sourceBackedUsage": {
+    "state": "unavailable",
+    "streamId": null,
+    "counters": null,
+    "source": "no attributable reviewer counter exposed by the current host schema",
+    "coverage": "none",
+    "reason": "reviewer/session counters are not exposed for this identity",
+    "fallback": "retain unknown review tokens and continue with authoritative UTC review boundaries"
+  },
+  "forbiddenEstimates": [
+    "account usage limits",
+    "message length",
+    "file size",
+    "review count"
+  ]
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-overhead-baseline-candidate",
+  "evidenceClass": "synthetic_fixture",
+  "workloadId": "fixed-review-contract-workload-1",
+  "reviewMode": "per_task",
+  "baseline": {
+    "instrumentation": "disabled",
+    "outcomeFingerprint": "same-synthetic-outcome",
+    "elapsedMilliseconds": 10000,
+    "eventCount": 0,
+    "addedAgents": 0,
+    "pollingEvents": 0,
+    "measurementOnlyMessages": 0,
+    "usageState": "unavailable"
+  },
+  "candidate": {
+    "instrumentation": "contract-events-only",
+    "outcomeFingerprint": "same-synthetic-outcome",
+    "elapsedMilliseconds": 10100,
+    "eventCount": 14,
+    "addedAgents": 0,
+    "pollingEvents": 0,
+    "measurementOnlyMessages": 0,
+    "usageState": "unavailable"
+  },
+  "budget": {
+    "maxElapsedMilliseconds": 500,
+    "maxElapsedPercent": 10,
+    "maxAddedEvents": 14,
+    "maxAddedAgents": 0,
+    "maxPollingEvents": 0,
+    "maxMeasurementOnlyMessages": 0
+  },
+  "overhead": {
+    "state": "measured",
+    "elapsedMilliseconds": 100,
+    "elapsedPercent": 1,
+    "source": "synthetic monotonic fixture clock",
+    "usageOverhead": "unavailable"
+  },
+  "acceptance": {
+    "state": "pass",
+    "sameOutcome": true,
+    "sameWorkload": true,
+    "withinBudget": true,
+    "noExtraAgentsPollingOrMeasurementMessages": true
+  }
+}
+```
+
+### Task #148 requirement-to-fixture matrix
+
+| Requirement | Fixture ID | Deterministic assertion |
+| --- | --- | --- |
+| Per-task review identity/counting | synthetic-review-counts-per-task | Initial tasks, correction re-review attempts, duplicate observations, stale observations, and first-pass numerator/denominator produce the declared counts. |
+| Story-end-only review mode | synthetic-review-counts-story-end-only | Per-task and correction review counts are zero and first-pass rate is not_applicable; final-story review remains countable. |
+| Same-SHA final re-reviews | synthetic-final-rereviews-same-head | Distinct request/attempt identities count separately even when the reviewed SHA is unchanged; attempt ordinal distinguishes a real retry. |
+| Review usage fallback | synthetic-review-usage-unavailable-fallback | Absent reviewer counters remain unavailable with null counters and an explicit safe fallback; forbidden estimates are named. |
+| Bounded-overhead evidence | synthetic-overhead-baseline-candidate | Same workload/outcome, zero added agents/polling/measurement-only messages, explicit budgets, and unavailable usage do not become a false numeric token result. |
+
+These fixtures are synthetic controls only. They do not claim live review
+counts, worker usage, or production overhead. The recorder and aggregator may
+persist and calculate these fields later without changing the identity or
+acceptance rules.
