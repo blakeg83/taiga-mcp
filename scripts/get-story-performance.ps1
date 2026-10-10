@@ -506,26 +506,40 @@ function Get-SetupMetadata {
         }
         [void] $records.Add([pscustomobject] $record)
     }
-    $profileConflicts = @(
-        $records | Group-Object { "$($_.role)|$($_.workerId)|$($_.sessionId)" } | ForEach-Object {
-            $group = @($_.Group | Sort-Object effectiveFromUtc)
-            for ($leftIndex = 0; $leftIndex -lt $group.Count; $leftIndex++) {
-                for ($rightIndex = $leftIndex + 1; $rightIndex -lt $group.Count; $rightIndex++) {
-                    $left = $group[$leftIndex]
-                    $right = $group[$rightIndex]
-                    $leftStart = [DateTimeOffset]::Parse($left.effectiveFromUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-                    $rightStart = [DateTimeOffset]::Parse($right.effectiveFromUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-                    $leftEnd = if ([string]::IsNullOrWhiteSpace([string] $left.effectiveToUtc)) { [DateTimeOffset]::MaxValue } else { [DateTimeOffset]::Parse($left.effectiveToUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
-                    $rightEnd = if ([string]::IsNullOrWhiteSpace([string] $right.effectiveToUtc)) { [DateTimeOffset]::MaxValue } else { [DateTimeOffset]::Parse($right.effectiveToUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
-                    $overlaps = $leftStart -lt $rightEnd -and $rightStart -lt $leftEnd
-                    $profileDiffers = [string] $left.model -cne [string] $right.model -or [string] $left.effort -cne [string] $right.effort
-                    if ($overlaps -and $profileDiffers) {
-                        [pscustomobject][ordered]@{ identity = "$($left.role)/$($left.workerId)/$($left.sessionId)"; leftChange = $left.changeId; rightChange = $right.changeId }
-                    }
+    $profileConflicts = [System.Collections.Generic.List[object]]::new()
+    foreach ($group in @($records | Group-Object { "$($_.role)|$($_.workerId)|$($_.sessionId)" })) {
+        $ordered = @($group.Group | ForEach-Object {
+                [pscustomobject]@{
+                    profile = $_
+                    start = [DateTimeOffset]::Parse([string] $_.effectiveFromUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+                    end = if ([string]::IsNullOrWhiteSpace([string] $_.effectiveToUtc)) { [DateTimeOffset]::MaxValue } else { [DateTimeOffset]::Parse([string] $_.effectiveToUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
                 }
+            } | Sort-Object start, end)
+        $cluster = [System.Collections.Generic.List[object]]::new()
+        $clusterEnd = [DateTimeOffset]::MinValue
+        $flush = {
+            if ($cluster.Count -le 1) { return }
+            $profiles = @($cluster | ForEach-Object { $_.profile })
+            $signatures = @($profiles | ForEach-Object { "$($_.model)|$($_.effort)" } | Sort-Object -Unique)
+            if ($signatures.Count -gt 1) {
+                [void] $profileConflicts.Add([pscustomobject][ordered]@{
+                        identity = "$($profiles[0].role)/$($profiles[0].workerId)/$($profiles[0].sessionId)"
+                        leftChange = $profiles[0].changeId
+                        rightChange = $profiles[-1].changeId
+                    })
             }
         }
-    )
+        foreach ($item in $ordered) {
+            if ($cluster.Count -gt 0 -and $item.start -ge $clusterEnd) {
+                & $flush
+                $cluster = [System.Collections.Generic.List[object]]::new()
+                $clusterEnd = [DateTimeOffset]::MinValue
+            }
+            [void] $cluster.Add($item)
+            if ($item.end -gt $clusterEnd) { $clusterEnd = $item.end }
+        }
+        & $flush
+    }
     if ($profileConflicts.Count -gt 0) {
         throw [System.InvalidOperationException]::new('setup_metadata_conflict: overlapping profile intervals disagree for the same role, worker, and session')
     }
@@ -1113,18 +1127,32 @@ function Add-OverlapAnomalies {
         [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
     )
 
-    $valid = @($Intervals | Where-Object { $_.state -eq 'measured' -and $null -ne $_.startUtc -and $null -ne $_.endUtc })
-    for ($i = 0; $i -lt $valid.Count; $i++) {
-        for ($j = $i + 1; $j -lt $valid.Count; $j++) {
-            $leftStart = [DateTimeOffset]::Parse($valid[$i].startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            $leftEnd = [DateTimeOffset]::Parse($valid[$i].endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            $rightStart = [DateTimeOffset]::Parse($valid[$j].startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            $rightEnd = [DateTimeOffset]::Parse($valid[$j].endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            if (($leftStart -lt $leftEnd) -and ($rightStart -lt $rightEnd) -and
-                ($leftStart -lt $rightEnd) -and ($rightStart -lt $leftEnd)) {
-                [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_intervals' -Message 'Valid phase intervals overlap; totals remain separate and are not made additive wall-clock time' -Identity "$($valid[$i].identity)|$($valid[$j].identity)"))
+    $ordered = @($Intervals | Where-Object { $_.state -eq 'measured' -and $null -ne $_.startUtc -and $null -ne $_.endUtc } | ForEach-Object {
+            [pscustomobject]@{
+                interval = $_
+                start = [DateTimeOffset]::Parse([string] $_.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+                end = [DateTimeOffset]::Parse([string] $_.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
             }
+        } | Where-Object { $_.start -lt $_.end } | Sort-Object start, end, { [string] $_.interval.identity })
+    $cluster = [System.Collections.Generic.List[object]]::new()
+    $clusterEnd = [DateTimeOffset]::MinValue
+    foreach ($item in $ordered) {
+        if ($cluster.Count -gt 0 -and $item.start -ge $clusterEnd) {
+            if ($cluster.Count -gt 1) {
+                $identity = @($cluster | ForEach-Object { [string] $_.interval.identity }) -join '|'
+                [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_intervals' -Message 'Valid phase intervals overlap; totals remain separate and are not made additive wall-clock time' -Identity $identity))
+            }
+            $cluster = [System.Collections.Generic.List[object]]::new()
+            $clusterEnd = [DateTimeOffset]::MinValue
         }
+        [void] $cluster.Add($item)
+        if ($item.end -gt $clusterEnd) {
+            $clusterEnd = $item.end
+        }
+    }
+    if ($cluster.Count -gt 1) {
+        $identity = @($cluster | ForEach-Object { [string] $_.interval.identity }) -join '|'
+        [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_intervals' -Message 'Valid phase intervals overlap; totals remain separate and are not made additive wall-clock time' -Identity $identity))
     }
 }
 
@@ -2008,13 +2036,103 @@ function Get-UsageCounter {
     }
 }
 
+function Get-UsageSampleKey {
+    param(
+        [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [string] $StreamId,
+        [Parameter(Mandatory)] [string] $Source
+    )
+
+    return "$Role|$StreamId|$Source"
+}
+
+function New-UsageSampleIndex {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records)
+
+    $index = @{}
+    foreach ($record in $Records) {
+        $usage = Get-PropertyValue $record.Event 'usage'
+        $counters = if ($null -ne $usage) { Get-PropertyValue $usage 'counters' } else { $null }
+        if ($null -eq $usage -or $null -eq $counters -or @($counters.PSObject.Properties).Count -eq 0) { continue }
+        $role = [string] (Get-PropertyValue $usage 'role')
+        $streamId = [string] (Get-PropertyValue $usage 'streamId')
+        $source = [string] (Get-PropertyValue $usage 'source')
+        $sampleTime = [DateTimeOffset]::MinValue
+        if ([string]::IsNullOrWhiteSpace($role) -or [string]::IsNullOrWhiteSpace($streamId) -or
+            [string]::IsNullOrWhiteSpace($source) -or
+            -not (Try-GetUtcTime -Value (Get-PropertyValue $usage 'sampledAtUtc') -Parsed ([ref] $sampleTime))) {
+            continue
+        }
+        $sessionId = [string] (Get-PropertyValue $usage 'sessionId')
+        if ([string]::IsNullOrWhiteSpace($sessionId)) { $sessionId = [string] (Get-PropertyValue $record.Event 'sessionId') }
+        $key = Get-UsageSampleKey -Role $role -StreamId $streamId -Source $source
+        if (-not $index.ContainsKey($key)) {
+            $index[$key] = [System.Collections.Generic.List[object]]::new()
+        }
+        [void] $index[$key].Add([pscustomobject][ordered]@{
+                record = $record
+                usage = $usage
+                sampleTime = $sampleTime
+                sessionId = $sessionId
+                workerId = [string] (Get-PropertyValue $record.Event 'workerId')
+                semantics = Get-PropertyValue $usage 'counterSemantics'
+                counters = $counters
+            })
+    }
+    foreach ($key in @($index.Keys)) {
+        $index[$key] = @($index[$key] | Sort-Object sampleTime, { [long] $_.record.Line })
+    }
+    return $index
+}
+
+function Find-FirstUsageSampleIndex {
+    param(
+        [Parameter(Mandatory)] [object[]] $Samples,
+        [Parameter(Mandatory)] [DateTimeOffset] $Target
+    )
+
+    $low = 0
+    $high = $Samples.Count
+    while ($low -lt $high) {
+        $middle = [int] (($low + $high) / 2)
+        if ($Samples[$middle].sampleTime -lt $Target) {
+            $low = $middle + 1
+        }
+        else {
+            $high = $middle
+        }
+    }
+    return $low
+}
+
+function Get-UsageSampleRange {
+    param(
+        [Parameter(Mandatory)] [hashtable] $UsageIndex,
+        [Parameter(Mandatory)] [string] $Key,
+        [Parameter(Mandatory)] [DateTimeOffset] $StartTime,
+        [Parameter(Mandatory)] [DateTimeOffset] $EndTime
+    )
+
+    if (-not $UsageIndex.ContainsKey($Key)) {
+        return @()
+    }
+    $samples = @($UsageIndex[$Key])
+    $first = Find-FirstUsageSampleIndex -Samples $samples -Target $StartTime
+    $selected = [System.Collections.Generic.List[object]]::new()
+    for ($index = $first; $index -lt $samples.Count; $index++) {
+        if ($samples[$index].sampleTime -gt $EndTime) { break }
+        [void] $selected.Add($samples[$index])
+    }
+    return @($selected)
+}
+
 function Get-UsageBoundaryResult {
     param(
         [Parameter(Mandatory)] [object] $Interval,
         [AllowNull()] [object] $StartRecord,
         [AllowNull()] [object] $EndRecord,
         [Parameter(Mandatory)] [string] $Role,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $AllRecords,
+        [Parameter(Mandatory)] [hashtable] $UsageIndex,
         [AllowNull()] [object] $StorySpan,
         [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
     )
@@ -2201,28 +2319,16 @@ function Get-UsageBoundaryResult {
     $intermediateProblemMessage = $null
     if ($timesValid) {
         $candidateSamples = [System.Collections.Generic.List[object]]::new()
-        foreach ($candidate in @($AllRecords | Sort-Object Time, Line)) {
-            $candidateUsage = Get-PropertyValue $candidate.Event 'usage'
-            $candidateCounters = if ($null -ne $candidateUsage) { Get-PropertyValue $candidateUsage 'counters' } else { $null }
-            if ($null -eq $candidateUsage -or $null -eq $candidateCounters -or @($candidateCounters.PSObject.Properties).Count -eq 0) { continue }
-            if ([string] (Get-PropertyValue $candidateUsage 'role') -cne $Role -or
-                [string] (Get-PropertyValue $candidateUsage 'streamId') -cne $startStream -or
-                [string] (Get-PropertyValue $candidateUsage 'source') -cne $startSource) { continue }
-            $candidateSampleTime = [DateTimeOffset]::MinValue
-            if (-not (Try-GetUtcTime -Value (Get-PropertyValue $candidateUsage 'sampledAtUtc') -Parsed ([ref] $candidateSampleTime))) { continue }
-            if ($candidateSampleTime -lt $startTime -or $candidateSampleTime -gt $endTime) { continue }
-            $candidateSession = [string] (Get-PropertyValue $candidateUsage 'sessionId')
-            if ([string]::IsNullOrWhiteSpace($candidateSession)) { $candidateSession = [string] (Get-PropertyValue $candidate.Event 'sessionId') }
-            $candidateWorker = [string] (Get-PropertyValue $candidate.Event 'workerId')
-            $candidateSemantics = Get-PropertyValue $candidateUsage 'counterSemantics'
+        $usageKey = Get-UsageSampleKey -Role $Role -StreamId $startStream -Source $startSource
+        foreach ($candidate in @(Get-UsageSampleRange -UsageIndex $UsageIndex -Key $usageKey -StartTime $startTime -EndTime $endTime)) {
             [void] $candidateSamples.Add([pscustomobject][ordered]@{
-                    record = $candidate
-                    usage = $candidateUsage
-                    sampleTime = $candidateSampleTime
-                    sessionId = $candidateSession
-                    workerId = $candidateWorker
-                    semantics = $candidateSemantics
-                    counters = $candidateCounters
+                    record = $candidate.record
+                    usage = $candidate.usage
+                    sampleTime = $candidate.sampleTime
+                    sessionId = $candidate.sessionId
+                    workerId = $candidate.workerId
+                    semantics = $candidate.semantics
+                    counters = $candidate.counters
                 })
         }
         $sampleGroups = @($candidateSamples | Group-Object { $_.sampleTime.ToUniversalTime().Ticks })
@@ -2396,6 +2502,81 @@ function Get-UsageAttributionKey {
     ) -join '|'
 }
 
+function Get-UsageEvidenceWindowKey {
+    param([Parameter(Mandatory)] [object] $Evidence)
+
+    return @(
+        [string] $Evidence.startUtc
+        [string] $Evidence.endUtc
+        (ConvertTo-CanonicalJson -Value ([ordered]@{
+                source = $Evidence.source
+                streamId = $Evidence.streamId
+                deltas = $Evidence.deltas
+                components = $Evidence.components
+                counterSemantics = $Evidence.counterSemantics
+            }))
+    ) -join '|'
+}
+
+function Set-UsageEvidenceConflict {
+    param(
+        [Parameter(Mandatory)] [object[]] $Entries,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies,
+        [Parameter(Mandatory)] [string] $Message
+    )
+
+    foreach ($entry in $Entries) {
+        $entry.state = 'partial'
+        $entry.countable = $false
+        $entry.missingData = $Message
+    }
+    [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_usage_window' -Message 'Overlapping source-backed usage windows were not summed because their attribution may double-count cumulative counters' -Identity (@($Entries | ForEach-Object { [string] $_.identity }) -join '|')))
+}
+
+function Resolve-UsageStreamOverlapClusters {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Entries,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
+    )
+
+    $ordered = @($Entries | ForEach-Object {
+            [pscustomobject]@{
+                evidence = $_
+                start = [DateTimeOffset]::Parse([string] $_.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+                end = [DateTimeOffset]::Parse([string] $_.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            }
+        } | Where-Object { $_.start -lt $_.end } | Sort-Object start, end, { [string] $_.evidence.identity })
+    $cluster = [System.Collections.Generic.List[object]]::new()
+    $clusterEnd = [DateTimeOffset]::MinValue
+    $flush = {
+        if ($cluster.Count -le 1) { return }
+        $clusterEvidence = @($cluster | ForEach-Object { $_.evidence })
+        $windowKeys = @($clusterEvidence | ForEach-Object { Get-UsageEvidenceWindowKey -Evidence $_ } | Sort-Object -Unique)
+        if ($windowKeys.Count -eq 1) {
+            $first = $clusterEvidence[0]
+            for ($duplicateIndex = 1; $duplicateIndex -lt $clusterEvidence.Count; $duplicateIndex++) {
+                $duplicate = $clusterEvidence[$duplicateIndex]
+                $duplicate.countable = $false
+                $duplicate | Add-Member -NotePropertyName duplicateOf -NotePropertyValue $first.identity -Force
+                [void] $Anomalies.Add((New-Anomaly -Code 'duplicate_usage_window' -Message 'An identical source-backed usage window was retained once for token totals' -Identity "$($first.identity)|$($duplicate.identity)"))
+            }
+        }
+        else {
+            Set-UsageEvidenceConflict -Entries $clusterEvidence -Anomalies $Anomalies -Message 'overlapping source-backed usage windows are ambiguous and were not summed'
+        }
+    }
+    foreach ($item in $ordered) {
+        if ($cluster.Count -gt 0 -and $item.start -ge $clusterEnd) {
+            & $flush
+            $cluster = [System.Collections.Generic.List[object]]::new()
+            $clusterEnd = [DateTimeOffset]::MinValue
+        }
+        [void] $cluster.Add($item)
+        if ($item.end -gt $clusterEnd) { $clusterEnd = $item.end }
+    }
+    & $flush
+}
+
 function Resolve-UsageEvidence {
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]] $Evidence,
@@ -2405,43 +2586,41 @@ function Resolve-UsageEvidence {
     foreach ($item in $Evidence) {
         $item | Add-Member -NotePropertyName countable -NotePropertyValue $true -Force
     }
-    $ordered = @($Evidence | Sort-Object identity)
-    for ($i = 0; $i -lt $ordered.Count; $i++) {
-        $left = $ordered[$i]
-        if ($left.state -eq 'unavailable' -or [string]::IsNullOrWhiteSpace([string] $left.startUtc) -or [string]::IsNullOrWhiteSpace([string] $left.endUtc) -or $null -eq $left.deltas) { continue }
-        $leftStart = [DateTimeOffset]::Parse([string] $left.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-        $leftEnd = [DateTimeOffset]::Parse([string] $left.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-        if ($leftStart -ge $leftEnd) { continue }
-        for ($j = $i + 1; $j -lt $ordered.Count; $j++) {
-            $right = $ordered[$j]
-            if ($right.state -eq 'unavailable' -or $null -eq $right.deltas -or (Get-UsageAttributionKey -Evidence $left) -cne (Get-UsageAttributionKey -Evidence $right)) { continue }
-            if ([string]::IsNullOrWhiteSpace([string] $right.startUtc) -or [string]::IsNullOrWhiteSpace([string] $right.endUtc)) { continue }
-            $rightStart = [DateTimeOffset]::Parse([string] $right.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            $rightEnd = [DateTimeOffset]::Parse([string] $right.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            if ($rightStart -ge $rightEnd -or $leftStart -ge $rightEnd -or $rightStart -ge $leftEnd) { continue }
-            $sameWindow = $leftStart -eq $rightStart -and $leftEnd -eq $rightEnd
-            $sameSource = [string] $left.source -ceq [string] $right.source
-            $sameStream = [string] $left.streamId -ceq [string] $right.streamId
-            if ($sameSource -and -not $sameStream) {
-                continue
+    $eligible = @($Evidence | Where-Object {
+            $_.state -ne 'unavailable' -and
+            -not [string]::IsNullOrWhiteSpace([string] $_.startUtc) -and
+            -not [string]::IsNullOrWhiteSpace([string] $_.endUtc) -and
+            $null -ne $_.deltas
+        })
+    foreach ($attributionGroup in @($eligible | Group-Object { Get-UsageAttributionKey -Evidence $_ })) {
+        $ordered = @($attributionGroup.Group | Sort-Object startUtc, endUtc, identity)
+        $cluster = [System.Collections.Generic.List[object]]::new()
+        $clusterEnd = [DateTimeOffset]::MinValue
+        $flush = {
+            if ($cluster.Count -le 1) { return }
+            $clusterEvidence = @($cluster)
+            $sourceKeys = @($clusterEvidence | ForEach-Object { [string] $_.source } | Sort-Object -Unique)
+            if ($sourceKeys.Count -gt 1) {
+                Set-UsageEvidenceConflict -Entries $clusterEvidence -Anomalies $Anomalies -Message 'overlapping source-backed usage windows have multiple sources and were not summed'
+                return
             }
-            $samePayload = (ConvertTo-CanonicalJson -Value ([ordered]@{ source = $left.source; deltas = $left.deltas; components = $left.components; counterSemantics = $left.counterSemantics })) -ceq
-                (ConvertTo-CanonicalJson -Value ([ordered]@{ source = $right.source; deltas = $right.deltas; components = $right.components; counterSemantics = $right.counterSemantics }))
-            if ($sameWindow -and $sameSource -and $sameStream -and $samePayload) {
-                $right.countable = $false
-                $right | Add-Member -NotePropertyName duplicateOf -NotePropertyValue $left.identity -Force
-                [void] $Anomalies.Add((New-Anomaly -Code 'duplicate_usage_window' -Message 'An identical source-backed usage window was retained once for token totals' -Identity "$($left.identity)|$($right.identity)"))
-            }
-            else {
-                $left.state = 'partial'
-                $right.state = 'partial'
-                $left.countable = $false
-                $right.countable = $false
-                $left.missingData = 'overlapping source-backed usage windows are ambiguous and were not summed'
-                $right.missingData = 'overlapping source-backed usage windows are ambiguous and were not summed'
-                [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_usage_window' -Message 'Overlapping source-backed usage windows were not summed because their attribution may double-count cumulative counters' -Identity "$($left.identity)|$($right.identity)"))
+            foreach ($streamGroup in @($clusterEvidence | Group-Object { [string] $_.streamId })) {
+                Resolve-UsageStreamOverlapClusters -Entries @($streamGroup.Group) -Anomalies $Anomalies
             }
         }
+        foreach ($entry in $ordered) {
+            $start = [DateTimeOffset]::Parse([string] $entry.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            $end = [DateTimeOffset]::Parse([string] $entry.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            if ($start -ge $end) { continue }
+            if ($cluster.Count -gt 0 -and $start -ge $clusterEnd) {
+                & $flush
+                $cluster = [System.Collections.Generic.List[object]]::new()
+                $clusterEnd = [DateTimeOffset]::MinValue
+            }
+            [void] $cluster.Add($entry)
+            if ($end -gt $clusterEnd) { $clusterEnd = $end }
+        }
+        & $flush
     }
     return $Evidence
 }
@@ -2453,7 +2632,7 @@ function Get-UsageMetric {
         [Parameter(Mandatory)] [string] $Source,
         [Parameter(Mandatory)] [string] $NoDataMessage,
         [Parameter(Mandatory)] [hashtable] $RecordsByEventId,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $AllRecords,
+        [Parameter(Mandatory)] [hashtable] $UsageIndex,
         [AllowNull()] [object] $StorySpan,
         [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
     )
@@ -2462,7 +2641,7 @@ function Get-UsageMetric {
     foreach ($interval in @($Intervals)) {
         $startRecord = if ($null -ne $interval.startEventId -and $RecordsByEventId.ContainsKey([string] $interval.startEventId)) { $RecordsByEventId[[string] $interval.startEventId] } else { $null }
         $endRecord = if ($null -ne $interval.endEventId -and $RecordsByEventId.ContainsKey([string] $interval.endEventId)) { $RecordsByEventId[[string] $interval.endEventId] } else { $null }
-        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -AllRecords $AllRecords -StorySpan $StorySpan -Anomalies $Anomalies))
+        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -UsageIndex $UsageIndex -StorySpan $StorySpan -Anomalies $Anomalies))
     }
     [void] (Resolve-UsageEvidence -Evidence $evidence -Anomalies $Anomalies)
 
@@ -2748,9 +2927,10 @@ $reviewModeMetric = if ($null -eq $effectiveReviewMode) {
     New-Metric -State 'measured' -Value $effectiveReviewMode -Unit 'enum' -Source 'setup authorization or explicit input' -Calculation 'copy selected review mode' -Coverage 'one consistent review mode' -MissingData $null
 }
 
-$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
-$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
-$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
+$usageSampleIndex = New-UsageSampleIndex -Records $records
+$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
+$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
+$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
 $totalTokenMetric = Get-TotalUsageMetric -RoleMetrics @($implementationTokenMetric, $reviewTokenMetric, $coordinationTokenMetric)
 $metadataRunId = if ($runIds.Count -eq 1) { [string] $runIds[0] } else { $null }
 $metadataProjectId = if ($projectIds.Count -eq 1) { [int] $projectIds[0] } else { $null }

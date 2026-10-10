@@ -1517,6 +1517,10 @@ function Invoke-MeasurementReadyScenario {
             turnCount = @($state.turns).Count
             turnRevision = [string]@($state.turns)[0].revision
             terminalActionKinds = @($currentTurnTrace | ForEach-Object { [string]$_.kind })
+            actionKinds = @($workflowActions | ForEach-Object { [string]$_.kind })
+            actorIds = @($actorIds)
+            consumedEventIds = @($state.consumedEvents | ForEach-Object { [string]$_ })
+            implementerActionKinds = @($state.implementerActions | ForEach-Object { [string]$_.kind })
             transitionCount = $transitionCount
             normalMessageCount = $normalMessageCount
             agentCount = $actorIds.Count

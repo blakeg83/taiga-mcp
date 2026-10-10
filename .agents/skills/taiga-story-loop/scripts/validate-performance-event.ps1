@@ -585,6 +585,62 @@ try {
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $confirmedEvent.eventId)) 'recovery preserves the confirmed complete event'
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $recoveredEvent.eventId)) 'recovery appends the new complete event'
 
+    $checkpointPath = [string] $recoveredResult.checkpointPath
+    $indexPath = [string] $recoveredResult.indexPath
+    Assert-True (Test-Path -LiteralPath $checkpointPath -PathType Leaf) 'normal recovery writes an external checkpoint'
+    Assert-True (Test-Path -LiteralPath $indexPath -PathType Container) 'normal recovery writes an external event index'
+    $staleLedgerEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-stale-checkpoint-catchup'
+        runId = $recoveryRunId
+        transitionId = 'stale-checkpoint-catchup'
+    }
+    [IO.File]::AppendAllText($recoveryLedgerPath, (Convert-EventToJson $staleLedgerEvent) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $catchUpEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-after-stale-checkpoint'
+        runId = $recoveryRunId
+        transitionId = 'after-stale-checkpoint'
+    }
+    $catchUp = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $catchUpEvent)
+    $catchUpResult = Get-RecorderResult -Invocation $catchUp -Context 'stale checkpoint catch-up'
+    Assert-True ($catchUp.ExitCode -eq 0 -and $catchUpResult.status -ceq 'appended') 'stale checkpoint catch-up appends safely'
+    Assert-True ([string] $catchUpResult.scanMode -ceq 'incremental' -and [long] $catchUpResult.scannedBytes -gt 0) 'stale checkpoint catch-up scans only the uncheckpointed suffix'
+    $catchUpReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $staleLedgerEvent)
+    $catchUpReplayResult = Get-RecorderResult -Invocation $catchUpReplay -Context 'stale checkpoint replay'
+    Assert-True ($catchUpReplay.ExitCode -eq 0 -and $catchUpReplayResult.status -ceq 'noop') 'stale checkpoint catch-up preserves replay idempotency'
+
+    [IO.File]::Delete($checkpointPath)
+    $missingCheckpointEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-missing-checkpoint-rebuild'
+        runId = $recoveryRunId
+        transitionId = 'missing-checkpoint-rebuild'
+    }
+    $missingCheckpoint = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $missingCheckpointEvent)
+    $missingCheckpointResult = Get-RecorderResult -Invocation $missingCheckpoint -Context 'missing checkpoint recovery'
+    Assert-True ($missingCheckpoint.ExitCode -eq 0 -and $missingCheckpointResult.status -ceq 'appended') 'missing checkpoint recovery appends safely'
+    Assert-True ([string] $missingCheckpointResult.scanMode -ceq 'cold_rebuild') 'missing checkpoint recovery discloses a cold rebuild'
+
+    [IO.File]::WriteAllText($checkpointPath, '{corrupt-checkpoint', [Text.UTF8Encoding]::new($false))
+    $corruptCheckpointEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-corrupt-checkpoint-rebuild'
+        runId = $recoveryRunId
+        transitionId = 'corrupt-checkpoint-rebuild'
+    }
+    $corruptCheckpoint = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $corruptCheckpointEvent)
+    $corruptCheckpointResult = Get-RecorderResult -Invocation $corruptCheckpoint -Context 'corrupt checkpoint recovery'
+    Assert-True ($corruptCheckpoint.ExitCode -eq 0 -and $corruptCheckpointResult.status -ceq 'appended') 'corrupt checkpoint recovery appends safely'
+    Assert-True ([string] $corruptCheckpointResult.scanMode -ceq 'cold_rebuild') 'corrupt checkpoint recovery discloses a cold rebuild'
+
+    [IO.Directory]::Delete($indexPath, $true)
+    $missingIndexEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-missing-index-rebuild'
+        runId = $recoveryRunId
+        transitionId = 'missing-index-rebuild'
+    }
+    $missingIndex = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $missingIndexEvent)
+    $missingIndexResult = Get-RecorderResult -Invocation $missingIndex -Context 'missing index recovery'
+    Assert-True ($missingIndex.ExitCode -eq 0 -and $missingIndexResult.status -ceq 'appended') 'missing index recovery appends safely'
+    Assert-True ([string] $missingIndexResult.scanMode -ceq 'cold_rebuild') 'missing index recovery discloses a cold rebuild'
+
     $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $unicodeRoot
     $unicodeRunId = 'synthetic-run-150-unicode-tail'

@@ -818,39 +818,74 @@ function Copy-ByteRange {
     return ,$result
 }
 
-function Read-LedgerState {
+function Read-FileByteRange {
     param(
         [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [long] $StartOffset
+    )
+
+    $length = if (Test-Path -LiteralPath $LedgerPath -PathType Leaf) {
+        [IO.FileInfo]::new($LedgerPath).Length
+    }
+    else {
+        0L
+    }
+    if ($StartOffset -lt 0 -or $StartOffset -gt $length) {
+        throw [IO.InvalidDataException]::new('ledger checkpoint offset is outside the ledger')
+    }
+    $count = $length - $StartOffset
+    if ($count -gt [int]::MaxValue) {
+        throw [IO.InvalidDataException]::new('ledger scan range exceeds the bounded recorder buffer')
+    }
+    if ($count -eq 0) {
+        return ,([byte[]]::new(0))
+    }
+
+    $bytes = [byte[]]::new([int] $count)
+    $stream = $null
+    try {
+        $stream = [IO.FileStream]::new($LedgerPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        [void] $stream.Seek($StartOffset, [IO.SeekOrigin]::Begin)
+        $read = 0
+        while ($read -lt $bytes.Length) {
+            $chunk = $stream.Read($bytes, $read, $bytes.Length - $read)
+            if ($chunk -le 0) {
+                throw [IO.IOException]::new('ledger changed while it was being scanned')
+            }
+            $read += $chunk
+        }
+        return ,$bytes
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
+function Read-LedgerChunk {
+    param(
+        [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [long] $StartOffset,
+        [Parameter(Mandatory)] [int] $StartLineNumber,
         [Parameter(Mandatory)] [string] $ExpectedRunId,
         [Parameter(Mandatory)] [int] $ExpectedProjectId,
         [Parameter(Mandatory)] [int] $ExpectedStoryId,
         [Parameter(Mandatory)] [int] $ExpectedStoryRef
     )
 
-    if (-not (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) {
-        return [pscustomobject]@{
-            Records = @()
-            InvalidRecords = @()
-            IncompleteTail = $null
-            NeedsSeparator = $false
-        }
+    $physicalLength = if (Test-Path -LiteralPath $LedgerPath -PathType Leaf) {
+        [IO.FileInfo]::new($LedgerPath).Length
     }
-
-    $bytes = [IO.File]::ReadAllBytes($LedgerPath)
-    if ($bytes.Length -eq 0) {
-        return [pscustomobject]@{
-            Records = @()
-            InvalidRecords = @()
-            IncompleteTail = $null
-            NeedsSeparator = $false
-        }
+    else {
+        0L
     }
-
+    $bytes = Read-FileByteRange -LedgerPath $LedgerPath -StartOffset $StartOffset
     $encoding = [Text.UTF8Encoding]::new($false, $true)
-    $records = @()
-    $invalid = @()
+    $records = [System.Collections.Generic.List[object]]::new()
+    $invalid = [System.Collections.Generic.List[object]]::new()
     $lineStart = 0
-    $lineNumber = 0
+    $lineNumber = $StartLineNumber
     for ($offset = 0; $offset -lt $bytes.Length; $offset++) {
         if ($bytes[$offset] -ne [byte] 0x0A) {
             continue
@@ -863,6 +898,8 @@ function Read-LedgerState {
             $contentLength--
         }
         $lineBytes = Copy-ByteRange -Bytes $bytes -Offset $lineStart -Count $contentLength
+        $globalStart = $StartOffset + $lineStart
+        $globalEnd = $StartOffset + $offset + 1
         $lineStart = $offset + 1
         $diagnosticType = 'schema_invalid_record'
         try {
@@ -888,19 +925,21 @@ function Read-LedgerState {
             }
             Assert-Event -Event $candidate -ExpectedRunId $ExpectedRunId
             Assert-EventStoryBinding -Event $candidate -ExpectedProjectId $ExpectedProjectId -ExpectedStoryId $ExpectedStoryId -ExpectedStoryRef $ExpectedStoryRef
-            $records += [pscustomobject]@{
-                EventId = [string] $eventIdProperty.Value
-                CanonicalJson = Convert-ToCanonicalJson -Value $candidate
-                LineNumber = $lineNumber
-            }
+            [void] $records.Add([pscustomobject]@{
+                    EventId = [string] $eventIdProperty.Value
+                    CanonicalJson = Convert-ToCanonicalJson -Value $candidate
+                    LineNumber = $lineNumber
+                    StartOffset = [long] $globalStart
+                    EndOffset = [long] $globalEnd
+                })
         }
         catch {
-            $invalid += [pscustomobject]@{
-                diagnosticType = $diagnosticType
-                lineNumber = $lineNumber
-                byteLength = $contentLength
-                digest = Get-Sha256HexBytes -Bytes $lineBytes
-            }
+            [void] $invalid.Add([pscustomobject]@{
+                    diagnosticType = $diagnosticType
+                    lineNumber = $lineNumber
+                    byteLength = $contentLength
+                    digest = Get-Sha256HexBytes -Bytes $lineBytes
+                })
         }
     }
 
@@ -916,10 +955,230 @@ function Read-LedgerState {
     }
 
     return [pscustomobject]@{
-        Records = $records
-        InvalidRecords = $invalid
+        Records = @($records)
+        InvalidRecords = @($invalid)
         IncompleteTail = $incompleteTail
         NeedsSeparator = $tailLength -gt 0
+        StartOffset = $StartOffset
+        LastCompleteOffset = [long] ($StartOffset + $lineStart)
+        NextLineNumber = $lineNumber
+        PhysicalLength = $physicalLength
+        ScannedBytes = [long] $bytes.Length
+    }
+}
+
+function Get-LedgerIndexDirectory {
+    param([Parameter(Mandatory)] [string] $LedgerPath)
+
+    return "$LedgerPath.index"
+}
+
+function Get-LedgerCheckpointPath {
+    param([Parameter(Mandatory)] [string] $LedgerPath)
+
+    return "$LedgerPath.checkpoint.json"
+}
+
+function Get-EventIndexPath {
+    param(
+        [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    return (Join-Path $IndexDirectory ((Get-Sha256Hex -Text $EventId) + '.json'))
+}
+
+function Write-AtomicText {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Text
+    )
+
+    $parent = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        [IO.Directory]::CreateDirectory($parent) | Out-Null
+    }
+    $temporary = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllText($temporary, $Text, [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            [IO.File]::Move($temporary, $Path, $true)
+        }
+        else {
+            [IO.File]::Move($temporary, $Path)
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) {
+            [IO.File]::Delete($temporary)
+        }
+    }
+}
+
+function Read-IndexEntry {
+    param(
+        [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    $path = Get-EventIndexPath -IndexDirectory $IndexDirectory -EventId $EventId
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $entry = [IO.File]::ReadAllText($path) | ConvertFrom-Json -DateKind String
+        if ($null -eq $entry -or [int] $entry.schemaVersion -ne 1 -or
+            [string] $entry.kind -cne 'story_performance_event_index' -or
+            [string] $entry.eventId -cne $EventId -or
+            [string] $entry.state -notin @('pending', 'committed', 'conflict') -or
+            [string]::IsNullOrWhiteSpace([string] $entry.canonicalJson)) {
+            throw [IO.InvalidDataException]::new('event index entry is invalid')
+        }
+        return $entry
+    }
+    catch {
+        throw [IO.InvalidDataException]::new('event index entry is invalid')
+    }
+}
+
+function Write-IndexEntry {
+    param(
+        [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [string] $EventId,
+        [Parameter(Mandatory)] [ValidateSet('pending', 'committed', 'conflict')] [string] $State,
+        [Parameter(Mandatory)] [string] $CanonicalJson,
+        [AllowNull()] [int] $LineNumber,
+        [AllowNull()] [long] $StartOffset,
+        [AllowNull()] [long] $EndOffset
+    )
+
+    $entry = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_event_index'
+        eventId = $EventId
+        state = $State
+        canonicalJson = $CanonicalJson
+        lineNumber = $LineNumber
+        startOffset = $StartOffset
+        endOffset = $EndOffset
+    }
+    Write-AtomicText -Path (Get-EventIndexPath -IndexDirectory $IndexDirectory -EventId $EventId) -Text ($entry | ConvertTo-Json -Compress -Depth 20)
+}
+
+function Clear-LedgerIndex {
+    param([Parameter(Mandatory)] [string] $IndexDirectory)
+
+    [IO.Directory]::CreateDirectory($IndexDirectory) | Out-Null
+    foreach ($path in @([IO.Directory]::GetFiles($IndexDirectory, '*.json'))) {
+        [IO.File]::Delete($path)
+    }
+}
+
+function Update-IndexFromRecords {
+    param(
+        [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records
+    )
+
+    [IO.Directory]::CreateDirectory($IndexDirectory) | Out-Null
+    foreach ($record in @($Records | Sort-Object LineNumber, StartOffset)) {
+        $entry = Read-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $record.EventId)
+        if ($null -eq $entry) {
+            Write-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $record.EventId) -State committed -CanonicalJson ([string] $record.CanonicalJson) -LineNumber ([int] $record.LineNumber) -StartOffset ([long] $record.StartOffset) -EndOffset ([long] $record.EndOffset)
+            continue
+        }
+        if ([string] $entry.canonicalJson -cne [string] $record.CanonicalJson) {
+            Write-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $record.EventId) -State conflict -CanonicalJson ([string] $entry.canonicalJson) -LineNumber ([int] $entry.lineNumber) -StartOffset ([long] $entry.startOffset) -EndOffset ([long] $entry.endOffset)
+        }
+        elseif ([string] $entry.state -eq 'pending') {
+            Write-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $record.EventId) -State committed -CanonicalJson ([string] $record.CanonicalJson) -LineNumber ([int] $record.LineNumber) -StartOffset ([long] $record.StartOffset) -EndOffset ([long] $record.EndOffset)
+        }
+    }
+}
+
+function Write-LedgerCheckpoint {
+    param(
+        [Parameter(Mandatory)] [string] $CheckpointPath,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [int] $ProjectId,
+        [Parameter(Mandatory)] [int] $StoryId,
+        [Parameter(Mandatory)] [int] $StoryRef,
+        [Parameter(Mandatory)] [long] $LastCompleteOffset,
+        [Parameter(Mandatory)] [int] $NextLineNumber,
+        [Parameter(Mandatory)] [long] $RecordCount,
+        [Parameter(Mandatory)] [long] $PhysicalLength
+    )
+
+    $checkpoint = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_ledger_checkpoint'
+        runId = $RunId
+        projectId = $ProjectId
+        storyId = $StoryId
+        storyRef = $StoryRef
+        lastCompleteOffset = $LastCompleteOffset
+        nextLineNumber = $NextLineNumber
+        recordCount = $RecordCount
+        physicalLength = $PhysicalLength
+        updatedAtUtc = Get-UtcNowText
+    }
+    Write-AtomicText -Path $CheckpointPath -Text ($checkpoint | ConvertTo-Json -Compress -Depth 20)
+}
+
+function Read-LedgerCheckpoint {
+    param(
+        [Parameter(Mandatory)] [string] $CheckpointPath,
+        [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [string] $ExpectedRunId,
+        [Parameter(Mandatory)] [int] $ExpectedProjectId,
+        [Parameter(Mandatory)] [int] $ExpectedStoryId,
+        [Parameter(Mandatory)] [int] $ExpectedStoryRef
+    )
+
+    if (-not (Test-Path -LiteralPath $CheckpointPath -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $checkpoint = [IO.File]::ReadAllText($CheckpointPath) | ConvertFrom-Json -DateKind String
+        $physicalLength = if (Test-Path -LiteralPath $LedgerPath -PathType Leaf) { [IO.FileInfo]::new($LedgerPath).Length } else { 0L }
+        $lastCompleteOffset = [long] $checkpoint.lastCompleteOffset
+        $checkpointPhysicalLength = [long] $checkpoint.physicalLength
+        if ([int] $checkpoint.schemaVersion -ne 1 -or
+            [string] $checkpoint.kind -cne 'story_performance_ledger_checkpoint' -or
+            [string] $checkpoint.runId -cne $ExpectedRunId -or
+            [int] $checkpoint.projectId -ne $ExpectedProjectId -or
+            [int] $checkpoint.storyId -ne $ExpectedStoryId -or
+            [int] $checkpoint.storyRef -ne $ExpectedStoryRef -or
+            $lastCompleteOffset -lt 0 -or $checkpointPhysicalLength -lt $lastCompleteOffset -or
+            $physicalLength -lt $lastCompleteOffset -or $physicalLength -lt $checkpointPhysicalLength) {
+            return $null
+        }
+        return [pscustomobject]@{
+            LastCompleteOffset = $lastCompleteOffset
+            NextLineNumber = [int] $checkpoint.nextLineNumber
+            RecordCount = [long] $checkpoint.recordCount
+            PhysicalLength = $checkpointPhysicalLength
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Write-IndexFromFullLedger {
+    param(
+        [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [object] $LedgerState
+    )
+
+    Clear-LedgerIndex -IndexDirectory $IndexDirectory
+    $groups = @($LedgerState.Records | Group-Object EventId)
+    foreach ($group in $groups) {
+        $ordered = @($group.Group | Sort-Object LineNumber, StartOffset)
+        $first = $ordered[0]
+        $canonicalValues = @($ordered | ForEach-Object { [string] $_.CanonicalJson } | Sort-Object -Unique)
+        $state = if ($canonicalValues.Count -gt 1) { 'conflict' } else { 'committed' }
+        Write-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $first.EventId) -State $state -CanonicalJson ([string] $first.CanonicalJson) -LineNumber ([int] $first.LineNumber) -StartOffset ([long] $first.StartOffset) -EndOffset ([long] $first.EndOffset)
     }
 }
 
@@ -1009,6 +1268,8 @@ Assert-Event -Event $event -ExpectedRunId $RunId
 
 $runDirectory = Join-Path $expectedRoot $RunId
 $ledgerPath = Join-Path $runDirectory 'events.jsonl'
+$indexDirectory = Get-LedgerIndexDirectory -LedgerPath $ledgerPath
+$checkpointPath = Get-LedgerCheckpointPath -LedgerPath $ledgerPath
 $normalizedLockReadyPath = $null
 if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
     $normalizedLockReadyPath = Get-FullPath -Path $LockReadyPath -Name 'LockReadyPath'
@@ -1020,7 +1281,9 @@ if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
         $runDirectory,
         $ledgerPath,
         "$ledgerPath.lock",
-        "$ledgerPath.diagnostics.jsonl"
+        "$ledgerPath.diagnostics.jsonl",
+        $indexDirectory,
+        $checkpointPath
     ) | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\', '/') }
     if (@($reservedPaths | Where-Object { $_.Equals($normalizedLockReadyPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
         Fail-Recorder "'LockReadyPath' aliases a reserved external run path"
@@ -1054,12 +1317,33 @@ $conflictDiagnosticPath = $null
 
 try {
     $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds -ReadyPath $normalizedLockReadyPath
-    $ledgerState = Read-LedgerState `
+    $checkpoint = Read-LedgerCheckpoint `
+        -CheckpointPath $checkpointPath `
         -LedgerPath $ledgerPath `
         -ExpectedRunId $RunId `
         -ExpectedProjectId ([int] $event.projectId) `
         -ExpectedStoryId ([int] $event.storyId) `
         -ExpectedStoryRef ([int] $event.storyRef)
+    $fullRebuild = $null -eq $checkpoint -or
+        ([long] $checkpoint.RecordCount -gt 0 -and -not (Test-Path -LiteralPath $indexDirectory -PathType Container))
+    $scanStartOffset = if ($fullRebuild) { 0L } else { [long] $checkpoint.LastCompleteOffset }
+    $scanStartLineNumber = if ($fullRebuild) { 0 } else { [int] $checkpoint.NextLineNumber }
+    $ledgerState = Read-LedgerChunk `
+        -LedgerPath $ledgerPath `
+        -StartOffset $scanStartOffset `
+        -StartLineNumber $scanStartLineNumber `
+        -ExpectedRunId $RunId `
+        -ExpectedProjectId ([int] $event.projectId) `
+        -ExpectedStoryId ([int] $event.storyId) `
+        -ExpectedStoryRef ([int] $event.storyRef)
+    if ($fullRebuild) {
+        Write-IndexFromFullLedger -IndexDirectory $indexDirectory -LedgerState $ledgerState
+        $recordCount = [long] $ledgerState.Records.Count
+    }
+    else {
+        Update-IndexFromRecords -IndexDirectory $indexDirectory -Records $ledgerState.Records
+        $recordCount = [long] $checkpoint.RecordCount + [long] $ledgerState.Records.Count
+    }
 
     foreach ($invalidRecord in @($ledgerState.InvalidRecords)) {
         $diagnosticPaths += Write-Diagnostic `
@@ -1084,6 +1368,10 @@ try {
             -ByteLength $ledgerState.IncompleteTail.byteLength
     }
 
+    $checkpointPhysicalLength = [long] $ledgerState.PhysicalLength
+    $checkpointLastCompleteOffset = [long] $ledgerState.LastCompleteOffset
+    $checkpointLineNumber = [int] $ledgerState.NextLineNumber
+
     $foreignRecords = @($ledgerState.InvalidRecords | Where-Object { $_.diagnosticType -ceq 'foreign_run' })
     if ($foreignRecords.Count -gt 0) {
         $operationResult = [ordered]@{
@@ -1097,18 +1385,20 @@ try {
         $operationExitCode = 3
     }
     else {
-        $matchingRecords = @($ledgerState.Records | Where-Object { $_.EventId -ceq [string] $event.eventId })
-        if ($matchingRecords.Count -gt 0) {
-        $conflict = @($matchingRecords | Where-Object { $_.CanonicalJson -cne $incomingCanonical })
-        if ($conflict.Count -gt 0) {
+        $indexEntry = Read-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId)
+        if ($null -eq $indexEntry) {
+            Write-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId) -State pending -CanonicalJson $incomingCanonical -LineNumber $null -StartOffset $null -EndOffset $null
+        }
+
+        if ($null -ne $indexEntry -and [string] $indexEntry.state -eq 'conflict') {
             $conflictDiagnosticPath = Write-Diagnostic `
                 -LedgerPath $ledgerPath `
                 -RunId $RunId `
                 -DiagnosticType 'conflicting_duplicate' `
                 -EventId ([string] $event.eventId) `
-                -ExistingDigest (Get-Sha256Hex -Text $conflict[0].CanonicalJson) `
+                -ExistingDigest (Get-Sha256Hex -Text ([string] $indexEntry.canonicalJson)) `
                 -IncomingDigest $incomingDigest `
-                -LineNumber $conflict[0].LineNumber `
+                -LineNumber ([int] $indexEntry.lineNumber) `
                 -ByteLength $null
             $operationResult = [ordered]@{
                 status = 'error'
@@ -1120,7 +1410,27 @@ try {
             }
             $operationExitCode = 3
         }
-        else {
+        elseif ($null -ne $indexEntry -and [string] $indexEntry.canonicalJson -cne $incomingCanonical) {
+            $conflictDiagnosticPath = Write-Diagnostic `
+                -LedgerPath $ledgerPath `
+                -RunId $RunId `
+                -DiagnosticType 'conflicting_duplicate' `
+                -EventId ([string] $event.eventId) `
+                -ExistingDigest (Get-Sha256Hex -Text ([string] $indexEntry.canonicalJson)) `
+                -IncomingDigest $incomingDigest `
+                -LineNumber ([int] $indexEntry.lineNumber) `
+                -ByteLength $null
+            $operationResult = [ordered]@{
+                status = 'error'
+                errorCategory = 'conflicting_duplicate'
+                eventId = [string] $event.eventId
+                runId = $RunId
+                ledgerPath = $ledgerPath
+                diagnosticPath = $conflictDiagnosticPath
+            }
+            $operationExitCode = 3
+        }
+        elseif ($null -ne $indexEntry -and [string] $indexEntry.state -eq 'committed') {
             $operationResult = [ordered]@{
                 status = 'noop'
                 eventId = [string] $event.eventId
@@ -1129,22 +1439,65 @@ try {
                 diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
             }
         }
-        }
         else {
             Write-LedgerLine `
                 -LedgerPath $ledgerPath `
                 -Line $serializedEvent `
                 -PrependNewline:([bool] $ledgerState.NeedsSeparator) `
                 -FaultAfterBytes $FaultAfterBytes
+            $postWriteState = Read-LedgerChunk `
+                -LedgerPath $ledgerPath `
+                -StartOffset $scanStartOffset `
+                -StartLineNumber $scanStartLineNumber `
+                -ExpectedRunId $RunId `
+                -ExpectedProjectId ([int] $event.projectId) `
+                -ExpectedStoryId ([int] $event.storyId) `
+                -ExpectedStoryRef ([int] $event.storyRef)
+            Update-IndexFromRecords -IndexDirectory $indexDirectory -Records $postWriteState.Records
+            $incomingRecord = @($postWriteState.Records | Where-Object { $_.EventId -ceq [string] $event.eventId } | Select-Object -Last 1)
+            if ($incomingRecord.Count -eq 0) {
+                throw [IO.InvalidDataException]::new('appended event was not found in the complete ledger range')
+            }
+            $postRecordCount = if ($fullRebuild) { [long] $postWriteState.Records.Count } else { [long] $checkpoint.RecordCount + [long] $postWriteState.Records.Count }
+            Write-LedgerCheckpoint `
+                -CheckpointPath $checkpointPath `
+                -RunId $RunId `
+                -ProjectId ([int] $event.projectId) `
+                -StoryId ([int] $event.storyId) `
+                -StoryRef ([int] $event.storyRef) `
+                -LastCompleteOffset ([long] $postWriteState.LastCompleteOffset) `
+                -NextLineNumber ([int] $postWriteState.NextLineNumber) `
+                -RecordCount $postRecordCount `
+                -PhysicalLength ([long] $postWriteState.PhysicalLength)
             $operationResult = [ordered]@{
                 status = 'appended'
                 eventId = [string] $event.eventId
                 runId = $RunId
                 ledgerPath = $ledgerPath
                 recoveredIncompleteTail = $null -ne $ledgerState.IncompleteTail
+                scanMode = if ($fullRebuild) { 'cold_rebuild' } else { 'incremental' }
+                scannedBytes = [long] $postWriteState.ScannedBytes
+                checkpointPath = $checkpointPath
+                indexPath = $indexDirectory
                 diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
             }
         }
+    }
+    if ($null -eq $operationResult -or [string] $operationResult.status -ne 'appended') {
+        Write-LedgerCheckpoint `
+            -CheckpointPath $checkpointPath `
+            -RunId $RunId `
+            -ProjectId ([int] $event.projectId) `
+            -StoryId ([int] $event.storyId) `
+            -StoryRef ([int] $event.storyRef) `
+            -LastCompleteOffset ([long] $checkpointLastCompleteOffset) `
+            -NextLineNumber $checkpointLineNumber `
+            -RecordCount $recordCount `
+            -PhysicalLength $checkpointPhysicalLength
+        $operationResult.scanMode = if ($fullRebuild) { 'cold_rebuild' } else { 'incremental' }
+        $operationResult.scannedBytes = [long] $ledgerState.ScannedBytes
+        $operationResult.checkpointPath = $checkpointPath
+        $operationResult.indexPath = $indexDirectory
     }
 }
 catch [TimeoutException] {
