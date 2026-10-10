@@ -772,6 +772,28 @@ try {
     Assert-True ($changedIndividualIndexReplay.ExitCode -eq 3 -and $changedIndividualIndexReplayResult.errorCategory -ceq 'conflicting_duplicate') 'corrupt individual index replay preserves conflict detection'
     Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'corrupt individual index conflict does not mutate the ledger'
 
+    $membershipDirectory = "$individualIndexLedger.membership"
+    $membershipFiles = @(Get-ChildItem -LiteralPath $membershipDirectory -Filter '*.json' -File)
+    Assert-True ($membershipFiles.Count -eq 1) 'individual membership fixture creates one exact membership marker'
+    [IO.File]::Delete((Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0].FullName)
+    [IO.File]::WriteAllText($membershipFiles[0].FullName, '{invalid-membership', [Text.UTF8Encoding]::new($false))
+    $missingIndexCorruptMembershipReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $missingIndexCorruptMembershipReplayResult = Get-RecorderResult -Invocation $missingIndexCorruptMembershipReplay -Context 'missing index corrupt membership replay'
+    Assert-True ($missingIndexCorruptMembershipReplay.ExitCode -eq 0 -and $missingIndexCorruptMembershipReplayResult.status -ceq 'noop' -and [string] $missingIndexCorruptMembershipReplayResult.scanMode -ceq 'cold_rebuild') 'missing index plus corrupt membership replay rebuilds before deciding idempotency'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing index plus corrupt membership replay never duplicates the ledger record'
+
+    [IO.File]::Delete((Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0].FullName)
+    $membershipFiles = @(Get-ChildItem -LiteralPath $membershipDirectory -Filter '*.json' -File)
+    Assert-True ($membershipFiles.Count -eq 1) 'recovery restores one exact membership marker'
+    [IO.File]::WriteAllText($membershipFiles[0].FullName, '{invalid-membership-again', [Text.UTF8Encoding]::new($false))
+    $missingIndexCorruptMembershipConflictEvent = New-EventVariant -Base $individualIndexEvent -Changes @{
+        transitionId = 'missing-index-corrupt-membership-conflict'
+    }
+    $missingIndexCorruptMembershipConflict = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $missingIndexCorruptMembershipConflictEvent)
+    $missingIndexCorruptMembershipConflictResult = Get-RecorderResult -Invocation $missingIndexCorruptMembershipConflict -Context 'missing index corrupt membership conflict'
+    Assert-True ($missingIndexCorruptMembershipConflict.ExitCode -eq 3 -and $missingIndexCorruptMembershipConflictResult.errorCategory -ceq 'conflicting_duplicate' -and [string] $missingIndexCorruptMembershipConflictResult.scanMode -ceq 'cold_rebuild') 'missing index plus corrupt membership conflict rebuilds before rejecting a conflicting replay'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing index plus corrupt membership conflict does not mutate the ledger'
+
     $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $unicodeRoot
     $unicodeRunId = 'synthetic-run-150-unicode-tail'

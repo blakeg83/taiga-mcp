@@ -1664,7 +1664,7 @@ try {
         $membershipConfirmsExisting = $null -ne $membershipMarker
         # The Bloom result is only a diagnostic hint. Exact membership is the
         # recovery authority so a false positive never triggers a ledger scan.
-        if (-not $fullRebuild -and ($indexEntryNeedsRebuild -or ($null -eq $indexEntry -and $membershipConfirmsExisting))) {
+        if (-not $fullRebuild -and ($indexEntryNeedsRebuild -or $membershipMarkerNeedsRepair -or ($null -eq $indexEntry -and $membershipConfirmsExisting))) {
             $fullRebuild = $true
             $scanStartOffset = 0L
             $scanStartLineNumber = 0
