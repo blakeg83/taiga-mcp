@@ -397,7 +397,12 @@ function Assert-Usage {
             Fail-Recorder "usage.role must match event role"
         }
         Assert-UtcTimestamp -Value $sampleText -Name 'usage.sampledAtUtc'
-        Assert-UtcTimestamp -Value $baselineText -Name 'usage.baselineAtUtc'
+        if ([string] $Usage.state -ceq 'measured') {
+            Assert-UtcTimestamp -Value $baselineText -Name 'usage.baselineAtUtc'
+        }
+        elseif ($null -ne $baselineText) {
+            Assert-UtcTimestamp -Value $baselineText -Name 'usage.baselineAtUtc'
+        }
         if (-not $hasCounterSemantics) {
             Fail-Recorder 'numeric usage samples require counterSemantics'
         }

@@ -270,18 +270,41 @@ try {
             fallback = 'retain unknown usage'
         }
     }
+    $usagePartialNoBaseline = New-EventVariant -Base $reviewStarted -Changes @{
+        eventId = 'synthetic-usage-partial-no-baseline'
+        usage = [ordered]@{
+            state = 'partial'
+            streamId = 'synthetic-review-stream-no-baseline'
+            role = 'reviewer'
+            source = 'synthetic_fixture'
+            coverage = 'no exact start-boundary baseline'
+            sampledAtUtc = '2026-10-10T10:11:00Z'
+            baselineAtUtc = $null
+            counters = [ordered]@{ inputTokens = 10 }
+            counterSemantics = [ordered]@{
+                cachedInput = 'unknown'
+                reasoning = 'unknown'
+            }
+            reason = 'baseline was not available at the exact run boundary'
+            fallback = 'retain raw sample with unknown delta'
+        }
+    }
     $validVariants = @(
         $implementationStarted, $taskReady, $reviewStarted, $reviewAccepted,
         $correctionStarted, $correctionReady, $finalReviewStarted, $finalFindings,
-        $finalAccepted, $prReady, $waitStarted, $waitEnded, $usageUnavailable
+        $finalAccepted, $prReady, $waitStarted, $waitEnded, $usageUnavailable,
+        $usagePartialNoBaseline
     )
     foreach ($variant in $validVariants) {
         $variantJson = Convert-EventToJson -Event $variant
         $result = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $externalRoot -RunId $runId -EventJson $variantJson
         Assert-True ($result.ExitCode -eq 0) "documented event '$($variant.eventType)' appends successfully"
+        $variantLines = @(Get-Content -LiteralPath $ledgerPath)
+        $variantRoundTrip = $variantLines[$variantLines.Count - 1] | ConvertFrom-Json -DateKind String
+        Assert-True ((Convert-EventToJson -Event $variantRoundTrip) -ceq $variantJson) "event '$($variant.eventId)' round-trips unchanged"
     }
     $allLines = @(Get-Content -LiteralPath $ledgerPath)
-    Assert-True ($allLines.Count -eq 14) 'documented event families append one complete record each'
+    Assert-True ($allLines.Count -eq 15) 'documented event families append one complete record each'
 
     $beforeInvalid = [IO.File]::ReadAllText($ledgerPath)
 
