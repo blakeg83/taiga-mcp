@@ -83,6 +83,35 @@ function New-Event {
     return [pscustomobject] $event
 }
 
+function New-UsageSample {
+    param(
+        [Parameter(Mandatory)] [string] $StreamId,
+        [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [string] $SessionId,
+        [Parameter(Mandatory)] [string] $Source,
+        [Parameter(Mandatory)] [string] $SampledAtUtc,
+        [Parameter(Mandatory)] [string] $BaselineAtUtc,
+        [Parameter(Mandatory)] [object] $Counters,
+        [AllowNull()] [object] $CounterSemantics = $null
+    )
+
+    if ($null -eq $CounterSemantics) {
+        $CounterSemantics = [ordered]@{ cachedInput = 'included_in_input'; reasoning = 'included_in_output' }
+    }
+    return [pscustomobject][ordered]@{
+        state = 'measured'
+        streamId = $StreamId
+        role = $Role
+        sessionId = $SessionId
+        source = $Source
+        counterSemantics = $CounterSemantics
+        coverage = 'synthetic exact boundary'
+        sampledAtUtc = $SampledAtUtc
+        baselineAtUtc = $BaselineAtUtc
+        counters = $Counters
+    }
+}
+
 function Write-EventsThroughRecorder {
     param(
         [Parameter(Mandatory)] [string] $ExternalRoot,
@@ -99,6 +128,47 @@ function Write-EventsThroughRecorder {
     return Join-Path (Join-Path $ExternalRoot $RunId) 'events.jsonl'
 }
 
+function New-UsageWindowEvents {
+    param(
+        [Parameter(Mandatory)] [int] $TaskRef,
+        [Parameter(Mandatory)] [string] $PhaseId,
+        [Parameter(Mandatory)] [string] $StartUtc,
+        [Parameter(Mandatory)] [string] $EndUtc,
+        [Parameter(Mandatory)] [object] $StartUsage,
+        [Parameter(Mandatory)] [object] $EndUsage,
+        [Parameter(Mandatory)] [string] $Revision
+    )
+
+    return @(
+        (New-Event -EventId ("usage-safety-{0}-start" -f $TaskRef) -EventType 'implementation_started' -OccurredAtUtc $StartUtc -Scope 'task' -TaskRef $TaskRef -PhaseId $PhaseId -Role 'implementer' -Usage $StartUsage),
+        (New-Event -EventId ("usage-safety-{0}-end" -f $TaskRef) -EventType 'task_ready_for_review' -OccurredAtUtc $EndUtc -Scope 'task' -TaskRef $TaskRef -PhaseId $PhaseId -Revision $Revision -Role 'implementer' -Usage $EndUsage)
+    )
+}
+
+$usageSafetyCaseNumber = 0
+function Invoke-UsageSafetyReport {
+    param(
+        [Parameter(Mandatory)] [object[]] $WindowEvents,
+        [Parameter(Mandatory)] [int[]] $TaskRefs
+    )
+
+    $script:usageSafetyCaseNumber++
+    $runId = "synthetic-usage-safety-$script:usageSafetyCaseNumber"
+    $storyStart = New-Event -EventId "usage-safety-$script:usageSafetyCaseNumber-story-start" -EventType 'story_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'story' -Role 'coordinator'
+    $prReady = New-Event -EventId "usage-safety-$script:usageSafetyCaseNumber-pr-ready" -EventType 'pr_ready' -OccurredAtUtc '2026-10-09T10:10:00Z' -Scope 'story' -Revision $revisionA -Role 'coordinator'
+    $prReady.pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 153; reviewedHead = $revisionA }
+    $flattenedWindowEvents = [System.Collections.Generic.List[object]]::new()
+    foreach ($windowEvent in @($WindowEvents)) {
+        foreach ($event in @($windowEvent)) { [void] $flattenedWindowEvents.Add($event) }
+    }
+    $events = @($storyStart) + @($flattenedWindowEvents.ToArray()) + @($prReady)
+    foreach ($event in $events) { $event.runId = $runId }
+    $ledger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $runId -Events $events -RecorderPath $recorderPath
+    $json = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs $TaskRefs
+    Assert-True ($LASTEXITCODE -eq 0) "usage safety case $script:usageSafetyCaseNumber should aggregate successfully"
+    return ($json | ConvertFrom-Json -Depth 100)
+}
+
 $root = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-task152-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $ledger = Join-Path $root 'per-task.jsonl'
@@ -110,6 +180,7 @@ $utfLedger = Join-Path $root 'invalid-utf8.jsonl'
 $orphanLedger = Join-Path $root 'orphan-order.jsonl'
 $overlapLedger = Join-Path $root 'overlap-cases.jsonl'
 $usageLedger = Join-Path $root 'usage-and-comparison.jsonl'
+$usageSafetyLedger = Join-Path $root 'usage-safety-cases.jsonl'
 $scriptPath = Join-Path $PSScriptRoot 'get-story-performance.ps1'
 $recorderPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts\write-performance-event.ps1'))
 $recorderRoot = Join-Path $root 'external-ledgers'
@@ -290,6 +361,109 @@ try {
     Assert-True ([string]$partialReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $partialReport.metrics.implementationTokens.value) 'counter reset must make implementation token coverage partial with null total'
     Assert-True ([string]$partialReport.metrics.reviewTokens.state -eq 'partial' -and $null -eq $partialReport.metrics.reviewTokens.value) 'missing review usage boundary must remain partial with null total'
     Assert-True (@($partialReport.anomalies | Where-Object { $_.code -eq 'usage_counter_reset' }).Count -eq 1 -and @($partialReport.anomalies | Where-Object { $_.code -eq 'usage_stream_conflict' }).Count -eq 1 -and @($partialReport.anomalies | Where-Object { $_.code -eq 'usage_missing_boundary' }).Count -eq 1) 'reset, worker/session changes, and missing usage boundaries must be disclosed explicitly'
+
+    $duplicateStart = New-UsageSample -StreamId 'safety-same-stream' -Role 'implementer' -SessionId 'safety-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $duplicateEnd = New-UsageSample -StreamId 'safety-same-stream' -Role 'implementer' -SessionId 'safety-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $duplicateReport = Invoke-UsageSafetyReport -TaskRefs @(200, 201) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 200 -PhaseId 'safety-duplicate-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $duplicateStart -EndUsage $duplicateEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 201 -PhaseId 'safety-duplicate-b' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $duplicateStart -EndUsage $duplicateEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$duplicateReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$duplicateReport.metrics.implementationTokens.value -eq 60) 'identical cumulative windows must count once rather than double-counting overlapping tasks'
+    Assert-True (@($duplicateReport.metrics.implementationTokens.evidence | Where-Object { $_.countable -eq $false -and $null -ne $_.duplicateOf }).Count -eq 1) 'identical usage windows must retain duplicate linkage in evidence'
+    Assert-True (@($duplicateReport.anomalies | Where-Object { $_.code -eq 'duplicate_usage_window' }).Count -eq 1) 'identical usage windows must disclose deduplication'
+
+    $nestedOuterStart = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $nestedOuterEnd = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:03:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 160; outputTokens = 20 })
+    $nestedInnerStart = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:30Z' -Counters ([ordered]@{ inputTokens = 120; outputTokens = 12 })
+    $nestedInnerEnd = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:30Z' -Counters ([ordered]@{ inputTokens = 140; outputTokens = 16 })
+    $partialStart = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:04:00Z' -BaselineAtUtc '2026-10-09T10:04:00Z' -Counters ([ordered]@{ inputTokens = 200; outputTokens = 30 })
+    $partialEnd = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:06:00Z' -BaselineAtUtc '2026-10-09T10:04:00Z' -Counters ([ordered]@{ inputTokens = 260; outputTokens = 40 })
+    $partialInnerStart = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:05:00Z' -BaselineAtUtc '2026-10-09T10:05:00Z' -Counters ([ordered]@{ inputTokens = 240; outputTokens = 35 })
+    $partialInnerEnd = New-UsageSample -StreamId 'safety-overlap-stream' -Role 'implementer' -SessionId 'safety-overlap-session' -Source 'safety-overlap-source' -SampledAtUtc '2026-10-09T10:07:00Z' -BaselineAtUtc '2026-10-09T10:05:00Z' -Counters ([ordered]@{ inputTokens = 280; outputTokens = 50 })
+    $overlapReport = Invoke-UsageSafetyReport -TaskRefs @(202, 203, 204, 205) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 202 -PhaseId 'safety-nested-outer' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:03:00Z' -StartUsage $nestedOuterStart -EndUsage $nestedOuterEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 203 -PhaseId 'safety-nested-inner' -StartUtc '2026-10-09T10:01:30Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $nestedInnerStart -EndUsage $nestedInnerEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 204 -PhaseId 'safety-partial-a' -StartUtc '2026-10-09T10:04:00Z' -EndUtc '2026-10-09T10:06:00Z' -StartUsage $partialStart -EndUsage $partialEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 205 -PhaseId 'safety-partial-b' -StartUtc '2026-10-09T10:05:00Z' -EndUtc '2026-10-09T10:07:00Z' -StartUsage $partialInnerStart -EndUsage $partialInnerEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$overlapReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $overlapReport.metrics.implementationTokens.value) 'nested and partly overlapping windows must not be summed'
+    $overlapUsageDiagnostics = @($overlapReport.anomalies | Where-Object { $_.code -eq 'overlapping_usage_window' })
+    Assert-True ($overlapUsageDiagnostics.Count -eq 2) "nested and partly overlapping windows must each disclose ambiguity (actual=$($overlapUsageDiagnostics.Count))"
+
+    $disjointAStart = New-UsageSample -StreamId 'safety-disjoint-a' -Role 'implementer' -SessionId 'safety-session-a' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
+    $disjointAEnd = New-UsageSample -StreamId 'safety-disjoint-a' -Role 'implementer' -SessionId 'safety-session-a' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
+    $disjointBStart = New-UsageSample -StreamId 'safety-disjoint-b' -Role 'implementer' -SessionId 'safety-session-b' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 20; outputTokens = 3 })
+    $disjointBEnd = New-UsageSample -StreamId 'safety-disjoint-b' -Role 'implementer' -SessionId 'safety-session-b' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 30; outputTokens = 8 })
+    $disjointReport = Invoke-UsageSafetyReport -TaskRefs @(206, 207) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 206 -PhaseId 'safety-disjoint-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $disjointAStart -EndUsage $disjointAEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 207 -PhaseId 'safety-disjoint-b' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $disjointBStart -EndUsage $disjointBEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$disjointReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$disjointReport.metrics.implementationTokens.value -eq 23) 'disjoint usage streams must sum independently even when times overlap'
+
+    $sourceAStart = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-a' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
+    $sourceAEnd = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-a' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
+    $sourceBStart = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-b' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
+    $sourceBEnd = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-b' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
+    $sourceReport = Invoke-UsageSafetyReport -TaskRefs @(208, 209) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 208 -PhaseId 'safety-source-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $sourceAStart -EndUsage $sourceAEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 209 -PhaseId 'safety-source-b' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $sourceBStart -EndUsage $sourceBEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$sourceReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $sourceReport.metrics.implementationTokens.value) 'overlapping alternative sources must not be treated as additive streams'
+    Assert-True (@($sourceReport.anomalies | Where-Object { $_.code -eq 'overlapping_usage_window' }).Count -eq 1) 'overlapping alternative sources must disclose ambiguity'
+
+    $resetStart = New-UsageSample -StreamId 'safety-reset-stream' -Role 'implementer' -SessionId 'safety-reset-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $resetMiddle = New-UsageSample -StreamId 'safety-reset-stream' -Role 'implementer' -SessionId 'safety-reset-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 5; outputTokens = 1 })
+    $resetEnd = New-UsageSample -StreamId 'safety-reset-stream' -Role 'implementer' -SessionId 'safety-reset-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $resetMiddleEvent = New-Event -EventId 'usage-safety-reset-middle' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 210 -WaitId 'usage-safety-reset-middle' -WaitKind 'synthetic' -Role 'implementer' -Usage $resetMiddle
+    $resetReport = Invoke-UsageSafetyReport -TaskRefs @(210) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 210 -PhaseId 'safety-reset' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $resetStart -EndUsage $resetEnd -Revision $revisionA),
+        $resetMiddleEvent
+    )
+    Assert-True ([string]$resetReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $resetReport.metrics.implementationTokens.value) 'an intermediate reset followed by recovery must make the whole usage window partial'
+    Assert-True (@($resetReport.anomalies | Where-Object { $_.code -eq 'usage_counter_reset' }).Count -ge 1) 'intermediate reset must be disclosed'
+
+    $conflictStart = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $conflictMiddleA = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 120; outputTokens = 12 })
+    $conflictMiddleB = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 121; outputTokens = 12 })
+    $conflictEnd = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $conflictReport = Invoke-UsageSafetyReport -TaskRefs @(211) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 211 -PhaseId 'safety-conflict' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $conflictStart -EndUsage $conflictEnd -Revision $revisionA),
+        (New-Event -EventId 'usage-safety-conflict-middle-a' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 211 -WaitId 'usage-safety-conflict-a' -WaitKind 'synthetic' -Role 'implementer' -Usage $conflictMiddleA),
+        (New-Event -EventId 'usage-safety-conflict-middle-b' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 211 -WaitId 'usage-safety-conflict-b' -WaitKind 'synthetic' -Role 'implementer' -Usage $conflictMiddleB)
+    )
+    Assert-True ([string]$conflictReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $conflictReport.metrics.implementationTokens.value) 'same-time conflicting usage samples must not choose an arbitrary sequence'
+    Assert-True (@($conflictReport.anomalies | Where-Object { $_.code -eq 'usage_intermediate_conflict' }).Count -ge 1) 'same-time conflicting usage samples must be disclosed'
+
+    $missingMiddle = New-UsageSample -StreamId 'safety-missing-middle-stream' -Role 'implementer' -SessionId 'safety-missing-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 120 })
+    $missingStart = New-UsageSample -StreamId 'safety-missing-middle-stream' -Role 'implementer' -SessionId 'safety-missing-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $missingEnd = New-UsageSample -StreamId 'safety-missing-middle-stream' -Role 'implementer' -SessionId 'safety-missing-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $missingReport = Invoke-UsageSafetyReport -TaskRefs @(212) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 212 -PhaseId 'safety-missing-middle' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $missingStart -EndUsage $missingEnd -Revision $revisionA),
+        (New-Event -EventId 'usage-safety-missing-middle' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 212 -WaitId 'usage-safety-missing-middle' -WaitKind 'synthetic' -Role 'implementer' -Usage $missingMiddle)
+    )
+    Assert-True ([string]$missingReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $missingReport.metrics.implementationTokens.value) 'missing required intermediate counters must make the whole usage window partial'
+    Assert-True (@($missingReport.anomalies | Where-Object { $_.code -eq 'usage_missing_intermediate_counter' }).Count -ge 1) 'missing intermediate counters must be disclosed'
+
+    $workerStart = New-UsageSample -StreamId 'safety-worker-stream' -Role 'implementer' -SessionId 'safety-worker-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $workerEnd = New-UsageSample -StreamId 'safety-worker-stream' -Role 'implementer' -SessionId 'safety-worker-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $workerEvents = New-UsageWindowEvents -TaskRef 213 -PhaseId 'safety-worker-change' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $workerStart -EndUsage $workerEnd -Revision $revisionA
+    $workerEvents[0].workerId = 'worker-a'
+    $workerEvents[1].workerId = 'worker-b'
+    $workerReport = Invoke-UsageSafetyReport -TaskRefs @(213) -WindowEvents $workerEvents
+    Assert-True ([string]$workerReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $workerReport.metrics.implementationTokens.value) 'worker-only changes must invalidate usage attribution even when session and counters continue'
+    Assert-True (@($workerReport.anomalies | Where-Object { $_.code -eq 'usage_stream_conflict' }).Count -ge 1) 'worker-only changes must be disclosed'
+
+    $windowStart = New-UsageSample -StreamId 'safety-window-before' -Role 'implementer' -SessionId 'safety-window-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T09:59:00Z' -BaselineAtUtc '2026-10-09T09:59:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $windowEnd = New-UsageSample -StreamId 'safety-window-before' -Role 'implementer' -SessionId 'safety-window-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T09:59:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $postStart = New-UsageSample -StreamId 'safety-window-after' -Role 'implementer' -SessionId 'safety-post-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:09:00Z' -BaselineAtUtc '2026-10-09T10:09:00Z' -Counters ([ordered]@{ inputTokens = 200; outputTokens = 30 })
+    $postEnd = New-UsageSample -StreamId 'safety-window-after' -Role 'implementer' -SessionId 'safety-post-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:11:00Z' -BaselineAtUtc '2026-10-09T10:09:00Z' -Counters ([ordered]@{ inputTokens = 250; outputTokens = 40 })
+    $windowReport = Invoke-UsageSafetyReport -TaskRefs @(214, 215) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 214 -PhaseId 'safety-window-before' -StartUtc '2026-10-09T09:59:00Z' -EndUtc '2026-10-09T10:01:00Z' -StartUsage $windowStart -EndUsage $windowEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 215 -PhaseId 'safety-window-after' -StartUtc '2026-10-09T10:09:00Z' -EndUtc '2026-10-09T10:11:00Z' -StartUsage $postStart -EndUsage $postEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$windowReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $windowReport.metrics.implementationTokens.value) 'usage intervals before or after the measured story run must remain partial'
+    Assert-True (@($windowReport.anomalies | Where-Object { $_.code -eq 'usage_interval_outside_run' }).Count -eq 2) 'before-start and post-PR straddling intervals must disclose run-window violations'
+    Assert-True (@($windowReport.anomalies | Where-Object { $_.code -eq 'usage_sample_after_run' }).Count -eq 1) 'post-PR samples must be disclosed'
 
     $finalRetryPerTaskEvents = @(
         (New-Event -EventId 'per-task-final-story-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T11:30:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),

@@ -1456,6 +1456,8 @@ function Get-UsageBoundaryResult {
         [AllowNull()] [object] $StartRecord,
         [AllowNull()] [object] $EndRecord,
         [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $AllRecords,
+        [AllowNull()] [object] $StorySpan,
         [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
     )
 
@@ -1471,11 +1473,14 @@ function Get-UsageBoundaryResult {
         identity = $identity
         role = $Role
         intervalState = [string] $Interval.state
+        startUtc = $Interval.startUtc
+        endUtc = $Interval.endUtc
         state = 'unavailable'
         value = $null
         streamId = $null
         sessionId = $null
         source = $null
+        workerId = $null
         counterSemantics = $null
         baselineAtUtc = $null
         startSampledAtUtc = if ($null -ne $startUsage) { Get-PropertyValue $startUsage 'sampledAtUtc' } else { $null }
@@ -1515,6 +1520,10 @@ function Get-UsageBoundaryResult {
 
     $startRole = [string] (Get-PropertyValue $startUsage 'role')
     $endRole = [string] (Get-PropertyValue $endUsage 'role')
+    $startWorker = [string] (Get-PropertyValue $startEvent 'workerId')
+    $endWorker = [string] (Get-PropertyValue $endEvent 'workerId')
+    $startEventSession = [string] (Get-PropertyValue $startEvent 'sessionId')
+    $endEventSession = [string] (Get-PropertyValue $endEvent 'sessionId')
     $startStream = [string] (Get-PropertyValue $startUsage 'streamId')
     $endStream = [string] (Get-PropertyValue $endUsage 'streamId')
     $startSource = [string] (Get-PropertyValue $startUsage 'source')
@@ -1525,7 +1534,7 @@ function Get-UsageBoundaryResult {
         $startSession = [string] (Get-PropertyValue $startEvent 'sessionId')
     }
     if ([string]::IsNullOrWhiteSpace($endSession) -and $null -ne $endEvent) {
-        $endSession = [string] (Get-PropertyValue $endEvent 'sessionId')
+        $endSession = $endEventSession
     }
     $startSemantics = Get-PropertyValue $startUsage 'counterSemantics'
     $endSemantics = Get-PropertyValue $endUsage 'counterSemantics'
@@ -1538,18 +1547,23 @@ function Get-UsageBoundaryResult {
     $result.streamId = if ($startStream -eq $endStream) { $startStream } else { $null }
     $result.sessionId = if ($startSession -eq $endSession) { $startSession } else { $null }
     $result.source = if ($startSource -eq $endSource) { $startSource } else { $null }
+    $result.workerId = if ($startWorker -eq $endWorker) { $startWorker } else { $null }
     $result.counterSemantics = [pscustomobject][ordered]@{ cachedInput = $cachedInput; reasoning = $reasoning }
     $result.baselineAtUtc = Get-PropertyValue $startUsage 'baselineAtUtc'
 
     $bindingConflict = $startRole -cne $Role -or $endRole -cne $Role -or
         $startRole -cne $endRole -or $startStream -cne $endStream -or
-        $startSession -cne $endSession -or $startSource -cne $endSource
+        $startSession -cne $endSession -or $startSource -cne $endSource -or
+        $startWorker -cne $endWorker -or
+        ([string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $startUsage 'sessionId')) -and
+            [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $endUsage 'sessionId')) -and
+            $startEventSession -cne $endEventSession)
     $semanticsConflict = $startCachedInput -cne $endCachedInput -or $startReasoning -cne $endReasoning
     if ($bindingConflict) {
         $result.state = 'partial'
-        $result.missingData = 'usage role, stream, session, or source changed between exact boundaries'
-        $result.coverage = 'boundary samples do not share one attributable source stream'
-        [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'Usage boundary samples changed their attributable role, stream, session, or source' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        $result.missingData = 'usage role, worker, stream, session, or source changed between exact boundaries'
+        $result.coverage = 'boundary samples do not share one attributable source worker stream'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'Usage boundary samples changed their attributable role, worker, stream, session, or source' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
         return [pscustomobject] $result
     }
     if ($semanticsConflict) {
@@ -1578,6 +1592,131 @@ function Get-UsageBoundaryResult {
         (Try-GetUtcTime -Value (Get-PropertyValue $endUsage 'sampledAtUtc') -Parsed ([ref] $endSampleTime)) -and
         (Try-GetUtcTime -Value (Get-PropertyValue $startUsage 'baselineAtUtc') -Parsed ([ref] $startBaselineTime)) -and
         (Try-GetUtcTime -Value (Get-PropertyValue $endUsage 'baselineAtUtc') -Parsed ([ref] $endBaselineTime))
+    $requiredCounters = [System.Collections.Generic.List[string]]::new()
+    [void] $requiredCounters.Add('inputTokens')
+    [void] $requiredCounters.Add('outputTokens')
+    if ($cachedInput -eq 'disjoint_from_input') { [void] $requiredCounters.Add('cachedInputTokens') }
+    if ($reasoning -eq 'disjoint_from_output') { [void] $requiredCounters.Add('reasoningTokens') }
+    $boundaryDeltas = [ordered]@{}
+    foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) {
+        $startCounter = Get-UsageCounter -Usage $startUsage -Name $counterName
+        $endCounter = Get-UsageCounter -Usage $endUsage -Name $counterName
+        if ($startCounter.present -and $endCounter.present -and $endCounter.value -ge $startCounter.value) {
+            $boundaryDeltas[$counterName] = $endCounter.value - $startCounter.value
+        }
+    }
+    $result.deltas = [pscustomobject] $boundaryDeltas
+    $intermediateProblem = $false
+    $intermediateProblemMessage = $null
+    if ($timesValid) {
+        $candidateSamples = [System.Collections.Generic.List[object]]::new()
+        foreach ($candidate in @($AllRecords | Sort-Object Time, Line)) {
+            $candidateUsage = Get-PropertyValue $candidate.Event 'usage'
+            $candidateCounters = if ($null -ne $candidateUsage) { Get-PropertyValue $candidateUsage 'counters' } else { $null }
+            if ($null -eq $candidateUsage -or $null -eq $candidateCounters -or @($candidateCounters.PSObject.Properties).Count -eq 0) { continue }
+            if ([string] (Get-PropertyValue $candidateUsage 'role') -cne $Role -or
+                [string] (Get-PropertyValue $candidateUsage 'streamId') -cne $startStream -or
+                [string] (Get-PropertyValue $candidateUsage 'source') -cne $startSource) { continue }
+            $candidateSampleTime = [DateTimeOffset]::MinValue
+            if (-not (Try-GetUtcTime -Value (Get-PropertyValue $candidateUsage 'sampledAtUtc') -Parsed ([ref] $candidateSampleTime))) { continue }
+            if ($candidateSampleTime -lt $startTime -or $candidateSampleTime -gt $endTime) { continue }
+            $candidateSession = [string] (Get-PropertyValue $candidateUsage 'sessionId')
+            if ([string]::IsNullOrWhiteSpace($candidateSession)) { $candidateSession = [string] (Get-PropertyValue $candidate.Event 'sessionId') }
+            $candidateWorker = [string] (Get-PropertyValue $candidate.Event 'workerId')
+            $candidateSemantics = Get-PropertyValue $candidateUsage 'counterSemantics'
+            [void] $candidateSamples.Add([pscustomobject][ordered]@{
+                    record = $candidate
+                    usage = $candidateUsage
+                    sampleTime = $candidateSampleTime
+                    sessionId = $candidateSession
+                    workerId = $candidateWorker
+                    semantics = $candidateSemantics
+                    counters = $candidateCounters
+                })
+        }
+        $sampleGroups = @($candidateSamples | Group-Object { $_.sampleTime.ToUniversalTime().Ticks })
+        $sequence = [System.Collections.Generic.List[object]]::new()
+        foreach ($sampleGroup in @($sampleGroups | Sort-Object { [long] $_.Name })) {
+            $canonicalSamples = @($sampleGroup.Group | ForEach-Object {
+                    ConvertTo-CanonicalJson -Value ([ordered]@{
+                            sessionId = $_.sessionId
+                            workerId = $_.workerId
+                            semantics = $_.semantics
+                            counters = $_.counters
+                        })
+                } | Sort-Object -Unique)
+            if ($canonicalSamples.Count -gt 1) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'same-time usage snapshots disagree on worker, session, semantics, or counters'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'Same-time usage snapshots disagree and cannot establish one cumulative sequence' -Identity $identity -EventIds @($sampleGroup.Group | ForEach-Object { $_.record.EventId })))
+            }
+            else {
+                [void] $sequence.Add(@($sampleGroup.Group | Sort-Object { $_.record.Line } | Select-Object -First 1))
+            }
+        }
+        $previousSample = $null
+        foreach ($sample in @($sequence | Sort-Object sampleTime, { $_.record.Line })) {
+            $sampleSemantics = $sample.semantics
+            if ($sample.sessionId -cne $startSession -or $sample.workerId -cne $startWorker) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'worker or session provenance changed within the attributable window'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'An intermediate usage sample changed worker or session provenance' -Identity $identity -EventIds @($sample.record.EventId)))
+            }
+            if ([string] (Get-PropertyValue $sampleSemantics 'cachedInput') -cne $cachedInput -or
+                [string] (Get-PropertyValue $sampleSemantics 'reasoning') -cne $reasoning) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'counter semantics changed within the attributable window'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'An intermediate usage sample changed counter semantics' -Identity $identity -EventIds @($sample.record.EventId)))
+            }
+            foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) {
+                $currentCounter = Get-UsageCounter -Usage $sample.usage -Name $counterName
+                if ($counterName -in $requiredCounters -and -not $currentCounter.present) {
+                    $intermediateProblem = $true
+                    $intermediateProblemMessage = 'a required counter is absent from an intermediate usage sample'
+                    [void] $Anomalies.Add((New-Anomaly -Code 'usage_missing_intermediate_counter' -Message 'An intermediate usage sample omitted a counter required by the declared semantics' -Identity $identity -EventIds @($sample.record.EventId)))
+                }
+                if ($null -ne $previousSample) {
+                    $previousCounter = Get-UsageCounter -Usage $previousSample.usage -Name $counterName
+                    if ($currentCounter.present -and $previousCounter.present -and $currentCounter.value -lt $previousCounter.value) {
+                        $intermediateProblem = $true
+                        $intermediateProblemMessage = 'a cumulative counter decreased at an intermediate usage sample'
+                        [void] $Anomalies.Add((New-Anomaly -Code 'usage_counter_reset' -Message 'An intermediate cumulative usage sample decreased; the whole window crosses a reset segment' -Identity $identity -EventIds @($previousSample.record.EventId, $sample.record.EventId)))
+                    }
+                }
+            }
+            $previousSample = $sample
+        }
+    }
+    if ($intermediateProblem) {
+        $result.state = 'partial'
+        $result.missingData = $intermediateProblemMessage
+        $result.coverage = 'ordered intermediate usage samples prevent a complete attributable cumulative delta'
+        return [pscustomobject] $result
+    }
+    $storyWindowValid = $false
+    $storyStartTime = [DateTimeOffset]::MinValue
+    $storyEndTime = [DateTimeOffset]::MinValue
+    $runWindowProblem = $false
+    $runWindowProblemMessage = $null
+    if ($null -ne $StorySpan -and [string] $StorySpan.state -eq 'measured') {
+        $storyWindowValid = (Try-GetUtcTime -Value $StorySpan.startUtc -Parsed ([ref] $storyStartTime)) -and
+            (Try-GetUtcTime -Value $StorySpan.endUtc -Parsed ([ref] $storyEndTime))
+    }
+    if (-not $storyWindowValid) {
+        $runWindowProblem = $true
+        $runWindowProblemMessage = 'story run boundaries are unavailable for source-backed usage attribution'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_run_window_unavailable' -Message 'Source-backed usage was not attributed without measured story start and confirmed PR boundaries' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+    }
+    if ($storyWindowValid -and ($startTime -lt $storyStartTime -or $endTime -gt $storyEndTime)) {
+        $runWindowProblem = $true
+        $runWindowProblemMessage = 'usage interval straddles the story run start or confirmed PR boundary'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_interval_outside_run' -Message 'A usage interval crosses the measured story run window and was excluded from the numeric total' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+    }
+    if ($storyWindowValid -and ($startSampleTime -gt $storyEndTime -or $endSampleTime -gt $storyEndTime)) {
+        $runWindowProblem = $true
+        $runWindowProblemMessage = 'usage sample occurs after the confirmed PR boundary'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_sample_after_run' -Message 'A usage sample after the confirmed PR boundary was excluded from the story total' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+    }
     if ($timesValid -and ($startSampleTime -gt $endTime -or $endSampleTime -gt $endTime)) {
         $result.state = 'partial'
         $result.missingData = 'usage sample occurs after the attributable interval'
@@ -1593,11 +1732,6 @@ function Get-UsageBoundaryResult {
         [void] $Anomalies.Add((New-Anomaly -Code 'usage_boundary_mismatch' -Message 'Usage samples were not observed at the exact interval boundaries or shared exact baseline' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
         return [pscustomobject] $result
     }
-    $requiredCounters = [System.Collections.Generic.List[string]]::new()
-    [void] $requiredCounters.Add('inputTokens')
-    [void] $requiredCounters.Add('outputTokens')
-    if ($cachedInput -eq 'disjoint_from_input') { [void] $requiredCounters.Add('cachedInputTokens') }
-    if ($reasoning -eq 'disjoint_from_output') { [void] $requiredCounters.Add('reasoningTokens') }
     $deltas = [ordered]@{}
     $reset = $false
     $missingCounter = $false
@@ -1631,6 +1765,12 @@ function Get-UsageBoundaryResult {
         [void] $Anomalies.Add((New-Anomaly -Code 'usage_missing_counter' -Message 'A required usage counter was absent at one exact boundary' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
         return [pscustomobject] $result
     }
+    if ($runWindowProblem) {
+        $result.state = 'partial'
+        $result.missingData = $runWindowProblemMessage
+        $result.coverage = 'numeric usage exists but cannot be fully bounded to the story run window'
+        return [pscustomobject] $result
+    }
     if ($Interval.state -ne 'measured' -or $startState -ne 'measured' -or $endState -ne 'measured') {
         $result.state = 'partial'
         $result.missingData = if ($Interval.state -ne 'measured') { [string] $Interval.missingData } else { 'one or both source usage samples are partial' }
@@ -1655,6 +1795,63 @@ function Get-UsageBoundaryResult {
     return [pscustomobject] $result
 }
 
+function Get-UsageAttributionKey {
+    param([Parameter(Mandatory)] [object] $Evidence)
+
+    return @(
+        [string] $Evidence.role
+        [string] $Evidence.workerId
+        [string] $Evidence.streamId
+        [string] $Evidence.sessionId
+    ) -join '|'
+}
+
+function Resolve-UsageEvidence {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]] $Evidence,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
+    )
+
+    foreach ($item in $Evidence) {
+        $item | Add-Member -NotePropertyName countable -NotePropertyValue $true -Force
+    }
+    $ordered = @($Evidence | Sort-Object identity)
+    for ($i = 0; $i -lt $ordered.Count; $i++) {
+        $left = $ordered[$i]
+        if ($left.state -eq 'unavailable' -or [string]::IsNullOrWhiteSpace([string] $left.startUtc) -or [string]::IsNullOrWhiteSpace([string] $left.endUtc) -or $null -eq $left.deltas) { continue }
+        $leftStart = [DateTimeOffset]::Parse([string] $left.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        $leftEnd = [DateTimeOffset]::Parse([string] $left.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+        if ($leftStart -ge $leftEnd) { continue }
+        for ($j = $i + 1; $j -lt $ordered.Count; $j++) {
+            $right = $ordered[$j]
+            if ($right.state -eq 'unavailable' -or $null -eq $right.deltas -or (Get-UsageAttributionKey -Evidence $left) -cne (Get-UsageAttributionKey -Evidence $right)) { continue }
+            if ([string]::IsNullOrWhiteSpace([string] $right.startUtc) -or [string]::IsNullOrWhiteSpace([string] $right.endUtc)) { continue }
+            $rightStart = [DateTimeOffset]::Parse([string] $right.startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            $rightEnd = [DateTimeOffset]::Parse([string] $right.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            if ($rightStart -ge $rightEnd -or $leftStart -ge $rightEnd -or $rightStart -ge $leftEnd) { continue }
+            $sameWindow = $leftStart -eq $rightStart -and $leftEnd -eq $rightEnd
+            $sameSource = [string] $left.source -ceq [string] $right.source
+            $samePayload = (ConvertTo-CanonicalJson -Value ([ordered]@{ source = $left.source; deltas = $left.deltas; components = $left.components; counterSemantics = $left.counterSemantics })) -ceq
+                (ConvertTo-CanonicalJson -Value ([ordered]@{ source = $right.source; deltas = $right.deltas; components = $right.components; counterSemantics = $right.counterSemantics }))
+            if ($sameWindow -and $sameSource -and $samePayload) {
+                $right.countable = $false
+                $right | Add-Member -NotePropertyName duplicateOf -NotePropertyValue $left.identity -Force
+                [void] $Anomalies.Add((New-Anomaly -Code 'duplicate_usage_window' -Message 'An identical source-backed usage window was retained once for token totals' -Identity "$($left.identity)|$($right.identity)"))
+            }
+            else {
+                $left.state = 'partial'
+                $right.state = 'partial'
+                $left.countable = $false
+                $right.countable = $false
+                $left.missingData = 'overlapping source-backed usage windows are ambiguous and were not summed'
+                $right.missingData = 'overlapping source-backed usage windows are ambiguous and were not summed'
+                [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_usage_window' -Message 'Overlapping source-backed usage windows were not summed because their attribution may double-count cumulative counters' -Identity "$($left.identity)|$($right.identity)"))
+            }
+        }
+    }
+    return $Evidence
+}
+
 function Get-UsageMetric {
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Intervals,
@@ -1662,6 +1859,8 @@ function Get-UsageMetric {
         [Parameter(Mandatory)] [string] $Source,
         [Parameter(Mandatory)] [string] $NoDataMessage,
         [Parameter(Mandatory)] [hashtable] $RecordsByEventId,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $AllRecords,
+        [AllowNull()] [object] $StorySpan,
         [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
     )
 
@@ -1669,14 +1868,16 @@ function Get-UsageMetric {
     foreach ($interval in @($Intervals)) {
         $startRecord = if ($null -ne $interval.startEventId -and $RecordsByEventId.ContainsKey([string] $interval.startEventId)) { $RecordsByEventId[[string] $interval.startEventId] } else { $null }
         $endRecord = if ($null -ne $interval.endEventId -and $RecordsByEventId.ContainsKey([string] $interval.endEventId)) { $RecordsByEventId[[string] $interval.endEventId] } else { $null }
-        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -Anomalies $Anomalies))
+        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -AllRecords $AllRecords -StorySpan $StorySpan -Anomalies $Anomalies))
     }
+    [void] (Resolve-UsageEvidence -Evidence $evidence -Anomalies $Anomalies)
 
     if ($evidence.Count -eq 0) {
         $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source $Source -Calculation 'sum source-backed cumulative deltas by attributable stream' -Coverage 'no attributable intervals for this role' -MissingData $NoDataMessage
     }
     else {
-        $measured = @($evidence | Where-Object { $_.state -eq 'measured' })
+        $countableEvidence = @($evidence | Where-Object { $_.countable -ne $false })
+        $measured = @($countableEvidence | Where-Object { $_.state -eq 'measured' })
         $partial = @($evidence | Where-Object { $_.state -eq 'partial' })
         $unavailable = @($evidence | Where-Object { $_.state -eq 'unavailable' })
         if ($partial.Count -gt 0 -or ($unavailable.Count -gt 0 -and $measured.Count -gt 0)) {
@@ -1938,9 +2139,9 @@ $reviewModeMetric = if ($null -eq $effectiveReviewMode) {
     New-Metric -State 'measured' -Value $effectiveReviewMode -Unit 'enum' -Source 'setup authorization or explicit input' -Calculation 'copy selected review mode' -Coverage 'one consistent review mode' -MissingData $null
 }
 
-$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -Anomalies $anomalies
-$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -Anomalies $anomalies
-$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -Anomalies $anomalies
+$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
+$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
+$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
 $totalTokenMetric = Get-TotalUsageMetric -RoleMetrics @($implementationTokenMetric, $reviewTokenMetric, $coordinationTokenMetric)
 $modelsAndReasoningMetric = New-UnavailableMetadataMetric
 $tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals)
