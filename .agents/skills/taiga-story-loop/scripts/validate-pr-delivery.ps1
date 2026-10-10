@@ -282,4 +282,226 @@ Assert-True ((Test-DeliveryPreflight $standaloneWrongBase) -eq 'wrong_standalone
 $legacyWrongBase = New-DeliveryReceipt -RunKind legacy-standalone-feature -PrBase 'master'
 Assert-True ((Test-DeliveryPreflight $legacyWrongBase) -eq 'missing_feature_base') 'legacy standalone resume must not be converted to a direct master story PR'
 
-Write-Output 'Passed offline PR delivery fixture: standalone direct-master, legacy preserved-feature, and epic feature-base topologies, exact-head preflight, stale/dirty/check guards, PR branch/state reuse guards, unknown-state reconciliation, PR create identity, review evidence, and Taiga link evidence.'
+function New-PerformanceEvent {
+    param(
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $EventId,
+        [Parameter(Mandatory)] [string] $EventType,
+        [Parameter(Mandatory)] [string] $OccurredAtUtc,
+        [AllowNull()] [object] $Revision = $null,
+        [AllowNull()] [object] $PullRequest = $null
+    )
+
+    [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_event'
+        eventId = $EventId
+        runId = $RunId
+        projectId = 12
+        storyId = 728
+        storyRef = 144
+        taskRef = $null
+        role = 'coordinator'
+        sessionId = 'synthetic-coordinator-session'
+        workerId = 'synthetic-coordinator'
+        transitionId = $EventId
+        scope = 'story'
+        phaseId = $null
+        correctionId = $null
+        reviewRequestId = $null
+        reviewAttemptId = $null
+        reviewKind = $null
+        reviewAttemptOrdinal = $null
+        supersedesReviewAttemptId = $null
+        eventType = $EventType
+        occurredAtUtc = $OccurredAtUtc
+        revision = $Revision
+        reviewMode = 'per_task'
+        provenance = [ordered]@{
+            source = 'synthetic_fixture'
+            observedBy = 'validate-pr-delivery'
+            coverage = 'fixed UTC delivery fixture'
+            synthetic = $true
+        }
+        usage = $null
+        waitId = $null
+        waitKind = $null
+        pullRequest = $PullRequest
+    }
+}
+
+function Invoke-PerformanceRecorder {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $ExternalRunRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [object] $Event
+    )
+
+    $eventJson = $Event | ConvertTo-Json -Compress -Depth 30
+    & pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $eventJson *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function New-SyntheticPerformanceRun {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $ExternalRunRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $OccurredAtUtc
+    )
+
+    [IO.Directory]::CreateDirectory($ExternalRunRoot) | Out-Null
+    $storyStarted = New-PerformanceEvent -RunId $RunId -EventId "$RunId/story-started" -EventType 'story_started' -OccurredAtUtc $OccurredAtUtc
+    Assert-True (Invoke-PerformanceRecorder -RecorderPath $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -Event $storyStarted) 'synthetic story_started must reach the recorder'
+    Join-Path (Join-Path $ExternalRunRoot $RunId) 'events.jsonl'
+}
+
+function Invoke-ReportFinalization {
+    param(
+        [Parameter(Mandatory)] [hashtable] $Delivery,
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $AggregatorPath,
+        [Parameter(Mandatory)] [string] $ExternalRunRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $ArtifactRoot,
+        [Parameter(Mandatory)] [string] $BaseRevision,
+        [Parameter(Mandatory)] [string] $RepositoryPath
+    )
+
+    $pr = $Delivery.pr
+    $confirmed = $Delivery.providerConfirmed -eq $true -and
+        $Delivery.state -in @('created', 'reused') -and
+        $null -ne $pr -and
+        [string]$pr.head -eq [string]$Delivery.reviewedHead -and
+        [string]$pr.base -eq [string]$Delivery.prBase
+    if (-not $confirmed) {
+        return [ordered]@{
+            deliveryState = 'reconcile'
+            reportState = 'not_attempted'
+            prReadyEvent = $false
+            reportId = $null
+            jsonPath = $null
+            response = 'PR delivery reconciliation required; performance report not attempted.'
+        }
+    }
+
+    $prIdentity = [ordered]@{
+        provider = 'github'
+        owner = 'blakeg83'
+        repository = 'taiga-mcp'
+        number = [int]$pr.number
+        reviewedHead = [string]$Delivery.reviewedHead
+    }
+    $prReady = New-PerformanceEvent -RunId $RunId -EventId "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)" -EventType 'pr_ready' -OccurredAtUtc '2026-10-10T02:00:00Z' -Revision ([string]$Delivery.reviewedHead) -PullRequest $prIdentity
+    if (-not (Invoke-PerformanceRecorder -RecorderPath $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -Event $prReady)) {
+        return [ordered]@{
+            deliveryState = 'confirmed'
+            reportState = 'unavailable'
+            prReadyEvent = $false
+            reportId = $null
+            jsonPath = $null
+            response = 'PR ready for approval; performance report unavailable (recorder failure).'
+        }
+    }
+
+    try {
+        [IO.Directory]::CreateDirectory($ArtifactRoot) | Out-Null
+        $ledgerPath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'events.jsonl'
+        $output = @(& pwsh -NoProfile -File $AggregatorPath -EventsPath $ledgerPath -ReviewMode per_task -ReviewedHead ([string]$Delivery.reviewedHead) -BaseRevision $BaseRevision -RepositoryPath $RepositoryPath -ArtifactDirectory $ArtifactRoot 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw ($output -join [Environment]::NewLine)
+        }
+        $report = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine) | ConvertFrom-Json -Depth 100
+        $jsonArtifact = Get-ChildItem -LiteralPath $ArtifactRoot -File -Filter '*.json' |
+            Where-Object { $_.Name -notlike '*.manifest.json' } |
+            Select-Object -First 1
+        Assert-True ($null -ne $jsonArtifact) 'confirmed report must publish a JSON artifact'
+        $summary = "report=$($report.reportId); timeToPr=$($report.metrics.timeToPr.state); limitations=$(@($report.provenance.limitations) -join ', ')"
+        return [ordered]@{
+            deliveryState = 'confirmed'
+            reportState = 'published'
+            prReadyEvent = $true
+            reportId = [string]$report.reportId
+            jsonPath = $jsonArtifact.FullName
+            response = "PR ready for approval; performance report: $summary; JSON artifact: $($jsonArtifact.FullName)"
+        }
+    }
+    catch {
+        return [ordered]@{
+            deliveryState = 'confirmed'
+            reportState = 'unavailable'
+            prReadyEvent = $true
+            reportId = $null
+            jsonPath = $null
+            response = "PR ready for approval; performance report unavailable/limited: $($_.Exception.Message)"
+        }
+    }
+}
+
+$reportFixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-pr-report-finalization-' + [guid]::NewGuid().ToString('N'))
+$reportRepositoryPath = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')).Path
+$reportRecorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
+$reportAggregatorPath = Join-Path $reportRepositoryPath 'scripts/get-story-performance.ps1'
+$reportBase = 'b' * 40
+$reportHeadA = 'a' * 40
+$reportHeadB = 'c' * 40
+$reportPrA = [pscustomobject]@{
+    url = 'https://example.invalid/pr/report-a'
+    number = 157
+    base = $valid.prBase
+    head = $reportHeadA
+}
+$confirmedCreate = [ordered]@{
+    state = 'created'
+    providerConfirmed = $true
+    pr = $reportPrA
+    reviewedHead = $reportHeadA
+    prBase = $valid.prBase
+}
+$confirmedReuse = [ordered]@{
+    state = 'reused'
+    providerConfirmed = $true
+    pr = $reportPrA
+    reviewedHead = $reportHeadA
+    prBase = $valid.prBase
+}
+
+try {
+    $runA = New-SyntheticPerformanceRun -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-a' -OccurredAtUtc '2026-10-10T01:59:00Z'
+    $artifactA = Join-Path $reportFixtureRoot 'artifacts-a'
+    $createdReport = Invoke-ReportFinalization -Delivery $confirmedCreate -RecorderPath $reportRecorderPath -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-a' -ArtifactRoot $artifactA -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
+    Assert-True ($createdReport.deliveryState -eq 'confirmed' -and $createdReport.reportState -eq 'published' -and $createdReport.prReadyEvent) 'confirmed PR creation must append pr_ready and publish a report'
+    Assert-True ($createdReport.response.Contains('performance report:') -and $createdReport.response.Contains('JSON artifact:') -and (Test-Path -LiteralPath $createdReport.jsonPath -PathType Leaf)) 'normal confirmed response must include a concise report and JSON artifact reference'
+
+    $reusedReport = Invoke-ReportFinalization -Delivery $confirmedReuse -RecorderPath $reportRecorderPath -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-a' -ArtifactRoot $artifactA -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
+    Assert-True ($reusedReport.reportState -eq 'published' -and $reusedReport.reportId -eq $createdReport.reportId -and $reusedReport.jsonPath -eq $createdReport.jsonPath) 'duplicate confirmed PR reuse must reuse the same report identity and JSON artifact'
+    $runALedgerLines = @(Get-Content -LiteralPath $runA)
+    Assert-True ($runALedgerLines.Count -eq 2) 'duplicate confirmed PR observation must not append a second pr_ready event'
+
+    $reportPrB = [pscustomobject]@{ url = 'https://example.invalid/pr/report-b'; number = 157; base = $valid.prBase; head = $reportHeadB }
+    $confirmedNewHead = [ordered]@{ state = 'reused'; providerConfirmed = $true; pr = $reportPrB; reviewedHead = $reportHeadB; prBase = $valid.prBase }
+    $runB = New-SyntheticPerformanceRun -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-b' -OccurredAtUtc '2026-10-10T02:09:00Z'
+    $newHeadReport = Invoke-ReportFinalization -Delivery $confirmedNewHead -RecorderPath $reportRecorderPath -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-b' -ArtifactRoot (Join-Path $reportFixtureRoot 'artifacts-b') -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
+    Assert-True ($newHeadReport.reportState -eq 'published' -and $newHeadReport.reportId -ne $createdReport.reportId -and $newHeadReport.jsonPath -ne $createdReport.jsonPath) 'a newly confirmed reviewed HEAD must retain a new report sibling'
+
+    $unknownDelivery = [ordered]@{ state = 'reconcile'; providerConfirmed = $false; pr = $null; reviewedHead = $reportHeadA; prBase = $valid.prBase }
+    $unknownReport = Invoke-ReportFinalization -Delivery $unknownDelivery -RecorderPath (Join-Path $reportFixtureRoot 'missing-recorder.ps1') -AggregatorPath (Join-Path $reportFixtureRoot 'missing-aggregator.ps1') -ExternalRunRoot $reportFixtureRoot -RunId 'unknown-run' -ArtifactRoot (Join-Path $reportFixtureRoot 'unknown-artifacts') -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
+    Assert-True ($unknownReport.deliveryState -eq 'reconcile' -and -not $unknownReport.prReadyEvent -and $unknownReport.reportState -eq 'not_attempted') 'unknown provider outcome must reconcile without pr_ready or aggregation'
+
+    $runRecorderFailure = New-SyntheticPerformanceRun -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-recorder-failure' -OccurredAtUtc '2026-10-10T02:19:00Z'
+    $recorderFailure = Invoke-ReportFinalization -Delivery $confirmedCreate -RecorderPath (Join-Path $reportFixtureRoot 'missing-recorder.ps1') -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-recorder-failure' -ArtifactRoot (Join-Path $reportFixtureRoot 'recorder-failure-artifacts') -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
+    Assert-True ($recorderFailure.deliveryState -eq 'confirmed' -and $recorderFailure.reportState -eq 'unavailable' -and -not $recorderFailure.prReadyEvent -and $recorderFailure.response.Contains('recorder failure')) 'recorder failure must preserve confirmed delivery and disclose a limitation'
+    Assert-True (@(Get-Content -LiteralPath $runRecorderFailure | Where-Object { $_ -like '*pr_ready*' }).Count -eq 0) 'recorder failure must not fabricate pr_ready'
+
+    $runReportFailure = New-SyntheticPerformanceRun -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-aggregation-failure' -OccurredAtUtc '2026-10-10T02:29:00Z'
+    $aggregationFailure = Invoke-ReportFinalization -Delivery $confirmedCreate -RecorderPath $reportRecorderPath -AggregatorPath (Join-Path $reportFixtureRoot 'missing-aggregator.ps1') -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-aggregation-failure' -ArtifactRoot (Join-Path $reportFixtureRoot 'aggregation-failure-artifacts') -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
+    Assert-True ($aggregationFailure.deliveryState -eq 'confirmed' -and $aggregationFailure.reportState -eq 'unavailable' -and $aggregationFailure.prReadyEvent -and $aggregationFailure.response.Contains('unavailable/limited')) 'aggregator failure must preserve confirmed delivery and disclose a limitation'
+}
+finally {
+    if (Test-Path -LiteralPath $reportFixtureRoot) {
+        Remove-Item -LiteralPath $reportFixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Output 'Passed offline PR delivery fixture and report-finalization fixtures: exact-head preflight, topology/reuse/unknown guards, unknown-state reconciliation, confirmed create/reuse-only pr_ready, real aggregator publication, duplicate report reuse, new reviewed-head retention, recorder/report fail-open limitations, and concise JSON response references.'

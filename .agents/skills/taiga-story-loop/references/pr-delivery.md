@@ -97,6 +97,40 @@ exact PR URL, topology, base, head, and checks in the parent Taiga story
 comment. The comment records `state: pr_ready_for_approval`; it does not mark
 the story Done, claim a merge, or authorize the next epic story.
 
+## Performance report finalization
+
+Report finalization is a coordinator-owned side effect of confirmed PR
+delivery. It runs only after the provider confirms an exact-match open PR that
+has the authorized repository, story head branch, topology-specific base, and
+the exact reviewer-approved HEAD. A `create` intent, a response-lost provider
+write, an unknown PR state, a closed PR, or a stale head is not confirmation:
+none of those outcomes may append `pr_ready`, call the aggregator, or create a
+report.
+
+After confirmed create or reuse:
+
+1. Append one coordinator `pr_ready` event through
+   `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with
+   the exact PR identity and reviewed HEAD. The run ledger remains external to
+   the repository.
+2. Invoke the read-only `scripts/get-story-performance.ps1` aggregator with
+   that ledger, the selected review mode, the exact reviewed HEAD, captured
+   base, repository path, and an external artifact directory. The invocation
+   is not another provider operation and does not change PR or merge state.
+3. Include a concise report summary and the immutable JSON artifact reference
+   in the normal `pr_ready_for_approval` response. Retain the Markdown sibling
+   and manifest when the aggregator publishes the artifact set.
+
+The report identity is `runId + projectId + storyId + PR identity + reviewed
+HEAD`. Reobserving the same confirmed PR and HEAD reuses the existing report
+artifacts and does not create a second report. A newly confirmed reviewed HEAD
+creates a new retained report sibling; it never overwrites the prior report.
+If recorder, aggregator, or artifact publication fails, keep the confirmed PR
+delivery and user merge gate intact, return the report as unavailable/limited
+with its safe limitation, and do not fabricate `pr_ready`, retry a provider
+write, add a worker message, or block normal delivery. Unknown provider or
+recorder outcomes remain reconciliation cases and produce no report.
+
 ## Delivery result and recovery
 
 Persist the confirmed PR URL, repository, base branch, head SHA, and

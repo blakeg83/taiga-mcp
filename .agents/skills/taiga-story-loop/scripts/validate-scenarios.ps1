@@ -718,7 +718,13 @@ foreach ($marker in @(
         'one explicit final whole-story review'
         'task acceptance records alone are insufficient'
         'Independent verification:'
-        'Inspected worker evidence:')) {
+        'Inspected worker evidence:'
+        '## Performance report finalization'
+        'confirmed create or reuse'
+        'scripts/get-story-performance.ps1'
+        'concise report summary'
+        'newly confirmed reviewed HEAD'
+        'recorder, aggregator, or artifact publication fails')) {
     if (-not $normalizedPrDelivery.Contains($marker)) {
         throw "PR delivery assertion failed: $marker"
     }
@@ -726,7 +732,19 @@ foreach ($marker in @(
 if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR delivery fixture')) {
     throw 'PR delivery assertion failed: offline fixture coverage'
 }
-foreach ($marker in @('unknownState', 'provider_state_unknown', 'should-not-create', 'unknown-state reconciliation')) {
+foreach ($marker in @(
+        'unknownState'
+        'provider_state_unknown'
+        'should-not-create'
+        'unknown-state reconciliation'
+        'Invoke-ReportFinalization'
+        'providerConfirmed'
+        'reportState'
+        'duplicate confirmed PR observation'
+        'newly confirmed reviewed HEAD'
+        'recorder failure'
+        'aggregator failure'
+        'JSON artifact')) {
     if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains($marker)) {
         throw "PR delivery assertion failed: unknown-state fixture marker $marker"
     }
