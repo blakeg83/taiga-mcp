@@ -148,6 +148,69 @@ function Invoke-WorkflowFixture {
     }
 }
 
+function Invoke-RecorderEvent {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $ExternalRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [object] $Event,
+        [int] $FaultAfterBytes = -1
+    )
+
+    $arguments = @(
+        '-NoProfile',
+        '-File', $RecorderPath,
+        '-ExternalRunRoot', $ExternalRoot,
+        '-RunId', $RunId,
+        '-EventJson', ($Event | ConvertTo-Json -Compress -Depth 20)
+    )
+    if ($FaultAfterBytes -ge 0) {
+        $arguments += @('-FaultAfterBytes', [string] $FaultAfterBytes)
+    }
+    $output = & pwsh @arguments 2>&1
+    $jsonLines = @($output | ForEach-Object { [string] $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    Assert-True ($jsonLines.Count -gt 0) "recorder invocation for $($Event.eventId) must return a JSON result"
+    $result = $null
+    try {
+        $result = $jsonLines[-1] | ConvertFrom-Json -Depth 50 -DateKind String
+    }
+    catch {
+        throw "recorder invocation for $($Event.eventId) returned non-JSON output '$($jsonLines[-1])'"
+    }
+    return [pscustomobject]@{
+        ExitCode = [int] $LASTEXITCODE
+        Result = $result
+        Output = $jsonLines
+    }
+}
+
+function Invoke-WorkflowReadyTransition {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $ExternalRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [object] $Event,
+        [int] $FaultAfterBytes = -1
+    )
+
+    $recorder = Invoke-RecorderEvent -RecorderPath $RecorderPath -ExternalRoot $ExternalRoot -RunId $RunId -Event $Event -FaultAfterBytes $FaultAfterBytes
+    # This is the controlled transition contract exercised by the automatic
+    # review fixture: measurement is a side effect of the ready boundary. A
+    # recorder failure changes coverage only; authorization, gate, dispatch,
+    # and the next-task hold remain workflow decisions.
+    return [pscustomobject][ordered]@{
+        authorization = 'start-synthetic-145'
+        taskStateBefore = 'in_progress'
+        gate = 'ready_for_review'
+        decision = 'dispatch_review'
+        taskStateAfter = 'awaiting_review'
+        nextTask = 'held'
+        measurement = if ($recorder.ExitCode -eq 0) { 'recorded' } else { 'unavailable' }
+        recorderExitCode = $recorder.ExitCode
+        recorderStatus = [string] $recorder.Result.status
+    }
+}
+
 function New-UsageWindowEvents {
     param(
         [Parameter(Mandatory)] [int] $TaskRef,
@@ -915,6 +978,70 @@ try {
     $repeatJson = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153)
     Assert-True ($LASTEXITCODE -eq 0 -and $repeatJson -ceq $jsonText) 'repeating aggregation over the same ledger should be byte stable'
 
+    # Integrate recorder recovery with aggregation. The interrupted write is
+    # followed by a fresh-process replay of a complete boundary, a recovery
+    # append for the interrupted identity, and a second stable-ID replay. The
+    # report is read from this exact recovered ledger, so a recorder bug that
+    # duplicates a complete event changes the asserted counts or durations.
+    $recoveryRunId = 'synthetic-integrated-recovery'
+    $recoveryEvents = @(
+        (New-Event -EventId 'integrated-recovery-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-10T10:00:00Z' -Scope 'story' -Role 'coordinator'),
+        (New-Event -EventId 'integrated-recovery-implementation-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T10:01:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-implementation' -Role 'implementer'),
+        (New-Event -EventId 'integrated-recovery-implementation-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T10:02:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-implementation' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'integrated-recovery-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:03:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-review' -ReviewRequestId 'integrated-recovery-request' -ReviewAttemptId 'integrated-recovery-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'integrated-recovery-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T10:04:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-review' -ReviewRequestId 'integrated-recovery-request' -ReviewAttemptId 'integrated-recovery-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'integrated-recovery-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-10T10:05:00Z' -Scope 'story' -WaitId 'integrated-recovery-wait' -WaitKind 'reviewer' -Role 'coordinator')
+    )
+    foreach ($recoveryEvent in $recoveryEvents) {
+        $recoveryEvent.runId = $recoveryRunId
+        $recoveryAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryEvent
+        Assert-True ($recoveryAppend.ExitCode -eq 0 -and [string]$recoveryAppend.Result.status -ceq 'appended') "recovery setup event $($recoveryEvent.eventId) should append"
+    }
+    $recoveryWaitEnd = New-Event -EventId 'integrated-recovery-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-10T10:06:00Z' -Scope 'story' -WaitId 'integrated-recovery-wait' -WaitKind 'reviewer' -Role 'coordinator'
+    $recoveryWaitEnd.runId = $recoveryRunId
+    $faultedRecoveryWrite = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryWaitEnd -FaultAfterBytes 11
+    Assert-True ($faultedRecoveryWrite.ExitCode -eq 2 -and [string]$faultedRecoveryWrite.Result.status -ceq 'error' -and [string]$faultedRecoveryWrite.Result.errorCategory -ceq 'write_failed') 'integrated recovery fault must leave a safe write failure'
+    $recoveryLedger = Join-Path (Join-Path $recorderRoot $recoveryRunId) 'events.jsonl'
+    $faultedRecoveryBytes = [IO.File]::ReadAllBytes($recoveryLedger)
+    Assert-True ($faultedRecoveryBytes.Length -gt 0 -and $faultedRecoveryBytes[$faultedRecoveryBytes.Length - 1] -ne [byte]0x0A) 'integrated recovery fault must leave a detectable incomplete tail'
+
+    $replayedCompleteBoundary = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryEvents[3]
+    Assert-True ($replayedCompleteBoundary.ExitCode -eq 0 -and [string]$replayedCompleteBoundary.Result.status -ceq 'noop') 'fresh-process replay of a complete boundary must not append a duplicate'
+    $recoveredRecoveryWrite = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryWaitEnd
+    Assert-True ($recoveredRecoveryWrite.ExitCode -eq 0 -and [string]$recoveredRecoveryWrite.Result.status -ceq 'appended' -and [bool]$recoveredRecoveryWrite.Result.recoveredIncompleteTail) 'fresh-process recovery append must retain the interrupted tail diagnostic'
+    Assert-True (Test-Path -LiteralPath ([string]$recoveredRecoveryWrite.Result.diagnosticPath) -PathType Leaf) 'integrated recovery must persist a diagnostic sidecar'
+    $recoveryDiagnosticText = [IO.File]::ReadAllText([string]$recoveredRecoveryWrite.Result.diagnosticPath)
+    Assert-True ($recoveryDiagnosticText -match '"diagnosticType":"incomplete_tail"') 'integrated recovery diagnostic must identify the interrupted tail'
+    $replayedRecoveredBoundary = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryWaitEnd
+    Assert-True ($replayedRecoveredBoundary.ExitCode -eq 0 -and [string]$replayedRecoveredBoundary.Result.status -ceq 'noop') 'replaying the recovered boundary must remain a no-op'
+
+    $recoveryPrReady = New-Event -EventId 'integrated-recovery-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-10T10:07:00Z' -Scope 'story' -Revision $revisionA -Role 'coordinator'
+    $recoveryPrReady.runId = $recoveryRunId
+    $recoveryPrReady.pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 145; reviewedHead = $revisionA }
+    $recoveryPrAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryPrReady
+    Assert-True ($recoveryPrAppend.ExitCode -eq 0 -and [string]$recoveryPrAppend.Result.status -ceq 'appended') 'integrated recovery PR boundary should append'
+    $recoveryReportJson = & $scriptPath -EventsPath $recoveryLedger -ReviewMode per_task -TaskRefs @(301)
+    Assert-True ($LASTEXITCODE -eq 0) 'recovered ledger should aggregate successfully'
+    $recoveryReport = $recoveryReportJson | ConvertFrom-Json -Depth 100
+    Assert-True ([int64]$recoveryReport.metrics.timeToPr.value -eq 420000 -and [int64]$recoveryReport.metrics.implementationElapsed.value -eq 60000 -and [int64]$recoveryReport.metrics.reviewElapsed.value -eq 60000 -and [int64]$recoveryReport.metrics.waitingElapsed.value -eq 60000) 'recovered report must preserve exact elapsed values'
+    Assert-True ([int]$recoveryReport.metrics.initialTaskReviews.value -eq 1 -and [int]$recoveryReport.metrics.tasksCompleted.value -eq 1 -and [int]$recoveryReport.coverage.validEventCount -eq 8) 'recovered report must not double-count complete or recovered boundaries'
+    Assert-True (@($recoveryReport.reviewAttempts).Count -eq 1 -and @($recoveryReport.anomalies | Where-Object { $_.code -eq 'malformed_event' }).Count -ge 1) 'recovered report must retain one review attempt and disclose the quarantined interrupted fragment'
+
+    # Pair a healthy ready-turn control with the same transition under a real
+    # recorder fault. Only measurement coverage may differ; the automatic
+    # review authorization, gate, dispatch decision, and next-task hold must
+    # remain identical.
+    $measurementEvent = New-Event -EventId 'integrated-measurement-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T11:00:00Z' -Scope 'task' -TaskRef 302 -PhaseId 'integrated-measurement-ready' -Revision $revisionA -Role 'implementer'
+    $measurementEvent.runId = 'synthetic-measurement-healthy'
+    $healthyTransition = Invoke-WorkflowReadyTransition -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId 'synthetic-measurement-healthy' -Event $measurementEvent
+    $faultedMeasurementEvent = $measurementEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -DateKind String
+    $faultedMeasurementEvent.runId = 'synthetic-measurement-fault'
+    $faultedTransition = Invoke-WorkflowReadyTransition -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId 'synthetic-measurement-fault' -Event $faultedMeasurementEvent -FaultAfterBytes 9
+    foreach ($decisionField in @('authorization', 'taskStateBefore', 'gate', 'decision', 'taskStateAfter', 'nextTask')) {
+        Assert-True ([string]$healthyTransition.$decisionField -ceq [string]$faultedTransition.$decisionField) "measurement failure must not change workflow decision field $decisionField"
+    }
+    Assert-True ([string]$healthyTransition.measurement -ceq 'recorded' -and [string]$faultedTransition.measurement -ceq 'unavailable' -and [int]$faultedTransition.recorderExitCode -ne 0) 'measurement failure must change only measurement coverage and retain a nonzero recorder failure'
+
     # Run the workflow-owned contract fixtures as part of this integrated
     # matrix. They invoke the production recorder (and, where applicable,
     # continuation writer) against disposable external roots, so this check
@@ -940,9 +1067,10 @@ try {
         [ordered]@{ scenario = 'restart and interrupted tail'; setup = 'confirmed line plus injected incomplete write'; action = 'start a fresh recorder process'; expected = 'preserve complete line and diagnose tail'; observed = 'recovery assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'concurrent writes'; setup = 'two recorder processes and same-ID replay'; action = 'append under the ledger lock'; expected = 'one line per distinct event'; observed = 'concurrency assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'unknown or partial telemetry'; setup = 'missing source-backed counters'; action = 'aggregate usage windows'; expected = 'null unavailable/partial state, no estimate'; observed = 'usage fallback assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'usage counter reset'; setup = 'synthetic cumulative stream with an intermediate decrease'; action = 'aggregate the reset window'; expected = 'partial null total with reset anomaly'; observed = 'usage_counter_reset assertion passed'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'PR reuse and new reviewed HEAD'; setup = 'same PR identity with changed full HEAD'; action = 'publish artifacts'; expected = 'reuse identical bytes, retain new sibling'; observed = 'artifact identity assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'measurement failure'; setup = 'fault-injected recorder after Start'; action = 'continue workflow without telemetry'; expected = 'authorization/workflow decision unchanged'; observed = 'post-Start failure fixture passed'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'attributable host token counters'; setup = 'current authorized host capability'; action = 'probe worker/session usage'; expected = 'report measured only when attributable'; observed = 'no per-worker counters exposed; preserve unknown'; evidence = 'unavailable'; status = 'unavailable' }
+        [ordered]@{ scenario = 'measurement failure'; setup = 'paired healthy/faulted ready-turn control with real recorder fault'; action = 'continue workflow without telemetry'; expected = 'authorization, gate, dispatch, and next-task hold unchanged'; observed = 'paired transition assertions passed; only measurement became unavailable'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'attributable host token counters'; setup = '.agents/skills/taiga-story-loop/references/performance-reporting.md discovery dated 2026-10-09; probes: create_thread schema, get_usage_limits schema, list_threads({limit:50}), get_goal({}), repository search'; action = 'not_run by this validator; retain prior bounded discovery'; expected = 'measure only when worker/session counters are attributable'; observed = 'no fresh host probe claimed; prior discovery records per-worker counters unavailable'; evidence = 'unavailable'; status = 'not_run' }
     )
     Write-Output 'Scenario evidence (synthetic unless explicitly marked unavailable):'
     foreach ($scenario in $scenarioEvidence) {
