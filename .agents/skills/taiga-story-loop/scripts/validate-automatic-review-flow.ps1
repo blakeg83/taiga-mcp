@@ -3,7 +3,8 @@ param(
     [string] $MeasurementExternalRunRoot,
     [string] $MeasurementRunId,
     [int] $MeasurementFaultAfterBytes = -1,
-    [string] $MeasurementTracePath
+    [string] $MeasurementTracePath,
+    [ValidateSet('disabled', 'enabled')] [string] $MeasurementMode = 'enabled'
 )
 
 Set-StrictMode -Version Latest
@@ -1353,7 +1354,8 @@ function Invoke-MeasurementReadyScenario {
         [Parameter(Mandatory)] [string] $ExternalRunRoot,
         [Parameter(Mandatory)] [string] $RunId,
         [int] $FaultAfterBytes = -1,
-        [Parameter(Mandatory)] [string] $TracePath
+        [Parameter(Mandatory)] [string] $TracePath,
+        [ValidateSet('disabled', 'enabled')] [string] $MeasurementMode = 'enabled'
     )
 
     $revision = ('e' * 40)
@@ -1404,26 +1406,40 @@ function Invoke-MeasurementReadyScenario {
         pullRequest = $null
     }
 
-    $recorderArguments = @(
-        '-NoProfile',
-        '-File', (Join-Path $PSScriptRoot 'write-performance-event.ps1'),
-        '-ExternalRunRoot', $ExternalRunRoot,
-        '-RunId', $RunId,
-        '-EventJson', ($performanceEvent | ConvertTo-Json -Compress -Depth 20)
-    )
-    if ($FaultAfterBytes -ge 0) {
-        $recorderArguments += @('-FaultAfterBytes', [string]$FaultAfterBytes)
-    }
-    $recorderOutput = & pwsh @recorderArguments 2>&1
-    $recorderExitCode = [int]$LASTEXITCODE
-    $recorderLines = @($recorderOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    Assert-True ($recorderLines.Count -gt 0) 'measurement recorder must return a JSON result'
-    $recorderResult = $recorderLines[-1] | ConvertFrom-Json -Depth 50 -DateKind String
-    $measurementState = if ($recorderExitCode -eq 0 -and [string]$recorderResult.status -ceq 'appended') { 'recorded' } else { 'unavailable' }
-    if ($FaultAfterBytes -ge 0) {
-        Assert-True ($recorderExitCode -ne 0 -and $measurementState -ceq 'unavailable') 'faulted measurement must be unavailable with a recorder failure'
+    $recorderInvocationCount = 0
+    $recorderExitCode = $null
+    $recorderStatus = 'not_run'
+    $measurementState = 'not_run'
+    $recorderDurationMilliseconds = $null
+    if ($MeasurementMode -eq 'enabled') {
+        $recorderArguments = @(
+            '-NoProfile',
+            '-File', (Join-Path $PSScriptRoot 'write-performance-event.ps1'),
+            '-ExternalRunRoot', $ExternalRunRoot,
+            '-RunId', $RunId,
+            '-EventJson', ($performanceEvent | ConvertTo-Json -Compress -Depth 20)
+        )
+        if ($FaultAfterBytes -ge 0) {
+            $recorderArguments += @('-FaultAfterBytes', [string]$FaultAfterBytes)
+        }
+        $recorderInvocationCount++
+        $recorderTimer = [Diagnostics.Stopwatch]::StartNew()
+        $recorderOutput = & pwsh @recorderArguments 2>&1
+        $recorderTimer.Stop()
+        $recorderDurationMilliseconds = [math]::Round($recorderTimer.Elapsed.TotalMilliseconds, 3)
+        $recorderExitCode = [int]$LASTEXITCODE
+        $recorderLines = @($recorderOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        Assert-True ($recorderLines.Count -gt 0) 'measurement recorder must return a JSON result'
+        $recorderResult = $recorderLines[-1] | ConvertFrom-Json -Depth 50 -DateKind String
+        $recorderStatus = [string]$recorderResult.status
+        $measurementState = if ($recorderExitCode -eq 0 -and $recorderStatus -ceq 'appended') { 'recorded' } else { 'unavailable' }
+        if ($FaultAfterBytes -ge 0) {
+            Assert-True ($recorderExitCode -ne 0 -and $measurementState -ceq 'unavailable') 'faulted measurement must be unavailable with a recorder failure'
+        } else {
+            Assert-True ($recorderExitCode -eq 0 -and $measurementState -ceq 'recorded') 'healthy measurement must be recorded'
+        }
     } else {
-        Assert-True ($recorderExitCode -eq 0 -and $measurementState -ceq 'recorded') 'healthy measurement must be recorded'
+        Assert-True ($FaultAfterBytes -lt 0) 'disabled measurement control cannot inject a recorder fault'
     }
 
     $workflowResult = Complete-ReviewHandoff $state $workflowEvent
@@ -1452,13 +1468,37 @@ function Invoke-MeasurementReadyScenario {
     Assert-True ($invalidRejected -and @($invalidState.actions).Count -eq 0 -and @($invalidState.turns).Count -eq 0 -and
         [string]$invalidState.tasks[0].state -ceq 'in_progress' -and $null -eq $invalidState.pendingReview) 'stale authorization must reject before mutating workflow state'
 
+    $workflowActions = @($state.actions)
+    $normalMessageKinds = @('review', 'correction', 'acceptance', 'taiga_reconcile', 'advance_next_task', 'story_review', 'story_correction')
+    $normalMessageCount = @($workflowActions | Where-Object { [string]$_.kind -in $normalMessageKinds }).Count
+    $actorIds = @($workflowActions | ForEach-Object { [string]$_.sender; [string]$_.destination } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $pollingKinds = @('wait_threads', 'read_reviewer_chat', 'review_monitor', 'keep_alive')
+    $pollingEventCount = @($state.implementerActions | Where-Object { [string]$_.kind -in $pollingKinds }).Count
+    $measurementOnlyMessageCount = @($workflowActions | Where-Object { [string]$_.kind -eq 'measurement_only' }).Count
+    $transitionCount = @($state.consumedEvents).Count
+    $workflowFingerprint = [ordered]@{
+        decision = [string]$workflowResult.decision
+        taskState = [string]$state.tasks[0].state
+        reviewGate = [string]$state.turnStatus
+        pendingReview = ($null -ne $state.pendingReview)
+        revision = [string]$state.pendingReview.revision
+        transitionCount = $transitionCount
+        normalMessageCount = $normalMessageCount
+        agentCount = $actorIds.Count
+        pollingEventCount = $pollingEventCount
+        measurementOnlyMessageCount = $measurementOnlyMessageCount
+    }
+
     $trace = [ordered]@{
         schemaVersion = 1
         kind = 'synthetic_automatic_review_measurement_trace'
         measurement = [ordered]@{
+            mode = $MeasurementMode
             state = $measurementState
             recorderExitCode = $recorderExitCode
-            recorderStatus = [string]$recorderResult.status
+            recorderStatus = $recorderStatus
+            recorderInvocationCount = $recorderInvocationCount
+            recorderDurationMilliseconds = $recorderDurationMilliseconds
         }
         workflow = [ordered]@{
             decision = [string]$workflowResult.decision
@@ -1477,6 +1517,14 @@ function Invoke-MeasurementReadyScenario {
             turnCount = @($state.turns).Count
             turnRevision = [string]@($state.turns)[0].revision
             terminalActionKinds = @($currentTurnTrace | ForEach-Object { [string]$_.kind })
+            transitionCount = $transitionCount
+            normalMessageCount = $normalMessageCount
+            agentCount = $actorIds.Count
+            pollingEventCount = $pollingEventCount
+            measurementOnlyMessageCount = $measurementOnlyMessageCount
+            recorderInvocationCount = $recorderInvocationCount
+            recorderDurationMilliseconds = $recorderDurationMilliseconds
+            outcomeFingerprint = ($workflowFingerprint | ConvertTo-Json -Compress -Depth 20)
         }
         invalidAuthorization = [ordered]@{
             rejected = $invalidRejected
@@ -1971,7 +2019,7 @@ Assert-True ($findingApproved.decision -eq 'final_story_reconciled' -and $findin
 if (-not [string]::IsNullOrWhiteSpace($MeasurementExternalRunRoot) -and
     -not [string]::IsNullOrWhiteSpace($MeasurementRunId) -and
     -not [string]::IsNullOrWhiteSpace($MeasurementTracePath)) {
-    Invoke-MeasurementReadyScenario -ExternalRunRoot $MeasurementExternalRunRoot -RunId $MeasurementRunId -FaultAfterBytes $MeasurementFaultAfterBytes -TracePath $MeasurementTracePath | Out-Null
+    Invoke-MeasurementReadyScenario -ExternalRunRoot $MeasurementExternalRunRoot -RunId $MeasurementRunId -FaultAfterBytes $MeasurementFaultAfterBytes -TracePath $MeasurementTracePath -MeasurementMode $MeasurementMode | Out-Null
 }
 
 Write-Output 'Passed automatic review-flow fixture: trace-derived end-of-turn initial/correction handoffs with post-termination action rejection, reviewer-message resume, no implementer polling/monitor/keep-alive/unchanged acknowledgement, healthy-versus-unresolved-delivery recovery, implementer-owned version-safe Taiga reconciliation with checklist/comment idempotency, human/version/response-loss/interruption barriers, direct acceptance/advancement, final-task and final-story gates, both review modes, duplicate/stale/idle guards, coordinator escalation, and scope gating.'

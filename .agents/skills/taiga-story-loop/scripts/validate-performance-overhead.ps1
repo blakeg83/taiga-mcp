@@ -1,8 +1,8 @@
 # SYNTHETIC BOUNDED-OVERHEAD CHECK.
-# This fixture compares one fixed workload with instrumentation disabled and
-# with the production performance recorder/aggregator enabled. It also runs
-# every other checked-in story-loop validator from the repository root. It
-# never calls Taiga, GitHub, Codex, a browser, a live provider, or a worker.
+# This fixture runs every other checked-in story-loop validator, then executes
+# the existing automatic-review state machine with instrumentation disabled and
+# enabled. It reports measured local control/helper timings and source-backed
+# recorder bounds without claiming a production performance threshold.
 
 [CmdletBinding()]
 param()
@@ -21,383 +21,401 @@ function Assert-True {
     }
 }
 
-function Get-NullableText {
-    param([AllowNull()] [object] $Value)
-
-    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
-        return $null
-    }
-    return [string]$Value
-}
-
 function Copy-JsonObject {
     param([Parameter(Mandatory)] [object] $Value)
 
-    return ($Value | ConvertTo-Json -Compress -Depth 30 | ConvertFrom-Json -Depth 30 -DateKind String)
+    return ($Value | ConvertTo-Json -Compress -Depth 40 | ConvertFrom-Json -Depth 40 -DateKind String)
 }
 
-function New-PerformanceEvent {
+function Get-Median {
+    param([Parameter(Mandatory)] [double[]] $Values)
+
+    $sorted = @($Values | Sort-Object)
+    return [double]$sorted[[int][math]::Floor($sorted.Count / 2)]
+}
+
+function Invoke-ValidatorSuite {
+    param([Parameter(Mandatory)] [string] $ScriptRoot)
+
+    $validatorFiles = @(Get-ChildItem -LiteralPath $ScriptRoot -Filter 'validate-*.ps1' -File |
+            Where-Object { $_.Name -ne 'validate-performance-overhead.ps1' } |
+            Sort-Object Name)
+    Assert-True ($validatorFiles.Count -gt 0) 'the story-loop validator suite must not be empty'
+    return @($validatorFiles | ForEach-Object {
+            $timer = [Diagnostics.Stopwatch]::StartNew()
+            $output = & pwsh -NoProfile -File $_.FullName 2>&1
+            $exitCode = [int]$LASTEXITCODE
+            $timer.Stop()
+            $lines = @($output | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $diagnostic = if ($lines.Count -gt 3) {
+                ($lines | Select-Object -Last 3) -join [Environment]::NewLine
+            } else {
+                $lines -join [Environment]::NewLine
+            }
+            Assert-True ($exitCode -eq 0) "validator $($_.Name) failed with exit ${exitCode}: $diagnostic"
+            [ordered]@{
+                name = $_.Name
+                exitCode = $exitCode
+                durationMilliseconds = [math]::Round($timer.Elapsed.TotalMilliseconds, 3)
+                outputTail = $diagnostic
+            }
+        })
+}
+
+function Invoke-WorkflowControl {
     param(
-        [Parameter(Mandatory)] [string] $SampleId,
-        [Parameter(Mandatory)] [string] $EventName,
-        [Parameter(Mandatory)] [string] $EventType,
-        [Parameter(Mandatory)] [string] $OccurredAtUtc,
-        [Parameter(Mandatory)] [string] $Scope,
-        [AllowNull()] [Nullable[int]] $TaskRef = $null,
-        [AllowNull()] [string] $PhaseId = $null,
-        [AllowNull()] [string] $ReviewRequestId = $null,
-        [AllowNull()] [string] $ReviewAttemptId = $null,
-        [AllowNull()] [string] $ReviewKind = $null,
-        [AllowNull()] [Nullable[int]] $ReviewAttemptOrdinal = $null,
-        [AllowNull()] [string] $Revision = $null,
-        [AllowNull()] [string] $CorrectionId = $null,
-        [AllowNull()] [string] $SupersedesReviewAttemptId = $null,
-        [AllowNull()] [string] $Role = 'coordinator',
-        [AllowNull()] [string] $WaitId = $null,
-        [AllowNull()] [string] $WaitKind = $null
-    )
-
-    $eventId = "overhead-$SampleId-$EventName"
-    $pullRequest = $null
-    if ($EventType -eq 'pr_ready') {
-        $pullRequest = [ordered]@{
-            provider = 'github'
-            owner = 'synthetic'
-            repository = 'taiga-mcp'
-            number = 145
-            reviewedHead = [string]$Revision
-        }
-    }
-    return [pscustomobject][ordered]@{
-        schemaVersion = 1
-        kind = 'story_performance_event'
-        eventId = $eventId
-        runId = "synthetic-overhead-$SampleId"
-        projectId = 12
-        storyId = 729
-        storyRef = 145
-        taskRef = $TaskRef
-        role = $Role
-        sessionId = "overhead-$Role-session"
-        workerId = "overhead-$Role-worker"
-        transitionId = $eventId
-        scope = $Scope
-        phaseId = Get-NullableText $PhaseId
-        correctionId = Get-NullableText $CorrectionId
-        reviewRequestId = Get-NullableText $ReviewRequestId
-        reviewAttemptId = Get-NullableText $ReviewAttemptId
-        reviewKind = Get-NullableText $ReviewKind
-        reviewAttemptOrdinal = $ReviewAttemptOrdinal
-        supersedesReviewAttemptId = Get-NullableText $SupersedesReviewAttemptId
-        eventType = $EventType
-        occurredAtUtc = $OccurredAtUtc
-        revision = Get-NullableText $Revision
-        reviewMode = 'per_task'
-        provenance = [ordered]@{
-            source = 'synthetic_overhead_fixture'
-            observedBy = 'validate-performance-overhead.ps1'
-            coverage = 'fixed transition schedule'
-            synthetic = $true
-        }
-        usage = $null
-        waitId = Get-NullableText $WaitId
-        waitKind = Get-NullableText $WaitKind
-        pullRequest = $pullRequest
-    }
-}
-
-function New-WorkloadEvents {
-    param([Parameter(Mandatory)] [string] $SampleId)
-
-    $revisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-    $revisionB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
-    return @(
-        (New-PerformanceEvent $SampleId 'story-start' 'story_started' '2026-10-10T12:00:00Z' 'story' -Role 'coordinator'),
-        (New-PerformanceEvent $SampleId 'task-401-start' 'implementation_started' '2026-10-10T12:01:00Z' 'task' -TaskRef 401 -PhaseId 'overhead-task-401' -Role 'implementer'),
-        (New-PerformanceEvent $SampleId 'task-401-ready' 'task_ready_for_review' '2026-10-10T12:10:00Z' 'task' -TaskRef 401 -PhaseId 'overhead-task-401' -Revision $revisionA -Role 'implementer'),
-        (New-PerformanceEvent $SampleId 'task-401-review-start' 'review_started' '2026-10-10T12:11:00Z' 'task' -TaskRef 401 -PhaseId 'overhead-review-401' -ReviewRequestId "overhead-$SampleId-request-401" -ReviewAttemptId "overhead-$SampleId-attempt-401" -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
-        (New-PerformanceEvent $SampleId 'task-401-review-accepted' 'review_accepted' '2026-10-10T12:13:00Z' 'task' -TaskRef 401 -PhaseId 'overhead-review-401' -ReviewRequestId "overhead-$SampleId-request-401" -ReviewAttemptId "overhead-$SampleId-attempt-401" -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
-        (New-PerformanceEvent $SampleId 'task-402-start' 'implementation_started' '2026-10-10T12:14:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-task-402' -Role 'implementer'),
-        (New-PerformanceEvent $SampleId 'task-402-ready' 'task_ready_for_review' '2026-10-10T12:20:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-task-402' -Revision $revisionB -Role 'implementer'),
-        (New-PerformanceEvent $SampleId 'task-402-review-start' 'review_started' '2026-10-10T12:21:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-review-402' -ReviewRequestId "overhead-$SampleId-request-402" -ReviewAttemptId "overhead-$SampleId-attempt-402" -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionB -Role 'reviewer'),
-        (New-PerformanceEvent $SampleId 'task-402-review-findings' 'review_findings' '2026-10-10T12:23:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-review-402' -ReviewRequestId "overhead-$SampleId-request-402" -ReviewAttemptId "overhead-$SampleId-attempt-402" -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionB -Role 'reviewer'),
-        (New-PerformanceEvent $SampleId 'task-402-correction-start' 'correction_started' '2026-10-10T12:24:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-correction-402' -CorrectionId "overhead-$SampleId-correction-402" -SupersedesReviewAttemptId "overhead-$SampleId-attempt-402" -Role 'implementer'),
-        (New-PerformanceEvent $SampleId 'task-402-correction-ready' 'correction_ready' '2026-10-10T12:30:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-correction-402' -CorrectionId "overhead-$SampleId-correction-402" -SupersedesReviewAttemptId "overhead-$SampleId-attempt-402" -Revision $revisionB -Role 'implementer'),
-        (New-PerformanceEvent $SampleId 'task-402-rereview-start' 'review_started' '2026-10-10T12:31:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-rereview-402' -ReviewRequestId "overhead-$SampleId-rerequest-402" -ReviewAttemptId "overhead-$SampleId-rereattempt-402" -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $revisionB -Role 'reviewer'),
-        (New-PerformanceEvent $SampleId 'task-402-rereview-accepted' 'review_accepted' '2026-10-10T12:33:00Z' 'task' -TaskRef 402 -PhaseId 'overhead-rereview-402' -ReviewRequestId "overhead-$SampleId-rerequest-402" -ReviewAttemptId "overhead-$SampleId-rereattempt-402" -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $revisionB -Role 'reviewer'),
-        (New-PerformanceEvent $SampleId 'pr-ready' 'pr_ready' '2026-10-10T12:35:00Z' 'story' -Revision $revisionB -Role 'coordinator')
-    )
-}
-
-function Invoke-RecorderEvent {
-    param(
-        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $AutomaticReviewPath,
         [Parameter(Mandatory)] [string] $ExternalRoot,
-        [Parameter(Mandatory)] [object] $Event
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [ValidateSet('disabled', 'enabled')] [string] $Mode,
+        [Parameter(Mandatory)] [string] $TracePath
     )
 
-    $output = & pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRoot -RunId ([string]$Event.runId) -EventJson ($Event | ConvertTo-Json -Compress -Depth 30) 2>&1
+    $arguments = @(
+        '-NoProfile'
+        '-File', $AutomaticReviewPath
+        '-MeasurementExternalRunRoot', $ExternalRoot
+        '-MeasurementRunId', $RunId
+        '-MeasurementTracePath', $TracePath
+        '-MeasurementMode', $Mode
+    )
+    $output = & pwsh @arguments 2>&1
     $exitCode = [int]$LASTEXITCODE
-    $lines = @($output | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    Assert-True ($exitCode -eq 0 -and $lines.Count -gt 0) "recorder rejected $($Event.eventId)"
-    $result = $lines[-1] | ConvertFrom-Json -Depth 30 -DateKind String
-    Assert-True ([string]$result.status -ceq 'appended') "recorder did not append $($Event.eventId)"
-    return $result
+    $diagnostic = [string]($output -join [Environment]::NewLine)
+    Assert-True ($exitCode -eq 0) "workflow control $Mode/$RunId failed with exit ${exitCode}: $diagnostic"
+    Assert-True (Test-Path -LiteralPath $TracePath -PathType Leaf) "workflow control $Mode/$RunId must write its observed trace"
+    return [IO.File]::ReadAllText($TracePath) | ConvertFrom-Json -Depth 50 -DateKind String
 }
 
-function Invoke-CandidateSample {
+function Invoke-Aggregator {
+    param(
+        [Parameter(Mandatory)] [string] $AggregatorPath,
+        [Parameter(Mandatory)] [string] $LedgerPath
+    )
+
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $failed = $false
+    try {
+        $output = & $AggregatorPath -EventsPath $LedgerPath -ReviewMode per_task -TaskRefs @(65) 2>&1
+    }
+    catch {
+        $failed = $true
+        $output = @($_)
+    }
+    $timer.Stop()
+    $exitCode = if ($failed) { 1 } else { 0 }
+    $text = [string]($output -join [Environment]::NewLine)
+    Assert-True ($exitCode -eq 0) "candidate aggregator failed: $text"
+    return [ordered]@{
+        report = $text | ConvertFrom-Json -Depth 100 -DateKind String
+        reportText = $text
+        durationMilliseconds = [math]::Round($timer.Elapsed.TotalMilliseconds, 3)
+        invocationCount = 1
+    }
+}
+
+function Invoke-ControlSample {
     param(
         [Parameter(Mandatory)] [string] $SampleId,
+        [Parameter(Mandatory)] [ValidateSet('disabled', 'enabled')] [string] $Mode,
         [Parameter(Mandatory)] [string] $ExternalRoot,
-        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $AutomaticReviewPath,
         [Parameter(Mandatory)] [string] $AggregatorPath
     )
 
-    $events = @(New-WorkloadEvents $SampleId)
-    $sampleRoot = Join-Path $ExternalRoot $SampleId
-    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-    foreach ($event in $events) {
-        [void](Invoke-RecorderEvent -RecorderPath $RecorderPath -ExternalRoot $sampleRoot -Event $event)
+    $runId = "overhead-$Mode-$SampleId"
+    $tracePath = Join-Path $ExternalRoot "$runId-trace.json"
+    $controlTimer = [Diagnostics.Stopwatch]::StartNew()
+    $trace = Invoke-WorkflowControl -AutomaticReviewPath $AutomaticReviewPath -ExternalRoot $ExternalRoot -RunId $runId -Mode $Mode -TracePath $tracePath
+    $aggregator = $null
+    $eventBytes = 0
+    $eventCount = 0
+    $reportBytes = 0
+    $reportState = 'not_run'
+    if ($Mode -eq 'enabled') {
+        $ledgerPath = Join-Path (Join-Path $ExternalRoot $runId) 'events.jsonl'
+        Assert-True (Test-Path -LiteralPath $ledgerPath -PathType Leaf) 'enabled workflow control must persist its production ledger'
+        $eventBytes = [IO.File]::ReadAllBytes($ledgerPath).Length
+        $eventCount = @([IO.File]::ReadAllLines($ledgerPath)).Count
+        $aggregator = Invoke-Aggregator -AggregatorPath $AggregatorPath -LedgerPath $ledgerPath
+        $reportBytes = [Text.UTF8Encoding]::new($false).GetByteCount([string]$aggregator.reportText)
+        $reportState = 'measured'
+        Assert-True ([int]$aggregator.report.coverage.validEventCount -eq $eventCount) 'candidate report must account for every persisted event'
     }
-    $ledgerPath = Join-Path (Join-Path $sampleRoot ([string]$events[0].runId)) 'events.jsonl'
-    $aggregatorFailed = $false
-    try {
-        $reportOutput = & $AggregatorPath -EventsPath $ledgerPath -ReviewMode per_task -TaskRefs @(401, 402) 2>&1
-    }
-    catch {
-        $aggregatorFailed = $true
-        $reportOutput = @($_)
-    }
-    $aggregatorExitCode = if ($aggregatorFailed) { 1 } else { 0 }
-    $stopwatch.Stop()
-    $reportText = [string]($reportOutput -join [Environment]::NewLine)
-    Assert-True ($aggregatorExitCode -eq 0) "aggregator rejected candidate sample ${SampleId}: $reportText"
-    $report = $reportText | ConvertFrom-Json -Depth 100 -DateKind String
-    $ledgerBytes = [IO.File]::ReadAllBytes($ledgerPath).Length
-    $reportBytes = [Text.UTF8Encoding]::new($false).GetByteCount($reportText)
-    $fingerprint = [ordered]@{
-        reviewMode = [string]$report.reviewMode
-        validEventCount = [int]$report.coverage.validEventCount
-        initialTaskReviews = [int]$report.metrics.initialTaskReviews.value
-        correctionReReviews = [int]$report.metrics.correctionReReviews.value
-        tasksCompleted = [int]$report.metrics.tasksCompleted.value
-        timeToPr = [int64]$report.metrics.timeToPr.value
-        reviewAttemptCount = @($report.reviewAttempts).Count
-    }
+    $controlTimer.Stop()
+    $workflow = $trace.workflow
+    $recorderInvocationCount = [int]$trace.measurement.recorderInvocationCount
+    $aggregationInvocationCount = if ($null -eq $aggregator) { 0 } else { [int]$aggregator.invocationCount }
     return [ordered]@{
         sampleId = $SampleId
-        workloadId = 'fixed-review-contract-workload-1'
-        outcomeFingerprint = ($fingerprint | ConvertTo-Json -Compress -Depth 10)
-        transitionCount = $events.Count
-        eventCount = $events.Count
-        helperInvocations = $events.Count + 1
-        addedAgents = 0
-        pollingEvents = 0
-        measurementOnlyMessages = 0
-        workloadElapsedMilliseconds = 10100
-        eventBytes = $ledgerBytes
+        mode = $Mode
+        workloadId = 'synthetic-ready-review-workload-1'
+        outcomeFingerprint = [string]$workflow.outcomeFingerprint
+        transitionCount = [int]$workflow.transitionCount
+        normalMessageCount = [int]$workflow.normalMessageCount
+        agentCount = [int]$workflow.agentCount
+        pollingEventCount = [int]$workflow.pollingEventCount
+        measurementOnlyMessageCount = [int]$workflow.measurementOnlyMessageCount
+        helperInvocations = $recorderInvocationCount + $aggregationInvocationCount
+        recorderInvocationCount = $recorderInvocationCount
+        aggregationInvocationCount = $aggregationInvocationCount
+        eventCount = $eventCount
+        eventBytes = $eventBytes
         reportBytes = $reportBytes
+        reportState = $reportState
         usageState = 'unavailable'
-        helperDurationMilliseconds = [math]::Round($stopwatch.Elapsed.TotalMilliseconds, 3)
-        helperSource = 'local monotonic Stopwatch around the production recorder child process and aggregator entry point'
-        report = $report
+        controlDurationMilliseconds = [math]::Round($controlTimer.Elapsed.TotalMilliseconds, 3)
+        helperDurationMilliseconds = if ($null -eq $aggregator) {
+            $null
+        } else {
+            [math]::Round([double]$trace.measurement.recorderDurationMilliseconds + [double]$aggregator.durationMilliseconds, 3)
+        }
+        trace = $trace
+    }
+}
+
+function Get-ControlSummary {
+    param(
+        [Parameter(Mandatory)] [object[]] $Samples,
+        [Parameter(Mandatory)] [ValidateSet('disabled', 'enabled')] [string] $Mode
+    )
+
+    $controlDurations = @($Samples | ForEach-Object { [double]$_.controlDurationMilliseconds })
+    $helperDurations = @($Samples | Where-Object { $null -ne $_.helperDurationMilliseconds } | ForEach-Object { [double]$_.helperDurationMilliseconds })
+    $sample = $Samples[0]
+    return [ordered]@{
+        mode = $Mode
+        workloadId = [string]$sample.workloadId
+        outcomeFingerprint = [string]$sample.outcomeFingerprint
+        transitionCount = [int]$sample.transitionCount
+        normalMessageCount = [int]$sample.normalMessageCount
+        agentCount = [int]$sample.agentCount
+        pollingEventCount = [int]$sample.pollingEventCount
+        measurementOnlyMessageCount = [int]$sample.measurementOnlyMessageCount
+        helperInvocations = [int](@($Samples | ForEach-Object { [int]$_.helperInvocations } | Measure-Object -Average).Average)
+        recorderInvocationCount = [int](@($Samples | ForEach-Object { [int]$_.recorderInvocationCount } | Measure-Object -Average).Average)
+        aggregationInvocationCount = [int](@($Samples | ForEach-Object { [int]$_.aggregationInvocationCount } | Measure-Object -Average).Average)
+        eventCount = [int](@($Samples | ForEach-Object { [int]$_.eventCount } | Measure-Object -Average).Average)
+        eventBytes = [int](@($Samples | ForEach-Object { [int]$_.eventBytes } | Measure-Object -Average).Average)
+        reportBytes = [int](@($Samples | ForEach-Object { [int]$_.reportBytes } | Measure-Object -Average).Average)
+        reportState = if ($Mode -eq 'enabled') { 'measured' } else { 'not_run' }
+        usageState = 'unavailable'
+        controlDuration = [ordered]@{
+            state = 'measured'
+            unit = 'milliseconds'
+            sampleCount = $controlDurations.Count
+            warmUp = 0
+            samples = @($controlDurations | Sort-Object)
+            minimum = [math]::Round(($controlDurations | Measure-Object -Minimum).Minimum, 3)
+            median = [math]::Round((Get-Median $controlDurations), 3)
+            maximum = [math]::Round(($controlDurations | Measure-Object -Maximum).Maximum, 3)
+            source = 'local monotonic Stopwatch around the matched workflow control process and enabled aggregation entry point'
+            conditions = 'three cold child-process samples; same automatic-review state machine; no timing sleeps'
+        }
+        helperDuration = if ($helperDurations.Count -eq 0) {
+            [ordered]@{ state = 'not_run'; value = $null; sampleCount = 0; source = 'no instrumentation helper was invoked in the disabled control' }
+        } else {
+            [ordered]@{
+                state = 'measured'
+                unit = 'milliseconds'
+                sampleCount = $helperDurations.Count
+                warmUp = 0
+                samples = @($helperDurations | Sort-Object)
+                minimum = [math]::Round(($helperDurations | Measure-Object -Minimum).Minimum, 3)
+                median = [math]::Round((Get-Median $helperDurations), 3)
+                maximum = [math]::Round(($helperDurations | Measure-Object -Maximum).Maximum, 3)
+                source = 'local monotonic Stopwatch around the production recorder child process and aggregator entry point'
+                conditions = 'three cold candidate samples; one recorder append and one aggregation entry point per sample'
+            }
+        }
+        samples = @($Samples | ForEach-Object {
+                [ordered]@{
+                    sampleId = $_.sampleId
+                    transitionCount = $_.transitionCount
+                    normalMessageCount = $_.normalMessageCount
+                    agentCount = $_.agentCount
+                    pollingEventCount = $_.pollingEventCount
+                    measurementOnlyMessageCount = $_.measurementOnlyMessageCount
+                    helperInvocations = $_.helperInvocations
+                    recorderInvocationCount = $_.recorderInvocationCount
+                    aggregationInvocationCount = $_.aggregationInvocationCount
+                    eventCount = $_.eventCount
+                    eventBytes = $_.eventBytes
+                    reportBytes = $_.reportBytes
+                    controlDurationMilliseconds = $_.controlDurationMilliseconds
+                    helperDurationMilliseconds = $_.helperDurationMilliseconds
+                }
+            })
     }
 }
 
 function Test-OverheadAcceptance {
     param(
-        [AllowNull()] [object] $Baseline,
-        [AllowNull()] [object] $Candidate,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Baseline,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Candidate,
         [Parameter(Mandatory)] [object] $Budget
     )
 
     $reasons = [System.Collections.Generic.List[string]]::new()
     if ($null -eq $Baseline -or $null -eq $Candidate) {
-        [void]$reasons.Add('comparable baseline and candidate evidence are required')
-    } else {
-        if ([string]$Baseline.workloadId -cne [string]$Candidate.workloadId) { [void]$reasons.Add('workload identity changed') }
-        if ([string]$Baseline.outcomeFingerprint -cne [string]$Candidate.outcomeFingerprint) { [void]$reasons.Add('workflow outcome changed') }
-        if ([int]$Baseline.transitionCount -ne [int]$Candidate.transitionCount) { [void]$reasons.Add('transition schedule changed') }
-        if ([int]$Candidate.eventCount -gt [int]$Budget.maxAddedEvents) { [void]$reasons.Add('candidate event count exceeded the declared lifecycle budget') }
-        if ([int]$Candidate.helperInvocations -gt [int]$Budget.maxHelperInvocations) { [void]$reasons.Add('candidate helper invocation count exceeded the declared budget') }
-        if ([int]$Candidate.addedAgents -gt [int]$Budget.maxAddedAgents) { [void]$reasons.Add('candidate added an agent') }
-        if ([int]$Candidate.pollingEvents -gt [int]$Budget.maxPollingEvents) { [void]$reasons.Add('candidate added polling') }
-        if ([int]$Candidate.measurementOnlyMessages -gt [int]$Budget.maxMeasurementOnlyMessages) { [void]$reasons.Add('candidate added a measurement-only message') }
-        $elapsedDelta = [int]$Candidate.workloadElapsedMilliseconds - [int]$Baseline.workloadElapsedMilliseconds
-        $elapsedPercent = if ([int]$Baseline.workloadElapsedMilliseconds -gt 0) { ($elapsedDelta / [double]$Baseline.workloadElapsedMilliseconds) * 100 } else { [double]::PositiveInfinity }
-        if ($elapsedDelta -gt [int]$Budget.maxElapsedMilliseconds -or $elapsedPercent -gt [double]$Budget.maxElapsedPercent) { [void]$reasons.Add('workload elapsed overhead exceeded the declared budget') }
-        if ([double]$Candidate.helperDurationMilliseconds -gt [double]$Budget.maxHelperDurationMilliseconds) { [void]$reasons.Add('measured helper duration exceeded the declared environment budget') }
-        if ([int]$Candidate.eventBytes -le 0 -or [int]$Candidate.reportBytes -le 0) { [void]$reasons.Add('candidate event/report byte evidence is missing') }
-        if ([string]$Candidate.usageState -notin @('unavailable', 'partial')) { [void]$reasons.Add('unknown usage must remain unavailable or partial') }
+        [void]$reasons.Add('comparable observed baseline and candidate evidence are required')
+        return [ordered]@{
+            state = 'unavailable'
+            sameOutcome = $false
+            sameWorkload = $false
+            observedCountDelta = $null
+            measuredControlDurationDeltaMilliseconds = $null
+            withinBudget = $false
+            reasons = @($reasons)
+        }
     }
+    if ([string]$Baseline.workloadId -cne [string]$Candidate.workloadId) { [void]$reasons.Add('workload identity changed') }
+    if ([string]$Baseline.outcomeFingerprint -cne [string]$Candidate.outcomeFingerprint) { [void]$reasons.Add('observed workflow outcome changed') }
+    foreach ($field in @('transitionCount', 'normalMessageCount', 'agentCount', 'pollingEventCount', 'measurementOnlyMessageCount')) {
+        if ([int]$Baseline.$field -ne [int]$Candidate.$field) { [void]$reasons.Add("observed workflow count changed: $field") }
+    }
+    $addedTransitions = [int]$Candidate.transitionCount - [int]$Baseline.transitionCount
+    $addedNormalMessages = [int]$Candidate.normalMessageCount - [int]$Baseline.normalMessageCount
+    $addedAgents = [int]$Candidate.agentCount - [int]$Baseline.agentCount
+    $addedPolling = [int]$Candidate.pollingEventCount - [int]$Baseline.pollingEventCount
+    $addedMeasurementOnly = [int]$Candidate.measurementOnlyMessageCount - [int]$Baseline.measurementOnlyMessageCount
+    if ($addedTransitions -gt [int]$Budget.maxAddedTransitions) { [void]$reasons.Add('added transition count exceeded the declared budget') }
+    if ($addedNormalMessages -gt [int]$Budget.maxAddedNormalMessages) { [void]$reasons.Add('added normal-message count exceeded the declared budget') }
+    if ($addedAgents -gt [int]$Budget.maxAddedAgents) { [void]$reasons.Add('candidate added an agent') }
+    if ($addedPolling -gt [int]$Budget.maxPollingEvents) { [void]$reasons.Add('candidate added polling') }
+    if ($addedMeasurementOnly -gt [int]$Budget.maxMeasurementOnlyMessages) { [void]$reasons.Add('candidate added a measurement-only message') }
+    if ([int]$Candidate.helperInvocations -gt [int]$Budget.maxHelperInvocations) { [void]$reasons.Add('helper invocation count exceeded the declared budget') }
+    $controlDelta = [double]$Candidate.controlDuration.median - [double]$Baseline.controlDuration.median
+    if ($controlDelta -gt [double]$Budget.maxControlDurationDeltaMilliseconds) { [void]$reasons.Add('measured control duration delta exceeded the declared environment budget') }
+    if ([int]$Candidate.eventCount -gt [int]$Budget.maxCandidateEvents) { [void]$reasons.Add('candidate persisted event count exceeded the declared boundary budget') }
+    if ([string]$Candidate.usageState -notin @('unavailable', 'partial')) { [void]$reasons.Add('unknown usage must remain unavailable or partial') }
     return [ordered]@{
-        state = if ($reasons.Count -eq 0) { 'pass' } elseif ($null -eq $Baseline -or $null -eq $Candidate) { 'unavailable' } else { 'fail' }
-        sameOutcome = ($null -ne $Baseline -and $null -ne $Candidate -and [string]$Baseline.outcomeFingerprint -ceq [string]$Candidate.outcomeFingerprint)
-        sameWorkload = ($null -ne $Baseline -and $null -ne $Candidate -and [string]$Baseline.workloadId -ceq [string]$Candidate.workloadId)
+        state = if ($reasons.Count -eq 0) { 'pass' } else { 'fail' }
+        sameOutcome = ([string]$Baseline.outcomeFingerprint -ceq [string]$Candidate.outcomeFingerprint)
+        sameWorkload = ([string]$Baseline.workloadId -ceq [string]$Candidate.workloadId)
+        observedCountDelta = [ordered]@{
+            transitions = $addedTransitions
+            normalMessages = $addedNormalMessages
+            agents = $addedAgents
+            pollingEvents = $addedPolling
+            measurementOnlyMessages = $addedMeasurementOnly
+        }
+        measuredControlDurationDeltaMilliseconds = [math]::Round($controlDelta, 3)
         withinBudget = ($reasons.Count -eq 0)
         reasons = @($reasons)
     }
 }
 
+function Get-SourceBoundAnalysis {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $AggregatorPath
+    )
+
+    $recorderLines = @(Get-Content -LiteralPath $RecorderPath)
+    $aggregatorLines = @(Get-Content -LiteralPath $AggregatorPath)
+    $readAllBytesLine = @($recorderLines | Select-String -Pattern '\[IO\.File\]::ReadAllBytes\(\$LedgerPath\)' | Select-Object -First 1)
+    $aggregateReadLine = @($aggregatorLines | Select-String -Pattern 'Read-EventLedger -Path \$resolvedEventsPath' | Select-Object -First 1)
+    Assert-True ($readAllBytesLine.Count -eq 1) 'source analysis must find the recorder full-ledger read'
+    Assert-True ($aggregateReadLine.Count -eq 1) 'source analysis must find the aggregator ledger read'
+    return [ordered]@{
+        state = 'limited'
+        evidence = 'automated_source_assertion'
+        recorder = [ordered]@{
+            path = $RecorderPath
+            fullLedgerRead = $true
+            line = [int]$readAllBytesLine[0].LineNumber
+            complexity = 'O(existing ledger bytes + appended event bytes) per append; the recorder rereads the complete ledger before writing'
+            constantHookWorkClaim = 'not_claimed'
+        }
+        aggregator = [ordered]@{
+            path = $AggregatorPath
+            ledgerRead = $true
+            line = [int]$aggregateReadLine[0].LineNumber
+            complexity = 'O(ledger bytes and records) per aggregation invocation'
+        }
+        productionThreshold = 'unavailable_without an authorized production workload and environment-controlled benchmark'
+        limitation = 'fixed transition counts and helper invocation counts do not imply constant recorder CPU/I/O work'
+    }
+}
+
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('taiga-performance-overhead-' + [Guid]::NewGuid().ToString('N'))
 $externalRoot = Join-Path $fixtureRoot 'external-run-root'
+$automaticReviewPath = Join-Path $PSScriptRoot 'validate-automatic-review-flow.ps1'
 $recorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
 $aggregatorPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..\scripts\get-story-performance.ps1'))
-$validatorResults = @()
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..'))
+
 [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
 Push-Location -LiteralPath $repositoryRoot
-
 try {
-    # Every checked-in story-loop validator is run from the repository root.
-    # This script is excluded only to avoid recursive self-invocation.
-    $validatorFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'validate-*.ps1' -File | Where-Object { $_.Name -ne 'validate-performance-overhead.ps1' } | Sort-Object Name)
-    Assert-True ($validatorFiles.Count -gt 0) 'the story-loop validator suite must not be empty'
-    $validatorResults = foreach ($validator in $validatorFiles) {
-        $timer = [Diagnostics.Stopwatch]::StartNew()
-        $output = & pwsh -NoProfile -File $validator.FullName 2>&1
-        $exitCode = [int]$LASTEXITCODE
-        $timer.Stop()
-        $lines = @($output | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        $diagnostic = if ($lines.Count -gt 3) { ($lines | Select-Object -Last 3) -join [Environment]::NewLine } else { $lines -join [Environment]::NewLine }
-        Assert-True ($exitCode -eq 0) "validator $($validator.Name) failed with exit ${exitCode}: $diagnostic"
-        [ordered]@{
-            name = $validator.Name
-            exitCode = $exitCode
-            durationMilliseconds = [math]::Round($timer.Elapsed.TotalMilliseconds, 3)
-            outputTail = $diagnostic
-        }
-    }
-
-    $workloadId = 'fixed-review-contract-workload-1'
-    $expectedFingerprint = [ordered]@{
-        reviewMode = 'per_task'
-        validEventCount = 14
-        initialTaskReviews = 2
-        correctionReReviews = 1
-        tasksCompleted = 2
-        timeToPr = 2100000
-        reviewAttemptCount = 3
-    }
-    $fingerprintText = $expectedFingerprint | ConvertTo-Json -Compress -Depth 10
-    $baselineReport = [ordered]@{
-        schemaVersion = 1
-        kind = 'synthetic_baseline_report'
-        workloadId = $workloadId
-        outcomeFingerprint = $fingerprintText
-        usageState = 'unavailable'
-    }
-    $baselineReportText = $baselineReport | ConvertTo-Json -Compress -Depth 10
-    $baseline = [ordered]@{
-        instrumentation = 'disabled'
-        workloadId = $workloadId
-        outcomeFingerprint = $fingerprintText
-        transitionCount = 14
-        eventCount = 0
-        helperInvocations = 0
-        addedAgents = 0
-        pollingEvents = 0
-        measurementOnlyMessages = 0
-        workloadElapsedMilliseconds = 10000
-        eventBytes = 0
-        reportBytes = [Text.UTF8Encoding]::new($false).GetByteCount($baselineReportText)
-        usageState = 'unavailable'
-        conditions = 'fixed UTC transition schedule; same repository/runtime; no recorder, worker, polling, or measurement-only message'
-        sampleCount = 1
-        warmUp = 0
-    }
-
-    $candidateSamples = @(1..3 | ForEach-Object {
-            Invoke-CandidateSample -SampleId ("sample-{0}" -f $_) -ExternalRoot $externalRoot -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
+    $validatorResults = Invoke-ValidatorSuite -ScriptRoot $PSScriptRoot
+    $baselineSamples = @(1..3 | ForEach-Object {
+            Invoke-ControlSample -SampleId ("sample-{0}" -f $_) -Mode disabled -ExternalRoot $externalRoot -AutomaticReviewPath $automaticReviewPath -AggregatorPath $aggregatorPath
         })
-    foreach ($sample in $candidateSamples) {
-        $sampleReport = $sample.report
-        $sampleFingerprint = $sample.outcomeFingerprint | ConvertFrom-Json -Depth 10
-        foreach ($expectedProperty in @($expectedFingerprint.Keys)) {
-            Assert-True ([string]$sampleFingerprint.$expectedProperty -ceq [string]$expectedFingerprint[$expectedProperty]) "candidate $($sample.sampleId) outcome field $expectedProperty must match the fixed workload (observed '$($sampleFingerprint.$expectedProperty)', expected '$($expectedFingerprint[$expectedProperty])')"
-        }
-        Assert-True ([int]$sampleReport.coverage.validEventCount -eq 14 -and [int]$sampleReport.metrics.initialTaskReviews.value -eq 2 -and [int]$sampleReport.metrics.correctionReReviews.value -eq 1 -and [int]$sampleReport.metrics.tasksCompleted.value -eq 2) "candidate $($sample.sampleId) report must preserve the expected lifecycle counts"
-    }
-    $durationSamples = @($candidateSamples | ForEach-Object { [double]$_.helperDurationMilliseconds } | Sort-Object)
-    $candidate = [ordered]@{
-        instrumentation = 'contract-events-only'
-        workloadId = $workloadId
-        outcomeFingerprint = $fingerprintText
-        transitionCount = 14
-        eventCount = 14
-        helperInvocations = 15
-        addedAgents = 0
-        pollingEvents = 0
-        measurementOnlyMessages = 0
-        workloadElapsedMilliseconds = 10100
-        eventBytes = [int]((@($candidateSamples | ForEach-Object { [int]$_.eventBytes } | Measure-Object -Sum).Sum) / $candidateSamples.Count)
-        reportBytes = [int]((@($candidateSamples | ForEach-Object { [int]$_.reportBytes } | Measure-Object -Sum).Sum) / $candidateSamples.Count)
-        usageState = 'unavailable'
-        helperDuration = [ordered]@{
-            state = 'measured'
-            unit = 'milliseconds'
-            source = 'local monotonic Stopwatch around the production recorder child process and aggregator entry point'
-            sampleCount = $candidateSamples.Count
-            warmUp = 0
-            samples = $durationSamples
-            minimum = $durationSamples[0]
-            median = $durationSamples[[int][math]::Floor($durationSamples.Count / 2)]
-            maximum = $durationSamples[-1]
-            conditions = 'three cold child-process samples; fixed 14-event ledger; disposable external root; no timing sleeps'
-        }
-        helperDurationMilliseconds = [double]$durationSamples[-1]
-        sampleEvidence = $candidateSamples | ForEach-Object {
-            [ordered]@{ sampleId = $_.sampleId; eventBytes = $_.eventBytes; reportBytes = $_.reportBytes; helperDurationMilliseconds = $_.helperDurationMilliseconds }
-        }
-    }
+    $candidateSamples = @(1..3 | ForEach-Object {
+            Invoke-ControlSample -SampleId ("sample-{0}" -f $_) -Mode enabled -ExternalRoot $externalRoot -AutomaticReviewPath $automaticReviewPath -AggregatorPath $aggregatorPath
+        })
+    $baseline = Get-ControlSummary -Samples $baselineSamples -Mode disabled
+    $candidate = Get-ControlSummary -Samples $candidateSamples -Mode enabled
+    Assert-True ([string]$baseline.outcomeFingerprint -ceq [string]$candidate.outcomeFingerprint) 'actual disabled/enabled workflow controls must produce the same observed outcome'
+    Assert-True ([int]$baseline.transitionCount -eq [int]$candidate.transitionCount -and
+        [int]$baseline.normalMessageCount -eq [int]$candidate.normalMessageCount -and
+        [int]$baseline.agentCount -eq [int]$candidate.agentCount -and
+        [int]$baseline.pollingEventCount -eq [int]$candidate.pollingEventCount -and
+        [int]$baseline.measurementOnlyMessageCount -eq [int]$candidate.measurementOnlyMessageCount) 'actual disabled/enabled workflow traces must preserve operation counts'
+    Assert-True ([int]$baseline.helperInvocations -eq 0 -and [int]$candidate.helperInvocations -eq 2) 'helper invocation counts must come from the observed disabled/enabled controls'
+    Assert-True ([int]$candidate.eventCount -gt 0 -and [int]$candidate.eventBytes -gt 0 -and [int]$candidate.reportBytes -gt 0) 'enabled control must retain actual event and report byte evidence'
+    Assert-True ([string]$baseline.reportState -ceq 'not_run' -and [string]$candidate.reportState -ceq 'measured') 'report coverage must distinguish disabled and enabled controls'
+
     $budget = [ordered]@{
-        maxElapsedMilliseconds = 500
-        maxElapsedPercent = 10
-        maxAddedEvents = 14
-        maxHelperInvocations = 15
+        maxAddedTransitions = 0
+        maxAddedNormalMessages = 0
         maxAddedAgents = 0
         maxPollingEvents = 0
         maxMeasurementOnlyMessages = 0
-        maxHelperDurationMilliseconds = 120000
+        maxHelperInvocations = 2
+        maxCandidateEvents = 1
+        maxControlDurationDeltaMilliseconds = 120000
     }
     $acceptance = Test-OverheadAcceptance -Baseline $baseline -Candidate $candidate -Budget $budget
-    Assert-True ([string]$acceptance.state -ceq 'pass') 'matched baseline/candidate workload must pass bounded-overhead acceptance'
+    Assert-True ([string]$acceptance.state -ceq 'pass') 'observed disabled/enabled workflow controls must satisfy bounded-operation acceptance'
+
+    $sourceBounds = Get-SourceBoundAnalysis -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
+    Assert-True ([string]$sourceBounds.recorder.constantHookWorkClaim -ceq 'not_claimed' -and [string]$sourceBounds.state -ceq 'limited') 'source bounds must not claim constant recorder work'
 
     $negativeControls = @()
-    $budgetExceeded = Copy-JsonObject $candidate
-    $budgetExceeded.workloadElapsedMilliseconds = 12000
-    $negativeControls += [ordered]@{ case = 'budget-exceeded'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $budgetExceeded -Budget $budget }
     $changedOutcome = Copy-JsonObject $candidate
-    $changedOutcome.outcomeFingerprint = 'changed-synthetic-outcome'
-    $negativeControls += [ordered]@{ case = 'changed-outcome'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $changedOutcome -Budget $budget }
-    $changedWorkload = Copy-JsonObject $candidate
-    $changedWorkload.workloadId = 'different-review-contract-workload'
-    $negativeControls += [ordered]@{ case = 'changed-workload'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $changedWorkload -Budget $budget }
-    foreach ($case in @(
-            [ordered]@{ name = 'extra-agent'; property = 'addedAgents'; value = 1 }
-            [ordered]@{ name = 'extra-polling'; property = 'pollingEvents'; value = 1 }
-            [ordered]@{ name = 'extra-message'; property = 'measurementOnlyMessages'; value = 1 }
-        )) {
-        $changed = Copy-JsonObject $candidate
-        $changed.($case.property) = $case.value
-        $negativeControls += [ordered]@{ case = $case.name; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $changed -Budget $budget }
-    }
-    $negativeControls += [ordered]@{ case = 'missing-comparable-evidence'; result = Test-OverheadAcceptance -Baseline $null -Candidate $candidate -Budget $budget }
+    $changedOutcome.outcomeFingerprint = 'bypassed-workflow-outcome'
+    $negativeControls += [ordered]@{ case = 'bypassed-workflow-trace'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $changedOutcome -Budget $budget }
+    $extraAction = Copy-JsonObject $candidate
+    $extraAction.normalMessageCount = [int]$extraAction.normalMessageCount + 1
+    $negativeControls += [ordered]@{ case = 'instrumentation-extra-message'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $extraAction -Budget $budget }
+    $extraAgent = Copy-JsonObject $candidate
+    $extraAgent.agentCount = [int]$extraAgent.agentCount + 1
+    $negativeControls += [ordered]@{ case = 'instrumentation-extra-agent'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $extraAgent -Budget $budget }
+    $extraEvent = Copy-JsonObject $candidate
+    $extraEvent.eventCount = [int]$extraEvent.eventCount + 1
+    $negativeControls += [ordered]@{ case = 'instrumentation-extra-event'; result = Test-OverheadAcceptance -Baseline $baseline -Candidate $extraEvent -Budget $budget }
+    $missingBaseline = Test-OverheadAcceptance -Baseline $null -Candidate $candidate -Budget $budget
+    $negativeControls += [ordered]@{ case = 'missing-comparable-evidence'; result = $missingBaseline }
     foreach ($control in $negativeControls) {
         Assert-True ([string]$control.result.state -in @('fail', 'unavailable')) "negative control $($control.case) must not pass"
     }
 
     $scenarioEvidence = @(
         [ordered]@{ scenario = 'validator-suite'; setup = 'all checked-in validate-*.ps1 files except this orchestrator'; action = 'run from repository root in fresh PowerShell processes'; expected = 'every validator exits 0'; observed = "$($validatorResults.Count) validators exited 0"; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'matched baseline/candidate workload'; setup = 'fixed 14-transition UTC schedule, three cold candidate samples, no sleeps'; action = 'compare disabled instrumentation with production recorder/aggregator'; expected = 'same outcome, bounded lifecycle events, zero extra agents/polling/measurement-only messages'; observed = 'acceptance passed; candidate event/report bytes and helper duration recorded'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'attributable usage'; setup = 'current host capability matrix'; action = 'retain explicit unavailable state'; expected = 'no token estimate from account limits, message length, file size, or event count'; observed = 'baseline and candidate usageState=unavailable'; evidence = 'unavailable'; status = 'not_run' },
-        [ordered]@{ scenario = 'negative controls'; setup = 'budget, outcome, workload, agent, polling, message, and missing-baseline mutations'; action = 'evaluate each against the same acceptance contract'; expected = 'bad or incomparable evidence never passes'; observed = "all $($negativeControls.Count) controls rejected"; evidence = 'automated_assertion'; status = 'passed' }
+        [ordered]@{ scenario = 'matched workflow controls'; setup = 'same automatic-review state machine, three disabled and three enabled cold samples'; action = 'derive transitions/messages/agents/polling/measurement-only counts from actual traces'; expected = 'same outcome and operation counts; only declared instrumentation helpers appear'; observed = 'observed traces matched; enabled recorder/aggregator calls and bytes recorded'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'helper duration'; setup = 'local monotonic Stopwatch, three samples per control, no sleeps'; action = 'measure control and enabled helper durations'; expected = 'actual samples with conditions, not a fixed-clock percentage'; observed = 'baseline/candidate control durations and candidate helper samples recorded'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection of recorder and aggregator ledger reads'; action = 'report algorithmic bounds and limitations'; expected = 'no constant-hook claim when append rereads the full ledger'; observed = 'recorder O(existing ledger bytes + event bytes) per append; aggregator O(ledger bytes); production threshold unavailable'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'attributable usage'; setup = 'current host capability matrix'; action = 'retain explicit unavailable state'; expected = 'no token estimate from account limits, text length, file size, event count, or timing'; observed = 'baseline/candidate usageState=unavailable'; evidence = 'unavailable'; status = 'not_run' },
+        [ordered]@{ scenario = 'negative controls'; setup = 'bypassed trace, extra message/agent/event, and missing baseline mutations'; action = 'evaluate observed-evidence contract'; expected = 'unsafe or incomparable evidence never passes'; observed = "all $($negativeControls.Count) controls rejected"; evidence = 'automated_assertion'; status = 'passed' }
     )
     Write-Output 'Scenario evidence (synthetic unless explicitly marked unavailable):'
     foreach ($scenario in $scenarioEvidence) {
         Write-Output (($scenario.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' | ')
     }
-    Write-Output 'PASS: bounded performance overhead; all existing validators, matched baseline/candidate outcomes, production helper invocation counts, event/report bytes, measured helper duration, explicit unavailable usage, and negative controls passed.'
+    Write-Output 'PASS: observed workflow compatibility and bounded-overhead evidence; no fabricated elapsed percentage or constant recorder-work claim.'
     [ordered]@{
         schemaVersion = 1
         kind = 'synthetic_performance_overhead_report'
@@ -408,16 +426,16 @@ try {
         budget = $budget
         overhead = [ordered]@{
             state = 'measured'
-            elapsedMilliseconds = 100
-            elapsedPercent = 1
+            controlDurationDeltaMilliseconds = $acceptance.measuredControlDurationDeltaMilliseconds
+            controlDurationDeltaSource = 'matched disabled/enabled local Stopwatch samples'
             helperDuration = $candidate.helperDuration
             usageState = 'unavailable'
-            source = 'fixed monotonic workload clock plus local Stopwatch helper samples'
+            sourceBounds = $sourceBounds
         }
         acceptance = $acceptance
         negativeControls = $negativeControls
         scenarioEvidence = $scenarioEvidence
-    } | ConvertTo-Json -Depth 50
+    } | ConvertTo-Json -Depth 60
 }
 finally {
     Pop-Location
