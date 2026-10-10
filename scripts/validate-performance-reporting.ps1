@@ -657,6 +657,59 @@ try {
     $overlapDiagnostics = @($overlap.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' })
     Assert-True ($overlapDiagnostics.Count -eq 3) 'only nesting and genuine cross-category intersections should be disclosed; disjoint, touching, and zero-duration intervals should not'
 
+    $artifactRoot = Join-Path $root 'published-reports'
+    $artifactJsonA = Join-Path $artifactRoot 'report-a.json'
+    $artifactMarkdownA = Join-Path $artifactRoot 'report-a.md'
+    $artifactJsonB = Join-Path $artifactRoot 'report-b.json'
+    $artifactMarkdownB = Join-Path $artifactRoot 'report-b.md'
+    $changedLedger = Join-Path $root 'changed-head.jsonl'
+    $artifactJsonRun = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA
+    Assert-True ($LASTEXITCODE -eq 0) 'artifact publication should aggregate successfully'
+    $publishedArtifact = Get-Content -Raw -LiteralPath $artifactJsonA | ConvertFrom-Json -Depth 100
+    $publishedMarkdown = Get-Content -Raw -LiteralPath $artifactMarkdownA
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$publishedArtifact.reportId)) 'published JSON should carry a stable report identity'
+    Assert-True ([string]$publishedArtifact.pullRequest.url -ceq 'https://github.com/blakeg83/taiga-mcp/pull/143') 'published JSON should expose the deterministic PR URL'
+    Assert-True ($publishedMarkdown -match [regex]::Escape([string]$publishedArtifact.reportId) -and
+        $publishedMarkdown -match [regex]::Escape($revisionB) -and
+        $publishedMarkdown -match '| implementationElapsed |' -and
+        $publishedMarkdown -match '| modelsAndReasoning |' -and
+        $publishedMarkdown -match 'Source:' -and
+        $publishedMarkdown -match 'Limitation:') 'Markdown should retain identity, reviewed HEAD, metrics, sources, and limitations'
+    $artifactJsonBytesBeforeReuse = [IO.File]::ReadAllBytes($artifactJsonA)
+    $artifactMarkdownBytesBeforeReuse = [IO.File]::ReadAllBytes($artifactMarkdownA)
+    $reusedArtifactOutput = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA
+    Assert-True ($LASTEXITCODE -eq 0) 'identical artifact publication should be idempotent'
+    Assert-True (([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactJsonA))) -ceq ([Convert]::ToBase64String($artifactJsonBytesBeforeReuse)) -and
+        ([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactMarkdownA))) -ceq ([Convert]::ToBase64String($artifactMarkdownBytesBeforeReuse))) 'identical publication must reuse byte-identical artifacts'
+    Assert-True (@(Get-ChildItem -LiteralPath $artifactRoot -Recurse -Force -File -Filter '*.tmp.*').Count -eq 0) 'successful publication must clean temporary siblings'
+
+    $revisionC = 'cccccccccccccccccccccccccccccccccccccccc'
+    $changedEvents = @($events | ForEach-Object { $_ | ConvertTo-Json -Depth 20 | ConvertFrom-Json })
+    $changedEvents[-1].revision = $revisionC
+    $changedEvents[-1].pullRequest.reviewedHead = $revisionC
+    [IO.File]::WriteAllLines($changedLedger, @($changedEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
+    $changedArtifactOutput = & $scriptPath -EventsPath $changedLedger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonB -MarkdownPath $artifactMarkdownB
+    Assert-True ($LASTEXITCODE -eq 0) 'a changed reviewed HEAD should publish a retained sibling report'
+    $changedArtifact = Get-Content -Raw -LiteralPath $artifactJsonB | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$publishedArtifact.reportId -cne [string]$changedArtifact.reportId -and
+        [string]$publishedArtifact.comparison.reviewedHead -ceq $revisionB -and
+        [string]$changedArtifact.comparison.reviewedHead -ceq $revisionC -and
+        (Test-Path -LiteralPath $artifactJsonA) -and (Test-Path -LiteralPath $artifactJsonB)) 'distinct reviewed HEADs must retain distinct report identities and files'
+
+    $conflictOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $changedLedger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA 2>&1
+    $conflictText = [string]($conflictOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0) "a changed report must conflict instead of replacing an existing artifact (diagnostic: $conflictText)"
+    Assert-True ($conflictText -match 'report_artifact_conflict') "artifact conflict should expose a safe conflict diagnostic (diagnostic: $conflictText)"
+    Assert-True (([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactJsonA))) -ceq ([Convert]::ToBase64String($artifactJsonBytesBeforeReuse))) 'artifact conflict must preserve the original report bytes'
+    Assert-True (@(Get-ChildItem -LiteralPath $artifactRoot -Recurse -Force -File -Filter '*.tmp.*').Count -eq 0) 'conflict handling must clean temporary siblings'
+
+    $edgeArtifactMarkdown = Join-Path $artifactRoot 'edge-cases.md'
+    $edgeArtifactOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $edgeLedger -ReviewMode per_task -MarkdownPath $edgeArtifactMarkdown 2>&1
+    $edgeArtifactDiagnostic = [string]($edgeArtifactOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "incomplete evidence should still publish a bounded Markdown artifact (diagnostic: $edgeArtifactDiagnostic)"
+    $edgeMarkdown = Get-Content -Raw -LiteralPath $edgeArtifactMarkdown
+    Assert-True ($edgeMarkdown -match 'partial' -and $edgeMarkdown -match 'incomplete_tail' -and $edgeMarkdown -match 'unknown') 'incomplete artifact Markdown must retain explicit partial, anomaly, and unknown limitations'
+
     $repeatJson = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153)
     Assert-True ($LASTEXITCODE -eq 0 -and $repeatJson -ceq $jsonText) 'repeating aggregation over the same ledger should be byte stable'
 

@@ -7,9 +7,10 @@
     JSONL ledger written by write-performance-event.ps1 and emits one
     deterministic story_performance_report object. It does not infer missing
     boundaries, subtract overlapping phases, estimate unavailable usage, or
-    persist a report. Source-backed usage is reconciled only from explicit
-    attributable boundary samples; report publication remains owned by a
-    later story task.
+    read transcripts or source text. Source-backed usage is reconciled only
+    from explicit attributable boundary samples. When requested, JSON and
+    Markdown artifacts are published atomically to immutable paths outside
+    the repository; an existing different artifact is a conflict.
 #>
 
 [CmdletBinding()]
@@ -292,11 +293,29 @@ function Get-SafePullRequest {
     if ($null -eq $PullRequest) {
         return $null
     }
+
+    $provider = [string] (Get-PropertyValue $PullRequest 'provider')
+    $owner = [string] (Get-PropertyValue $PullRequest 'owner')
+    $repository = [string] (Get-PropertyValue $PullRequest 'repository')
+    $number = Get-PropertyValue $PullRequest 'number'
+    $url = $null
+    switch ($provider.ToLowerInvariant()) {
+        'github' {
+            $url = "https://github.com/$owner/$repository/pull/$number"
+        }
+        'gitlab' {
+            $url = "https://gitlab.com/$owner/$repository/-/merge_requests/$number"
+        }
+        'bitbucket' {
+            $url = "https://bitbucket.org/$owner/$repository/pull-requests/$number"
+        }
+    }
     return [pscustomobject][ordered]@{
-        provider = Get-PropertyValue $PullRequest 'provider'
-        owner = Get-PropertyValue $PullRequest 'owner'
-        repository = Get-PropertyValue $PullRequest 'repository'
-        number = Get-PropertyValue $PullRequest 'number'
+        provider = $provider
+        owner = $owner
+        repository = $repository
+        number = $number
+        url = $url
         reviewedHead = Get-PropertyValue $PullRequest 'reviewedHead'
     }
 }
@@ -1089,29 +1108,214 @@ function New-CountMetric {
     return New-Metric -State $State -Value $Value -Unit $Unit -Source $Source -Calculation 'count distinct authoritative identities' -Coverage $Coverage -MissingData $MissingData
 }
 
+function Get-ReportIdentity {
+    param(
+        [AllowNull()] [string] $RunId,
+        [AllowNull()] [Nullable[int]] $ProjectId,
+        [AllowNull()] [Nullable[int]] $StoryId,
+        [AllowNull()] [object] $PullRequest
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RunId) -or $null -eq $ProjectId -or
+        $null -eq $StoryId -or $null -eq $PullRequest) {
+        return $null
+    }
+
+    $parts = @(
+        $RunId,
+        "project-$ProjectId",
+        "story-$StoryId",
+        "pr-$([string] (Get-PropertyValue $PullRequest 'provider'))",
+        "owner-$([string] (Get-PropertyValue $PullRequest 'owner'))",
+        "repository-$([string] (Get-PropertyValue $PullRequest 'repository'))",
+        "number-$([string] (Get-PropertyValue $PullRequest 'number'))",
+        "head-$([string] (Get-PropertyValue $PullRequest 'reviewedHead'))"
+    )
+    return ($parts -join '/')
+}
+
+function ConvertTo-MarkdownCell {
+    param([AllowNull()] [object] $Value)
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string] $Value)) {
+        return 'unknown'
+    }
+    return ([string] $Value).Replace('|', '\|').Replace("`r", ' ').Replace("`n", ' ')
+}
+
 function ConvertTo-Markdown {
     param([Parameter(Mandatory)] [object] $Report)
 
     $lines = [System.Collections.Generic.List[string]]::new()
     [void] $lines.Add('# Story performance report')
     [void] $lines.Add('')
-    [void] $lines.Add("- Run: $($Report.runId)")
-    [void] $lines.Add("- Story: $($Report.projectId)/$($Report.storyId) (#$($Report.storyRef))")
-    [void] $lines.Add("- Review mode: $($Report.reviewMode)")
+    [void] $lines.Add("- Report identity: $(ConvertTo-MarkdownCell $Report.reportId)")
+    [void] $lines.Add("- Run: $(ConvertTo-MarkdownCell $Report.runId)")
+    [void] $lines.Add("- Project/story: $(ConvertTo-MarkdownCell $Report.projectId)/$(ConvertTo-MarkdownCell $Report.storyId) (#$(ConvertTo-MarkdownCell $Report.storyRef))")
+    [void] $lines.Add("- Review mode: $(ConvertTo-MarkdownCell $Report.reviewMode)")
+    $pullRequest = $Report.pullRequest
+    if ($null -eq $pullRequest) {
+        [void] $lines.Add('- Pull request: unknown')
+    }
+    else {
+        $pullRequestLabel = "$(ConvertTo-MarkdownCell $pullRequest.provider)/$(ConvertTo-MarkdownCell $pullRequest.owner)/$(ConvertTo-MarkdownCell $pullRequest.repository)#$($pullRequest.number)"
+        $pullRequestUrl = Get-PropertyValue $pullRequest 'url'
+        if ([string]::IsNullOrWhiteSpace([string] $pullRequestUrl)) {
+            [void] $lines.Add("- Pull request: $(ConvertTo-MarkdownCell $pullRequestLabel)")
+        }
+        else {
+            [void] $lines.Add("- Pull request: [$([string] $pullRequestLabel)]($([string] $pullRequestUrl))")
+        }
+    }
+    [void] $lines.Add("- Reviewed HEAD: $(ConvertTo-MarkdownCell $Report.comparison.reviewedHead)")
+    [void] $lines.Add("- Base revision: $(ConvertTo-MarkdownCell $Report.comparison.baseRevision)")
     [void] $lines.Add('')
-    [void] $lines.Add('| Metric | State | Value | Coverage |')
-    [void] $lines.Add('| --- | --- | ---: | --- |')
-    foreach ($property in @($Report.metrics.PSObject.Properties)) {
+    [void] $lines.Add('| Metric | State | Value | Unit | Source | Coverage | Limitation |')
+    [void] $lines.Add('| --- | --- | ---: | --- | --- | --- | --- |')
+    $metricProperties = if ($Report.metrics -is [System.Collections.IDictionary]) {
+        @($Report.metrics.Keys | ForEach-Object { [pscustomobject][ordered]@{ Name = [string] $_; Value = $Report.metrics[$_] } })
+    }
+    else {
+        @($Report.metrics.PSObject.Properties)
+    }
+    foreach ($property in $metricProperties) {
         $metric = $property.Value
         $value = if ($null -eq $metric.value) { 'unknown' } else { [string] $metric.value }
-        [void] $lines.Add("| $($property.Name) | $($metric.state) | $value | $($metric.coverage) |")
+        [void] $lines.Add("| $(ConvertTo-MarkdownCell $property.Name) | $(ConvertTo-MarkdownCell $metric.state) | $(ConvertTo-MarkdownCell $value) | $(ConvertTo-MarkdownCell $metric.unit) | $(ConvertTo-MarkdownCell $metric.source) | $(ConvertTo-MarkdownCell $metric.coverage) | $(ConvertTo-MarkdownCell $metric.missingData) |")
+    }
+    [void] $lines.Add('')
+    [void] $lines.Add('## Comparison')
+    [void] $lines.Add('')
+    [void] $lines.Add("- Changed files: $(ConvertTo-MarkdownCell $Report.comparison.changedFiles)")
+    [void] $lines.Add("- Lines added: $(ConvertTo-MarkdownCell $Report.comparison.linesAdded)")
+    [void] $lines.Add("- Lines deleted: $(ConvertTo-MarkdownCell $Report.comparison.linesDeleted)")
+    [void] $lines.Add('')
+    [void] $lines.Add('## Provenance and limitations')
+    [void] $lines.Add('')
+    foreach ($source in @($Report.provenance.sources)) {
+        [void] $lines.Add("- Source: $(ConvertTo-MarkdownCell $source)")
+    }
+    foreach ($limitation in @($Report.provenance.limitations)) {
+        [void] $lines.Add("- Limitation: $(ConvertTo-MarkdownCell $limitation)")
     }
     [void] $lines.Add('')
     [void] $lines.Add("Anomalies: $(@($Report.anomalies).Count)")
     foreach ($anomaly in @($Report.anomalies)) {
-        [void] $lines.Add("- [$($anomaly.code)] $($anomaly.message)")
+        [void] $lines.Add("- [$([string] $anomaly.code)] $([string] $anomaly.message)")
     }
     return ($lines -join [Environment]::NewLine) + [Environment]::NewLine
+}
+
+function Get-WorktreeRootCandidates {
+    param([AllowNull()] [string] $RepositoryPath)
+
+    $roots = [System.Collections.Generic.List[string]]::new()
+    if (-not [string]::IsNullOrWhiteSpace($RepositoryPath)) {
+        [void] $roots.Add([IO.Path]::GetFullPath($RepositoryPath).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+    }
+
+    $gitRoot = (& git -C $PSScriptRoot rev-parse --show-toplevel 2>$null | Select-Object -First 1)
+    $gitExitCode = if (Test-Path variable:LASTEXITCODE) { [int] $LASTEXITCODE } else { 1 }
+    if ($gitExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace([string] $gitRoot)) {
+        $gitRootFull = [IO.Path]::GetFullPath(([string] $gitRoot).Trim())
+        if ($roots -notcontains $gitRootFull) {
+            [void] $roots.Add($gitRootFull.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar))
+        }
+    }
+    return @($roots)
+}
+
+function Assert-ExternalArtifactPath {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [AllowNull()] [string] $RepositoryPath
+    )
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    foreach ($root in @(Get-WorktreeRootCandidates -RepositoryPath $RepositoryPath)) {
+        $rootWithSeparator = $root + [IO.Path]::DirectorySeparatorChar
+        if ($fullPath.Equals($root, [StringComparison]::OrdinalIgnoreCase) -or
+            $fullPath.StartsWith($rootWithSeparator, [StringComparison]::OrdinalIgnoreCase)) {
+            throw [System.ArgumentException]::new("report artifacts must be outside the source worktree: $fullPath")
+        }
+    }
+    return $fullPath
+}
+
+function Test-ExactUtf8ArtifactContent {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Content
+    )
+
+    if (-not [IO.File]::Exists($Path)) {
+        return $false
+    }
+    $expected = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+    $actual = [IO.File]::ReadAllBytes($Path)
+    if ($actual.Length -ne $expected.Length) {
+        return $false
+    }
+    for ($index = 0; $index -lt $expected.Length; $index++) {
+        if ($actual[$index] -ne $expected[$index]) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Assert-ArtifactCanPublish {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Content
+    )
+
+    if ([IO.File]::Exists($Path) -and -not (Test-ExactUtf8ArtifactContent -Path $Path -Content $Content)) {
+        throw [System.InvalidOperationException]::new("report_artifact_conflict: refusing to replace existing artifact '$Path'")
+    }
+}
+
+function Publish-ImmutableArtifact {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $Content
+    )
+
+    if (Test-ExactUtf8ArtifactContent -Path $Path -Content $Content) {
+        return 'reused'
+    }
+
+    $directory = [IO.Path]::GetDirectoryName($Path)
+    if (-not [string]::IsNullOrWhiteSpace($directory)) {
+        [IO.Directory]::CreateDirectory($directory) | Out-Null
+    }
+    $temporaryPath = "$Path.tmp.$([Guid]::NewGuid().ToString('N'))"
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
+    try {
+        $stream = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush($true)
+        }
+        finally {
+            $stream.Dispose()
+        }
+        try {
+            [IO.File]::Move($temporaryPath, $Path)
+            return 'created'
+        }
+        catch [IO.IOException] {
+            if (Test-ExactUtf8ArtifactContent -Path $Path -Content $Content) {
+                return 'reused'
+            }
+            throw [System.InvalidOperationException]::new("report_artifact_conflict: another artifact already occupies '$Path'")
+        }
+    }
+    finally {
+        if ([IO.File]::Exists($temporaryPath)) {
+            [IO.File]::Delete($temporaryPath)
+        }
+    }
 }
 
 $resolvedEventsPath = [IO.Path]::GetFullPath($EventsPath)
@@ -2191,16 +2395,31 @@ else {
 }
 $reviewedHeadForDiff = if ($reviewedHeadCandidates.Count -eq 1) { [string] $reviewedHeadCandidates[0] } else { $null }
 $comparisonMetrics = Get-ComparisonMetrics -BaseRevision $BaseRevision -ReviewedHead $reviewedHeadForDiff -RepositoryPath $RepositoryPath
+$reportPullRequest = if ($prReady.Count -eq 1) { Get-SafePullRequest -PullRequest (Get-PropertyValue $prReady[0].Event 'pullRequest') } else { $null }
+$reportRunId = if ($runIds.Count -eq 1) { [string] $runIds[0] } else { $null }
+$reportProjectId = if ($projectIds.Count -eq 1) { [int] $projectIds[0] } else { $null }
+$reportStoryId = if ($storyIds.Count -eq 1) { [int] $storyIds[0] } else { $null }
+$reportIdentityPullRequest = if ($prReady.Count -eq 1) { Get-PropertyValue $prReady[0].Event 'pullRequest' } else { $null }
+$reportId = Get-ReportIdentity -RunId $reportRunId -ProjectId $reportProjectId -StoryId $reportStoryId -PullRequest $reportIdentityPullRequest
+$hasSyntheticEvidence = @($eventObjects | Where-Object { (Get-PropertyValue (Get-PropertyValue $_ 'provenance') 'synthetic') -eq $true }).Count -gt 0
+$hasNonSyntheticEvidence = @($eventObjects | Where-Object { (Get-PropertyValue (Get-PropertyValue $_ 'provenance') 'synthetic') -ne $true }).Count -gt 0
+$sourceCoverage = if ($hasSyntheticEvidence -and $hasNonSyntheticEvidence) { 'mixed synthetic and source-backed provenance' } elseif ($hasSyntheticEvidence) { 'synthetic provenance explicitly classified per event' } else { 'source provenance retained per event; numeric usage requires attributable authority' }
+$reportLimitations = @(
+    'Unknown values remain null; unavailable evidence is never treated as zero.'
+    'Role model and reasoning-effort profiles are unavailable because the version-1 event envelope carries no profile fields.'
+    if ($comparisonMetrics.changedFiles.state -eq 'unavailable' -or $comparisonMetrics.linesAdded.state -eq 'unavailable' -or $comparisonMetrics.linesDeleted.state -eq 'unavailable') { 'Git comparison metrics require an explicit valid base revision, reviewed HEAD, and repository path.' }
+)
 
 $report = [ordered]@{
     schemaVersion = 1
     kind = 'story_performance_report'
+    reportId = $reportId
     runId = if ($runIds.Count -eq 1) { $runIds[0] } else { $null }
     projectId = if ($projectIds.Count -eq 1) { $projectIds[0] } else { $null }
     storyId = if ($storyIds.Count -eq 1) { $storyIds[0] } else { $null }
     storyRef = if ($storyRefs.Count -eq 1) { $storyRefs[0] } else { $null }
     reviewMode = $effectiveReviewMode
-    pullRequest = if ($prReady.Count -eq 1) { Get-SafePullRequest -PullRequest (Get-PropertyValue $prReady[0].Event 'pullRequest') } else { $null }
+    pullRequest = $reportPullRequest
     metrics = [ordered]@{
         timeToPr = $timeToPrMetric
         implementationElapsed = $implementationMetric
@@ -2249,24 +2468,30 @@ $report = [ordered]@{
         uncoveredStorySpan = $uncoveredStorySpan
         note = 'Synthetic and source-backed evidence are aggregated only when their explicit identities and UTC boundaries are valid; unknown values remain null.'
     }
+    provenance = [ordered]@{
+        eventSchemaVersion = 1
+        sourceCoverage = $sourceCoverage
+        sources = @('version-1 story performance event ledger', 'Git revision comparison when an explicit valid base and reviewed HEAD are supplied')
+        limitations = @($reportLimitations)
+    }
 }
 
 $json = $report | ConvertTo-Json -Depth 100
 if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $outputFullPath = [IO.Path]::GetFullPath($OutputPath)
-    $outputDirectory = [IO.Path]::GetDirectoryName($outputFullPath)
-    if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
-        [IO.Directory]::CreateDirectory($outputDirectory) | Out-Null
-    }
-    [IO.File]::WriteAllText($outputFullPath, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $outputFullPath = Assert-ExternalArtifactPath -Path $OutputPath -RepositoryPath $RepositoryPath
+    $outputContent = $json + [Environment]::NewLine
+    Assert-ArtifactCanPublish -Path $outputFullPath -Content $outputContent
 }
 if (-not [string]::IsNullOrWhiteSpace($MarkdownPath)) {
-    $markdownFullPath = [IO.Path]::GetFullPath($MarkdownPath)
-    $markdownDirectory = [IO.Path]::GetDirectoryName($markdownFullPath)
-    if (-not [string]::IsNullOrWhiteSpace($markdownDirectory)) {
-        [IO.Directory]::CreateDirectory($markdownDirectory) | Out-Null
-    }
-    [IO.File]::WriteAllText($markdownFullPath, (ConvertTo-Markdown -Report ([pscustomobject] $report)), [Text.UTF8Encoding]::new($false))
+    $markdownFullPath = Assert-ExternalArtifactPath -Path $MarkdownPath -RepositoryPath $RepositoryPath
+    $markdownContent = ConvertTo-Markdown -Report ([pscustomobject] $report)
+    Assert-ArtifactCanPublish -Path $markdownFullPath -Content $markdownContent
+}
+if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+    [void] (Publish-ImmutableArtifact -Path $outputFullPath -Content $outputContent)
+}
+if (-not [string]::IsNullOrWhiteSpace($MarkdownPath)) {
+    [void] (Publish-ImmutableArtifact -Path $markdownFullPath -Content $markdownContent)
 }
 
 Write-Output $json
