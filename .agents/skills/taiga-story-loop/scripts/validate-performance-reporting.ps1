@@ -213,6 +213,8 @@ Assert-True ([string]$perTaskReviews.events[0].revision -ceq [string]$perTaskRev
 $task148Assertions = {
     $perTaskCounts = Get-ReviewCountResult -Fixture $perTaskReviews
     $perTaskObservations = Get-ReviewObservationResult -Fixture $perTaskReviews
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$perTaskReviews.observations[0].observedAtUtc)) 'same-event-ID duplicate control must carry diagnostic observation time'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$perTaskReviews.observations[2].observedAtUtc)) 'same-event-ID conflict control must carry diagnostic observation time'
     Assert-True ($perTaskObservations.duplicateEventCount -eq 1) 'fixture control must derive one exact duplicate event'
     Assert-True ($perTaskObservations.duplicateAttemptCount -eq 1) 'fixture control must derive one same-attempt duplicate with a new event ID'
     Assert-True ($perTaskObservations.conflictCount -eq 2) 'fixture control must derive changed-payload conflicts before stale classification'
@@ -614,7 +616,10 @@ function Get-ReviewObservationResult {
         $eventId = [string]$event.eventId
         Assert-True (-not [string]::IsNullOrWhiteSpace($eventId)) 'review fixture events must have event IDs'
         Assert-True (-not $ledgerByEventId.ContainsKey($eventId)) "fixture authoritative event IDs must be unique: $eventId"
-        $ledgerByEventId[$eventId] = Get-CanonicalPayload -Payload $event
+        $ledgerByEventId[$eventId] = [pscustomobject]@{
+            eventId = $eventId
+            payload = Get-ReviewPayloadWithoutEventId -Event $event
+        }
 
         if ([string]$event.eventType -ceq 'review_started' -or [string]$event.eventType -ceq 'final_review_started') {
             $attemptId = [string]$event.reviewAttemptId
@@ -647,9 +652,10 @@ function Get-ReviewObservationResult {
     foreach ($observation in @($Fixture.observations)) {
         $eventId = [string]$observation.eventId
         $attemptId = [string]$observation.reviewAttemptId
-        $canonical = Get-CanonicalPayload -Payload $observation
         if ($ledgerByEventId.ContainsKey($eventId)) {
-            if ([string]$ledgerByEventId[$eventId] -ceq $canonical) {
+            $payloadMatches = [string]$ledgerByEventId[$eventId].eventId -ceq $eventId -and
+                [string]$ledgerByEventId[$eventId].payload -ceq (Get-ReviewPayloadWithoutEventId -Event $observation)
+            if ($payloadMatches) {
                 $duplicateEventCount++
             }
             else {

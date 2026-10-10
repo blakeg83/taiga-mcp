@@ -844,7 +844,8 @@ payloads by themselves.
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "occurredAtUtc": "2026-10-09T11:00:00Z"
+      "occurredAtUtc": "2026-10-09T11:00:00Z",
+      "observedAtUtc": "2026-10-09T11:20:00Z"
     },
     {
       "eventId": "task-146-review-start-reobserved",
@@ -868,7 +869,8 @@ payloads by themselves.
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
       "revision": "ffffffffffffffffffffffffffffffffffffffff",
-      "occurredAtUtc": "2026-10-09T11:00:00Z"
+      "occurredAtUtc": "2026-10-09T11:00:00Z",
+      "observedAtUtc": "2026-10-09T11:20:00Z"
     },
     {
       "eventId": "task-147-stale-start",
@@ -1332,7 +1334,7 @@ payloads by themselves.
 
 | Requirement | Fixture ID | Deterministic assertion |
 | --- | --- | --- |
-| Per-task review identity/counting | synthetic-review-counts-per-task | Initial tasks, correction re-review attempts, duplicate observations, stale observations, mismatched closure identity, reversed closure, and first-pass numerator/denominator produce the declared counts and coverage. |
+| Per-task review identity/counting | synthetic-review-counts-per-task | Initial tasks, correction re-review attempts, same-event-ID diagnostic-only duplicate, changed immutable payload conflict, stale observations, mismatched closure identity, reversed closure, and first-pass numerator/denominator produce the declared counts and coverage. |
 | Story-end-only review mode | synthetic-review-counts-story-end-only | Per-task and correction review counts are zero and first-pass rate is not_applicable; final-story review remains countable. |
 | Same-SHA final re-reviews | synthetic-final-rereviews-same-head | finalStoryReviews counts all three distinct final attempts while finalStoryReReviews counts the later two; attempt ordinal distinguishes a real retry on the unchanged SHA. |
 | Review usage fallback | synthetic-review-usage-unavailable-fallback | Absent reviewer counters remain unavailable with null counters and an explicit safe fallback; forbidden estimates are named. |
