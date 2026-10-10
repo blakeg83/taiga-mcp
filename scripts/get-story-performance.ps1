@@ -889,6 +889,146 @@ function Try-GetUtcTime {
     return $true
 }
 
+function Sort-RecordsByTimeLinear {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records)
+
+    if ($Records.Count -le 1) {
+        return @($Records)
+    }
+
+    # Records arrive from the ledger in physical line order. A stable eight-pass
+    # radix sort of the nonnegative UTC tick value therefore preserves line order
+    # for equal timestamps without a comparison sort.
+    $source = [object[]] @($Records)
+    $target = [object[]]::new($source.Length)
+    for ($pass = 0; $pass -lt 8; $pass++) {
+        $counts = [int[]]::new(256)
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $bucket = [int] ((([uint64] $source[$itemIndex].Time.Ticks) -shr ($pass * 8)) -band [uint64] 0xFF)
+            $counts[$bucket]++
+        }
+        $positions = [int[]]::new(256)
+        for ($bucket = 1; $bucket -lt 256; $bucket++) {
+            $positions[$bucket] = $positions[$bucket - 1] + $counts[$bucket - 1]
+        }
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $bucket = [int] ((([uint64] $source[$itemIndex].Time.Ticks) -shr ($pass * 8)) -band [uint64] 0xFF)
+            $target[$positions[$bucket]] = $source[$itemIndex]
+            $positions[$bucket]++
+        }
+        $temporary = $source
+        $source = $target
+        $target = $temporary
+    }
+    return @($source)
+}
+
+function Sort-RecordsByLineLinear {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records)
+
+    if ($Records.Count -le 1) {
+        return @($Records)
+    }
+
+    # Line numbers are nonnegative 32-bit values. Fixed four-pass radix sorting
+    # keeps the original physical order for equal keys in linear time.
+    $source = [object[]] @($Records)
+    $target = [object[]]::new($source.Length)
+    for ($pass = 0; $pass -lt 4; $pass++) {
+        $counts = [int[]]::new(256)
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $bucket = [int] ((([uint64] $source[$itemIndex].Line) -shr ($pass * 8)) -band [uint64] 0xFF)
+            $counts[$bucket]++
+        }
+        $positions = [int[]]::new(256)
+        for ($bucket = 1; $bucket -lt 256; $bucket++) {
+            $positions[$bucket] = $positions[$bucket - 1] + $counts[$bucket - 1]
+        }
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $bucket = [int] ((([uint64] $source[$itemIndex].Line) -shr ($pass * 8)) -band [uint64] 0xFF)
+            $target[$positions[$bucket]] = $source[$itemIndex]
+            $positions[$bucket]++
+        }
+        $temporary = $source
+        $source = $target
+        $target = $temporary
+    }
+    return @($source)
+}
+
+function Sort-UsageSamplesLinear {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Samples)
+
+    if ($Samples.Count -le 1) {
+        return @($Samples)
+    }
+
+    # LSD passes sort the secondary physical line key first and the primary
+    # sampledAtUtc key second. The result is sampleTime, then ledger line.
+    $source = [object[]] @($Samples)
+    $target = [object[]]::new($source.Length)
+    for ($pass = 0; $pass -lt 12; $pass++) {
+        $counts = [int[]]::new(256)
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $value = if ($pass -lt 4) { [uint64] $source[$itemIndex].record.Line } else { [uint64] $source[$itemIndex].sampleTime.Ticks }
+            $shift = if ($pass -lt 4) { $pass * 8 } else { ($pass - 4) * 8 }
+            $bucket = [int] (($value -shr $shift) -band [uint64] 0xFF)
+            $counts[$bucket]++
+        }
+        $positions = [int[]]::new(256)
+        for ($bucket = 1; $bucket -lt 256; $bucket++) {
+            $positions[$bucket] = $positions[$bucket - 1] + $counts[$bucket - 1]
+        }
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $value = if ($pass -lt 4) { [uint64] $source[$itemIndex].record.Line } else { [uint64] $source[$itemIndex].sampleTime.Ticks }
+            $shift = if ($pass -lt 4) { $pass * 8 } else { ($pass - 4) * 8 }
+            $bucket = [int] (($value -shr $shift) -band [uint64] 0xFF)
+            $target[$positions[$bucket]] = $source[$itemIndex]
+            $positions[$bucket]++
+        }
+        $temporary = $source
+        $source = $target
+        $target = $temporary
+    }
+    return @($source)
+}
+
+function Sort-UsageRangeItemsLinear {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Items,
+        [Parameter(Mandatory)] [ValidateSet('startTime', 'endTime')] [string] $TimeProperty
+    )
+
+    if ($Items.Count -le 1) {
+        return @($Items)
+    }
+
+    $source = [object[]] @($Items)
+    $target = [object[]]::new($source.Length)
+    for ($pass = 0; $pass -lt 8; $pass++) {
+        $counts = [int[]]::new(256)
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $value = [uint64] $source[$itemIndex].$TimeProperty.Ticks
+            $bucket = [int] (($value -shr ($pass * 8)) -band [uint64] 0xFF)
+            $counts[$bucket]++
+        }
+        $positions = [int[]]::new(256)
+        for ($bucket = 1; $bucket -lt 256; $bucket++) {
+            $positions[$bucket] = $positions[$bucket - 1] + $counts[$bucket - 1]
+        }
+        for ($itemIndex = 0; $itemIndex -lt $source.Length; $itemIndex++) {
+            $value = [uint64] $source[$itemIndex].$TimeProperty.Ticks
+            $bucket = [int] (($value -shr ($pass * 8)) -band [uint64] 0xFF)
+            $target[$positions[$bucket]] = $source[$itemIndex]
+            $positions[$bucket]++
+        }
+        $temporary = $source
+        $source = $target
+        $target = $temporary
+    }
+    return @($source)
+}
+
 function Get-TaskText {
     param([AllowNull()] [object] $Event)
 
@@ -1341,7 +1481,7 @@ function Read-EventLedger {
         [void] $Anomalies.Add((New-Anomaly -Code 'incomplete_tail' -Message 'The final ledger fragment has no terminating newline and was excluded as an interrupted tail' -Line ($allLines.Count + 1)))
     }
 
-    return @($records | Sort-Object Time, Line)
+    return Sort-RecordsByTimeLinear -Records @($records)
 }
 
 function New-CountMetric {
@@ -1708,7 +1848,7 @@ if ($records.Count -eq 0) {
     throw [System.ArgumentException]::new('The events ledger contains no valid events')
 }
 
-$ledgerOrder = @($records | Sort-Object Line)
+$ledgerOrder = Sort-RecordsByLineLinear -Records @($records)
 $bindingKey = Get-BindingKey -Event $ledgerOrder[0].Event
 $foreignRecords = @($records | Where-Object { (Get-BindingKey -Event $_.Event) -cne $bindingKey })
 foreach ($foreign in $foreignRecords) {
@@ -1828,7 +1968,7 @@ $reviewAttemptBindingById = @{}
 $reviewRequestBindingById = @{}
 $reviewStartConflicts = @{}
 $dedupedReviewStarts = [System.Collections.Generic.List[object]]::new()
-foreach ($record in @($records | Where-Object { $_.EventType -in $script:ReviewStartEvents } | Sort-Object Line)) {
+foreach ($record in (Sort-RecordsByLineLinear -Records @($records | Where-Object { $_.EventType -in $script:ReviewStartEvents }))) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
     $attemptBindingKey = Get-ReviewAttemptBindingIdentity -Event $record.Event
     $requestBindingKey = [string] (Get-PropertyValue $record.Event 'reviewRequestId')
@@ -1890,7 +2030,7 @@ foreach ($key in @($reviewEnds.Keys | Sort-Object)) {
 }
 
 $reviewIntervals = [System.Collections.Generic.List[object]]::new()
-foreach ($record in @($dedupedReviewStarts | Sort-Object Time, Line)) {
+foreach ($record in (Sort-RecordsByTimeLinear -Records @($dedupedReviewStarts))) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
     $closures = if ($reviewEndsByAttempt.ContainsKey($attemptKey)) { @($reviewEndsByAttempt[$attemptKey]) } else { @() }
     $matchingClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -eq (Get-ReviewIdentity $record.Event) })
@@ -2080,7 +2220,7 @@ function New-UsageSampleIndex {
             })
     }
     foreach ($key in @($index.Keys)) {
-        $samples = @($index[$key] | Sort-Object sampleTime, { [long] $_.record.Line })
+        $samples = Sort-UsageSamplesLinear -Samples @($index[$key])
         $sameTimeConflictPrefix = [long[]]::new($samples.Count + 1)
         $edgeStreamPrefix = [long[]]::new($samples.Count + 1)
         $edgeSemanticsPrefix = [long[]]::new($samples.Count + 1)
@@ -2169,46 +2309,6 @@ function New-UsageSampleIndex {
     return $index
 }
 
-function Find-FirstUsageSampleIndex {
-    param(
-        [Parameter(Mandatory)] [object[]] $Samples,
-        [Parameter(Mandatory)] [DateTimeOffset] $Target
-    )
-
-    $low = 0
-    $high = $Samples.Count
-    while ($low -lt $high) {
-        $middle = $low + [int][math]::Floor(($high - $low) / 2.0)
-        if ($Samples[$middle].sampleTime -lt $Target) {
-            $low = $middle + 1
-        }
-        else {
-            $high = $middle
-        }
-    }
-    return $low
-}
-
-function Find-FirstGreaterUsageSampleIndex {
-    param(
-        [Parameter(Mandatory)] [object[]] $Samples,
-        [Parameter(Mandatory)] [DateTimeOffset] $Target
-    )
-
-    $low = 0
-    $high = $Samples.Count
-    while ($low -lt $high) {
-        $middle = $low + [int][math]::Floor(($high - $low) / 2.0)
-        if ($Samples[$middle].sampleTime -le $Target) {
-            $low = $middle + 1
-        }
-        else {
-            $high = $middle
-        }
-    }
-    return $low
-}
-
 function Find-FirstUsageIssueIndex {
     param(
         [Parameter(Mandatory)] [long[]] $Prefix,
@@ -2237,28 +2337,78 @@ function Find-FirstUsageIssueIndex {
     return $low
 }
 
-function Get-UsageSampleRange {
+function New-UsageRangePlan {
     param(
-        [Parameter(Mandatory)] [hashtable] $UsageIndex,
-        [Parameter(Mandatory)] [string] $Key,
-        [Parameter(Mandatory)] [DateTimeOffset] $StartTime,
-        [Parameter(Mandatory)] [DateTimeOffset] $EndTime
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Intervals,
+        [Parameter(Mandatory)] [hashtable] $RecordsByEventId,
+        [Parameter(Mandatory)] [hashtable] $UsageIndex
     )
 
-    if (-not $UsageIndex.ContainsKey($Key)) {
-        return $null
+    $itemsByKey = @{}
+    for ($intervalIndex = 0; $intervalIndex -lt $Intervals.Count; $intervalIndex++) {
+        $interval = $Intervals[$intervalIndex]
+        $startRecord = if ($null -ne $interval.startEventId -and $RecordsByEventId.ContainsKey([string] $interval.startEventId)) { $RecordsByEventId[[string] $interval.startEventId] } else { $null }
+        $startUsage = if ($null -ne $startRecord) { Get-PropertyValue $startRecord.Event 'usage' } else { $null }
+        $startTime = [DateTimeOffset]::MinValue
+        $endTime = [DateTimeOffset]::MinValue
+        $role = if ($null -ne $startUsage) { [string] (Get-PropertyValue $startUsage 'role') } else { $null }
+        $streamId = if ($null -ne $startUsage) { [string] (Get-PropertyValue $startUsage 'streamId') } else { $null }
+        $source = if ($null -ne $startUsage) { [string] (Get-PropertyValue $startUsage 'source') } else { $null }
+        $key = if ($null -ne $startUsage) { Get-UsageSampleKey -Role $role -StreamId $streamId -Source $source } else { $null }
+        if ((Try-GetUtcTime -Value $interval.startUtc -Parsed ([ref] $startTime)) -and
+            (Try-GetUtcTime -Value $interval.endUtc -Parsed ([ref] $endTime)) -and
+            -not [string]::IsNullOrWhiteSpace($role) -and
+            -not [string]::IsNullOrWhiteSpace($streamId) -and
+            -not [string]::IsNullOrWhiteSpace($source) -and
+            $UsageIndex.ContainsKey($key)) {
+            if (-not $itemsByKey.ContainsKey($key)) {
+                $itemsByKey[$key] = [System.Collections.Generic.List[object]]::new()
+            }
+            [void] $itemsByKey[$key].Add([pscustomobject][ordered]@{
+                    intervalIndex = $intervalIndex
+                    startTime = $startTime
+                    endTime = $endTime
+                })
+        }
     }
-    $bucket = $UsageIndex[$Key]
-    $samples = $bucket.samples
-    $first = Find-FirstUsageSampleIndex -Samples $samples -Target $StartTime
-    $lastExclusive = Find-FirstGreaterUsageSampleIndex -Samples $samples -Target $EndTime
-    return [pscustomobject][ordered]@{
-        bucket = $bucket
-        samples = $samples
-        firstIndex = $first
-        lastIndex = $lastExclusive - 1
-        count = [Math]::Max(0, $lastExclusive - $first)
+
+    $plan = @{}
+    foreach ($key in @($itemsByKey.Keys)) {
+        $bucket = $UsageIndex[$key]
+        $samples = @($bucket.samples)
+        $items = @($itemsByKey[$key])
+        $firstIndexes = @{}
+        $lastExclusiveIndexes = @{}
+
+        $startCursor = 0
+        foreach ($item in (Sort-UsageRangeItemsLinear -Items $items -TimeProperty 'startTime')) {
+            while ($startCursor -lt $samples.Count -and $samples[$startCursor].sampleTime -lt $item.startTime) {
+                $startCursor++
+            }
+            $firstIndexes[[string] $item.intervalIndex] = $startCursor
+        }
+
+        $endCursor = 0
+        foreach ($item in (Sort-UsageRangeItemsLinear -Items $items -TimeProperty 'endTime')) {
+            while ($endCursor -lt $samples.Count -and $samples[$endCursor].sampleTime -le $item.endTime) {
+                $endCursor++
+            }
+            $lastExclusiveIndexes[[string] $item.intervalIndex] = $endCursor
+        }
+
+        foreach ($item in $items) {
+            $first = [int] $firstIndexes[[string] $item.intervalIndex]
+            $lastExclusive = [int] $lastExclusiveIndexes[[string] $item.intervalIndex]
+            $plan[[string] $item.intervalIndex] = [pscustomobject][ordered]@{
+                bucket = $bucket
+                samples = $samples
+                firstIndex = $first
+                lastIndex = $lastExclusive - 1
+                count = [Math]::Max(0, $lastExclusive - $first)
+            }
+        }
     }
+    return $plan
 }
 
 function Get-UsageBoundaryResult {
@@ -2268,6 +2418,7 @@ function Get-UsageBoundaryResult {
         [AllowNull()] [object] $EndRecord,
         [Parameter(Mandatory)] [string] $Role,
         [Parameter(Mandatory)] [hashtable] $UsageIndex,
+        [AllowNull()] [object] $UsageRange,
         [AllowNull()] [object] $StorySpan,
         [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
     )
@@ -2453,8 +2604,6 @@ function Get-UsageBoundaryResult {
     $intermediateProblem = $false
     $intermediateProblemMessage = $null
     if ($timesValid) {
-        $usageKey = Get-UsageSampleKey -Role $Role -StreamId $startStream -Source $startSource
-        $usageRange = Get-UsageSampleRange -UsageIndex $UsageIndex -Key $usageKey -StartTime $startTime -EndTime $endTime
         if ($null -ne $usageRange -and [int] $usageRange.count -gt 0) {
             $bucket = $usageRange.bucket
             $samples = $usageRange.samples
@@ -2767,10 +2916,13 @@ function Get-UsageMetric {
     )
 
     $evidence = [System.Collections.Generic.List[object]]::new()
-    foreach ($interval in @($Intervals)) {
+    $usageRangePlan = New-UsageRangePlan -Intervals @($Intervals) -RecordsByEventId $RecordsByEventId -UsageIndex $UsageIndex
+    for ($intervalIndex = 0; $intervalIndex -lt $Intervals.Count; $intervalIndex++) {
+        $interval = $Intervals[$intervalIndex]
         $startRecord = if ($null -ne $interval.startEventId -and $RecordsByEventId.ContainsKey([string] $interval.startEventId)) { $RecordsByEventId[[string] $interval.startEventId] } else { $null }
         $endRecord = if ($null -ne $interval.endEventId -and $RecordsByEventId.ContainsKey([string] $interval.endEventId)) { $RecordsByEventId[[string] $interval.endEventId] } else { $null }
-        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -UsageIndex $UsageIndex -StorySpan $StorySpan -Anomalies $Anomalies))
+        $usageRange = if ($usageRangePlan.ContainsKey([string] $intervalIndex)) { $usageRangePlan[[string] $intervalIndex] } else { $null }
+        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -UsageIndex $UsageIndex -UsageRange $usageRange -StorySpan $StorySpan -Anomalies $Anomalies))
     }
     [void] (Resolve-UsageEvidence -Evidence $evidence -Anomalies $Anomalies)
 
@@ -2986,7 +3138,7 @@ foreach ($record in @($records)) {
     [void] $recordsByTaskRef[$taskRefKey].Add($record)
 }
 foreach ($taskRefKey in @($recordsByTaskRef.Keys)) {
-    $recordsByTaskRef[$taskRefKey] = @($recordsByTaskRef[$taskRefKey] | Sort-Object Time, Line)
+    $recordsByTaskRef[$taskRefKey] = Sort-RecordsByTimeLinear -Records @($recordsByTaskRef[$taskRefKey])
 }
 $initialAttemptsByTaskRef = @{}
 foreach ($attempt in @($initialAttempts)) {
