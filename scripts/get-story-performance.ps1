@@ -389,7 +389,16 @@ function Get-SetupMetadata {
         throw [System.ArgumentException]::new('setup_metadata_invalid: metadata input file was not found')
     }
     try {
-        $root = [IO.File]::ReadAllText($fullPath, [Text.UTF8Encoding]::new($false)) | ConvertFrom-Json -Depth 100 -DateKind String
+        $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+        $metadataJsonText = [IO.File]::ReadAllText($fullPath, $strictUtf8)
+        $root = $metadataJsonText | ConvertFrom-Json -Depth 100 -DateKind String
+        $jsonDocument = [Text.Json.JsonDocument]::Parse($metadataJsonText)
+        try {
+            $profilesWasArray = $jsonDocument.RootElement.GetProperty('profiles').ValueKind -eq [Text.Json.JsonValueKind]::Array
+        }
+        finally {
+            $jsonDocument.Dispose()
+        }
     }
     catch {
         throw [System.ArgumentException]::new('setup_metadata_invalid: metadata input is not valid UTF-8 JSON')
@@ -413,14 +422,31 @@ function Get-SetupMetadata {
     if ([string] (Get-PropertyValue $root 'kind') -cne 'story_performance_setup') {
         throw [System.ArgumentException]::new('setup_metadata_invalid: kind must be story_performance_setup')
     }
-    if ([string] (Get-PropertyValue $root 'runId') -cne $RunId -or
-        [int] (Get-PropertyValue $root 'projectId') -ne $ProjectId -or
-        [int] (Get-PropertyValue $root 'storyId') -ne $StoryId) {
+    $metadataRunId = Get-PropertyValue $root 'runId'
+    $metadataProjectId = Get-PropertyValue $root 'projectId'
+    $metadataStoryId = Get-PropertyValue $root 'storyId'
+    if (-not (Test-NonBlankSafeString -Value $metadataRunId) -or
+        -not (Test-PositiveIntegerValue -Value $metadataProjectId) -or
+        [decimal] $metadataProjectId -gt [int]::MaxValue -or
+        -not (Test-PositiveIntegerValue -Value $metadataStoryId) -or
+        [decimal] $metadataStoryId -gt [int]::MaxValue) {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: runId, projectId, and storyId must be a safe run ID and positive 32-bit integers')
+    }
+    if ([string] $metadataRunId -cne $RunId -or
+        [int] $metadataProjectId -ne $ProjectId -or
+        [int] $metadataStoryId -ne $StoryId) {
         throw [System.ArgumentException]::new('setup_metadata_conflict: metadata run/project/story identity does not match the event ledger')
     }
     $rootProvenance = Get-ValidatedSetupProvenance -Value (Get-PropertyValue $root 'provenance') -Context 'metadata'
-    $profiles = Get-PropertyValue $root 'profiles'
-    if ($null -eq $profiles -or $profiles -isnot [System.Array] -or @($profiles).Count -eq 0) {
+    $profilesProperty = $root.PSObject.Properties['profiles']
+    $profiles = if ($null -eq $profilesProperty) { $null } else { $profilesProperty.Value }
+    if (-not $profilesWasArray) {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: profiles must be a nonempty array')
+    }
+    if ($null -ne $profiles -and $profiles -isnot [System.Array]) {
+        $profiles = @($profiles)
+    }
+    if ($null -eq $profiles -or $profiles.Count -eq 0) {
         throw [System.ArgumentException]::new('setup_metadata_invalid: profiles must be a nonempty array')
     }
 
@@ -480,6 +506,30 @@ function Get-SetupMetadata {
         }
         [void] $records.Add([pscustomobject] $record)
     }
+    $profileConflicts = @(
+        $records | Group-Object { "$($_.role)|$($_.workerId)|$($_.sessionId)" } | ForEach-Object {
+            $group = @($_.Group | Sort-Object effectiveFromUtc)
+            for ($leftIndex = 0; $leftIndex -lt $group.Count; $leftIndex++) {
+                for ($rightIndex = $leftIndex + 1; $rightIndex -lt $group.Count; $rightIndex++) {
+                    $left = $group[$leftIndex]
+                    $right = $group[$rightIndex]
+                    $leftStart = [DateTimeOffset]::Parse($left.effectiveFromUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+                    $rightStart = [DateTimeOffset]::Parse($right.effectiveFromUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+                    $leftEnd = if ([string]::IsNullOrWhiteSpace([string] $left.effectiveToUtc)) { [DateTimeOffset]::MaxValue } else { [DateTimeOffset]::Parse($left.effectiveToUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+                    $rightEnd = if ([string]::IsNullOrWhiteSpace([string] $right.effectiveToUtc)) { [DateTimeOffset]::MaxValue } else { [DateTimeOffset]::Parse($right.effectiveToUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind) }
+                    $overlaps = $leftStart -lt $rightEnd -and $rightStart -lt $leftEnd
+                    $profileDiffers = [string] $left.model -cne [string] $right.model -or [string] $left.effort -cne [string] $right.effort
+                    if ($overlaps -and $profileDiffers) {
+                        [pscustomobject][ordered]@{ identity = "$($left.role)/$($left.workerId)/$($left.sessionId)"; leftChange = $left.changeId; rightChange = $right.changeId }
+                    }
+                }
+            }
+        }
+    )
+    if ($profileConflicts.Count -gt 0) {
+        throw [System.InvalidOperationException]::new('setup_metadata_conflict: overlapping profile intervals disagree for the same role, worker, and session')
+    }
+
     return [pscustomobject][ordered]@{
         state = 'measured'
         records = @($records)

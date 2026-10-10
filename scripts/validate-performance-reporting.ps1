@@ -690,8 +690,103 @@ try {
         provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'complete setup fixture'; synthetic = $true }
     }
     [IO.File]::WriteAllText($metadataPath, ($setupMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
-    $metadataOutput = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153) -MetadataPath $metadataPath -OutputPath $metadataJsonPath -MarkdownPath $metadataMarkdownPath
-    Assert-True ($LASTEXITCODE -eq 0) 'validated setup metadata should aggregate and publish successfully'
+
+    $oneProfileMetadataPath = Join-Path $root 'one-profile-setup-metadata.json'
+    $oneProfileOutputPath = Join-Path $artifactRoot 'one-profile.json'
+    $oneProfileMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $oneProfileMetadata.profiles = @($oneProfileMetadata.profiles[0])
+    [IO.File]::WriteAllText($oneProfileMetadataPath, ($oneProfileMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $oneProfileOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $oneProfileMetadataPath -OutputPath $oneProfileOutputPath 2>&1
+    $oneProfileDiagnostic = [string]($oneProfileOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "a one-record profiles array should remain a valid array and publish successfully (diagnostic: $oneProfileDiagnostic)"
+    $oneProfileReport = Get-Content -Raw -LiteralPath $oneProfileOutputPath | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$oneProfileReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($oneProfileReport.metrics.modelsAndReasoning.value).Count -eq 1) 'one supplied profile should remain measured'
+
+    $shapeCases = @(
+        [ordered]@{ name = 'zero-profiles'; profiles = @() }
+        [ordered]@{ name = 'object-profiles'; profiles = $oneProfileMetadata.profiles[0] }
+    )
+    foreach ($shapeCase in $shapeCases) {
+        $shapeMetadataPath = Join-Path $root "$($shapeCase.name)-setup-metadata.json"
+        $shapeOutputPath = Join-Path $artifactRoot "$($shapeCase.name).json"
+        $shapeMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+        $shapeMetadata.profiles = $shapeCase.profiles
+        [IO.File]::WriteAllText($shapeMetadataPath, ($shapeMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+        $shapeOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $shapeMetadataPath -OutputPath $shapeOutputPath 2>&1
+        $shapeDiagnostic = [string]($shapeOutput -join [Environment]::NewLine)
+        Assert-True ($LASTEXITCODE -ne 0 -and $shapeDiagnostic.Contains('setup_metadata_invalid') -and -not (Test-Path -LiteralPath $shapeOutputPath)) "$($shapeCase.name) metadata shape should fail safely"
+    }
+
+    $identityCases = @(
+        [ordered]@{ name = 'fractional-project'; field = 'projectId'; value = 12.5 }
+        [ordered]@{ name = 'string-project'; field = 'projectId'; value = '12' }
+        [ordered]@{ name = 'boolean-story'; field = 'storyId'; value = $true }
+        [ordered]@{ name = 'out-of-range-story'; field = 'storyId'; value = ([int64]::MaxValue) }
+    )
+    foreach ($identityCase in $identityCases) {
+        $identityMetadataPath = Join-Path $root "$($identityCase.name)-setup-metadata.json"
+        $identityOutputPath = Join-Path $artifactRoot "$($identityCase.name).json"
+        $identityMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+        $identityMetadata.($identityCase.field) = $identityCase.value
+        [IO.File]::WriteAllText($identityMetadataPath, ($identityMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+        $identityOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $identityMetadataPath -OutputPath $identityOutputPath 2>&1
+        $identityDiagnostic = [string]($identityOutput -join [Environment]::NewLine)
+        Assert-True ($LASTEXITCODE -ne 0 -and $identityDiagnostic.Contains('setup_metadata_invalid') -and -not (Test-Path -LiteralPath $identityOutputPath)) "$($identityCase.name) metadata identity should fail safely"
+    }
+
+    $invalidUtf8MetadataPath = Join-Path $root 'invalid-utf8-setup-metadata.json'
+    $invalidUtf8OutputPath = Join-Path $artifactRoot 'invalid-utf8.json'
+    $metadataBytes = [Text.UTF8Encoding]::new($false).GetBytes(($setupMetadata | ConvertTo-Json -Depth 20))
+    $markerBytes = [Text.UTF8Encoding]::new($false).GetBytes('gpt-6.1-sol')
+    $markerIndex = -1
+    for ($byteIndex = 0; $byteIndex -le $metadataBytes.Length - $markerBytes.Length; $byteIndex++) {
+        $matchesMarker = $true
+        for ($markerOffset = 0; $markerOffset -lt $markerBytes.Length; $markerOffset++) {
+            if ($metadataBytes[$byteIndex + $markerOffset] -ne $markerBytes[$markerOffset]) { $matchesMarker = $false; break }
+        }
+        if ($matchesMarker) { $markerIndex = $byteIndex; break }
+    }
+    Assert-True ($markerIndex -ge 0) 'invalid UTF-8 fixture should locate its synthetic model marker'
+    $metadataBytes[$markerIndex] = 0xFF
+    [IO.File]::WriteAllBytes($invalidUtf8MetadataPath, $metadataBytes)
+    $invalidUtf8Output = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $invalidUtf8MetadataPath -OutputPath $invalidUtf8OutputPath 2>&1
+    $invalidUtf8Diagnostic = [string]($invalidUtf8Output -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0 -and $invalidUtf8Diagnostic.Contains('setup_metadata_invalid') -and -not (Test-Path -LiteralPath $invalidUtf8OutputPath)) 'invalid UTF-8 metadata must fail safely before publication'
+
+    $nonOverlappingChangePath = Join-Path $root 'non-overlapping-profile-change.json'
+    $nonOverlappingChangeOutputPath = Join-Path $artifactRoot 'non-overlapping-profile-change.json'
+    $nonOverlappingMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $initialProfile = $nonOverlappingMetadata.profiles[1] | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $changedProfile = $nonOverlappingMetadata.profiles[1] | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $initialProfile.effectiveToUtc = '2026-10-09T10:30:00Z'
+    $initialProfile.changeId = 'implementer-initial'
+    $changedProfile.model = 'gpt-6.1-sol'
+    $changedProfile.effectiveFromUtc = '2026-10-09T10:30:00Z'
+    $changedProfile.changeId = 'implementer-change-2'
+    $nonOverlappingMetadata.profiles = @($initialProfile, $changedProfile)
+    [IO.File]::WriteAllText($nonOverlappingChangePath, ($nonOverlappingMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $nonOverlappingOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $nonOverlappingChangePath -OutputPath $nonOverlappingChangeOutputPath 2>&1
+    $nonOverlappingDiagnostic = [string]($nonOverlappingOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "non-overlapping profile changes should remain valid (diagnostic: $nonOverlappingDiagnostic)"
+    $nonOverlappingReport = Get-Content -Raw -LiteralPath $nonOverlappingChangeOutputPath | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$nonOverlappingReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($nonOverlappingReport.metrics.modelsAndReasoning.value).Count -eq 2) 'non-overlapping profile changes should remain measured'
+
+    $conflictingProfilePath = Join-Path $root 'conflicting-profile.json'
+    $conflictingProfileOutputPath = Join-Path $artifactRoot 'conflicting-profile.json'
+    $conflictingMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $conflictingProfile = $conflictingMetadata.profiles[1] | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $conflictingProfile.model = 'gpt-6.1-sol'
+    $conflictingProfile.effectiveFromUtc = '2026-10-09T10:20:00Z'
+    $conflictingProfile.changeId = 'conflicting-overlap'
+    $conflictingMetadata.profiles = @($conflictingMetadata.profiles[1], $conflictingProfile)
+    [IO.File]::WriteAllText($conflictingProfilePath, ($conflictingMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $conflictingProfileOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $conflictingProfilePath -OutputPath $conflictingProfileOutputPath 2>&1
+    $conflictingProfileDiagnostic = [string]($conflictingProfileOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0 -and $conflictingProfileDiagnostic.Contains('setup_metadata_conflict') -and -not (Test-Path -LiteralPath $conflictingProfileOutputPath)) 'overlapping conflicting assignments must not be reported as measured'
+
+    $metadataOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $metadataPath -OutputPath $metadataJsonPath -MarkdownPath $metadataMarkdownPath 2>&1
+    $metadataDiagnostic = [string]($metadataOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "validated setup metadata should aggregate and publish successfully (diagnostic: $metadataDiagnostic)"
     $metadataReport = Get-Content -Raw -LiteralPath $metadataJsonPath | ConvertFrom-Json -Depth 100
     $metadataMarkdown = Get-Content -Raw -LiteralPath $metadataMarkdownPath
     Assert-True ([string]$metadataReport.metrics.modelsAndReasoning.state -ceq 'measured' -and
