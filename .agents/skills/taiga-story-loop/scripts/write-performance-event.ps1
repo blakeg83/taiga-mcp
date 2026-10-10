@@ -732,6 +732,29 @@ function Get-UtcNowText {
     return [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
 }
 
+function Write-LockReadyMarker {
+    param([Parameter(Mandatory)] [string] $ReadyPath)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes('ready')
+    $stream = $null
+    try {
+        $stream = [IO.FileStream]::new(
+            $ReadyPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::Read,
+            $bytes.Length,
+            [IO.FileOptions]::WriteThrough)
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
 function Acquire-LedgerLock {
     param(
         [Parameter(Mandatory)] [string] $LedgerPath,
@@ -744,7 +767,7 @@ function Acquire-LedgerLock {
     $readySignaled = $false
     while ($clock.ElapsedMilliseconds -le $TimeoutMilliseconds) {
         if (-not $readySignaled -and -not [string]::IsNullOrWhiteSpace($ReadyPath)) {
-            [IO.File]::WriteAllText($ReadyPath, 'ready', [Text.UTF8Encoding]::new($false))
+            Write-LockReadyMarker -ReadyPath $ReadyPath
             $readySignaled = $true
         }
         try {
@@ -945,16 +968,32 @@ if ($LockTimeoutMilliseconds -lt 0) {
 if ($FaultAfterBytes -lt -1) {
     Fail-Recorder "'FaultAfterBytes' must be -1 or nonnegative"
 }
-if (-not [string]::IsNullOrWhiteSpace($LockReadyPath) -and -not [IO.Path]::IsPathRooted($LockReadyPath)) {
-    Fail-Recorder "'LockReadyPath' must be absolute when supplied"
-}
-
 $eventText = Read-EventJson
 $event = Parse-Event -Json $eventText
 Assert-Event -Event $event -ExpectedRunId $RunId
 
 $runDirectory = Join-Path $expectedRoot $RunId
 $ledgerPath = Join-Path $runDirectory 'events.jsonl'
+$normalizedLockReadyPath = $null
+if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
+    $normalizedLockReadyPath = Get-FullPath -Path $LockReadyPath -Name 'LockReadyPath'
+    Assert-ExternalRunRoot -Root $normalizedLockReadyPath
+    if (-not (Test-PathWithin -Child $normalizedLockReadyPath -Parent $runDirectory)) {
+        Fail-Recorder "'LockReadyPath' must be within the external run directory"
+    }
+    $reservedPaths = @(
+        $runDirectory,
+        $ledgerPath,
+        "$ledgerPath.lock",
+        "$ledgerPath.diagnostics.jsonl"
+    ) | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\', '/') }
+    if (@($reservedPaths | Where-Object { $_.Equals($normalizedLockReadyPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
+        Fail-Recorder "'LockReadyPath' aliases a reserved external run path"
+    }
+    if (Test-Path -LiteralPath $normalizedLockReadyPath) {
+        Fail-Recorder "'LockReadyPath' must not already exist"
+    }
+}
 if (Test-Path -LiteralPath $runDirectory -PathType Leaf) {
     Fail-Recorder 'external run directory is not a directory'
 }
@@ -979,7 +1018,7 @@ $diagnosticPaths = @()
 $conflictDiagnosticPath = $null
 
 try {
-    $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds -ReadyPath $LockReadyPath
+    $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds -ReadyPath $normalizedLockReadyPath
     $ledgerState = Read-LedgerState -LedgerPath $ledgerPath
 
     foreach ($corruptRecord in @($ledgerState.CorruptRecords)) {

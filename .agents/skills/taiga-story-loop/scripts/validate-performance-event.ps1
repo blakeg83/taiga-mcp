@@ -137,6 +137,7 @@ $recorder = Join-Path $PSScriptRoot 'write-performance-event.ps1'
 Assert-True (Test-Path -LiteralPath $recorder -PathType Leaf) 'recorder script exists'
 
 $externalRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-' + [guid]::NewGuid().ToString('N'))
+$disposableRoots = @($externalRoot)
 $runId = 'synthetic-run-149'
 $ledgerPath = Join-Path (Join-Path $externalRoot $runId) 'events.jsonl'
 
@@ -450,6 +451,7 @@ try {
     Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) 'nested privacy rejection leaves the ledger unchanged'
 
     $idempotencyRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-idempotency-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $idempotencyRoot
     $idempotencyRunId = 'synthetic-run-150-idempotency'
     $idempotencyLedgerPath = Join-Path (Join-Path $idempotencyRoot $idempotencyRunId) 'events.jsonl'
     $idempotencyEvent = New-EventVariant -Base $validEvent -Changes @{
@@ -486,6 +488,7 @@ try {
     Assert-True ([IO.File]::ReadAllText($idempotencyLedgerPath) -ceq $beforeNoop) 'conflicting replay does not mutate the event ledger'
 
     $lockRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-lock-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $lockRoot
     $lockRunId = 'synthetic-run-150-lock'
     $lockDirectory = Join-Path $lockRoot $lockRunId
     [IO.Directory]::CreateDirectory($lockDirectory) | Out-Null
@@ -510,7 +513,42 @@ try {
         }
     }
 
+    $lockBaselineEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-lock-baseline'
+        runId = $lockRunId
+        transitionId = 'lock-baseline'
+    }
+    $lockBaseline = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $lockRoot -RunId $lockRunId -EventJson (Convert-EventToJson $lockBaselineEvent)
+    Assert-True ($lockBaseline.ExitCode -eq 0) 'lock safety baseline appends'
+    $lockBaselineText = [IO.File]::ReadAllText((Join-Path $lockDirectory 'events.jsonl'))
+    $reservedAliasEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-reserved-alias'
+        runId = $lockRunId
+        transitionId = 'reserved-alias'
+    }
+    $reservedAlias = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $lockRoot -RunId $lockRunId -EventJson (Convert-EventToJson $reservedAliasEvent) -LockReadyPath (Join-Path $lockDirectory 'events.jsonl')
+    Assert-True ($reservedAlias.ExitCode -ne 0) 'ledger path is rejected as a readiness alias'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $lockDirectory 'events.jsonl')) -ceq $lockBaselineText) 'reserved ledger alias leaves the ledger byte-identical'
+    $existingReadyPath = Join-Path $lockDirectory 'existing-ready.signal'
+    [IO.File]::WriteAllText($existingReadyPath, 'existing', [Text.UTF8Encoding]::new($false))
+    $existingReady = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $lockRoot -RunId $lockRunId -EventJson (Convert-EventToJson $reservedAliasEvent) -LockReadyPath $existingReadyPath
+    Assert-True ($existingReady.ExitCode -ne 0) 'existing readiness target is rejected before mutation'
+    Assert-True ([IO.File]::ReadAllText($existingReadyPath) -ceq 'existing') 'existing readiness target remains byte-identical'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $lockDirectory 'events.jsonl')) -ceq $lockBaselineText) 'existing readiness target rejection leaves the ledger byte-identical'
+    $sourceReadyPath = Join-Path $repoRoot '.agents\skills\taiga-story-loop\synthetic-ready-signal'
+    try {
+        $sourceReady = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $lockRoot -RunId $lockRunId -EventJson (Convert-EventToJson $reservedAliasEvent) -LockReadyPath $sourceReadyPath
+        Assert-True ($sourceReady.ExitCode -ne 0) 'source-worktree readiness target is rejected'
+        Assert-True (-not (Test-Path -LiteralPath $sourceReadyPath)) 'source-worktree readiness rejection creates no file'
+    }
+    finally {
+        if (Test-Path -LiteralPath $sourceReadyPath) {
+            Remove-Item -LiteralPath $sourceReadyPath -Force
+        }
+    }
+
     $recoveryRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-recovery-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $recoveryRoot
     $recoveryRunId = 'synthetic-run-150-recovery'
     $recoveryLedgerPath = Join-Path (Join-Path $recoveryRoot $recoveryRunId) 'events.jsonl'
     $confirmedEvent = New-EventVariant -Base $validEvent -Changes @{
@@ -548,6 +586,7 @@ try {
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $recoveredEvent.eventId)) 'recovery appends the new complete event'
 
     $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $unicodeRoot
     $unicodeRunId = 'synthetic-run-150-unicode-tail'
     $unicodeLedgerPath = Join-Path (Join-Path $unicodeRoot $unicodeRunId) 'events.jsonl'
     $unicodeConfirmed = New-EventVariant -Base $validEvent -Changes @{
@@ -591,6 +630,7 @@ try {
     Assert-True ($unicodeLedgerText -match [regex]::Escape([string] $unicodeRecovered.eventId)) 'multibyte-tail recovery appends the next complete event'
 
     $concurrentRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-concurrent-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $concurrentRoot
     $concurrentRunId = 'synthetic-run-150-concurrent'
     $concurrentDirectory = Join-Path $concurrentRoot $concurrentRunId
     [IO.Directory]::CreateDirectory($concurrentDirectory) | Out-Null
@@ -701,7 +741,9 @@ try {
     exit 0
 }
 finally {
-    if (Test-Path -LiteralPath $externalRoot) {
-        Remove-Item -LiteralPath $externalRoot -Recurse -Force
+    foreach ($disposableRoot in @($disposableRoots)) {
+        if (Test-Path -LiteralPath $disposableRoot) {
+            Remove-Item -LiteralPath $disposableRoot -Recurse -Force
+        }
     }
 }
