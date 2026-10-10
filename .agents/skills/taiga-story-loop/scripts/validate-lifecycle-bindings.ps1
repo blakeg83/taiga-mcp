@@ -280,6 +280,10 @@ foreach ($text in @($workerHandoffsText, $automaticFlowText, $taskExecutionText,
 }
 Assert-Contains $reviewerPromptText 'review_started' 'reviewer start boundary'
 Assert-Contains $reviewerPromptText 'final_review_started' 'reviewer final boundary'
+Assert-Contains $taskExecutionText 'implementer owns `correction_started` and `correction_ready`' 'implementer final-correction ownership'
+Assert-Contains $taskExecutionText 'reviewer owns' 'reviewer final-review ownership'
+Assert-Contains $implementerPromptText 'The implementer owns task and final-story' 'implementer prompt correction ownership'
+Assert-Contains $implementerPromptText '`final_review_started`' 'implementer prompt final-review ownership'
 
 $revisionA = 'a' * 40
 $revisionB = 'b' * 40

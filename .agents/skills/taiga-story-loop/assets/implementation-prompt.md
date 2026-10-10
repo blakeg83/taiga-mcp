@@ -224,10 +224,11 @@ At the real workflow boundary, record the lifecycle observation with
 concrete task work is `implementation_started`; a frozen implementation-ready
 packet in either mode is `task_ready_for_review`. In `per_task` it precedes the
 task review; in `story_end_only` it closes implementation without dispatching
-that review. A current finding/correction uses
-`correction_started`/`correction_ready`; the reviewer owns the matching task
-and final-story review events, including final-story corrections and
-re-reviews. Preserve the stable `phaseId`, `correctionId`,
+that review. The implementer owns task and final-story
+`correction_started`/`correction_ready`; the reviewer owns
+`review_started`, `review_findings`, `review_accepted`,
+`final_review_started`, `final_review_accepted`, and final-story re-reviews.
+Preserve the stable `phaseId`, `correctionId`,
 `reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
 from `references/worker-handoffs.md`. Copy the selected `per_task` or
 `story_end_only` mode from setup rather than inferring it. Include known

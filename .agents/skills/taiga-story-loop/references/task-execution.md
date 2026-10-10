@@ -140,7 +140,8 @@ matching `review_started` and `review_findings`/`review_accepted` observations;
 in `story_end_only`, the implementation boundary does not dispatch a task
 review. A current task finding starts `correction_started`; the corrected
 commit records `correction_ready` before direct re-review. The reviewer owns
-final-story start, finding, correction, and re-review events in both modes.
+final-story start, finding, and re-review events in both modes. The implementer owns `correction_started` and `correction_ready`, including final-story
+corrections, in both modes.
 The coordinator owns explicit wait boundaries and the story/PR boundaries;
 `pr_ready` remains deferred to task #157.
 
