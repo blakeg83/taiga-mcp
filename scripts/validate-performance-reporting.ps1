@@ -103,6 +103,7 @@ $root = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-task152-' + [Guid]::New
 $ledger = Join-Path $root 'per-task.jsonl'
 $storyEndLedger = Join-Path $root 'story-end-only.jsonl'
 $edgeLedger = Join-Path $root 'edge-cases.jsonl'
+$finalRetryPerTaskLedger = Join-Path $root 'final-retry-per-task.jsonl'
 $privacyLedger = Join-Path $root 'privacy.jsonl'
 $utfLedger = Join-Path $root 'invalid-utf8.jsonl'
 $orphanLedger = Join-Path $root 'orphan-order.jsonl'
@@ -179,6 +180,19 @@ try {
     Assert-True ([string]$report.coverage.taskSet.state -eq 'measured' -and @($report.coverage.taskSet.declaredTaskRefs).Count -eq 2) 'declared task coverage should remain explicit and ordered'
     Assert-True ([string]$report.coverage.uncoveredStorySpan.state -eq 'partial' -and @($report.coverage.uncoveredStorySpan.value).Count -gt 0) 'uncovered story-span gaps should be reported explicitly'
 
+    $finalRetryPerTaskEvents = @(
+        (New-Event -EventId 'per-task-final-story-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T11:30:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),
+        (New-Event -EventId 'per-task-final-story-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T11:31:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),
+        (New-Event -EventId 'per-task-final-story-retry-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T11:32:00Z' -Scope 'final_story' -PhaseId 'per-task-final-2' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),
+        (New-Event -EventId 'per-task-final-story-retry-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T11:33:00Z' -Scope 'final_story' -PhaseId 'per-task-final-2' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer')
+    )
+    [IO.File]::WriteAllLines($finalRetryPerTaskLedger, @($finalRetryPerTaskEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
+    $finalRetryPerTaskJson = & $scriptPath -EventsPath $finalRetryPerTaskLedger -ReviewMode per_task
+    Assert-True ($LASTEXITCODE -eq 0) 'per-task final-story retry fixture should aggregate successfully'
+    $finalRetryPerTask = $finalRetryPerTaskJson | ConvertFrom-Json -Depth 100
+    Assert-True ([int]$finalRetryPerTask.metrics.finalStoryReviews.value -eq 2 -and [int]$finalRetryPerTask.metrics.finalStoryReReviews.value -eq 1) 'per_task must count a first final-story request retry that changes only attempt classification'
+    Assert-True (@($finalRetryPerTask.anomalies | Where-Object { $_.code -eq 'conflicting_review_request' }).Count -eq 0) 'per_task first final-story retry must not rebind its request'
+
     $privacyStart = New-Event -EventId 'privacy-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T08:00:00Z' -Scope 'story' -Role 'coordinator'
     $privacyPr = New-Event -EventId 'privacy-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-09T08:01:00Z' -Scope 'story' -Revision $revisionA -Role 'coordinator'
     $privacyPr.pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 152; reviewedHead = $revisionA; secret = 'SYNTHETIC-PR-SECRET' }
@@ -222,8 +236,8 @@ try {
         (New-Event -EventId 'story-end-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T11:55:00Z' -Scope 'story' -ReviewMode 'per_task' -Role 'coordinator'),
         (New-Event -EventId 'story-end-final-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:00:00Z' -Scope 'final_story' -PhaseId 'final-1' -ReviewRequestId 'final-request-1' -ReviewAttemptId 'final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
         (New-Event -EventId 'story-end-final-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:10:00Z' -Scope 'final_story' -PhaseId 'final-1' -ReviewRequestId 'final-request-1' -ReviewAttemptId 'final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
-        (New-Event -EventId 'story-end-rereview-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:20:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
-        (New-Event -EventId 'story-end-rereview-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:30:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
+        (New-Event -EventId 'story-end-rereview-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:20:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-1' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
+        (New-Event -EventId 'story-end-rereview-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:30:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-1' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
         (New-Event -EventId 'story-end-rereview-retry-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:40:00Z' -Scope 'final_story' -PhaseId 'final-3' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-3' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 3 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
         (New-Event -EventId 'story-end-rereview-retry-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:50:00Z' -Scope 'final_story' -PhaseId 'final-3' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-3' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 3 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer')
     )
@@ -233,6 +247,7 @@ try {
     $storyEnd = $storyEndJson | ConvertFrom-Json -Depth 100
     Assert-True ([int]$storyEnd.metrics.initialTaskReviews.value -eq 0 -and [int]$storyEnd.metrics.correctionReReviews.value -eq 0) 'story_end_only must have zero per-task and correction reviews'
     Assert-True ([int]$storyEnd.metrics.finalStoryReviews.value -eq 3 -and [int]$storyEnd.metrics.finalStoryReReviews.value -eq 2) 'story_end_only final review and same-request same-SHA retries remain countable'
+    Assert-True (@($storyEnd.anomalies | Where-Object { $_.code -eq 'conflicting_review_request' }).Count -eq 0) 'story_end_only first final-story retry must not rebind its request'
     Assert-True ([string]$storyEnd.metrics.firstPassAcceptanceRate.state -eq 'not_applicable') 'story_end_only first-pass denominator is not applicable'
     Assert-True (@($storyEnd.anomalies | Where-Object { $_.code -eq 'conflicting_review_mode' }).Count -eq 1) 'conflicting event review modes should be disclosed'
 

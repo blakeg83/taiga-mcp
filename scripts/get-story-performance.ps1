@@ -694,7 +694,6 @@ function Get-ReviewRequestBindingCanonical {
         scope = Get-PropertyValue $Event 'scope'
         taskRef = Get-PropertyValue $Event 'taskRef'
         revision = Get-PropertyValue $Event 'revision'
-        reviewKind = Get-PropertyValue $Event 'reviewKind'
     }
     return ConvertTo-CanonicalJson -Value ([pscustomobject] $binding)
 }
