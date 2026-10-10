@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run deterministic task #152 aggregation and task #154 artifact fixtures.
+    Run deterministic integrated story-loop reporting and recovery fixtures.
 
 The fixture is synthetic evidence only. It uses fixed UTC timestamps and a
 unique disposable external directory; it does not call Taiga, start a service,
@@ -129,6 +129,25 @@ function Write-EventsThroughRecorder {
     return Join-Path (Join-Path $ExternalRoot $RunId) 'events.jsonl'
 }
 
+function Invoke-WorkflowFixture {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Path
+    )
+
+    Assert-True (Test-Path -LiteralPath $Path -PathType Leaf) "missing workflow fixture '$Name'"
+    $output = & pwsh -NoProfile -File $Path 2>&1
+    $exitCode = $LASTEXITCODE
+    $diagnostic = [string]($output -join [Environment]::NewLine)
+    Assert-True ($exitCode -eq 0) "workflow fixture '$Name' failed with exit ${exitCode}: $diagnostic"
+    return [pscustomobject]@{
+        name = $Name
+        path = $Path
+        exitCode = $exitCode
+        output = $diagnostic
+    }
+}
+
 function New-UsageWindowEvents {
     param(
         [Parameter(Mandatory)] [int] $TaskRef,
@@ -177,7 +196,7 @@ function Invoke-UsageSafetyReport {
     return ($json | ConvertFrom-Json -Depth 100)
 }
 
-$root = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-task152-' + [Guid]::NewGuid().ToString('N'))
+$root = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-story145-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $ledger = Join-Path $root 'per-task.jsonl'
 $storyEndLedger = Join-Path $root 'story-end-only.jsonl'
@@ -896,7 +915,41 @@ try {
     $repeatJson = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153)
     Assert-True ($LASTEXITCODE -eq 0 -and $repeatJson -ceq $jsonText) 'repeating aggregation over the same ledger should be byte stable'
 
-    Write-Output 'PASS: task #152 deterministic aggregation and task #154 revision-bound artifact fixtures (per_task and story_end_only)'
+    # Run the workflow-owned contract fixtures as part of this integrated
+    # matrix. They invoke the production recorder (and, where applicable,
+    # continuation writer) against disposable external roots, so this check
+    # covers restart, concurrent writes, interrupted tails, injected recorder
+    # failure, both review modes, and ordered-task/re-review guards without
+    # changing workflow authority.
+    $workflowFixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts'))
+    $workflowFixtures = @(
+        [ordered]@{ name = 'performance-event recorder lifecycle'; file = 'validate-performance-event.ps1' },
+        [ordered]@{ name = 'lifecycle boundary ownership'; file = 'validate-lifecycle-bindings.ps1' },
+        [ordered]@{ name = 'post-Start resume and measurement failure'; file = 'validate-performance-start.ps1' },
+        [ordered]@{ name = 'automatic review and ordered-task flow'; file = 'validate-automatic-review-flow.ps1' }
+    )
+    $workflowFixtureResults = foreach ($fixture in $workflowFixtures) {
+        Invoke-WorkflowFixture -Name ([string]$fixture.name) -Path (Join-Path $workflowFixtureRoot ([string]$fixture.file))
+    }
+
+    $scenarioEvidence = @(
+        [ordered]@{ scenario = 'normal per-task operation'; setup = 'fixed UTC lifecycle events'; action = 'record then aggregate'; expected = 'measured elapsed/review metrics'; observed = 'report assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'correction and final re-review'; setup = 'finding, correction, and new full revision'; action = 'record both review attempts'; expected = 'distinct attributable attempts'; observed = 'per_task and final retry assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'story_end_only mode'; setup = 'implementation plus final-story events'; action = 'reject task review events'; expected = 'no task reviews, final review countable'; observed = 'mode assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'duplicate and stale observations'; setup = 'stable IDs plus stale revision'; action = 'replay and reject'; expected = 'no double-count or mutation'; observed = 'recorder/aggregator/lifecycle assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'restart and interrupted tail'; setup = 'confirmed line plus injected incomplete write'; action = 'start a fresh recorder process'; expected = 'preserve complete line and diagnose tail'; observed = 'recovery assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'concurrent writes'; setup = 'two recorder processes and same-ID replay'; action = 'append under the ledger lock'; expected = 'one line per distinct event'; observed = 'concurrency assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'unknown or partial telemetry'; setup = 'missing source-backed counters'; action = 'aggregate usage windows'; expected = 'null unavailable/partial state, no estimate'; observed = 'usage fallback assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'PR reuse and new reviewed HEAD'; setup = 'same PR identity with changed full HEAD'; action = 'publish artifacts'; expected = 'reuse identical bytes, retain new sibling'; observed = 'artifact identity assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'measurement failure'; setup = 'fault-injected recorder after Start'; action = 'continue workflow without telemetry'; expected = 'authorization/workflow decision unchanged'; observed = 'post-Start failure fixture passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'attributable host token counters'; setup = 'current authorized host capability'; action = 'probe worker/session usage'; expected = 'report measured only when attributable'; observed = 'no per-worker counters exposed; preserve unknown'; evidence = 'unavailable'; status = 'unavailable' }
+    )
+    Write-Output 'Scenario evidence (synthetic unless explicitly marked unavailable):'
+    foreach ($scenario in $scenarioEvidence) {
+        Write-Output (($scenario.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' | ')
+    }
+
+    Write-Output ('PASS: integrated reporting/recovery matrix; workflow fixtures: ' + (($workflowFixtureResults | ForEach-Object { "$($_.name)=exit$($_.exitCode)" }) -join ', '))
 }
 finally {
     if (Test-Path -LiteralPath $root) {
