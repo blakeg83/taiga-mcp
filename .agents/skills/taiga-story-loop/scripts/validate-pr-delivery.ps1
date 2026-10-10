@@ -417,15 +417,24 @@ function Invoke-ReportFinalization {
     )
 
     $pr = $Delivery.pr
-    $preflight = if ($Delivery.ContainsKey('receipt') -and $Delivery.receipt -is [hashtable]) { Test-DeliveryPreflight -Receipt $Delivery.receipt } else { 'missing_preflight' }
+    $receipt = if ($Delivery.ContainsKey('receipt') -and $Delivery.receipt -is [hashtable]) { $Delivery.receipt } else { $null }
+    $preflight = if ($null -ne $receipt) { Test-DeliveryPreflight -Receipt $receipt } else { 'missing_preflight' }
     $confirmed = $Delivery.providerConfirmed -eq $true -and
         $Delivery.state -in @('created', 'reused') -and
+        $null -ne $receipt -and
         $preflight -eq 'ready' -and
+        [string]$Delivery.repository -eq [string]$receipt.repository -and
+        [string]$Delivery.storyBranch -eq [string]$receipt.storyBranch -and
+        [string]$Delivery.prBase -eq [string]$receipt.prBase -and
+        [string]$Delivery.reviewedHead -eq [string]$receipt.approvedHead -and
+        [string]$Delivery.reviewedHead -eq [string]$receipt.branchHead -and
+        [string]$Delivery.reviewedHead -eq [string]$receipt.checksHead -and
+        [string]$Delivery.reviewedHead -eq [string]$receipt.finalStoryReviewHead -and
         $null -ne $pr -and
-        [string]$pr.repository -eq [string]$Delivery.repository -and
-        [string]$pr.headBranch -eq [string]$Delivery.storyBranch -and
-        [string]$pr.head -eq [string]$Delivery.reviewedHead -and
-        [string]$pr.base -eq [string]$Delivery.prBase -and
+        [string]$pr.repository -eq [string]$receipt.repository -and
+        [string]$pr.headBranch -eq [string]$receipt.storyBranch -and
+        [string]$pr.head -eq [string]$receipt.branchHead -and
+        [string]$pr.base -eq [string]$receipt.prBase -and
         [string]$pr.state -eq 'open' -and
         $pr.isClosed -eq $false
     if (-not $confirmed) {
@@ -528,6 +537,10 @@ function New-DeliveryVariant {
         [string] $Repository = 'TaigaMCP',
         [string] $HeadBranch = 'codex/story-50-run1',
         [string] $Head = ('a' * 40),
+        [string] $ProviderBase = 'codex/feature-taiga-mcp-run1',
+        [string] $DeliveryRepository = 'TaigaMCP',
+        [string] $DeliveryStoryBranch = 'codex/story-50-run1',
+        [string] $DeliveryPrBase = 'codex/feature-taiga-mcp-run1',
         [AllowNull()] [object] $ProviderState = 'open',
         [AllowNull()] [object] $IsClosed = $false,
         [string] $ReviewedHead = ('a' * 40),
@@ -543,15 +556,15 @@ function New-DeliveryVariant {
             number = [int]$BaseDelivery.pr.number
             repository = $Repository
             headBranch = $HeadBranch
-            base = [string]$BaseDelivery.pr.base
+            base = $ProviderBase
             head = $Head
             state = $ProviderState
             isClosed = $IsClosed
         }
         reviewedHead = $ReviewedHead
-        prBase = [string]$BaseDelivery.prBase
-        repository = [string]$BaseDelivery.repository
-        storyBranch = [string]$BaseDelivery.storyBranch
+        repository = $DeliveryRepository
+        storyBranch = $DeliveryStoryBranch
+        prBase = $DeliveryPrBase
         receipt = $BaseDelivery.receipt
     }
 }
@@ -609,9 +622,13 @@ try {
     $invalidProviderCases = @(
         [ordered]@{ name = 'wrong repository'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -Repository 'OtherRepo' }
         [ordered]@{ name = 'wrong story branch'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -HeadBranch 'codex/other-story' }
+        [ordered]@{ name = 'repository identity copy drift'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -Repository 'OtherRepo' -DeliveryRepository 'OtherRepo' }
+        [ordered]@{ name = 'story branch identity copy drift'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -HeadBranch 'codex/other-story' -DeliveryStoryBranch 'codex/other-story' }
+        [ordered]@{ name = 'base identity copy drift'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -ProviderBase 'master' -DeliveryPrBase 'master' }
         [ordered]@{ name = 'closed PR'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -ProviderState 'closed' -IsClosed $true }
         [ordered]@{ name = 'unknown PR state'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -ProviderState $null -IsClosed $null }
         [ordered]@{ name = 'mismatched approved HEAD'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -Head $reportHeadA -ReviewedHead $reportHeadB }
+        [ordered]@{ name = 'approval bypass with matching B copies'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -Head $reportHeadB -ReviewedHead $reportHeadB }
         [ordered]@{ name = 'response-lost create'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -State 'reconcile' -ProviderConfirmed $false }
     )
     foreach ($invalidProviderCase in $invalidProviderCases) {

@@ -725,6 +725,8 @@ foreach ($marker in @(
         'revision-bound aggregation view'
         'same append-only'
         'does not mint a new'
+        'exact preflight receipt is authoritative'
+        'Matching copies that disagree with the receipt'
         'concise report summary'
         'newly confirmed reviewed HEAD'
         'recorder, aggregator, or artifact publication fails')) {
@@ -755,6 +757,8 @@ foreach ($marker in @(
         'closed PR'
         'unknown PR state'
         'mismatched approved HEAD'
+        'approval bypass with matching B copies'
+        'identity copy drift'
         'response-lost create')) {
     if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains($marker)) {
         throw "PR delivery assertion failed: unknown-state fixture marker $marker"

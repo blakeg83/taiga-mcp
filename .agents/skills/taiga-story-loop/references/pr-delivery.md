@@ -107,6 +107,12 @@ write, an unknown PR state, a closed PR, or a stale head is not confirmation:
 none of those outcomes may append `pr_ready`, call the aggregator, or create a
 report.
 
+The exact preflight receipt is authoritative for that confirmation. The
+provider record and delivery result must agree with its repository, story head
+branch, topology-specific base, approved/branch HEAD, checks HEAD, and final
+story-review HEAD. Matching copies that disagree with the receipt are still
+reconciliation cases.
+
 After confirmed create or reuse:
 
 1. Append one coordinator `pr_ready` event through
