@@ -46,6 +46,7 @@ function New-Event {
         [AllowNull()] [string] $SupersedesReviewAttemptId = $null,
         [AllowNull()] [object] $Usage = $null,
         [string] $ReviewMode = 'per_task',
+        [string] $SessionId = 'synthetic-session',
         [string] $Role = 'coordinator'
     )
 
@@ -59,7 +60,7 @@ function New-Event {
         storyRef = 143
         taskRef = $TaskRef
         role = $Role
-        sessionId = 'synthetic-session'
+        sessionId = $SessionId
         workerId = 'synthetic-worker'
         transitionId = $EventId
         scope = $Scope
@@ -140,8 +141,8 @@ function New-UsageWindowEvents {
     )
 
     return @(
-        (New-Event -EventId ("usage-safety-{0}-start" -f $TaskRef) -EventType 'implementation_started' -OccurredAtUtc $StartUtc -Scope 'task' -TaskRef $TaskRef -PhaseId $PhaseId -Role 'implementer' -Usage $StartUsage),
-        (New-Event -EventId ("usage-safety-{0}-end" -f $TaskRef) -EventType 'task_ready_for_review' -OccurredAtUtc $EndUtc -Scope 'task' -TaskRef $TaskRef -PhaseId $PhaseId -Revision $Revision -Role 'implementer' -Usage $EndUsage)
+        (New-Event -EventId ("usage-safety-{0}-start" -f $TaskRef) -EventType 'implementation_started' -OccurredAtUtc $StartUtc -Scope 'task' -TaskRef $TaskRef -PhaseId $PhaseId -Role 'implementer' -SessionId ([string] $StartUsage.sessionId) -Usage $StartUsage),
+        (New-Event -EventId ("usage-safety-{0}-end" -f $TaskRef) -EventType 'task_ready_for_review' -OccurredAtUtc $EndUtc -Scope 'task' -TaskRef $TaskRef -PhaseId $PhaseId -Revision $Revision -Role 'implementer' -SessionId ([string] $EndUsage.sessionId) -Usage $EndUsage)
     )
 }
 
@@ -149,7 +150,8 @@ $usageSafetyCaseNumber = 0
 function Invoke-UsageSafetyReport {
     param(
         [Parameter(Mandatory)] [object[]] $WindowEvents,
-        [Parameter(Mandatory)] [int[]] $TaskRefs
+        [Parameter(Mandatory)] [int[]] $TaskRefs,
+        [switch] $PreserveEventSession
     )
 
     $script:usageSafetyCaseNumber++
@@ -162,7 +164,13 @@ function Invoke-UsageSafetyReport {
         foreach ($event in @($windowEvent)) { [void] $flattenedWindowEvents.Add($event) }
     }
     $events = @($storyStart) + @($flattenedWindowEvents.ToArray()) + @($prReady)
-    foreach ($event in $events) { $event.runId = $runId }
+    foreach ($event in $events) {
+        $event.runId = $runId
+        if ($null -ne $event.usage -and -not $PreserveEventSession) {
+            $usageSession = Get-NullableText $event.usage.sessionId
+            if ($null -ne $usageSession) { $event.sessionId = $usageSession }
+        }
+    }
     $ledger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $runId -Events $events -RecorderPath $recorderPath
     $json = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs $TaskRefs
     Assert-True ($LASTEXITCODE -eq 0) "usage safety case $script:usageSafetyCaseNumber should aggregate successfully"
@@ -295,17 +303,21 @@ try {
     }
     $usageEvents = @(
         (New-Event -EventId 'usage-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T08:55:00Z' -Scope 'story' -Role 'coordinator'),
-        (New-Event -EventId 'usage-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T09:00:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-impl' -Role 'implementer' -Usage $usageImplStart),
-        (New-Event -EventId 'usage-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T09:10:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-impl' -Revision $comparisonHead -Role 'implementer' -Usage $usageImplEnd),
-        (New-Event -EventId 'usage-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T09:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageReviewStart),
-        (New-Event -EventId 'usage-review-start-replay' -EventType 'review_started' -OccurredAtUtc '2026-10-09T09:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageReviewStart),
-        (New-Event -EventId 'usage-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T09:25:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageReviewEnd),
-        (New-Event -EventId 'usage-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T09:30:00Z' -Scope 'story' -WaitId 'usage-wait' -WaitKind 'reviewer' -Role 'coordinator' -Usage $usageWaitStart),
-        (New-Event -EventId 'usage-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-09T09:35:00Z' -Scope 'story' -WaitId 'usage-wait' -WaitKind 'reviewer' -Role 'coordinator' -Usage $usageWaitEnd),
+        (New-Event -EventId 'usage-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T09:00:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-impl' -Role 'implementer' -SessionId 'usage-impl-session' -Usage $usageImplStart),
+        (New-Event -EventId 'usage-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T09:10:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-impl' -Revision $comparisonHead -Role 'implementer' -SessionId 'usage-impl-session' -Usage $usageImplEnd),
+        (New-Event -EventId 'usage-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T09:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -SessionId 'usage-review-session' -Usage $usageReviewStart),
+        (New-Event -EventId 'usage-review-start-replay' -EventType 'review_started' -OccurredAtUtc '2026-10-09T09:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -SessionId 'usage-review-session' -Usage $usageReviewStart),
+        (New-Event -EventId 'usage-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T09:25:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -SessionId 'usage-review-session' -Usage $usageReviewEnd),
+        (New-Event -EventId 'usage-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T09:30:00Z' -Scope 'story' -WaitId 'usage-wait' -WaitKind 'reviewer' -Role 'coordinator' -SessionId 'usage-coordinator-session' -Usage $usageWaitStart),
+        (New-Event -EventId 'usage-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-09T09:35:00Z' -Scope 'story' -WaitId 'usage-wait' -WaitKind 'reviewer' -Role 'coordinator' -SessionId 'usage-coordinator-session' -Usage $usageWaitEnd),
         (New-Event -EventId 'usage-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-09T09:40:00Z' -Scope 'story' -Revision $comparisonHead -Role 'coordinator')
     )
     $usageEvents[4].transitionId = $usageEvents[3].transitionId
-    foreach ($usageEvent in $usageEvents) { $usageEvent.runId = 'synthetic-usage-153' }
+    foreach ($usageEvent in $usageEvents) {
+        $usageEvent.runId = 'synthetic-usage-153'
+        $usageSession = if ($null -ne $usageEvent.usage) { Get-NullableText $usageEvent.usage.sessionId } else { $null }
+        if ($null -ne $usageSession) { $usageEvent.sessionId = $usageSession }
+    }
     $usageEvents[-1].pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 153; reviewedHead = $comparisonHead }
     $usageLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId 'synthetic-usage-153' -Events $usageEvents -RecorderPath $recorderPath
     $usageJson = & $scriptPath -EventsPath $usageLedger -ReviewMode per_task -TaskRefs @(152) -BaseRevision $comparisonBase -ReviewedHead $comparisonHead -RepositoryPath (Get-Location).Path
@@ -346,14 +358,18 @@ try {
         counters = [ordered]@{ inputTokens = 400; outputTokens = 50 }
     }
     $usagePartialEvents = @(
-        (New-Event -EventId 'usage-partial-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-reset' -Role 'implementer' -Usage $usageReset),
-        (New-Event -EventId 'usage-partial-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T10:10:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-reset' -Revision $comparisonHead -Role 'implementer' -Usage $usageResetEnd),
-        (New-Event -EventId 'usage-partial-worker-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:30:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-worker-change' -Role 'implementer' -Usage $usageWorkerStart),
-        (New-Event -EventId 'usage-partial-worker-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T10:40:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-worker-change' -Revision $comparisonHead -Role 'implementer' -Usage $usageWorkerEnd),
-        (New-Event -EventId 'usage-partial-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-missing' -ReviewRequestId 'usage-missing-request' -ReviewAttemptId 'usage-missing-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageMissingStart),
+        (New-Event -EventId 'usage-partial-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-reset' -Role 'implementer' -SessionId 'usage-reset-session' -Usage $usageReset),
+        (New-Event -EventId 'usage-partial-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T10:10:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-reset' -Revision $comparisonHead -Role 'implementer' -SessionId 'usage-reset-session' -Usage $usageResetEnd),
+        (New-Event -EventId 'usage-partial-worker-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:30:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-worker-change' -Role 'implementer' -SessionId 'usage-worker-session-1' -Usage $usageWorkerStart),
+        (New-Event -EventId 'usage-partial-worker-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T10:40:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-worker-change' -Revision $comparisonHead -Role 'implementer' -SessionId 'usage-worker-session-2' -Usage $usageWorkerEnd),
+        (New-Event -EventId 'usage-partial-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-missing' -ReviewRequestId 'usage-missing-request' -ReviewAttemptId 'usage-missing-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -SessionId 'usage-missing-session' -Usage $usageMissingStart),
         (New-Event -EventId 'usage-partial-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T10:25:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-missing' -ReviewRequestId 'usage-missing-request' -ReviewAttemptId 'usage-missing-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer')
     )
-    foreach ($partialEvent in $usagePartialEvents) { $partialEvent.runId = 'synthetic-usage-153-partial' }
+    foreach ($partialEvent in $usagePartialEvents) {
+        $partialEvent.runId = 'synthetic-usage-153-partial'
+        $usageSession = if ($null -ne $partialEvent.usage) { Get-NullableText $partialEvent.usage.sessionId } else { $null }
+        if ($null -ne $usageSession) { $partialEvent.sessionId = $usageSession }
+    }
     [IO.File]::WriteAllLines($usageLedger, @($usagePartialEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
     $partialJson = & $scriptPath -EventsPath $usageLedger -ReviewMode per_task -TaskRefs @(152)
     Assert-True ($LASTEXITCODE -eq 0) 'partial usage fixture should aggregate without inventing totals'
@@ -392,8 +408,8 @@ try {
 
     $disjointAStart = New-UsageSample -StreamId 'safety-disjoint-a' -Role 'implementer' -SessionId 'safety-session-a' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
     $disjointAEnd = New-UsageSample -StreamId 'safety-disjoint-a' -Role 'implementer' -SessionId 'safety-session-a' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
-    $disjointBStart = New-UsageSample -StreamId 'safety-disjoint-b' -Role 'implementer' -SessionId 'safety-session-b' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 20; outputTokens = 3 })
-    $disjointBEnd = New-UsageSample -StreamId 'safety-disjoint-b' -Role 'implementer' -SessionId 'safety-session-b' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 30; outputTokens = 8 })
+    $disjointBStart = New-UsageSample -StreamId 'safety-disjoint-b' -Role 'implementer' -SessionId 'safety-session-a' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 20; outputTokens = 3 })
+    $disjointBEnd = New-UsageSample -StreamId 'safety-disjoint-b' -Role 'implementer' -SessionId 'safety-session-a' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 30; outputTokens = 8 })
     $disjointReport = Invoke-UsageSafetyReport -TaskRefs @(206, 207) -WindowEvents @(
         (New-UsageWindowEvents -TaskRef 206 -PhaseId 'safety-disjoint-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $disjointAStart -EndUsage $disjointAEnd -Revision $revisionA),
         (New-UsageWindowEvents -TaskRef 207 -PhaseId 'safety-disjoint-b' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $disjointBStart -EndUsage $disjointBEnd -Revision $revisionA)
@@ -402,14 +418,33 @@ try {
 
     $sourceAStart = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-a' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
     $sourceAEnd = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-a' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
-    $sourceBStart = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-b' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
-    $sourceBEnd = New-UsageSample -StreamId 'safety-source-stream' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-b' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
+    $sourceBStart = New-UsageSample -StreamId 'safety-source-stream-b' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-b' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 2 })
+    $sourceBEnd = New-UsageSample -StreamId 'safety-source-stream-b' -Role 'implementer' -SessionId 'safety-source-session' -Source 'safety-source-b' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 15; outputTokens = 5 })
     $sourceReport = Invoke-UsageSafetyReport -TaskRefs @(208, 209) -WindowEvents @(
         (New-UsageWindowEvents -TaskRef 208 -PhaseId 'safety-source-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $sourceAStart -EndUsage $sourceAEnd -Revision $revisionA),
         (New-UsageWindowEvents -TaskRef 209 -PhaseId 'safety-source-b' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $sourceBStart -EndUsage $sourceBEnd -Revision $revisionA)
     )
     Assert-True ([string]$sourceReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $sourceReport.metrics.implementationTokens.value) 'overlapping alternative sources must not be treated as additive streams'
     Assert-True (@($sourceReport.anomalies | Where-Object { $_.code -eq 'overlapping_usage_window' }).Count -eq 1) 'overlapping alternative sources must disclose ambiguity'
+
+    $sessionStart = New-UsageSample -StreamId 'safety-session-stream' -Role 'implementer' -SessionId 'safety-session-source' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $sessionEnd = New-UsageSample -StreamId 'safety-session-stream' -Role 'implementer' -SessionId 'safety-session-source' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $changedEventSession = New-UsageWindowEvents -TaskRef 216 -PhaseId 'safety-event-session-change' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $sessionStart -EndUsage $sessionEnd -Revision $revisionA
+    $changedEventSession[1].sessionId = 'other-event-session'
+    $missingEventSession = New-UsageWindowEvents -TaskRef 217 -PhaseId 'safety-event-session-missing' -StartUtc '2026-10-09T10:03:00Z' -EndUtc '2026-10-09T10:04:00Z' -StartUsage $sessionStart -EndUsage $sessionEnd -Revision $revisionA
+    $missingEventSession[1].sessionId = $null
+    $sessionReport = Invoke-UsageSafetyReport -TaskRefs @(216, 217) -PreserveEventSession -WindowEvents @($changedEventSession, $missingEventSession)
+    Assert-True ([string]$sessionReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $sessionReport.metrics.implementationTokens.value) 'contradictory or missing event-session provenance must not establish a measured usage total'
+    Assert-True (@($sessionReport.anomalies | Where-Object { $_.code -eq 'usage_stream_conflict' }).Count -ge 2) 'event-session changes and missing identity must be disclosed'
+
+    $unprovenStart = New-UsageSample -StreamId 'safety-unproven-stream' -Role 'implementer' -SessionId 'safety-unproven-session' -Source 'mcp__codex_app__get_usage_limits' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $unprovenEnd = New-UsageSample -StreamId 'safety-unproven-stream' -Role 'implementer' -SessionId 'safety-unproven-session' -Source 'mcp__codex_app__get_usage_limits' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $unprovenEvents = New-UsageWindowEvents -TaskRef 218 -PhaseId 'safety-unproven-source' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $unprovenStart -EndUsage $unprovenEnd -Revision $revisionA
+    $unprovenEvents[0].provenance.synthetic = $false
+    $unprovenEvents[1].provenance.synthetic = $false
+    $unprovenReport = Invoke-UsageSafetyReport -TaskRefs @(218) -WindowEvents $unprovenEvents
+    Assert-True ([string]$unprovenReport.metrics.implementationTokens.state -eq 'unavailable' -and $null -eq $unprovenReport.metrics.implementationTokens.value) 'self-declared account-limit usage must remain unavailable without an authorized attributable capability'
+    Assert-True (@($unprovenReport.anomalies | Where-Object { $_.code -eq 'usage_source_unavailable' }).Count -eq 1) 'unproven usage source must be disclosed'
 
     $resetStart = New-UsageSample -StreamId 'safety-reset-stream' -Role 'implementer' -SessionId 'safety-reset-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
     $resetMiddle = New-UsageSample -StreamId 'safety-reset-stream' -Role 'implementer' -SessionId 'safety-reset-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 5; outputTokens = 1 })

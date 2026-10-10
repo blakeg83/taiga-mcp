@@ -1479,6 +1479,8 @@ function Get-UsageBoundaryResult {
         value = $null
         streamId = $null
         sessionId = $null
+        eventSessionId = $null
+        sessionBinding = $null
         source = $null
         workerId = $null
         counterSemantics = $null
@@ -1518,6 +1520,16 @@ function Get-UsageBoundaryResult {
         return [pscustomobject] $result
     }
 
+    $rawBoundaryDeltas = [ordered]@{}
+    foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) {
+        $startCounter = Get-UsageCounter -Usage $startUsage -Name $counterName
+        $endCounter = Get-UsageCounter -Usage $endUsage -Name $counterName
+        if ($startCounter.present -and $endCounter.present -and $endCounter.value -ge $startCounter.value) {
+            $rawBoundaryDeltas[$counterName] = $endCounter.value - $startCounter.value
+        }
+    }
+    $result.deltas = [pscustomobject] $rawBoundaryDeltas
+
     $startRole = [string] (Get-PropertyValue $startUsage 'role')
     $endRole = [string] (Get-PropertyValue $endUsage 'role')
     $startWorker = [string] (Get-PropertyValue $startEvent 'workerId')
@@ -1528,8 +1540,10 @@ function Get-UsageBoundaryResult {
     $endStream = [string] (Get-PropertyValue $endUsage 'streamId')
     $startSource = [string] (Get-PropertyValue $startUsage 'source')
     $endSource = [string] (Get-PropertyValue $endUsage 'source')
-    $startSession = [string] (Get-PropertyValue $startUsage 'sessionId')
-    $endSession = [string] (Get-PropertyValue $endUsage 'sessionId')
+    $startUsageSession = [string] (Get-PropertyValue $startUsage 'sessionId')
+    $endUsageSession = [string] (Get-PropertyValue $endUsage 'sessionId')
+    $startSession = $startUsageSession
+    $endSession = $endUsageSession
     if ([string]::IsNullOrWhiteSpace($startSession) -and $null -ne $startEvent) {
         $startSession = [string] (Get-PropertyValue $startEvent 'sessionId')
     }
@@ -1546,24 +1560,43 @@ function Get-UsageBoundaryResult {
     $endReasoning = [string] (Get-PropertyValue $endSemantics 'reasoning')
     $result.streamId = if ($startStream -eq $endStream) { $startStream } else { $null }
     $result.sessionId = if ($startSession -eq $endSession) { $startSession } else { $null }
+    $result.eventSessionId = if ($startEventSession -eq $endEventSession) { $startEventSession } else { $null }
+    $result.sessionBinding = [pscustomobject][ordered]@{
+        eventSessionId = $result.eventSessionId
+        usageSessionId = $result.sessionId
+    }
     $result.source = if ($startSource -eq $endSource) { $startSource } else { $null }
     $result.workerId = if ($startWorker -eq $endWorker) { $startWorker } else { $null }
     $result.counterSemantics = [pscustomobject][ordered]@{ cachedInput = $cachedInput; reasoning = $reasoning }
     $result.baselineAtUtc = Get-PropertyValue $startUsage 'baselineAtUtc'
 
+    $startSynthetic = Get-PropertyValue (Get-PropertyValue $startEvent 'provenance') 'synthetic'
+    $endSynthetic = Get-PropertyValue (Get-PropertyValue $endEvent 'provenance') 'synthetic'
+    if ($startSynthetic -ne $true -or $endSynthetic -ne $true) {
+        $result.state = if ($startSynthetic -eq $true -or $endSynthetic -eq $true) { 'partial' } else { 'unavailable' }
+        $result.missingData = 'usage authority was not established by an explicitly classified synthetic fixture or an authorized source capability'
+        $result.coverage = 'numeric counters were retained as raw evidence but not treated as authoritative usage'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_source_unavailable' -Message 'Numeric usage from an unproven or unavailable source capability was not treated as authoritative' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+
     $bindingConflict = $startRole -cne $Role -or $endRole -cne $Role -or
         $startRole -cne $endRole -or $startStream -cne $endStream -or
-        $startSession -cne $endSession -or $startSource -cne $endSource -or
+        $startUsageSession -cne $endUsageSession -or
+        $startEventSession -cne $endEventSession -or
+        [string]::IsNullOrWhiteSpace($startUsageSession) -or
+        [string]::IsNullOrWhiteSpace($endUsageSession) -or
+        [string]::IsNullOrWhiteSpace($startEventSession) -or
+        [string]::IsNullOrWhiteSpace($endEventSession) -or
+        $startSource -cne $endSource -or
         $startWorker -cne $endWorker -or
-        ([string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $startUsage 'sessionId')) -and
-            [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $endUsage 'sessionId')) -and
-            $startEventSession -cne $endEventSession)
+        $startSession -cne $endSession
     $semanticsConflict = $startCachedInput -cne $endCachedInput -or $startReasoning -cne $endReasoning
     if ($bindingConflict) {
         $result.state = 'partial'
-        $result.missingData = 'usage role, worker, stream, session, or source changed between exact boundaries'
-        $result.coverage = 'boundary samples do not share one attributable source worker stream'
-        [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'Usage boundary samples changed their attributable role, worker, stream, session, or source' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        $result.missingData = 'usage role, worker, stream, session, source, or event-session provenance changed or was missing between exact boundaries'
+        $result.coverage = 'boundary samples do not share one attributable source worker stream and stable event-session binding'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'Usage boundary samples changed or omitted their attributable role, worker, stream, session, source, or event-session provenance' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
         return [pscustomobject] $result
     }
     if ($semanticsConflict) {
@@ -1801,7 +1834,6 @@ function Get-UsageAttributionKey {
     return @(
         [string] $Evidence.role
         [string] $Evidence.workerId
-        [string] $Evidence.streamId
         [string] $Evidence.sessionId
     ) -join '|'
 }
@@ -1831,9 +1863,13 @@ function Resolve-UsageEvidence {
             if ($rightStart -ge $rightEnd -or $leftStart -ge $rightEnd -or $rightStart -ge $leftEnd) { continue }
             $sameWindow = $leftStart -eq $rightStart -and $leftEnd -eq $rightEnd
             $sameSource = [string] $left.source -ceq [string] $right.source
+            $sameStream = [string] $left.streamId -ceq [string] $right.streamId
+            if ($sameSource -and -not $sameStream) {
+                continue
+            }
             $samePayload = (ConvertTo-CanonicalJson -Value ([ordered]@{ source = $left.source; deltas = $left.deltas; components = $left.components; counterSemantics = $left.counterSemantics })) -ceq
                 (ConvertTo-CanonicalJson -Value ([ordered]@{ source = $right.source; deltas = $right.deltas; components = $right.components; counterSemantics = $right.counterSemantics }))
-            if ($sameWindow -and $sameSource -and $samePayload) {
+            if ($sameWindow -and $sameSource -and $sameStream -and $samePayload) {
                 $right.countable = $false
                 $right | Add-Member -NotePropertyName duplicateOf -NotePropertyValue $left.identity -Force
                 [void] $Anomalies.Add((New-Anomaly -Code 'duplicate_usage_window' -Message 'An identical source-backed usage window was retained once for token totals' -Identity "$($left.identity)|$($right.identity)"))
