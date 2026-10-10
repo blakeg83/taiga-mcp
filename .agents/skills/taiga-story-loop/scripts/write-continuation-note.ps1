@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $fields = @(
     'Run', 'Scope', 'Repository', 'Base', 'Topology', 'Feature', 'Current', 'Story branch',
     'Implementer', 'Pair', 'Integrated pair', 'Setup authorization', 'Review mode', 'PR', 'PR delivery', 'Approval',
-    'Review', 'Integrated review', 'Final review', 'Final delivery', 'Merge', 'Next', 'Recovery',
+    'Review', 'Integrated review', 'Final review', 'Final delivery', 'Merge', 'Next', 'Recovery', 'Performance pointer',
     'Worker cursors', 'Task state', 'Gate', 'Pending action', 'Evidence'
 )
 $required = @(

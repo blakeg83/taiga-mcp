@@ -75,6 +75,45 @@ Each assignment includes a destination table:
 | Reviewer | coordinator | final story approval and exceptional escalation |
 | Coordinator | implementer, reviewer | scoped assignments, exceptional escalation, and recovery coordination |
 
+## Lifecycle event ownership
+
+Performance recording observes the transitions already owned by the pair; it
+does not add a workflow action, a worker, a poll, or a telemetry-only message.
+The actor at the real boundary appends one version-1 event through
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` using the
+run, project, story, and explicitly selected `reviewMode` from setup. The
+event's `eventId`/`transitionId` and `phaseId`, `correctionId`,
+`reviewRequestId`/`reviewAttemptId`, or `waitId` identity are stable across
+retries. Replaying a handoff or
+observing an old revision is a duplicate/stale observation, not a new attempt.
+
+| Existing boundary | Event owner and event | Identity/boundary rule |
+| --- | --- | --- |
+| Confirmed `Start` and story-run initialization | coordinator: `story_started` | story scope; use the actual UTC start and setup provenance |
+| First concrete work on a current task | implementer: `implementation_started` | task ref + phase ID; revision may be null before a commit |
+| Frozen task-ready packet before direct delivery | implementer: `task_ready_for_review` | same phase ID + full revision; this does not prove delivery or review |
+| Reviewer begins the exact request/attempt | reviewer: `review_started` | request ID + attempt ID + ordinal + review kind + exact revision |
+| Reviewer records a current finding or exact acceptance | reviewer: `review_findings` or `review_accepted` | same phase/request/attempt identity and revision |
+| Implementer begins a current correction | implementer: `correction_started` | new correction ID/phase ID; link the finding with `supersedesReviewAttemptId` |
+| Corrected packet is frozen before direct re-review | implementer: `correction_ready` | same correction/phase identity + new full revision |
+| Reviewer begins or closes the whole-story review | reviewer: `final_review_started`, `review_findings`, `final_review_accepted` | final-story request/attempt identity; exact reviewed HEAD |
+| An existing explicit coordinator/recovery wait opens or closes | coordinator: `wait_started`/`wait_ended` | stable wait ID and wait kind; never infer a wait from polling or elapsed time |
+| Confirmed reviewed PR creation or reuse | coordinator: `pr_ready` | story scope + PR identity + exact reviewed HEAD; owned by task #157 |
+
+In both modes, `implementation_started` and `task_ready_for_review` record the
+implementation interval at the first concrete task work and the frozen
+implementation-ready boundary. In `per_task`, task review, finding, correction,
+and re-review events are then recorded at their actual pair boundaries. In
+`story_end_only`, the implementation-ready `task_ready_for_review` event does
+not dispatch a reviewer and no task-scoped review/correction events are
+invented. Final-story review, finding, correction, and re-review boundaries
+remain valid in both modes. Mode is copied from setup and is never inferred
+from the event sequence. Known model/effort
+profiles and source-backed usage snapshots are optional provenance; an
+unavailable usage sample remains null/unavailable, never zero. Recorder or
+snapshot failure is fail-open for the workflow and is surfaced as measurement
+coverage, not retried as a new handoff or reported through a routine message.
+
 The coordinator is not a routine finding, correction, task-ready, or task-acceptance
 relay. The implementer owns current-version Taiga checklist/status/
 progress reconciliation and next-task advancement after the direct acceptance
