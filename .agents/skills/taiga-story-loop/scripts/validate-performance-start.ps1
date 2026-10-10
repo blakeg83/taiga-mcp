@@ -141,6 +141,87 @@ function Read-Snapshot([string] $Path) {
     $snapshot
 }
 
+function Parse-PerformancePointer {
+    param([Parameter(Mandatory)] [string] $Pointer)
+
+    $pattern = '^schema=(?<schema>\d+) \| run=(?<run>[^|]+) \| project=(?<project>\d+) \| story=(?<storyId>\d+)/(?<storyRef>\d+) \| ledger=(?<ledger>[^|]+) \| lastEvent=(?<lastEvent>[^|]+) \| lastObservedUtc=(?<lastObservedUtc>[^|]+)$'
+    $match = [regex]::Match($Pointer, $pattern)
+    if (-not $match.Success) { return $null }
+
+    $schema = [int]$match.Groups['schema'].Value
+    $project = [int]$match.Groups['project'].Value
+    $storyId = [int]$match.Groups['storyId'].Value
+    $storyRef = [int]$match.Groups['storyRef'].Value
+    if ($schema -ne 1 -or $project -ne 12 -or $storyId -ne 725 -or $storyRef -ne 52) {
+        return $null
+    }
+
+    [pscustomobject]@{
+        SchemaVersion = $schema
+        RunId = $match.Groups['run'].Value.Trim()
+        ProjectId = $project
+        StoryId = $storyId
+        StoryRef = $storyRef
+        LedgerPath = $match.Groups['ledger'].Value.Trim()
+        LastEventId = $match.Groups['lastEvent'].Value.Trim()
+        LastObservedUtc = $match.Groups['lastObservedUtc'].Value.Trim()
+    }
+}
+
+function Resolve-ResumeBinding {
+    param([Parameter(Mandatory)] [string] $Pointer)
+
+    $binding = Parse-PerformancePointer -Pointer $Pointer
+    if ($null -eq $binding) {
+        return [pscustomobject]@{ State = 'unavailable'; Reason = 'pointer_binding_invalid'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }
+    }
+    if ($binding.LastEventId -eq 'none' -or $binding.LastObservedUtc -eq 'unavailable') {
+        return [pscustomobject]@{ State = 'unavailable'; Reason = 'pointer_has_no_confirmed_event'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }
+    }
+    if (-not (Test-Path -LiteralPath $binding.LedgerPath -PathType Leaf)) {
+        return [pscustomobject]@{ State = 'unavailable'; Reason = 'ledger_missing'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }
+    }
+
+    $lines = @(Get-Content -LiteralPath $binding.LedgerPath)
+    $events = [System.Collections.Generic.List[object]]::new()
+    foreach ($line in $lines) {
+        try {
+            [void]$events.Add(($line | ConvertFrom-Json -DateKind String))
+        }
+        catch {
+            return [pscustomobject]@{ State = 'unavailable'; Reason = 'ledger_event_invalid'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }
+        }
+    }
+
+    $matches = @($events | Where-Object { [string]$_.eventId -ceq $binding.LastEventId })
+    if ($matches.Count -ne 1) {
+        return [pscustomobject]@{ State = 'unavailable'; Reason = 'last_event_missing_or_ambiguous'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }
+    }
+
+    $event = $matches[0]
+    $identityMatches = [string]$event.runId -ceq $binding.RunId -and
+        [int]$event.projectId -eq $binding.ProjectId -and
+        [int]$event.storyId -eq $binding.StoryId -and
+        [int]$event.storyRef -eq $binding.StoryRef -and
+        [string]$event.eventType -ceq 'story_started' -and
+        [string]$event.scope -ceq 'story' -and
+        [string]$event.role -ceq 'coordinator' -and
+        [string]$event.occurredAtUtc -ceq $binding.LastObservedUtc
+    if (-not $identityMatches) {
+        return [pscustomobject]@{ State = 'unavailable'; Reason = 'ledger_binding_mismatch'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }
+    }
+
+    [pscustomobject]@{
+        State = 'reused'
+        Reason = $null
+        RunId = $binding.RunId
+        EventId = $binding.LastEventId
+        OccurredAtUtc = $binding.LastObservedUtc
+        LedgerLineCount = $lines.Count
+        Authorization = 'unchanged'
+    }
+}
+
 function Start-Measurement {
     param(
         [Parameter(Mandatory)] [bool] $Authorized,
@@ -199,15 +280,35 @@ try {
     Assert-True ($saved['Performance pointer'] -ceq $pointer) 'the continuation stores only the compact performance pointer'
     Assert-True (-not ([IO.File]::ReadAllText($notePath)).Contains('story_performance_event')) 'the continuation does not copy event history'
 
-    # Resume verifies the same last event and reuses the run without another
-    # story_started append or a replacement timestamp.
+    # Resume parses the persisted pointer, reads the real ledger event, and
+    # verifies every run/project/story/event boundary before reuse. It does not
+    # append a second story_started event or replace the timestamp.
     $resumed = Read-Snapshot -Path $notePath
     $resumeLedger = Get-LedgerPath $firstRunId
     $resumeLinesBefore = @(Get-Content -LiteralPath $resumeLedger)
-    Assert-True ($resumed['Performance pointer'] -match 'run=synthetic-start-run-1') 'resume keeps the original run identity'
-    Assert-True ($resumed['Performance pointer'] -match 'lastEvent=synthetic-start-run-1-story-started') 'resume keeps the original event identity'
-    Assert-True ($resumed['Performance pointer'] -match 'lastObservedUtc=2026-10-10T10:00:00Z') 'resume keeps the recorded UTC boundary'
-    Assert-True (@(Get-Content -LiteralPath $resumeLedger).Count -eq $resumeLinesBefore.Count) 'resume does not append a duplicate story start'
+    $resumeBinding = Resolve-ResumeBinding -Pointer $resumed['Performance pointer']
+    Assert-True ($resumeBinding.State -eq 'reused' -and $resumeBinding.RunId -eq $firstRunId) 'resume reuses the actual ledger run identity'
+    Assert-True ($resumeBinding.EventId -ceq 'synthetic-start-run-1-story-started') 'resume verifies the actual ledger event identity'
+    Assert-True ($resumeBinding.OccurredAtUtc -ceq $firstTime) 'resume verifies the actual persisted UTC boundary'
+    Assert-True ($resumeBinding.Authorization -ceq 'unchanged') 'valid resume preserves workflow authorization'
+    Assert-True ($resumeBinding.LedgerLineCount -eq $resumeLinesBefore.Count -and @(Get-Content -LiteralPath $resumeLedger).Count -eq $resumeLinesBefore.Count) 'resume does not append a duplicate story start'
+
+    # Missing or mismatched recovery evidence remains unavailable. It does not
+    # synthesize a timestamp, mutate the ledger, or alter the workflow gate.
+    $missingEventPointer = New-PerformancePointer -RunId $firstRunId -EventId 'missing-story-start-event' -OccurredAtUtc $firstTime
+    $missingEvent = Resolve-ResumeBinding -Pointer $missingEventPointer
+    Assert-True ($missingEvent.State -eq 'unavailable' -and $missingEvent.Reason -eq 'last_event_missing_or_ambiguous' -and $missingEvent.OccurredAtUtc -eq 'unavailable') 'missing last event stays unavailable without a timestamp'
+    $missingLedgerPointer = New-PerformancePointer -RunId 'synthetic-missing-ledger' -EventId 'missing-story-start-event' -OccurredAtUtc $firstTime
+    $missingLedger = Resolve-ResumeBinding -Pointer $missingLedgerPointer
+    Assert-True ($missingLedger.State -eq 'unavailable' -and $missingLedger.Reason -eq 'ledger_missing' -and $missingLedger.OccurredAtUtc -eq 'unavailable') 'missing ledger stays unavailable without a timestamp'
+    foreach ($bindingCase in @(
+        [pscustomobject]@{ Name = 'run'; Pointer = $pointer.Replace('run=synthetic-start-run-1', 'run=synthetic-foreign-run'); ExpectedReason = 'ledger_binding_mismatch' }
+        [pscustomobject]@{ Name = 'project'; Pointer = $pointer.Replace('project=12', 'project=99'); ExpectedReason = 'pointer_binding_invalid' }
+        [pscustomobject]@{ Name = 'story'; Pointer = $pointer.Replace('story=725/52', 'story=999/999'); ExpectedReason = 'pointer_binding_invalid' }
+    )) {
+        $mismatch = Resolve-ResumeBinding -Pointer $bindingCase.Pointer
+        Assert-True ($mismatch.State -eq 'unavailable' -and $mismatch.Reason -eq $bindingCase.ExpectedReason -and $mismatch.OccurredAtUtc -eq 'unavailable' -and $mismatch.Authorization -eq 'unchanged') "$($bindingCase.Name) binding mismatch stays unavailable"
+    }
 
     # A historical note without the optional field remains compatible and has
     # unavailable historical coverage rather than a reconstructed timestamp.
@@ -238,7 +339,7 @@ try {
         NewRun = 'synthetic-start-run-2'
         MeasurementFailure = 'unavailable; workflow continues'
     } | ConvertTo-Json
-    Write-Output 'Passed post-Start performance binding fixture: pre-Start gate protection, real recorder story_started append, compact pointer persistence without ledger history, exact-run resume reuse, legacy-note unavailable coverage, new-run identity separation, and non-blocking unavailable failure semantics; synthetic and non-live.'
+    Write-Output 'Passed post-Start performance binding fixture: pre-Start gate protection, real recorder story_started append, compact pointer persistence without ledger history, actual ledger-bound resume reuse, missing/mismatched recovery evidence, legacy-note unavailable coverage, new-run identity separation, and non-blocking unavailable failure semantics; synthetic contract assertions with production recorder/writer invocation, no live host/provider execution.'
 }
 finally {
     if ([IO.Directory]::Exists($fixtureRoot)) {
