@@ -44,6 +44,7 @@ function New-Event {
         [AllowNull()] [string] $WaitId = $null,
         [AllowNull()] [string] $WaitKind = $null,
         [AllowNull()] [string] $SupersedesReviewAttemptId = $null,
+        [AllowNull()] [object] $Usage = $null,
         [string] $ReviewMode = 'per_task',
         [string] $Role = 'coordinator'
     )
@@ -74,7 +75,7 @@ function New-Event {
         revision = Get-NullableText $Revision
         reviewMode = $ReviewMode
         provenance = [ordered]@{ source = 'synthetic_fixture'; observedBy = 'validator'; coverage = 'fixed UTC fixture'; synthetic = $true }
-        usage = $null
+        usage = $Usage
         waitId = Get-NullableText $WaitId
         waitKind = Get-NullableText $WaitKind
         pullRequest = $null
@@ -108,6 +109,7 @@ $privacyLedger = Join-Path $root 'privacy.jsonl'
 $utfLedger = Join-Path $root 'invalid-utf8.jsonl'
 $orphanLedger = Join-Path $root 'orphan-order.jsonl'
 $overlapLedger = Join-Path $root 'overlap-cases.jsonl'
+$usageLedger = Join-Path $root 'usage-and-comparison.jsonl'
 $scriptPath = Join-Path $PSScriptRoot 'get-story-performance.ps1'
 $recorderPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts\write-performance-event.ps1'))
 $recorderRoot = Join-Path $root 'external-ledgers'
@@ -179,6 +181,115 @@ try {
     Assert-True (@($report.anomalies | Where-Object { $_.code -eq 'duplicate_or_stale_review' }).Count -eq 1) 'same review identity with the same immutable payload should be disclosed as a replay'
     Assert-True ([string]$report.coverage.taskSet.state -eq 'measured' -and @($report.coverage.taskSet.declaredTaskRefs).Count -eq 2) 'declared task coverage should remain explicit and ordered'
     Assert-True ([string]$report.coverage.uncoveredStorySpan.state -eq 'partial' -and @($report.coverage.uncoveredStorySpan.value).Count -gt 0) 'uncovered story-span gaps should be reported explicitly'
+    Assert-True ([string]$report.metrics.implementationTokens.state -eq 'unavailable' -and $null -eq $report.metrics.implementationTokens.value) 'missing implementer usage must remain unavailable rather than zero'
+    Assert-True ([string]$report.metrics.totalTokens.state -eq 'unavailable' -and $null -eq $report.metrics.totalTokens.value) 'missing role usage must keep total tokens unavailable'
+    Assert-True ([string]$report.metrics.modelsAndReasoning.state -eq 'unavailable') 'unproven model and reasoning profiles must remain unavailable'
+    Assert-True ([string]$report.metrics.changedFiles.state -eq 'unavailable') 'comparison stats must remain unavailable without an explicit base revision'
+
+    $comparisonHead = ([string] (& git rev-parse HEAD)).Trim()
+    Assert-True ($comparisonHead -match '^[0-9a-f]{40}$') 'comparison fixture requires the current full Git HEAD'
+    $comparisonBase = ([string] (& git rev-parse HEAD~1)).Trim()
+    Assert-True ($comparisonBase -match '^[0-9a-f]{40}$') 'comparison fixture requires an exact parent Git base'
+    $includedSemantics = [ordered]@{ cachedInput = 'included_in_input'; reasoning = 'included_in_output' }
+    $disjointSemantics = [ordered]@{ cachedInput = 'disjoint_from_input'; reasoning = 'disjoint_from_output' }
+    $usageImplStart = [ordered]@{
+        state = 'measured'; streamId = 'usage-impl-stream'; role = 'implementer'; sessionId = 'usage-impl-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'exact implementation boundary'; sampledAtUtc = '2026-10-09T09:00:00Z'; baselineAtUtc = '2026-10-09T09:00:00Z'
+        counters = [ordered]@{ inputTokens = 100; cachedInputTokens = 40; outputTokens = 20; reasoningTokens = 5 }
+    }
+    $usageImplEnd = [ordered]@{
+        state = 'measured'; streamId = 'usage-impl-stream'; role = 'implementer'; sessionId = 'usage-impl-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'exact implementation boundary'; sampledAtUtc = '2026-10-09T09:10:00Z'; baselineAtUtc = '2026-10-09T09:00:00Z'
+        counters = [ordered]@{ inputTokens = 145; cachedInputTokens = 70; outputTokens = 30; reasoningTokens = 8 }
+    }
+    $usageReviewStart = [ordered]@{
+        state = 'measured'; streamId = 'usage-review-stream'; role = 'reviewer'; sessionId = 'usage-review-session'; source = 'synthetic-task153'
+        counterSemantics = $disjointSemantics; coverage = 'exact review boundary'; sampledAtUtc = '2026-10-09T09:15:00Z'; baselineAtUtc = '2026-10-09T09:15:00Z'
+        counters = [ordered]@{ inputTokens = 200; cachedInputTokens = 50; outputTokens = 100; reasoningTokens = 20 }
+    }
+    $usageReviewEnd = [ordered]@{
+        state = 'measured'; streamId = 'usage-review-stream'; role = 'reviewer'; sessionId = 'usage-review-session'; source = 'synthetic-task153'
+        counterSemantics = $disjointSemantics; coverage = 'exact review boundary'; sampledAtUtc = '2026-10-09T09:25:00Z'; baselineAtUtc = '2026-10-09T09:15:00Z'
+        counters = [ordered]@{ inputTokens = 230; cachedInputTokens = 60; outputTokens = 130; reasoningTokens = 35 }
+    }
+    $usageWaitStart = [ordered]@{
+        state = 'measured'; streamId = 'usage-coordinator-stream'; role = 'coordinator'; sessionId = 'usage-coordinator-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'exact wait boundary'; sampledAtUtc = '2026-10-09T09:30:00Z'; baselineAtUtc = '2026-10-09T09:30:00Z'
+        counters = [ordered]@{ inputTokens = 10; cachedInputTokens = 2; outputTokens = 1; reasoningTokens = 0 }
+    }
+    $usageWaitEnd = [ordered]@{
+        state = 'measured'; streamId = 'usage-coordinator-stream'; role = 'coordinator'; sessionId = 'usage-coordinator-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'exact wait boundary'; sampledAtUtc = '2026-10-09T09:35:00Z'; baselineAtUtc = '2026-10-09T09:30:00Z'
+        counters = [ordered]@{ inputTokens = 15; cachedInputTokens = 7; outputTokens = 4; reasoningTokens = 1 }
+    }
+    $usageEvents = @(
+        (New-Event -EventId 'usage-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T08:55:00Z' -Scope 'story' -Role 'coordinator'),
+        (New-Event -EventId 'usage-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T09:00:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-impl' -Role 'implementer' -Usage $usageImplStart),
+        (New-Event -EventId 'usage-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T09:10:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-impl' -Revision $comparisonHead -Role 'implementer' -Usage $usageImplEnd),
+        (New-Event -EventId 'usage-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T09:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageReviewStart),
+        (New-Event -EventId 'usage-review-start-replay' -EventType 'review_started' -OccurredAtUtc '2026-10-09T09:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageReviewStart),
+        (New-Event -EventId 'usage-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T09:25:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-review' -ReviewRequestId 'usage-review-request' -ReviewAttemptId 'usage-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageReviewEnd),
+        (New-Event -EventId 'usage-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T09:30:00Z' -Scope 'story' -WaitId 'usage-wait' -WaitKind 'reviewer' -Role 'coordinator' -Usage $usageWaitStart),
+        (New-Event -EventId 'usage-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-09T09:35:00Z' -Scope 'story' -WaitId 'usage-wait' -WaitKind 'reviewer' -Role 'coordinator' -Usage $usageWaitEnd),
+        (New-Event -EventId 'usage-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-09T09:40:00Z' -Scope 'story' -Revision $comparisonHead -Role 'coordinator')
+    )
+    $usageEvents[4].transitionId = $usageEvents[3].transitionId
+    foreach ($usageEvent in $usageEvents) { $usageEvent.runId = 'synthetic-usage-153' }
+    $usageEvents[-1].pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 153; reviewedHead = $comparisonHead }
+    $usageLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId 'synthetic-usage-153' -Events $usageEvents -RecorderPath $recorderPath
+    $usageJson = & $scriptPath -EventsPath $usageLedger -ReviewMode per_task -TaskRefs @(152) -BaseRevision $comparisonBase -ReviewedHead $comparisonHead -RepositoryPath (Get-Location).Path
+    Assert-True ($LASTEXITCODE -eq 0) 'source-backed usage and comparison fixture should aggregate successfully'
+    $usageReport = $usageJson | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$usageReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$usageReport.metrics.implementationTokens.value -eq 55) 'included cached-input and reasoning counters must not be double-counted'
+    Assert-True ([string]$usageReport.metrics.reviewTokens.state -eq 'measured' -and [int64]$usageReport.metrics.reviewTokens.value -eq 85) 'disjoint cached-input and reasoning counters must be included exactly once'
+    Assert-True ([string]$usageReport.metrics.coordinationTokens.state -eq 'measured' -and [int64]$usageReport.metrics.coordinationTokens.value -eq 8) 'coordinator usage must use explicit wait boundaries'
+    Assert-True ([string]$usageReport.metrics.totalTokens.state -eq 'measured' -and [int64]$usageReport.metrics.totalTokens.value -eq 148) 'total tokens must sum measured role subtotals only'
+    Assert-True ([string]$usageReport.metrics.tasksCompleted.state -eq 'measured' -and [int]$usageReport.metrics.tasksCompleted.value -eq 1) 'tasksCompleted must count accepted declared task identities'
+    Assert-True ([string]$usageReport.metrics.changedFiles.state -eq 'measured' -and [int]$usageReport.metrics.changedFiles.value -gt 0 -and [int]$usageReport.metrics.linesAdded.value -gt 0 -and [int]$usageReport.metrics.linesDeleted.value -ge 0) 'comparison metrics must use the exact base-to-reviewed-head Git diff'
+    Assert-True ([string]$usageReport.metrics.modelsAndReasoning.state -eq 'unavailable') 'model and reasoning profiles must not be inferred from usage stream metadata'
+    Assert-True (@($usageReport.anomalies | Where-Object { $_.code -eq 'duplicate_or_stale_review' }).Count -eq 1) 'duplicate usage-bearing review snapshots must not create a second review attempt'
+
+    $usageReset = [ordered]@{
+        state = 'measured'; streamId = 'usage-reset-stream'; role = 'implementer'; sessionId = 'usage-reset-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'reset fixture'; sampledAtUtc = '2026-10-09T10:00:00Z'; baselineAtUtc = '2026-10-09T10:00:00Z'
+        counters = [ordered]@{ inputTokens = 100; outputTokens = 20 }
+    }
+    $usageResetEnd = [ordered]@{
+        state = 'measured'; streamId = 'usage-reset-stream'; role = 'implementer'; sessionId = 'usage-reset-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'reset fixture'; sampledAtUtc = '2026-10-09T10:10:00Z'; baselineAtUtc = '2026-10-09T10:00:00Z'
+        counters = [ordered]@{ inputTokens = 90; outputTokens = 25 }
+    }
+    $usageWorkerStart = [ordered]@{
+        state = 'measured'; streamId = 'usage-worker-stream'; role = 'implementer'; sessionId = 'usage-worker-session-1'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'worker-change fixture'; sampledAtUtc = '2026-10-09T10:30:00Z'; baselineAtUtc = '2026-10-09T10:30:00Z'
+        counters = [ordered]@{ inputTokens = 300; outputTokens = 40 }
+    }
+    $usageWorkerEnd = [ordered]@{
+        state = 'measured'; streamId = 'usage-worker-stream'; role = 'implementer'; sessionId = 'usage-worker-session-2'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'worker-change fixture'; sampledAtUtc = '2026-10-09T10:40:00Z'; baselineAtUtc = '2026-10-09T10:30:00Z'
+        counters = [ordered]@{ inputTokens = 320; outputTokens = 45 }
+    }
+    $usageMissingStart = [ordered]@{
+        state = 'measured'; streamId = 'usage-missing-stream'; role = 'reviewer'; sessionId = 'usage-missing-session'; source = 'synthetic-task153'
+        counterSemantics = $includedSemantics; coverage = 'missing-boundary fixture'; sampledAtUtc = '2026-10-09T10:15:00Z'; baselineAtUtc = '2026-10-09T10:15:00Z'
+        counters = [ordered]@{ inputTokens = 400; outputTokens = 50 }
+    }
+    $usagePartialEvents = @(
+        (New-Event -EventId 'usage-partial-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-reset' -Role 'implementer' -Usage $usageReset),
+        (New-Event -EventId 'usage-partial-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T10:10:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-reset' -Revision $comparisonHead -Role 'implementer' -Usage $usageResetEnd),
+        (New-Event -EventId 'usage-partial-worker-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:30:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-worker-change' -Role 'implementer' -Usage $usageWorkerStart),
+        (New-Event -EventId 'usage-partial-worker-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T10:40:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-worker-change' -Revision $comparisonHead -Role 'implementer' -Usage $usageWorkerEnd),
+        (New-Event -EventId 'usage-partial-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:15:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-missing' -ReviewRequestId 'usage-missing-request' -ReviewAttemptId 'usage-missing-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer' -Usage $usageMissingStart),
+        (New-Event -EventId 'usage-partial-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T10:25:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'usage-missing' -ReviewRequestId 'usage-missing-request' -ReviewAttemptId 'usage-missing-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $comparisonHead -Role 'reviewer')
+    )
+    foreach ($partialEvent in $usagePartialEvents) { $partialEvent.runId = 'synthetic-usage-153-partial' }
+    [IO.File]::WriteAllLines($usageLedger, @($usagePartialEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
+    $partialJson = & $scriptPath -EventsPath $usageLedger -ReviewMode per_task -TaskRefs @(152)
+    Assert-True ($LASTEXITCODE -eq 0) 'partial usage fixture should aggregate without inventing totals'
+    $partialReport = $partialJson | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$partialReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $partialReport.metrics.implementationTokens.value) 'counter reset must make implementation token coverage partial with null total'
+    Assert-True ([string]$partialReport.metrics.reviewTokens.state -eq 'partial' -and $null -eq $partialReport.metrics.reviewTokens.value) 'missing review usage boundary must remain partial with null total'
+    Assert-True (@($partialReport.anomalies | Where-Object { $_.code -eq 'usage_counter_reset' }).Count -eq 1 -and @($partialReport.anomalies | Where-Object { $_.code -eq 'usage_stream_conflict' }).Count -eq 1 -and @($partialReport.anomalies | Where-Object { $_.code -eq 'usage_missing_boundary' }).Count -eq 1) 'reset, worker/session changes, and missing usage boundaries must be disclosed explicitly'
 
     $finalRetryPerTaskEvents = @(
         (New-Event -EventId 'per-task-final-story-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T11:30:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),

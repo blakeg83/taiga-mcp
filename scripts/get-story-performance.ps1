@@ -6,9 +6,10 @@
     This entry point is deliberately read-only. It consumes the append-only
     JSONL ledger written by write-performance-event.ps1 and emits one
     deterministic story_performance_report object. It does not infer missing
-    boundaries, subtract overlapping phases, estimate usage, or persist a
-    report. Report publication and source-backed usage reconciliation are
-    owned by later story tasks.
+    boundaries, subtract overlapping phases, estimate unavailable usage, or
+    persist a report. Source-backed usage is reconciled only from explicit
+    attributable boundary samples; report publication remains owned by a
+    later story task.
 #>
 
 [CmdletBinding()]
@@ -25,7 +26,16 @@ param(
 
     [string] $OutputPath,
 
-    [string] $MarkdownPath
+    [string] $MarkdownPath,
+
+    [Alias('ReviewedRevision', 'HeadRevision')]
+    [string] $ReviewedHead,
+
+    [Alias('BaseSha', 'BaseCommit')]
+    [string] $BaseRevision,
+
+    [Alias('RepoPath', 'RepositoryRoot')]
+    [string] $RepositoryPath
 )
 
 Set-StrictMode -Version Latest
@@ -813,6 +823,8 @@ function Get-IntervalResult {
         identity = $Identity
         taskRef = $task
         phaseId = $phaseId
+        startEventId = if ($null -ne $start) { $start.EventId } else { $null }
+        endEventId = if ($null -ne $end) { $end.EventId } else { $null }
         startUtc = if ($null -ne $start) { [string] (Get-PropertyValue $start.Event 'occurredAtUtc') } else { $null }
         endUtc = if ($null -ne $end) { [string] (Get-PropertyValue $end.Event 'occurredAtUtc') } else { $null }
         startRole = if ($null -ne $start) { Get-PropertyValue $start.Event 'role' } else { $null }
@@ -1184,6 +1196,11 @@ if ($effectiveReviewMode -notin @('per_task', 'story_end_only')) {
     $effectiveReviewMode = $null
 }
 
+$recordsByEventId = @{}
+foreach ($record in @($records)) {
+    $recordsByEventId[[string] $record.EventId] = $record
+}
+
 $storyStarts = @($records | Where-Object { $_.EventType -eq 'story_started' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
 $prReady = @($records | Where-Object { $_.EventType -eq 'pr_ready' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
 $timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Identity 'story|time_to_pr' -Kind 'story_to_pr' -Anomalies $anomalies
@@ -1361,6 +1378,8 @@ foreach ($record in @($dedupedReviewStarts | Sort-Object Time, Line)) {
         reviewKind = Get-PropertyValue $record.Event 'reviewKind'
         phaseId = Get-PropertyValue $record.Event 'phaseId'
         revision = Get-PropertyValue $record.Event 'revision'
+        startEventId = $record.EventId
+        endEventId = if ($null -ne $closure) { $closure.EventId } else { $null }
         startUtc = Get-PropertyValue $record.Event 'occurredAtUtc'
         endUtc = if ($null -ne $closure) { Get-PropertyValue $closure.Event 'occurredAtUtc' } else { $null }
         closureEventType = $closureKind
@@ -1415,6 +1434,402 @@ function Get-IntervalMetric {
         return New-Metric -State 'partial' -Value $sum -Unit $Unit -Source $Source -Calculation $Calculation -Coverage "$($valid.Count) of $($Intervals.Count) intervals have valid paired boundaries" -MissingData "$($invalid.Count) interval(s) are missing, conflicting, reversed, or ambiguous"
     }
     return New-Metric -State 'measured' -Value $sum -Unit $Unit -Source $Source -Calculation $Calculation -Coverage "all $($Intervals.Count) intervals have valid paired boundaries" -MissingData $null
+}
+
+function Get-UsageCounter {
+    param(
+        [AllowNull()] [object] $Usage,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $counters = Get-PropertyValue $Usage 'counters'
+    $property = if ($null -ne $counters) { $counters.PSObject.Properties[$Name] } else { $null }
+    return [pscustomobject][ordered]@{
+        present = $null -ne $property
+        value = if ($null -ne $property) { [long] $property.Value } else { $null }
+    }
+}
+
+function Get-UsageBoundaryResult {
+    param(
+        [Parameter(Mandatory)] [object] $Interval,
+        [AllowNull()] [object] $StartRecord,
+        [AllowNull()] [object] $EndRecord,
+        [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
+    )
+
+    $identity = [string] $Interval.identity
+    $startEvent = if ($null -ne $StartRecord) { $StartRecord.Event } else { $null }
+    $endEvent = if ($null -ne $EndRecord) { $EndRecord.Event } else { $null }
+    $startUsage = if ($null -ne $startEvent) { Get-PropertyValue $startEvent 'usage' } else { $null }
+    $endUsage = if ($null -ne $endEvent) { Get-PropertyValue $endEvent 'usage' } else { $null }
+    $startState = if ($null -ne $startUsage) { [string] (Get-PropertyValue $startUsage 'state') } else { $null }
+    $endState = if ($null -ne $endUsage) { [string] (Get-PropertyValue $endUsage 'state') } else { $null }
+
+    $result = [ordered]@{
+        identity = $identity
+        role = $Role
+        intervalState = [string] $Interval.state
+        state = 'unavailable'
+        value = $null
+        streamId = $null
+        sessionId = $null
+        source = $null
+        counterSemantics = $null
+        baselineAtUtc = $null
+        startSampledAtUtc = if ($null -ne $startUsage) { Get-PropertyValue $startUsage 'sampledAtUtc' } else { $null }
+        endSampledAtUtc = if ($null -ne $endUsage) { Get-PropertyValue $endUsage 'sampledAtUtc' } else { $null }
+        startCounters = if ($null -ne $startUsage) { Get-PropertyValue $startUsage 'counters' } else { $null }
+        endCounters = if ($null -ne $endUsage) { Get-PropertyValue $endUsage 'counters' } else { $null }
+        deltas = $null
+        components = $null
+        coverage = 'no attributable numeric usage samples at both interval boundaries'
+        missingData = $null
+    }
+
+    if ($null -eq $startUsage -and $null -eq $endUsage) {
+        $result.missingData = 'usage is unavailable at both interval boundaries'
+        return [pscustomobject] $result
+    }
+    if ($null -eq $startUsage -or $null -eq $endUsage) {
+        $result.state = 'partial'
+        $result.coverage = 'only one interval boundary has a usage sample'
+        $result.missingData = 'both exact interval-boundary usage samples are required'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_missing_boundary' -Message 'A source-backed usage interval is missing one exact boundary sample' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+
+    $startCounters = Get-PropertyValue $startUsage 'counters'
+    $endCounters = Get-PropertyValue $endUsage 'counters'
+    $startNumeric = $null -ne $startCounters -and @($startCounters.PSObject.Properties).Count -gt 0
+    $endNumeric = $null -ne $endCounters -and @($endCounters.PSObject.Properties).Count -gt 0
+    if (-not $startNumeric -or -not $endNumeric) {
+        $result.missingData = 'numeric counters are unavailable at one or both interval boundaries'
+        $result.coverage = 'usage provenance exists but numeric counters are not attributable at both boundaries'
+        if ($startState -ne 'unavailable' -or $endState -ne 'unavailable') {
+            $result.state = 'partial'
+        }
+        return [pscustomobject] $result
+    }
+
+    $startRole = [string] (Get-PropertyValue $startUsage 'role')
+    $endRole = [string] (Get-PropertyValue $endUsage 'role')
+    $startStream = [string] (Get-PropertyValue $startUsage 'streamId')
+    $endStream = [string] (Get-PropertyValue $endUsage 'streamId')
+    $startSource = [string] (Get-PropertyValue $startUsage 'source')
+    $endSource = [string] (Get-PropertyValue $endUsage 'source')
+    $startSession = [string] (Get-PropertyValue $startUsage 'sessionId')
+    $endSession = [string] (Get-PropertyValue $endUsage 'sessionId')
+    if ([string]::IsNullOrWhiteSpace($startSession) -and $null -ne $startEvent) {
+        $startSession = [string] (Get-PropertyValue $startEvent 'sessionId')
+    }
+    if ([string]::IsNullOrWhiteSpace($endSession) -and $null -ne $endEvent) {
+        $endSession = [string] (Get-PropertyValue $endEvent 'sessionId')
+    }
+    $startSemantics = Get-PropertyValue $startUsage 'counterSemantics'
+    $endSemantics = Get-PropertyValue $endUsage 'counterSemantics'
+    $cachedInput = [string] (Get-PropertyValue $startSemantics 'cachedInput')
+    $reasoning = [string] (Get-PropertyValue $startSemantics 'reasoning')
+    $startCachedInput = [string] (Get-PropertyValue $startSemantics 'cachedInput')
+    $endCachedInput = [string] (Get-PropertyValue $endSemantics 'cachedInput')
+    $startReasoning = [string] (Get-PropertyValue $startSemantics 'reasoning')
+    $endReasoning = [string] (Get-PropertyValue $endSemantics 'reasoning')
+    $result.streamId = if ($startStream -eq $endStream) { $startStream } else { $null }
+    $result.sessionId = if ($startSession -eq $endSession) { $startSession } else { $null }
+    $result.source = if ($startSource -eq $endSource) { $startSource } else { $null }
+    $result.counterSemantics = [pscustomobject][ordered]@{ cachedInput = $cachedInput; reasoning = $reasoning }
+    $result.baselineAtUtc = Get-PropertyValue $startUsage 'baselineAtUtc'
+
+    $bindingConflict = $startRole -cne $Role -or $endRole -cne $Role -or
+        $startRole -cne $endRole -or $startStream -cne $endStream -or
+        $startSession -cne $endSession -or $startSource -cne $endSource
+    $semanticsConflict = $startCachedInput -cne $endCachedInput -or $startReasoning -cne $endReasoning
+    if ($bindingConflict) {
+        $result.state = 'partial'
+        $result.missingData = 'usage role, stream, session, or source changed between exact boundaries'
+        $result.coverage = 'boundary samples do not share one attributable source stream'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'Usage boundary samples changed their attributable role, stream, session, or source' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+    if ($semanticsConflict) {
+        $result.state = 'partial'
+        $result.missingData = 'counter semantics changed between exact boundaries'
+        $result.coverage = 'boundary samples do not share one counter interpretation'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_semantics_conflict' -Message 'Usage boundary samples changed cached-input or reasoning semantics' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+    if ($cachedInput -eq 'unknown' -or $reasoning -eq 'unknown') {
+        $result.state = 'partial'
+        $result.missingData = 'counter semantics are unknown'
+        $result.coverage = 'raw counters retained but the subtotal interpretation is unknown'
+        return [pscustomobject] $result
+    }
+
+    $startTime = [DateTimeOffset]::MinValue
+    $endTime = [DateTimeOffset]::MinValue
+    $startSampleTime = [DateTimeOffset]::MinValue
+    $endSampleTime = [DateTimeOffset]::MinValue
+    $startBaselineTime = [DateTimeOffset]::MinValue
+    $endBaselineTime = [DateTimeOffset]::MinValue
+    $timesValid = (Try-GetUtcTime -Value $Interval.startUtc -Parsed ([ref] $startTime)) -and
+        (Try-GetUtcTime -Value $Interval.endUtc -Parsed ([ref] $endTime)) -and
+        (Try-GetUtcTime -Value (Get-PropertyValue $startUsage 'sampledAtUtc') -Parsed ([ref] $startSampleTime)) -and
+        (Try-GetUtcTime -Value (Get-PropertyValue $endUsage 'sampledAtUtc') -Parsed ([ref] $endSampleTime)) -and
+        (Try-GetUtcTime -Value (Get-PropertyValue $startUsage 'baselineAtUtc') -Parsed ([ref] $startBaselineTime)) -and
+        (Try-GetUtcTime -Value (Get-PropertyValue $endUsage 'baselineAtUtc') -Parsed ([ref] $endBaselineTime))
+    if ($timesValid -and ($startSampleTime -gt $endTime -or $endSampleTime -gt $endTime)) {
+        $result.state = 'partial'
+        $result.missingData = 'usage sample occurs after the attributable interval'
+        $result.coverage = 'post-boundary samples were excluded'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_sample_after_boundary' -Message 'A usage sample after the attributable interval was excluded' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+    if (-not $timesValid -or $startSampleTime -ne $startTime -or $endSampleTime -ne $endTime -or
+        $startBaselineTime -ne $startTime -or $endBaselineTime -ne $startTime) {
+        $result.state = 'partial'
+        $result.missingData = 'usage samples must have exact interval boundaries and one exact baselineAtUtc'
+        $result.coverage = 'numeric samples exist but boundary attribution is not exact'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_boundary_mismatch' -Message 'Usage samples were not observed at the exact interval boundaries or shared exact baseline' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+    $requiredCounters = [System.Collections.Generic.List[string]]::new()
+    [void] $requiredCounters.Add('inputTokens')
+    [void] $requiredCounters.Add('outputTokens')
+    if ($cachedInput -eq 'disjoint_from_input') { [void] $requiredCounters.Add('cachedInputTokens') }
+    if ($reasoning -eq 'disjoint_from_output') { [void] $requiredCounters.Add('reasoningTokens') }
+    $deltas = [ordered]@{}
+    $reset = $false
+    $missingCounter = $false
+    foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) {
+        $startCounter = Get-UsageCounter -Usage $startUsage -Name $counterName
+        $endCounter = Get-UsageCounter -Usage $endUsage -Name $counterName
+        if ($startCounter.present -and $endCounter.present) {
+            if ($endCounter.value -lt $startCounter.value) {
+                $reset = $true
+            }
+            else {
+                $deltas[$counterName] = $endCounter.value - $startCounter.value
+            }
+        }
+        elseif ($counterName -in $requiredCounters) {
+            $missingCounter = $true
+        }
+    }
+    $result.deltas = [pscustomobject] $deltas
+    if ($reset) {
+        $result.state = 'partial'
+        $result.missingData = 'a cumulative counter decreased between exact boundaries; reset segment is unknown'
+        $result.coverage = 'counter reset was not clamped to zero'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_counter_reset' -Message 'A cumulative usage counter decreased between exact boundaries; the affected segment is unknown' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+    if ($missingCounter) {
+        $result.state = 'partial'
+        $result.missingData = 'one or more counters required by the declared semantics are missing at a boundary'
+        $result.coverage = 'known raw counter deltas are retained but the role subtotal is incomplete'
+        [void] $Anomalies.Add((New-Anomaly -Code 'usage_missing_counter' -Message 'A required usage counter was absent at one exact boundary' -Identity $identity -EventIds @($Interval.startEventId, $Interval.endEventId | Where-Object { $null -ne $_ })))
+        return [pscustomobject] $result
+    }
+    if ($Interval.state -ne 'measured' -or $startState -ne 'measured' -or $endState -ne 'measured') {
+        $result.state = 'partial'
+        $result.missingData = if ($Interval.state -ne 'measured') { [string] $Interval.missingData } else { 'one or both source usage samples are partial' }
+        $result.coverage = 'numeric usage exists but the interval or source sample is not fully measured'
+        return [pscustomobject] $result
+    }
+
+    $inputComponent = [long] $deltas.inputTokens
+    if ($cachedInput -eq 'disjoint_from_input') { $inputComponent += [long] $deltas.cachedInputTokens }
+    $outputComponent = [long] $deltas.outputTokens
+    if ($reasoning -eq 'disjoint_from_output') { $outputComponent += [long] $deltas.reasoningTokens }
+    $total = $inputComponent + $outputComponent
+    $result.state = 'measured'
+    $result.value = $total
+    $result.components = [pscustomobject][ordered]@{
+        input = $inputComponent
+        output = $outputComponent
+        total = $total
+    }
+    $result.coverage = 'both exact interval boundaries have attributable cumulative samples with stable semantics'
+    $result.missingData = $null
+    return [pscustomobject] $result
+}
+
+function Get-UsageMetric {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Intervals,
+        [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [string] $Source,
+        [Parameter(Mandatory)] [string] $NoDataMessage,
+        [Parameter(Mandatory)] [hashtable] $RecordsByEventId,
+        [Parameter(Mandatory)] [AllowNull()] [object] $Anomalies
+    )
+
+    $evidence = [System.Collections.Generic.List[object]]::new()
+    foreach ($interval in @($Intervals)) {
+        $startRecord = if ($null -ne $interval.startEventId -and $RecordsByEventId.ContainsKey([string] $interval.startEventId)) { $RecordsByEventId[[string] $interval.startEventId] } else { $null }
+        $endRecord = if ($null -ne $interval.endEventId -and $RecordsByEventId.ContainsKey([string] $interval.endEventId)) { $RecordsByEventId[[string] $interval.endEventId] } else { $null }
+        [void] $evidence.Add((Get-UsageBoundaryResult -Interval $interval -StartRecord $startRecord -EndRecord $endRecord -Role $Role -Anomalies $Anomalies))
+    }
+
+    if ($evidence.Count -eq 0) {
+        $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source $Source -Calculation 'sum source-backed cumulative deltas by attributable stream' -Coverage 'no attributable intervals for this role' -MissingData $NoDataMessage
+    }
+    else {
+        $measured = @($evidence | Where-Object { $_.state -eq 'measured' })
+        $partial = @($evidence | Where-Object { $_.state -eq 'partial' })
+        $unavailable = @($evidence | Where-Object { $_.state -eq 'unavailable' })
+        if ($partial.Count -gt 0 -or ($unavailable.Count -gt 0 -and $measured.Count -gt 0)) {
+            $metric = New-Metric -State 'partial' -Value $null -Unit 'tokens' -Source $Source -Calculation 'sum source-backed cumulative deltas by attributable stream' -Coverage "$($measured.Count) of $($evidence.Count) intervals have complete source-backed deltas" -MissingData "$($partial.Count) partial and $($unavailable.Count) unavailable interval(s) lack complete boundary, semantic, or counter evidence"
+        }
+        elseif ($measured.Count -eq 0) {
+            $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source $Source -Calculation 'sum source-backed cumulative deltas by attributable stream' -Coverage 'intervals exist but no complete source-backed delta is available' -MissingData 'source-backed usage is unavailable at the required boundaries'
+        }
+        else {
+            $sum = [long] (($measured | Measure-Object -Property value -Sum).Sum)
+            $metric = New-Metric -State 'measured' -Value $sum -Unit 'tokens' -Source $Source -Calculation 'sum source-backed cumulative deltas by attributable stream' -Coverage "all $($evidence.Count) intervals have complete source-backed deltas" -MissingData $null
+        }
+    }
+    $metric | Add-Member -NotePropertyName role -NotePropertyValue $Role -Force
+    $metric | Add-Member -NotePropertyName evidence -NotePropertyValue @($evidence) -Force
+    return $metric
+}
+
+function Get-TotalUsageMetric {
+    param(
+        [Parameter(Mandatory)] [object[]] $RoleMetrics
+    )
+
+    $measured = @($RoleMetrics | Where-Object { $_.state -eq 'measured' })
+    $partial = @($RoleMetrics | Where-Object { $_.state -eq 'partial' })
+    if ($measured.Count -eq $RoleMetrics.Count -and $RoleMetrics.Count -gt 0) {
+        $value = [long] (($measured | Measure-Object -Property value -Sum).Sum)
+        $state = 'measured'
+        $coverage = 'all attributable role totals are measured'
+        $missing = $null
+    }
+    elseif ($measured.Count -gt 0 -or $partial.Count -gt 0) {
+        $value = $null
+        $state = 'partial'
+        $coverage = "$($measured.Count) of $($RoleMetrics.Count) role totals are measured"
+        $missing = 'one or more attributable role totals are partial or unavailable; unavailable is not treated as zero'
+    }
+    else {
+        $value = $null
+        $state = 'unavailable'
+        $coverage = 'no attributable role total is measured'
+        $missing = 'source-backed role usage is unavailable'
+    }
+    $metric = New-Metric -State $state -Value $value -Unit 'tokens' -Source 'implementationTokens + reviewTokens + coordinationTokens' -Calculation 'sum attributable role totals without treating unavailable roles as zero' -Coverage $coverage -MissingData $missing
+    $metric | Add-Member -NotePropertyName roleStates -NotePropertyValue @($RoleMetrics | ForEach-Object { [pscustomobject][ordered]@{ role = $_.role; state = $_.state; value = $_.value } }) -Force
+    return $metric
+}
+
+function New-UnavailableMetadataMetric {
+    return New-Metric -State 'unavailable' -Value $null -Unit 'metadata records' -Source 'setup/host provenance' -Calculation 'copy exact role/model/reasoning profile records' -Coverage 'the v1 event envelope exposes no model or reasoning-effort profile fields' -MissingData 'models and reasoning profiles were not source-backed for this run'
+}
+
+function Get-TasksCompletedMetric {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[int]] $DeclaredTaskRefs,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $ReviewIntervals
+    )
+
+    $acceptedTaskRefs = @($ReviewIntervals |
+        Where-Object {
+            [string] $_.scope -eq 'task' -and
+            $null -ne $_.taskRef -and
+            [string] $_.closureEventType -eq 'review_accepted' -and
+            $_.state -eq 'measured'
+        } |
+        ForEach-Object { [int] $_.taskRef } |
+        Sort-Object -Unique)
+    $metric = $null
+    if ($DeclaredTaskRefs.Count -eq 0) {
+        $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage 'no ordered task set was supplied' -MissingData 'task completion cannot be attributed without the declared ordered task set'
+    }
+    elseif ($acceptedTaskRefs.Count -eq $DeclaredTaskRefs.Count -and $acceptedTaskRefs.Count -gt 0 -and @($DeclaredTaskRefs | Where-Object { $_ -notin $acceptedTaskRefs }).Count -eq 0) {
+        $metric = New-Metric -State 'measured' -Value $acceptedTaskRefs.Count -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "all $($DeclaredTaskRefs.Count) declared task identities have measured review acceptance" -MissingData $null
+    }
+    else {
+        $metric = New-Metric -State 'partial' -Value $null -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "$($acceptedTaskRefs.Count) of $($DeclaredTaskRefs.Count) declared task identities have measured review acceptance" -MissingData 'ordered task set or acceptance evidence is incomplete'
+    }
+    $metric | Add-Member -NotePropertyName acceptedTaskRefs -NotePropertyValue @($acceptedTaskRefs) -Force
+    return $metric
+}
+
+function Get-ComparisonMetrics {
+    param(
+        [AllowNull()] [string] $BaseRevision,
+        [AllowNull()] [string] $ReviewedHead,
+        [AllowNull()] [string] $RepositoryPath
+    )
+
+    $source = 'exact base-to-reviewed-HEAD Git diff'
+    $unavailable = {
+        param([string] $MissingData)
+        return [pscustomobject][ordered]@{
+            changedFiles = New-Metric -State 'unavailable' -Value $null -Unit 'files' -Source $source -Calculation 'count changed paths in exact Git diff' -Coverage 'base or reviewed HEAD is unavailable' -MissingData $MissingData
+            linesAdded = New-Metric -State 'unavailable' -Value $null -Unit 'lines' -Source $source -Calculation 'sum added lines from exact Git numstat' -Coverage 'base or reviewed HEAD is unavailable' -MissingData $MissingData
+            linesDeleted = New-Metric -State 'unavailable' -Value $null -Unit 'lines' -Source $source -Calculation 'sum deleted lines from exact Git numstat' -Coverage 'base or reviewed HEAD is unavailable' -MissingData $MissingData
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($BaseRevision) -or [string]::IsNullOrWhiteSpace($ReviewedHead)) {
+        return & $unavailable 'base revision or reviewed HEAD was not supplied'
+    }
+    if (-not (Test-FullRevision $BaseRevision) -or -not (Test-FullRevision $ReviewedHead)) {
+        return & $unavailable 'base revision or reviewed HEAD is not a full Git SHA'
+    }
+    $repository = if ([string]::IsNullOrWhiteSpace($RepositoryPath)) { (Get-Location).Path } else { $RepositoryPath }
+    try {
+        $repository = [IO.Path]::GetFullPath($repository)
+    }
+    catch {
+        return & $unavailable 'repository path could not be resolved'
+    }
+    if (-not (Test-Path -LiteralPath $repository -PathType Container)) {
+        return & $unavailable 'repository path is not available'
+    }
+
+    $diffOutput = @(& git -C $repository --no-pager diff --numstat --no-renames --no-ext-diff $BaseRevision $ReviewedHead -- 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+        return & $unavailable 'Git could not resolve or compare the supplied base and reviewed HEAD'
+    }
+    $changedFiles = 0
+    $added = [long] 0
+    $deleted = [long] 0
+    $binary = $false
+    foreach ($line in @($diffOutput)) {
+        if ([string]::IsNullOrWhiteSpace([string] $line)) { continue }
+        $parts = [string] $line -split "`t", 3
+        if ($parts.Count -lt 3) {
+            return & $unavailable 'Git returned an unparseable numstat record'
+        }
+        $changedFiles++
+        if ($parts[0] -eq '-' -or $parts[1] -eq '-') {
+            $binary = $true
+            continue
+        }
+        if ($parts[0] -notmatch '^\d+$' -or $parts[1] -notmatch '^\d+$') {
+            return & $unavailable 'Git returned a nonnumeric numstat record'
+        }
+        try {
+            $added += [long] $parts[0]
+            $deleted += [long] $parts[1]
+        }
+        catch {
+            return & $unavailable 'Git numstat exceeded the supported integer range'
+        }
+    }
+    $changedMetric = New-Metric -State 'measured' -Value $changedFiles -Unit 'files' -Source $source -Calculation 'count changed paths in exact Git diff' -Coverage "exact $BaseRevision..$ReviewedHead diff" -MissingData $null
+    $lineState = if ($binary) { 'partial' } else { 'measured' }
+    $lineMissing = if ($binary) { 'one or more binary paths have no line count in Git numstat' } else { $null }
+    $lineCoverage = if ($binary) { "exact diff contains $changedFiles path(s); binary line counts are unknown" } else { "exact $BaseRevision..$ReviewedHead diff" }
+    return [pscustomobject][ordered]@{
+        changedFiles = $changedMetric
+        linesAdded = New-Metric -State $lineState -Value $(if ($binary) { $null } else { $added }) -Unit 'lines' -Source $source -Calculation 'sum added lines from exact Git numstat' -Coverage $lineCoverage -MissingData $lineMissing
+        linesDeleted = New-Metric -State $lineState -Value $(if ($binary) { $null } else { $deleted }) -Unit 'lines' -Source $source -Calculation 'sum deleted lines from exact Git numstat' -Coverage $lineCoverage -MissingData $lineMissing
+    }
 }
 
 $implementationMetric = Get-IntervalMetric -Intervals @($implementationIntervals + $correctionIntervals) -Unit 'milliseconds' -Source 'paired implementation_started/task_ready_for_review and correction_started/correction_ready events' -Calculation 'sum valid implementation and correction UTC intervals without subtracting overlap' -NoDataMessage 'no implementation or correction boundary pair was recorded'
@@ -1523,6 +1938,23 @@ $reviewModeMetric = if ($null -eq $effectiveReviewMode) {
     New-Metric -State 'measured' -Value $effectiveReviewMode -Unit 'enum' -Source 'setup authorization or explicit input' -Calculation 'copy selected review mode' -Coverage 'one consistent review mode' -MissingData $null
 }
 
+$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -Anomalies $anomalies
+$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -Anomalies $anomalies
+$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -Anomalies $anomalies
+$totalTokenMetric = Get-TotalUsageMetric -RoleMetrics @($implementationTokenMetric, $reviewTokenMetric, $coordinationTokenMetric)
+$modelsAndReasoningMetric = New-UnavailableMetadataMetric
+$tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals)
+
+$reviewedHeadCandidates = @()
+if (-not [string]::IsNullOrWhiteSpace($ReviewedHead)) {
+    $reviewedHeadCandidates = @([string] $ReviewedHead)
+}
+else {
+    $reviewedHeadCandidates = @($prReady | ForEach-Object { [string] (Get-PropertyValue $_.Event.pullRequest 'reviewedHead') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+}
+$reviewedHeadForDiff = if ($reviewedHeadCandidates.Count -eq 1) { [string] $reviewedHeadCandidates[0] } else { $null }
+$comparisonMetrics = Get-ComparisonMetrics -BaseRevision $BaseRevision -ReviewedHead $reviewedHeadForDiff -RepositoryPath $RepositoryPath
+
 $report = [ordered]@{
     schemaVersion = 1
     kind = 'story_performance_report'
@@ -1538,11 +1970,28 @@ $report = [ordered]@{
         reviewElapsed = $reviewMetric
         coordinationElapsed = $coordinationMetric
         waitingElapsed = $waitMetric
+        implementationTokens = $implementationTokenMetric
+        reviewTokens = $reviewTokenMetric
+        coordinationTokens = $coordinationTokenMetric
+        totalTokens = $totalTokenMetric
+        tasksCompleted = $tasksCompletedMetric
         initialTaskReviews = $initialMetric
         correctionReReviews = $correctionMetric
         finalStoryReviews = $finalMetric
         finalStoryReReviews = $finalReMetric
         firstPassAcceptanceRate = $firstPassMetric
+        reviewMode = $reviewModeMetric
+        modelsAndReasoning = $modelsAndReasoningMetric
+        changedFiles = $comparisonMetrics.changedFiles
+        linesAdded = $comparisonMetrics.linesAdded
+        linesDeleted = $comparisonMetrics.linesDeleted
+    }
+    comparison = [ordered]@{
+        baseRevision = if ([string]::IsNullOrWhiteSpace($BaseRevision)) { $null } else { [string] $BaseRevision }
+        reviewedHead = $reviewedHeadForDiff
+        changedFiles = $comparisonMetrics.changedFiles
+        linesAdded = $comparisonMetrics.linesAdded
+        linesDeleted = $comparisonMetrics.linesDeleted
     }
     phases = @($implementationIntervals + $correctionIntervals)
     reviewAttempts = @($reviewIntervals)
