@@ -678,6 +678,27 @@ function Get-ReviewAttemptIdentity {
     return ($scope, $task, $request, $attempt -join '|')
 }
 
+function Get-ReviewAttemptBindingIdentity {
+    param([Parameter(Mandatory)] [object] $Event)
+
+    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $task = Get-TaskText -Event $Event
+    $attempt = [string] (Get-PropertyValue $Event 'reviewAttemptId')
+    return ($scope, $task, $attempt -join '|')
+}
+
+function Get-ReviewRequestBindingCanonical {
+    param([Parameter(Mandatory)] [object] $Event)
+
+    $binding = [ordered]@{
+        scope = Get-PropertyValue $Event 'scope'
+        taskRef = Get-PropertyValue $Event 'taskRef'
+        revision = Get-PropertyValue $Event 'revision'
+        reviewKind = Get-PropertyValue $Event 'reviewKind'
+    }
+    return ConvertTo-CanonicalJson -Value ([pscustomobject] $binding)
+}
+
 function Add-ToIndex {
     param(
         [Parameter(Mandatory)] [hashtable] $Index,
@@ -844,11 +865,12 @@ function Add-OverlapAnomalies {
     $valid = @($Intervals | Where-Object { $_.state -eq 'measured' -and $null -ne $_.startUtc -and $null -ne $_.endUtc })
     for ($i = 0; $i -lt $valid.Count; $i++) {
         for ($j = $i + 1; $j -lt $valid.Count; $j++) {
+            $leftStart = [DateTimeOffset]::Parse($valid[$i].startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
             $leftEnd = [DateTimeOffset]::Parse($valid[$i].endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
             $rightStart = [DateTimeOffset]::Parse($valid[$j].startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            $otherEnd = [DateTimeOffset]::Parse($valid[$j].endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            $otherStart = [DateTimeOffset]::Parse($valid[$i].startUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-            if (($otherStart -lt $leftEnd) -and ($rightStart -lt $otherEnd)) {
+            $rightEnd = [DateTimeOffset]::Parse($valid[$j].endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+            if (($leftStart -lt $leftEnd) -and ($rightStart -lt $rightEnd) -and
+                ($leftStart -lt $rightEnd) -and ($rightStart -lt $leftEnd)) {
                 [void] $Anomalies.Add((New-Anomaly -Code 'overlapping_intervals' -Message 'Valid phase intervals overlap; totals remain separate and are not made additive wall-clock time' -Identity "$($valid[$i].identity)|$($valid[$j].identity)"))
             }
         }
@@ -1200,10 +1222,43 @@ foreach ($record in $records) {
 # never a second review count, even when it arrived under another eventId.
 # Immutable payload differences are conflicts, not stale duplicates.
 $reviewStartByAttempt = @{}
+$reviewAttemptBindingById = @{}
+$reviewRequestBindingById = @{}
 $reviewStartConflicts = @{}
 $dedupedReviewStarts = [System.Collections.Generic.List[object]]::new()
 foreach ($record in @($records | Where-Object { $_.EventType -in $script:ReviewStartEvents } | Sort-Object Line)) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
+    $attemptBindingKey = Get-ReviewAttemptBindingIdentity -Event $record.Event
+    $requestBindingKey = [string] (Get-PropertyValue $record.Event 'reviewRequestId')
+    $requestBindingCanonical = Get-ReviewRequestBindingCanonical -Event $record.Event
+    if ($reviewRequestBindingById.ContainsKey($requestBindingKey) -and
+        $reviewRequestBindingById[$requestBindingKey].Canonical -cne $requestBindingCanonical) {
+        $firstRequest = $reviewRequestBindingById[$requestBindingKey]
+        $firstRequestAttemptKey = Get-ReviewAttemptIdentity -Event $firstRequest.Event
+        $reviewStartConflicts[$firstRequestAttemptKey] = $true
+        [void] $anomalies.Add((New-Anomaly -Code 'conflicting_review_request' -Message 'A review request identity was rebound to a different target or revision; the first ledger record remains authoritative' -Identity $requestBindingKey -EventIds @($firstRequest.Event.EventId, $record.EventId)))
+        continue
+    }
+    if ($reviewAttemptBindingById.ContainsKey($attemptBindingKey)) {
+        $first = $reviewAttemptBindingById[$attemptBindingKey]
+        $firstAttemptKey = Get-ReviewAttemptIdentity -Event $first.Event
+        if ($firstAttemptKey -cne $attemptKey) {
+            $reviewStartConflicts[$firstAttemptKey] = $true
+            [void] $anomalies.Add((New-Anomaly -Code 'conflicting_review_attempt' -Message 'A review attempt identity was rebound to another request; real retries must use a distinct reviewAttemptId' -Identity $attemptBindingKey -EventIds @($first.EventId, $record.EventId)))
+        }
+        elseif ((Get-ImmutableBoundaryCanonical -Event $first.Event) -ceq (Get-ImmutableBoundaryCanonical -Event $record.Event)) {
+            [void] $anomalies.Add((New-Anomaly -Code 'duplicate_or_stale_review' -Message 'A repeated review attempt identity with the same immutable payload was ignored for counting' -Identity $attemptKey -EventIds @($first.EventId, $record.EventId)))
+        }
+        else {
+            $reviewStartConflicts[$attemptKey] = $true
+            [void] $anomalies.Add((New-Anomaly -Code 'conflicting_review_start' -Message 'A repeated review attempt identity carried a changed immutable payload; the first ledger record remains authoritative and coverage is partial' -Identity $attemptKey -EventIds @($first.EventId, $record.EventId)))
+        }
+        continue
+    }
+    if (-not $reviewRequestBindingById.ContainsKey($requestBindingKey)) {
+        $reviewRequestBindingById[$requestBindingKey] = [pscustomobject]@{ Event = $record.Event; Canonical = $requestBindingCanonical }
+    }
+    $reviewAttemptBindingById[$attemptBindingKey] = $record
     if ($reviewStartByAttempt.ContainsKey($attemptKey)) {
         $first = $reviewStartByAttempt[$attemptKey]
         if ((Get-ImmutableBoundaryCanonical -Event $first.Event) -ceq (Get-ImmutableBoundaryCanonical -Event $record.Event)) {
@@ -1366,8 +1421,8 @@ function Get-IntervalMetric {
 $implementationMetric = Get-IntervalMetric -Intervals @($implementationIntervals + $correctionIntervals) -Unit 'milliseconds' -Source 'paired implementation_started/task_ready_for_review and correction_started/correction_ready events' -Calculation 'sum valid implementation and correction UTC intervals without subtracting overlap' -NoDataMessage 'no implementation or correction boundary pair was recorded'
 $reviewMetric = Get-IntervalMetric -Intervals @($reviewIntervals) -Unit 'milliseconds' -Source 'paired review attempt start and authoritative closure events' -Calculation 'sum valid elapsed time by distinct review attempt' -NoDataMessage 'no review attempt was recorded'
 $waitMetric = Get-IntervalMetric -Intervals @($waitIntervals) -Unit 'milliseconds' -Source 'paired explicit wait_started/wait_ended events' -Calculation 'sum valid explicit wait UTC intervals' -NoDataMessage 'no explicit wait boundary was recorded'
-$coordinationIntervals = @($waitIntervals | Where-Object { $_.startRole -eq 'coordinator' -and $_.endRole -eq 'coordinator' })
-$coordinationMetric = Get-IntervalMetric -Intervals $coordinationIntervals -Unit 'milliseconds' -Source 'paired explicit coordinator-owned wait boundaries' -Calculation 'sum valid coordinator wait UTC intervals without inferring gaps' -NoDataMessage 'no attributable coordinator-owned interval was recorded'
+$coordinationIntervals = @($waitIntervals | Where-Object { $_.startRole -eq 'coordinator' -or $_.endRole -eq 'coordinator' })
+$coordinationMetric = Get-IntervalMetric -Intervals $coordinationIntervals -Unit 'milliseconds' -Source 'explicit waits with coordinator-attributable boundaries' -Calculation 'sum valid coordinator-attributable wait UTC intervals without inferring gaps' -NoDataMessage 'no attributable coordinator-owned interval was recorded'
 $uncoveredStorySpan = Get-UncoveredStorySpan -StorySpan $timeToPrInterval -Intervals @($implementationIntervals + $correctionIntervals + $reviewIntervals + $waitIntervals)
 
 if ($timeToPrInterval.state -eq 'measured') {
@@ -1496,7 +1551,7 @@ $report = [ordered]@{
     anomalies = @($anomalies)
     coverage = [ordered]@{
         validEventCount = $records.Count
-        duplicateAndConflictDiagnostics = @($anomalies | Where-Object { $_.code -in @('duplicate_event', 'event_identity_conflict', 'duplicate_or_stale_review') }).Count
+        duplicateAndConflictDiagnostics = @($anomalies | Where-Object { $_.code -in @('duplicate_event', 'event_identity_conflict', 'duplicate_or_stale_review', 'conflicting_review_start', 'conflicting_review_closure', 'conflicting_review_identity', 'conflicting_review_attempt', 'conflicting_review_request') }).Count
         uncoveredBoundaryDiagnostics = @($anomalies | Where-Object { $_.code -in @('missing_boundary', 'conflicting_boundary', 'negative_interval', 'orphan_review_closure', 'incomplete_tail') }).Count
         taskSet = [ordered]@{
             state = $taskCoverageState

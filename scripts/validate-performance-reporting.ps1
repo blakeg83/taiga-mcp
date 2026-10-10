@@ -106,6 +106,7 @@ $edgeLedger = Join-Path $root 'edge-cases.jsonl'
 $privacyLedger = Join-Path $root 'privacy.jsonl'
 $utfLedger = Join-Path $root 'invalid-utf8.jsonl'
 $orphanLedger = Join-Path $root 'orphan-order.jsonl'
+$overlapLedger = Join-Path $root 'overlap-cases.jsonl'
 $scriptPath = Join-Path $PSScriptRoot 'get-story-performance.ps1'
 $recorderPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts\write-performance-event.ps1'))
 $recorderRoot = Join-Path $root 'external-ledgers'
@@ -222,14 +223,16 @@ try {
         (New-Event -EventId 'story-end-final-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:00:00Z' -Scope 'final_story' -PhaseId 'final-1' -ReviewRequestId 'final-request-1' -ReviewAttemptId 'final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
         (New-Event -EventId 'story-end-final-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:10:00Z' -Scope 'final_story' -PhaseId 'final-1' -ReviewRequestId 'final-request-1' -ReviewAttemptId 'final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
         (New-Event -EventId 'story-end-rereview-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:20:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
-        (New-Event -EventId 'story-end-rereview-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:30:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer')
+        (New-Event -EventId 'story-end-rereview-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:30:00Z' -Scope 'final_story' -PhaseId 'final-2' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-2' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 2 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
+        (New-Event -EventId 'story-end-rereview-retry-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T12:40:00Z' -Scope 'final_story' -PhaseId 'final-3' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-3' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 3 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer'),
+        (New-Event -EventId 'story-end-rereview-retry-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T12:50:00Z' -Scope 'final_story' -PhaseId 'final-3' -ReviewRequestId 'final-request-2' -ReviewAttemptId 'final-attempt-3' -ReviewKind 'final_story_rereview' -ReviewAttemptOrdinal 3 -Revision $revisionB -ReviewMode 'story_end_only' -Role 'reviewer')
     )
     [IO.File]::WriteAllLines($storyEndLedger, @($storyEndEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
     $storyEndJson = & $scriptPath -EventsPath $storyEndLedger -ReviewMode story_end_only
     Assert-True ($LASTEXITCODE -eq 0) 'story-end-only aggregator should exit successfully'
     $storyEnd = $storyEndJson | ConvertFrom-Json -Depth 100
     Assert-True ([int]$storyEnd.metrics.initialTaskReviews.value -eq 0 -and [int]$storyEnd.metrics.correctionReReviews.value -eq 0) 'story_end_only must have zero per-task and correction reviews'
-    Assert-True ([int]$storyEnd.metrics.finalStoryReviews.value -eq 2 -and [int]$storyEnd.metrics.finalStoryReReviews.value -eq 1) 'story_end_only final review and same-SHA re-review remain countable'
+    Assert-True ([int]$storyEnd.metrics.finalStoryReviews.value -eq 3 -and [int]$storyEnd.metrics.finalStoryReReviews.value -eq 2) 'story_end_only final review and same-request same-SHA retries remain countable'
     Assert-True ([string]$storyEnd.metrics.firstPassAcceptanceRate.state -eq 'not_applicable') 'story_end_only first-pass denominator is not applicable'
     Assert-True (@($storyEnd.anomalies | Where-Object { $_.code -eq 'conflicting_review_mode' }).Count -eq 1) 'conflicting event review modes should be disclosed'
 
@@ -260,6 +263,14 @@ try {
         (New-Event -EventId 'edge-kind-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-09T10:13:00Z' -Scope 'task' -TaskRef 170 -WaitId 'edge-kind-wait' -WaitKind 'different-kind' -Role 'coordinator'),
         (New-Event -EventId 'edge-role-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:14:00Z' -Scope 'task' -TaskRef 171 -WaitId 'edge-role-wait' -WaitKind 'reviewer' -Role 'coordinator'),
         (New-Event -EventId 'edge-role-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-09T10:15:00Z' -Scope 'task' -TaskRef 171 -WaitId 'edge-role-wait' -WaitKind 'reviewer' -Role 'implementer'),
+        (New-Event -EventId 'edge-rebound-start-1' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:30:00Z' -Scope 'task' -TaskRef 172 -PhaseId 'edge-rebound-1' -ReviewRequestId 'edge-rebound-request-1' -ReviewAttemptId 'edge-rebound-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'edge-rebound-end-1' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T10:31:00Z' -Scope 'task' -TaskRef 172 -PhaseId 'edge-rebound-1' -ReviewRequestId 'edge-rebound-request-1' -ReviewAttemptId 'edge-rebound-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'edge-rebound-start-2' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:32:00Z' -Scope 'task' -TaskRef 172 -PhaseId 'edge-rebound-2' -ReviewRequestId 'edge-rebound-request-2' -ReviewAttemptId 'edge-rebound-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'edge-rebound-end-2' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T10:33:00Z' -Scope 'task' -TaskRef 172 -PhaseId 'edge-rebound-2' -ReviewRequestId 'edge-rebound-request-2' -ReviewAttemptId 'edge-rebound-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'edge-request-rebind-start-1' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:40:00Z' -Scope 'task' -TaskRef 173 -PhaseId 'edge-request-rebind-1' -ReviewRequestId 'edge-request-rebind' -ReviewAttemptId 'edge-request-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'edge-request-rebind-end-1' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T10:41:00Z' -Scope 'task' -TaskRef 173 -PhaseId 'edge-request-rebind-1' -ReviewRequestId 'edge-request-rebind' -ReviewAttemptId 'edge-request-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'edge-request-rebind-start-2' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:42:00Z' -Scope 'task' -TaskRef 173 -PhaseId 'edge-request-rebind-2' -ReviewRequestId 'edge-request-rebind' -ReviewAttemptId 'edge-request-attempt-2' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 2 -Revision $revisionB -Role 'reviewer'),
+        (New-Event -EventId 'edge-request-rebind-end-2' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T10:43:00Z' -Scope 'task' -TaskRef 173 -PhaseId 'edge-request-rebind-2' -ReviewRequestId 'edge-request-rebind' -ReviewAttemptId 'edge-request-attempt-2' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 2 -Revision $revisionB -Role 'reviewer'),
         (New-Event -EventId 'edge-reversed-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T09:30:00Z' -Scope 'story' -WaitId 'edge-wait' -WaitKind 'reviewer' -Role 'coordinator'),
         (New-Event -EventId 'edge-reversed-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-09T09:29:00Z' -Scope 'story' -WaitId 'edge-wait' -WaitKind 'reviewer' -Role 'coordinator'),
         (New-Event -EventId 'edge-overlap-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T09:07:00Z' -Scope 'story' -WaitId 'edge-overlap-wait' -WaitKind 'reviewer' -Role 'coordinator'),
@@ -268,7 +279,7 @@ try {
     )
     [IO.File]::WriteAllLines($edgeLedger, @($edgeEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
     [IO.File]::AppendAllText($edgeLedger, '{"eventId":"interrupted-tail"', [Text.UTF8Encoding]::new($false))
-    $edgeJson = & $scriptPath -EventsPath $edgeLedger -ReviewMode per_task -TaskRefs @(160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171)
+    $edgeJson = & $scriptPath -EventsPath $edgeLedger -ReviewMode per_task -TaskRefs @(160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173)
     Assert-True ($LASTEXITCODE -eq 0) 'edge-case aggregator should exit successfully with incomplete evidence'
     $edge = $edgeJson | ConvertFrom-Json -Depth 100
     Assert-True ([string]$edge.metrics.implementationElapsed.state -eq 'partial' -and [int64]$edge.metrics.implementationElapsed.value -eq 1200000) 'missing implementation boundary should keep valid overlap totals partial and explicit'
@@ -281,12 +292,35 @@ try {
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_start' }).Count -eq 1) 'changed review-start payload should be disclosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_closure' }).Count -eq 1) 'changed review-closure payload should be disclosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_identity' }).Count -ge 1) 'matching plus mismatched review closure evidence should be partial and disclosed'
+    Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_attempt' }).Count -eq 1) 'reusing an attempt identity under another request should be disclosed'
+    Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_request' }).Count -eq 1) 'reusing a request identity for another revision should be disclosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_boundary' }).Count -ge 2) 'changed wait kind and actor attribution should be disclosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'undeclared_task_evidence' }).Count -eq 1) 'undeclared task evidence should be quarantined'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'incomplete_tail' }).Count -eq 1) 'an interrupted non-newline tail should be excluded and diagnosed'
     Assert-True (@($edge.coverage.taskSet.missingInitialReviewTaskRefs).Count -eq 7) 'per-task coverage should name declared tasks without initial review evidence'
-    Assert-True ([string]$edge.metrics.firstPassAcceptanceRate.state -eq 'partial' -and [int]$edge.metrics.firstPassAcceptanceRate.denominator -eq 5) 'first-pass coverage should remain partial when acceptance ordering is impossible'
-    Assert-True ([int]$edge.coverage.validEventCount -eq 30) 'task filtering should retain only valid records before aggregation'
+    Assert-True ([string]$edge.metrics.firstPassAcceptanceRate.state -eq 'partial' -and [int]$edge.metrics.firstPassAcceptanceRate.denominator -eq 7) 'first-pass coverage should remain partial when attempt rebinding evidence is ambiguous'
+    Assert-True ([int]$edge.coverage.validEventCount -eq 38) 'task filtering should retain only valid records before aggregation'
+
+    $overlapEvents = @(
+        (New-Event -EventId 'overlap-disjoint-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T08:00:00Z' -Scope 'task' -TaskRef 180 -PhaseId 'overlap-disjoint' -Role 'implementer'),
+        (New-Event -EventId 'overlap-disjoint-end' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T08:01:00Z' -Scope 'task' -TaskRef 180 -PhaseId 'overlap-disjoint' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'overlap-gap-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T08:02:00Z' -Scope 'task' -TaskRef 181 -PhaseId 'overlap-gap' -Role 'implementer'),
+        (New-Event -EventId 'overlap-gap-end' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T08:03:00Z' -Scope 'task' -TaskRef 181 -PhaseId 'overlap-gap' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'overlap-touch-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T08:03:00Z' -Scope 'task' -TaskRef 182 -PhaseId 'overlap-touch' -Role 'implementer'),
+        (New-Event -EventId 'overlap-touch-end' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T08:04:00Z' -Scope 'task' -TaskRef 182 -PhaseId 'overlap-touch' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'overlap-zero-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T08:05:00Z' -Scope 'task' -TaskRef 183 -PhaseId 'overlap-zero' -Role 'implementer'),
+        (New-Event -EventId 'overlap-zero-end' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T08:05:00Z' -Scope 'task' -TaskRef 183 -PhaseId 'overlap-zero' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'overlap-nested-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T08:00:30Z' -Scope 'task' -TaskRef 184 -PhaseId 'overlap-nested' -Role 'implementer'),
+        (New-Event -EventId 'overlap-nested-end' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-09T08:00:45Z' -Scope 'task' -TaskRef 184 -PhaseId 'overlap-nested' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'overlap-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-09T08:00:30Z' -Scope 'task' -TaskRef 185 -PhaseId 'overlap-review' -ReviewRequestId 'overlap-review-request' -ReviewAttemptId 'overlap-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'overlap-review-end' -EventType 'review_accepted' -OccurredAtUtc '2026-10-09T08:00:40Z' -Scope 'task' -TaskRef 185 -PhaseId 'overlap-review' -ReviewRequestId 'overlap-review-request' -ReviewAttemptId 'overlap-review-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer')
+    )
+    [IO.File]::WriteAllLines($overlapLedger, @($overlapEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
+    $overlapJson = & $scriptPath -EventsPath $overlapLedger -ReviewMode per_task -TaskRefs @(180, 181, 182, 183, 184, 185)
+    Assert-True ($LASTEXITCODE -eq 0) 'exact overlap fixture should aggregate successfully'
+    $overlap = $overlapJson | ConvertFrom-Json -Depth 100
+    $overlapDiagnostics = @($overlap.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' })
+    Assert-True ($overlapDiagnostics.Count -eq 3) 'only nesting and genuine cross-category intersections should be disclosed; disjoint, touching, and zero-duration intervals should not'
 
     $repeatJson = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153)
     Assert-True ($LASTEXITCODE -eq 0 -and $repeatJson -ceq $jsonText) 'repeating aggregation over the same ledger should be byte stable'
