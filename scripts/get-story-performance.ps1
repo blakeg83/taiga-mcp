@@ -2478,19 +2478,20 @@ function Get-UsageBoundaryResult {
                 $intermediateProblemMessage = 'same-time usage snapshots disagree on worker, session, semantics, or counters'
                 [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'Same-time usage snapshots disagree and cannot establish one cumulative sequence' -Identity $identity -EventIds @([string] $samples[$issueIndex].record.EventId)))
             }
-            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeStreamPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            $edgeStartIndex = $usageRange.firstIndex + 1
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeStreamPrefix -StartIndex $edgeStartIndex -EndIndex $usageRange.lastIndex
             if ($issueIndex -ge 0) {
                 $intermediateProblem = $true
                 $intermediateProblemMessage = 'worker or session provenance changed within the attributable window'
                 [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'An intermediate usage sample changed worker or session provenance' -Identity $identity -EventIds @([string] $samples[$issueIndex - 1].record.EventId, [string] $samples[$issueIndex].record.EventId)))
             }
-            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeSemanticsPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeSemanticsPrefix -StartIndex $edgeStartIndex -EndIndex $usageRange.lastIndex
             if ($issueIndex -ge 0) {
                 $intermediateProblem = $true
                 $intermediateProblemMessage = 'counter semantics changed within the attributable window'
                 [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'An intermediate usage sample changed counter semantics' -Identity $identity -EventIds @([string] $samples[$issueIndex - 1].record.EventId, [string] $samples[$issueIndex].record.EventId)))
             }
-            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeResetPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeResetPrefix -StartIndex $edgeStartIndex -EndIndex $usageRange.lastIndex
             if ($issueIndex -ge 0) {
                 $intermediateProblem = $true
                 $intermediateProblemMessage = 'a cumulative counter decreased at an intermediate usage sample'

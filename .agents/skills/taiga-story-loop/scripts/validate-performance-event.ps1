@@ -96,6 +96,21 @@ function Convert-EventToJson {
     return ($Event | ConvertTo-Json -Compress -Depth 20)
 }
 
+function Get-BloomBitPositionsForTest {
+    param([Parameter(Mandatory)] [string] $EventId)
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($EventId))
+        return @(0..3 | ForEach-Object {
+                [BitConverter]::ToUInt32($digest, $_ * 4) % 32768
+            })
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function Copy-Event {
     param([Parameter(Mandatory)] [object] $Event)
 
@@ -178,7 +193,10 @@ $validEvent = [ordered]@{
 try {
     $validJson = Convert-EventToJson -Event $validEvent
     $first = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $externalRoot -RunId $runId -EventJson $validJson
+    $firstResult = Get-RecorderResult -Invocation $first -Context 'valid event append'
     Assert-True ($first.ExitCode -eq 0) ("valid event append exits zero; exit=$($first.ExitCode); output=$($first.Output -join ' | ')")
+    $expectedFirstLedgerRead = [Text.UTF8Encoding]::new($false).GetByteCount($validJson + [Environment]::NewLine)
+    Assert-True ([long]$firstResult.scannedBytes -eq $expectedFirstLedgerRead -and [long]$firstResult.ledgerReadBytes -eq $expectedFirstLedgerRead) 'ordinary append must report the actual post-write ledger bytes read'
     Assert-True (Test-Path -LiteralPath $ledgerPath -PathType Leaf) 'valid append creates the external ledger'
 
     $lines = @(Get-Content -LiteralPath $ledgerPath)
@@ -186,6 +204,60 @@ try {
     $roundTrip = $lines[0] | ConvertFrom-Json -DateKind String
     $roundTripJson = Convert-EventToJson -Event $roundTrip
     Assert-True ($roundTripJson -ceq $validJson) 'valid event round-trips unchanged'
+
+    $bloomEdgeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-bloom-edge-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $bloomEdgeRoot
+    $bloomEdgeRunId = 'synthetic-run-bloom-edge'
+    $bloomEdge32766 = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'bloom-edge-673'
+        runId = $bloomEdgeRunId
+        transitionId = 'bloom-edge-32766'
+    }
+    $bloomEdge32767 = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'bloom-edge-8904'
+        runId = $bloomEdgeRunId
+        transitionId = 'bloom-edge-32767'
+    }
+    Assert-True ((Get-BloomBitPositionsForTest -EventId ([string]$bloomEdge32766.eventId)) -contains 32766) 'Bloom lower edge fixture must hash to bit 32766'
+    Assert-True ((Get-BloomBitPositionsForTest -EventId ([string]$bloomEdge32767.eventId)) -contains 32767) 'Bloom upper edge fixture must hash to bit 32767'
+    $bloomEdgeFirst = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomEdgeRoot -RunId $bloomEdgeRunId -EventJson (Convert-EventToJson $bloomEdge32766)
+    $bloomEdgeFirstResult = Get-RecorderResult -Invocation $bloomEdgeFirst -Context 'Bloom lower bit boundary append'
+    Assert-True ($bloomEdgeFirst.ExitCode -eq 0 -and $bloomEdgeFirstResult.status -ceq 'appended') 'Bloom bit 32766 recorder append must succeed'
+    $bloomBytes = [IO.File]::ReadAllBytes([string]$bloomEdgeFirstResult.bloomPath)
+    Assert-True ($bloomBytes.Length -eq 4104 -and (($bloomBytes[8 + 4095] -band [byte](1 -shl 6)) -ne 0)) 'Bloom bit 32766 must be stored in the final filter byte'
+    $bloomEdgeSecond = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomEdgeRoot -RunId $bloomEdgeRunId -EventJson (Convert-EventToJson $bloomEdge32767)
+    $bloomEdgeSecondResult = Get-RecorderResult -Invocation $bloomEdgeSecond -Context 'Bloom upper bit boundary append'
+    Assert-True ($bloomEdgeSecond.ExitCode -eq 0 -and $bloomEdgeSecondResult.status -ceq 'appended') 'Bloom bit 32767 recorder append must succeed'
+    $bloomBytes = [IO.File]::ReadAllBytes([string]$bloomEdgeSecondResult.bloomPath)
+    Assert-True (($bloomBytes[8 + 4095] -band [byte](1 -shl 7)) -ne 0) 'Bloom bit 32767 must be stored in the final filter byte'
+
+    $bloomSaturationRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-bloom-saturation-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $bloomSaturationRoot
+    $bloomSaturationRunId = 'synthetic-run-bloom-saturation'
+    $bloomSaturationBase = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'bloom-saturation-base'
+        runId = $bloomSaturationRunId
+        transitionId = 'bloom-saturation-base'
+    }
+    $bloomSaturationBaseAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomSaturationRoot -RunId $bloomSaturationRunId -EventJson (Convert-EventToJson $bloomSaturationBase)
+    $bloomSaturationBaseResult = Get-RecorderResult -Invocation $bloomSaturationBaseAppend -Context 'Bloom saturation baseline append'
+    Assert-True ($bloomSaturationBaseAppend.ExitCode -eq 0 -and $bloomSaturationBaseResult.status -ceq 'appended') 'Bloom saturation baseline must append'
+    $saturatedBloom = [IO.File]::ReadAllBytes([string]$bloomSaturationBaseResult.bloomPath)
+    for ($byteIndex = 8; $byteIndex -lt $saturatedBloom.Length; $byteIndex++) {
+        $saturatedBloom[$byteIndex] = 0xFF
+    }
+    [IO.File]::WriteAllBytes([string]$bloomSaturationBaseResult.bloomPath, $saturatedBloom)
+    for ($saturationIndex = 1; $saturationIndex -le 4; $saturationIndex++) {
+        $saturationEvent = New-EventVariant -Base $bloomSaturationBase -Changes @{
+            eventId = "bloom-saturation-new-$saturationIndex"
+            transitionId = "bloom-saturation-new-$saturationIndex"
+        }
+        $saturationJson = Convert-EventToJson -Event $saturationEvent
+        $saturationAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomSaturationRoot -RunId $bloomSaturationRunId -EventJson $saturationJson
+        $saturationResult = Get-RecorderResult -Invocation $saturationAppend -Context "Bloom false-positive append $saturationIndex"
+        $expectedSaturationRead = [Text.UTF8Encoding]::new($false).GetByteCount($saturationJson + [Environment]::NewLine)
+        Assert-True ($saturationAppend.ExitCode -eq 0 -and $saturationResult.status -ceq 'appended' -and [bool]$saturationResult.bloomMayContainEvent -and [string]$saturationResult.scanMode -ceq 'incremental' -and [long]$saturationResult.scannedBytes -eq $expectedSaturationRead) "Bloom false-positive append $saturationIndex must remain ordinary bounded work"
+    }
 
     $revisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $revisionB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'

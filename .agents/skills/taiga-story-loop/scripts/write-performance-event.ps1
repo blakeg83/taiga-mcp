@@ -1003,6 +1003,21 @@ function Get-EventIndexPath {
     return (Join-Path $IndexDirectory ((Get-Sha256Hex -Text $EventId) + '.json'))
 }
 
+function Get-LedgerMembershipDirectory {
+    param([Parameter(Mandatory)] [string] $LedgerPath)
+
+    return "$LedgerPath.membership"
+}
+
+function Get-EventMembershipPath {
+    param(
+        [Parameter(Mandatory)] [string] $MembershipDirectory,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    return (Join-Path $MembershipDirectory ((Get-Sha256Hex -Text $EventId) + '.json'))
+}
+
 function Write-AtomicText {
     param(
         [Parameter(Mandatory)] [string] $Path,
@@ -1105,7 +1120,7 @@ function Test-BloomEventId {
     )
 
     foreach ($position in @(Get-BloomBitPositions -EventId $EventId)) {
-        $byteIndex = $script:BloomHeader.Length + [int] ($position / 8)
+        $byteIndex = $script:BloomHeader.Length + [int][math]::Floor($position / 8.0)
         $mask = [byte] (1 -shl ($position % 8))
         if (($Bytes[$byteIndex] -band $mask) -eq 0) {
             return $false
@@ -1121,7 +1136,7 @@ function Add-BloomEventId {
     )
 
     foreach ($position in @(Get-BloomBitPositions -EventId $EventId)) {
-        $byteIndex = $script:BloomHeader.Length + [int] ($position / 8)
+        $byteIndex = $script:BloomHeader.Length + [int][math]::Floor($position / 8.0)
         $mask = [byte] (1 -shl ($position % 8))
         $Bytes[$byteIndex] = [byte] ($Bytes[$byteIndex] -bor $mask)
     }
@@ -1191,6 +1206,65 @@ function Write-IndexEntry {
     Write-AtomicText -Path (Get-EventIndexPath -IndexDirectory $IndexDirectory -EventId $EventId) -Text ($entry | ConvertTo-Json -Compress -Depth 20)
 }
 
+function Read-MembershipMarker {
+    param(
+        [Parameter(Mandatory)] [string] $MembershipDirectory,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    $path = Get-EventMembershipPath -MembershipDirectory $MembershipDirectory -EventId $EventId
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $null
+    }
+    try {
+        $marker = [IO.File]::ReadAllText($path) | ConvertFrom-Json -DateKind String
+        if ($null -eq $marker -or [int] $marker.schemaVersion -ne 1 -or
+            [string] $marker.kind -cne 'story_performance_event_membership' -or
+            [string] $marker.eventId -cne $EventId) {
+            throw [IO.InvalidDataException]::new('event membership marker is invalid')
+        }
+        return $marker
+    }
+    catch {
+        throw [IO.InvalidDataException]::new('event membership marker is invalid')
+    }
+}
+
+function Write-MembershipMarker {
+    param(
+        [Parameter(Mandatory)] [string] $MembershipDirectory,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    $marker = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_event_membership'
+        eventId = $EventId
+    }
+    Write-AtomicText -Path (Get-EventMembershipPath -MembershipDirectory $MembershipDirectory -EventId $EventId) -Text ($marker | ConvertTo-Json -Compress -Depth 10)
+}
+
+function Clear-LedgerMembership {
+    param([Parameter(Mandatory)] [string] $MembershipDirectory)
+
+    [IO.Directory]::CreateDirectory($MembershipDirectory) | Out-Null
+    foreach ($path in @([IO.Directory]::GetFiles($MembershipDirectory, '*.json'))) {
+        [IO.File]::Delete($path)
+    }
+}
+
+function Update-MembershipFromRecords {
+    param(
+        [Parameter(Mandatory)] [string] $MembershipDirectory,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records
+    )
+
+    [IO.Directory]::CreateDirectory($MembershipDirectory) | Out-Null
+    foreach ($record in @($Records)) {
+        Write-MembershipMarker -MembershipDirectory $MembershipDirectory -EventId ([string] $record.EventId)
+    }
+}
+
 function Clear-LedgerIndex {
     param([Parameter(Mandatory)] [string] $IndexDirectory)
 
@@ -1203,11 +1277,14 @@ function Clear-LedgerIndex {
 function Update-IndexFromRecords {
     param(
         [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [string] $MembershipDirectory,
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records
     )
 
     [IO.Directory]::CreateDirectory($IndexDirectory) | Out-Null
+    [IO.Directory]::CreateDirectory($MembershipDirectory) | Out-Null
     foreach ($record in @($Records | Sort-Object LineNumber, StartOffset)) {
+        Write-MembershipMarker -MembershipDirectory $MembershipDirectory -EventId ([string] $record.EventId)
         $entry = Read-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $record.EventId)
         if ($null -eq $entry) {
             Write-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $record.EventId) -State committed -CanonicalJson ([string] $record.CanonicalJson) -LineNumber ([int] $record.LineNumber) -StartOffset ([long] $record.StartOffset) -EndOffset ([long] $record.EndOffset)
@@ -1326,10 +1403,12 @@ function Read-LedgerCheckpoint {
 function Write-IndexFromFullLedger {
     param(
         [Parameter(Mandatory)] [string] $IndexDirectory,
+        [Parameter(Mandatory)] [string] $MembershipDirectory,
         [Parameter(Mandatory)] [object] $LedgerState
     )
 
     Clear-LedgerIndex -IndexDirectory $IndexDirectory
+    Clear-LedgerMembership -MembershipDirectory $MembershipDirectory
     $groups = @($LedgerState.Records | Group-Object EventId)
     foreach ($group in $groups) {
         $ordered = @($group.Group | Sort-Object LineNumber, StartOffset)
@@ -1337,6 +1416,7 @@ function Write-IndexFromFullLedger {
         $canonicalValues = @($ordered | ForEach-Object { [string] $_.CanonicalJson } | Sort-Object -Unique)
         $state = if ($canonicalValues.Count -gt 1) { 'conflict' } else { 'committed' }
         Write-IndexEntry -IndexDirectory $IndexDirectory -EventId ([string] $first.EventId) -State $state -CanonicalJson ([string] $first.CanonicalJson) -LineNumber ([int] $first.LineNumber) -StartOffset ([long] $first.StartOffset) -EndOffset ([long] $first.EndOffset)
+        Write-MembershipMarker -MembershipDirectory $MembershipDirectory -EventId ([string] $first.EventId)
     }
 }
 
@@ -1427,6 +1507,7 @@ Assert-Event -Event $event -ExpectedRunId $RunId
 $runDirectory = Join-Path $expectedRoot $RunId
 $ledgerPath = Join-Path $runDirectory 'events.jsonl'
 $indexDirectory = Get-LedgerIndexDirectory -LedgerPath $ledgerPath
+$membershipDirectory = Get-LedgerMembershipDirectory -LedgerPath $ledgerPath
 $checkpointPath = Get-LedgerCheckpointPath -LedgerPath $ledgerPath
 $bloomPath = Get-LedgerBloomPath -LedgerPath $ledgerPath
 $normalizedLockReadyPath = $null
@@ -1442,6 +1523,7 @@ if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
         "$ledgerPath.lock",
         "$ledgerPath.diagnostics.jsonl",
         $indexDirectory,
+        $membershipDirectory,
         $checkpointPath,
         $bloomPath
     ) | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\', '/') }
@@ -1485,7 +1567,9 @@ try {
         -ExpectedStoryId ([int] $event.storyId) `
         -ExpectedStoryRef ([int] $event.storyRef)
     $fullRebuild = $null -eq $checkpoint -or
-        ([long] $checkpoint.RecordCount -gt 0 -and -not (Test-Path -LiteralPath $indexDirectory -PathType Container))
+        ([long] $checkpoint.RecordCount -gt 0 -and
+            (-not (Test-Path -LiteralPath $indexDirectory -PathType Container) -or
+             -not (Test-Path -LiteralPath $membershipDirectory -PathType Container)))
     $bloomBytes = $null
     if (-not $fullRebuild) {
         try {
@@ -1505,13 +1589,14 @@ try {
         -ExpectedProjectId ([int] $event.projectId) `
         -ExpectedStoryId ([int] $event.storyId) `
         -ExpectedStoryRef ([int] $event.storyRef)
+    $ledgerBytesRead = [long] $ledgerState.ScannedBytes
     if ($fullRebuild) {
-        Write-IndexFromFullLedger -IndexDirectory $indexDirectory -LedgerState $ledgerState
+        Write-IndexFromFullLedger -IndexDirectory $indexDirectory -MembershipDirectory $membershipDirectory -LedgerState $ledgerState
         $bloomBytes = Write-BloomFromRecords -BloomPath $bloomPath -Records $ledgerState.Records
         $recordCount = [long] $ledgerState.Records.Count
     }
     else {
-        Update-IndexFromRecords -IndexDirectory $indexDirectory -Records $ledgerState.Records
+        Update-IndexFromRecords -IndexDirectory $indexDirectory -MembershipDirectory $membershipDirectory -Records $ledgerState.Records
         foreach ($record in @($ledgerState.Records)) {
             Add-BloomEventId -Bytes $bloomBytes -EventId ([string] $record.EventId)
         }
@@ -1551,6 +1636,9 @@ try {
     $foreignRecords = @($ledgerState.InvalidRecords | Where-Object { $_.diagnosticType -ceq 'foreign_run' })
     $indexEntry = $null
     $indexEntryNeedsRebuild = $false
+    $membershipMarker = $null
+    $membershipMarkerNeedsRepair = $false
+    $bloomMayContainEvent = $false
     if ($foreignRecords.Count -eq 0) {
         try {
             $indexEntry = Read-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId)
@@ -1558,11 +1646,25 @@ try {
         catch [IO.InvalidDataException] {
             $indexEntryNeedsRebuild = $true
         }
-        $eventMayExist = $false
-        if (-not $fullRebuild -and -not $indexEntryNeedsRebuild) {
-            $eventMayExist = Test-BloomEventId -Bytes $bloomBytes -EventId ([string] $event.eventId)
+        try {
+            $membershipMarker = Read-MembershipMarker -MembershipDirectory $membershipDirectory -EventId ([string] $event.eventId)
         }
-        if (-not $fullRebuild -and ($indexEntryNeedsRebuild -or ($null -eq $indexEntry -and $eventMayExist))) {
+        catch [IO.InvalidDataException] {
+            $membershipMarkerNeedsRepair = $true
+        }
+        if (-not $fullRebuild -and -not $indexEntryNeedsRebuild) {
+            $bloomMayContainEvent = Test-BloomEventId -Bytes $bloomBytes -EventId ([string] $event.eventId)
+        }
+        if ($null -ne $indexEntry -and [string] $indexEntry.state -in @('committed', 'conflict') -and
+            ($null -eq $membershipMarker -or $membershipMarkerNeedsRepair)) {
+            Write-MembershipMarker -MembershipDirectory $membershipDirectory -EventId ([string] $event.eventId)
+            $membershipMarker = [pscustomobject]@{ eventId = [string] $event.eventId }
+            $membershipMarkerNeedsRepair = $false
+        }
+        $membershipConfirmsExisting = $null -ne $membershipMarker
+        # The Bloom result is only a diagnostic hint. Exact membership is the
+        # recovery authority so a false positive never triggers a ledger scan.
+        if (-not $fullRebuild -and ($indexEntryNeedsRebuild -or ($null -eq $indexEntry -and $membershipConfirmsExisting))) {
             $fullRebuild = $true
             $scanStartOffset = 0L
             $scanStartLineNumber = 0
@@ -1574,7 +1676,8 @@ try {
                 -ExpectedProjectId ([int] $event.projectId) `
                 -ExpectedStoryId ([int] $event.storyId) `
                 -ExpectedStoryRef ([int] $event.storyRef)
-            Write-IndexFromFullLedger -IndexDirectory $indexDirectory -LedgerState $ledgerState
+            $ledgerBytesRead += [long] $ledgerState.ScannedBytes
+            Write-IndexFromFullLedger -IndexDirectory $indexDirectory -MembershipDirectory $membershipDirectory -LedgerState $ledgerState
             $bloomBytes = Write-BloomFromRecords -BloomPath $bloomPath -Records $ledgerState.Records
             $recordCount = [long] $ledgerState.Records.Count
             $checkpointPhysicalLength = [long] $ledgerState.PhysicalLength
@@ -1667,7 +1770,8 @@ try {
                 -ExpectedProjectId ([int] $event.projectId) `
                 -ExpectedStoryId ([int] $event.storyId) `
                 -ExpectedStoryRef ([int] $event.storyRef)
-            Update-IndexFromRecords -IndexDirectory $indexDirectory -Records $postWriteState.Records
+            $ledgerBytesRead += [long] $postWriteState.ScannedBytes
+            Update-IndexFromRecords -IndexDirectory $indexDirectory -MembershipDirectory $membershipDirectory -Records $postWriteState.Records
             $incomingRecord = @($postWriteState.Records | Where-Object { $_.EventId -ceq [string] $event.eventId } | Select-Object -Last 1)
             if ($incomingRecord.Count -eq 0) {
                 throw [IO.InvalidDataException]::new('appended event was not found in the complete ledger range')
@@ -1700,7 +1804,9 @@ try {
     }
     if ($null -ne $operationResult) {
         $operationResult.scanMode = if ($fullRebuild) { 'cold_rebuild' } else { 'incremental' }
-        $operationResult.scannedBytes = [long] $ledgerState.ScannedBytes
+        $operationResult.scannedBytes = [long] $ledgerBytesRead
+        $operationResult.ledgerReadBytes = [long] $ledgerBytesRead
+        $operationResult.bloomMayContainEvent = [bool] $bloomMayContainEvent
         $operationResult.checkpointPath = $checkpointPath
         $operationResult.indexPath = $indexDirectory
         $operationResult.bloomPath = $bloomPath
