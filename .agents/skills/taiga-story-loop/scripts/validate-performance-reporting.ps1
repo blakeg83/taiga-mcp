@@ -87,6 +87,11 @@ foreach ($marker in @(
         'addedAgents'
         'measurement-only messages'
         'same-SHA retry'
+        'negativeControls'
+        'budget-exceeded'
+        'changed-outcome'
+        'changed-workload'
+        'missing-comparable-evidence'
         'synthetic-overhead-baseline-candidate')) {
     Assert-Contains $normalized $marker "reference is missing '$marker'"
 }
@@ -151,6 +156,7 @@ foreach ($field in @('eventId', 'runId', 'projectId', 'storyId', 'storyRef', 'sc
 Assert-True ([string]$event.eventType -ceq 'story_started') 'event example must use an original epic event type'
 Assert-True ([string]$event.scope -ceq 'story') 'story_started example must use story scope'
 Assert-True ($null -eq $event.phaseId) 'story_started example must leave phase identity null'
+Assert-True ($null -eq $event.reviewKind -and $null -eq $event.reviewAttemptOrdinal) 'story_started example must leave review identity fields null'
 Assert-Contains $normalized '"occurredAtUtc": "2026-10-09T10:00:00Z"' 'event example timestamp must be UTC'
 Assert-True ($null -eq $event.usage) 'event example may omit usage without treating it as zero'
 
@@ -200,14 +206,23 @@ $correctionReviewStart = @($perTaskReviews.events | Where-Object { [string]$_.ev
 Assert-True ([string]$correctionReviewStart.reviewKind -ceq 'correction_rereview') 'correction re-review must use correction_rereview kind'
 Assert-True ([string]$correctionReviewStart.revision -ceq 'cccccccccccccccccccccccccccccccccccccccc') 'correction re-review must use the corrected revision'
 Assert-True ([string]$perTaskReviews.events[0].revision -ceq [string]$perTaskReviews.events[1].revision) 'review start and acceptance must retain the same revision'
-Assert-True ([string]$perTaskReviews.observations[0].kind -ceq 'duplicate' -and [string]$perTaskReviews.observations[0].effect -ceq 'no_new_attempt') 'duplicate observation must not create an attempt'
-Assert-True ([string]$perTaskReviews.observations[1].kind -ceq 'stale' -and [string]$perTaskReviews.observations[1].effect -ceq 'no_new_attempt') 'stale observation must not create an attempt'
-Assert-True ([int]$perTaskReviews.expectedCounts.initialTaskReviews -eq 2) 'per-task fixture must count initial tasks once'
-Assert-True ([int]$perTaskReviews.expectedCounts.correctionReReviews -eq 1) 'per-task fixture must count correction re-reviews'
-Assert-True ([int]$perTaskReviews.expectedCounts.tasksWithInitialReview -eq 2) 'per-task fixture must set the first-pass denominator'
-Assert-True ([int]$perTaskReviews.expectedCounts.acceptedFirstAttemptTasks -eq 1) 'per-task fixture must set the first-pass numerator'
-Assert-True ([string]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.state -ceq 'measured') 'per-task first-pass rate must be measured'
-Assert-True ([double]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.value -eq 0.5) 'per-task first-pass rate must use numerator divided by denominator'
+$task148Assertions = {
+    $perTaskCounts = Get-ReviewCountResult -Fixture $perTaskReviews
+$perTaskObservations = Get-ReviewObservationResult -Fixture $perTaskReviews
+Assert-True ($perTaskObservations.duplicateEventCount -eq 1) 'fixture control must derive one exact duplicate event'
+Assert-True ($perTaskObservations.duplicateAttemptCount -eq 1) 'fixture control must derive one same-attempt duplicate with a new event ID'
+Assert-True ($perTaskObservations.conflictCount -eq 1) 'fixture control must derive one changed-payload conflict'
+Assert-True ($perTaskObservations.staleCount -eq 1) 'fixture control must derive one stale closed-attempt observation'
+Assert-True ($perTaskObservations.unhandledCount -eq 0) 'fixture control must classify every observation'
+Assert-True ([int]$perTaskReviews.expectedCounts.initialTaskReviews -eq $perTaskCounts.initialTaskReviews) 'per-task expected initial count must match the derived event count'
+Assert-True ([int]$perTaskReviews.expectedCounts.correctionReReviews -eq $perTaskCounts.correctionReReviews) 'per-task expected correction count must match the derived event count'
+Assert-True ([int]$perTaskReviews.expectedCounts.finalStoryReviews -eq $perTaskCounts.finalStoryReviews) 'per-task expected final count must match the derived event count'
+Assert-True ([int]$perTaskReviews.expectedCounts.finalStoryReReviews -eq $perTaskCounts.finalStoryReReviews) 'per-task expected final re-review count must match the derived event count'
+Assert-True ([int]$perTaskReviews.expectedCounts.tasksWithInitialReview -eq $perTaskCounts.tasksWithInitialReview) 'per-task expected denominator must match the derived task set'
+Assert-True ([int]$perTaskReviews.expectedCounts.acceptedFirstAttemptTasks -eq $perTaskCounts.acceptedFirstAttemptTasks) 'per-task expected numerator must match the derived acceptance sequence'
+Assert-True ([string]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.state -ceq [string]$perTaskCounts.firstPassAcceptanceRate.state) 'per-task expected rate state must match derived coverage'
+Assert-True ([double]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.value -eq [double]$perTaskCounts.firstPassAcceptanceRate.value) 'per-task expected rate must match derived numerator and denominator'
+Assert-True ([string]$perTaskReviews.expectedCounts.firstPassAcceptanceRate.coverage -ceq [string]$perTaskCounts.firstPassAcceptanceRate.coverage) 'per-task expected rate coverage must match derived closure coverage'
 
 $storyEndOnlyReviews = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-review-counts-story-end-only'
 Assert-True ([string]$storyEndOnlyReviews.reviewMode -ceq 'story_end_only') 'story-end-only fixture must preserve story_end_only mode'
@@ -215,18 +230,25 @@ Assert-True (@($storyEndOnlyReviews.events | Where-Object { [string]$_.scope -ce
 Assert-True ([int]$storyEndOnlyReviews.constraints.taskReviewEvents -eq 0) 'story-end-only fixture must declare zero task reviews'
 Assert-True ([int]$storyEndOnlyReviews.constraints.correctionReReviews -eq 0) 'story-end-only fixture must declare zero correction re-reviews'
 Assert-True ([int]$storyEndOnlyReviews.constraints.addedAgents -eq 0 -and [int]$storyEndOnlyReviews.constraints.pollingEvents -eq 0 -and [int]$storyEndOnlyReviews.constraints.measurementOnlyMessages -eq 0) 'story-end-only fixture must prohibit added agents, polling, and measurement-only messages'
-Assert-True ([int]$storyEndOnlyReviews.expectedCounts.initialTaskReviews -eq 0) 'story-end-only initial task reviews must be zero'
-Assert-True ([int]$storyEndOnlyReviews.expectedCounts.finalStoryReviews -eq 1) 'story-end-only final review must remain countable'
-Assert-True ([string]$storyEndOnlyReviews.expectedCounts.firstPassAcceptanceRate.state -ceq 'not_applicable') 'story-end-only first-pass rate must be not applicable'
-Assert-True ([int]$storyEndOnlyReviews.expectedCounts.firstPassAcceptanceRate.denominator -eq 0) 'story-end-only first-pass denominator must be zero'
+$storyEndOnlyCounts = Get-ReviewCountResult -Fixture $storyEndOnlyReviews
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.initialTaskReviews -eq $storyEndOnlyCounts.initialTaskReviews) 'story-end-only initial count must be derived as zero'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.correctionReReviews -eq $storyEndOnlyCounts.correctionReReviews) 'story-end-only correction count must be derived as zero'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.finalStoryReviews -eq $storyEndOnlyCounts.finalStoryReviews) 'story-end-only final review total must remain countable'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.finalStoryReReviews -eq $storyEndOnlyCounts.finalStoryReReviews) 'story-end-only final re-review subset must be derived'
+Assert-True ([string]$storyEndOnlyReviews.expectedCounts.firstPassAcceptanceRate.state -ceq [string]$storyEndOnlyCounts.firstPassAcceptanceRate.state) 'story-end-only first-pass rate must be derived as not applicable'
+Assert-True ([int]$storyEndOnlyReviews.expectedCounts.firstPassAcceptanceRate.denominator -eq $storyEndOnlyCounts.firstPassAcceptanceRate.denominator) 'story-end-only first-pass denominator must be derived as zero'
 
 $sameHeadReReviews = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-final-rereviews-same-head'
 $sameHeadRevisions = @($sameHeadReReviews.events | ForEach-Object { [string]$_.revision } | Select-Object -Unique)
 Assert-True ($sameHeadRevisions.Count -eq 1) 'same-head fixture must keep one reviewed revision'
 Assert-True (@($sameHeadReReviews.events | Where-Object { [string]$_.reviewKind -ceq 'final_story_rereview' }).Count -eq 2) 'same-head fixture must contain two final re-review attempts'
 Assert-True (@($sameHeadReReviews.events | Where-Object { [int]$_.reviewAttemptOrdinal -eq 2 }).Count -eq 1) 'same-head fixture must distinguish a real retry by ordinal'
-Assert-True ([int]$sameHeadReReviews.expectedCounts.finalStoryReviews -eq 1 -and [int]$sameHeadReReviews.expectedCounts.finalStoryReReviews -eq 2) 'same-head fixture must separate first and later final attempts'
-Assert-True ([bool]$sameHeadReReviews.expectedCounts.sameHeadDistinctAttempts) 'same-head fixture must preserve distinct attempts'
+$sameHeadCounts = Get-ReviewCountResult -Fixture $sameHeadReReviews
+Assert-True ([int]$sameHeadReReviews.expectedCounts.finalStoryReviews -eq $sameHeadCounts.finalStoryReviews) 'same-head final total must include every distinct final attempt'
+Assert-True ([int]$sameHeadReReviews.expectedCounts.finalStoryReReviews -eq $sameHeadCounts.finalStoryReReviews) 'same-head final re-review subset must be derived from later attempts'
+$sameHeadAttemptIds = @($sameHeadReReviews.events | Where-Object { [string]$_.eventType -eq 'final_review_started' } | ForEach-Object { [string]$_.reviewAttemptId } | Sort-Object -Unique)
+Assert-True ($sameHeadAttemptIds.Count -eq $sameHeadCounts.finalStoryReviews) 'same-head fixture must derive one distinct attempt per final total'
+Assert-True ([bool]$sameHeadReReviews.expectedCounts.sameHeadDistinctAttempts -eq ($sameHeadAttemptIds.Count -eq 3)) 'same-head distinct-attempt claim must match derived identities'
 
 $reviewUsageFallback = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-review-usage-unavailable-fallback'
 Assert-True ([string]$reviewUsageFallback.sourceBackedUsage.state -ceq 'unavailable') 'review usage fallback must be explicitly unavailable'
@@ -242,8 +264,22 @@ Assert-True ([int]$overhead.baseline.addedAgents -eq 0 -and [int]$overhead.candi
 Assert-True ([int]$overhead.baseline.pollingEvents -eq 0 -and [int]$overhead.candidate.pollingEvents -eq 0) 'overhead fixture must add no polling'
 Assert-True ([int]$overhead.baseline.measurementOnlyMessages -eq 0 -and [int]$overhead.candidate.measurementOnlyMessages -eq 0) 'overhead fixture must add no measurement-only messages'
 Assert-True ([int]$overhead.candidate.eventCount -eq 14 -and [int]$overhead.budget.maxAddedEvents -eq 14) 'overhead fixture must bound lifecycle event additions'
-Assert-True ([string]$overhead.overhead.state -ceq 'measured' -and [string]$overhead.overhead.usageOverhead -ceq 'unavailable') 'overhead fixture must separate elapsed evidence from unavailable usage'
-Assert-True ([bool]$overhead.acceptance.sameOutcome -and [bool]$overhead.acceptance.sameWorkload -and [bool]$overhead.acceptance.withinBudget -and [bool]$overhead.acceptance.noExtraAgentsPollingOrMeasurementMessages) 'overhead fixture acceptance must require equivalent bounded execution'
+$overheadDecision = Get-OverheadDecision -Baseline $overhead.baseline -Candidate $overhead.candidate -Budget $overhead.budget
+Assert-True ([string]$overhead.overhead.state -ceq $overheadDecision.state) 'overhead state must match the derived elapsed evidence state'
+Assert-True ([int]$overhead.overhead.elapsedMilliseconds -eq $overheadDecision.elapsedMilliseconds) 'overhead elapsed delta must be derived from baseline and candidate'
+Assert-True ([double]$overhead.overhead.elapsedPercent -eq $overheadDecision.elapsedPercent) 'overhead percentage must be derived from baseline and candidate'
+Assert-True ([string]$overhead.overhead.usageOverhead -ceq 'unavailable') 'overhead fixture must keep usage unavailable separate from elapsed acceptance'
+Assert-True ([bool]$overhead.acceptance.sameOutcome -eq $overheadDecision.sameOutcome -and [bool]$overhead.acceptance.sameWorkload -eq $overheadDecision.sameWorkload -and [bool]$overhead.acceptance.withinBudget -eq $overheadDecision.withinBudget -and [bool]$overhead.acceptance.noExtraAgentsPollingOrMeasurementMessages -eq $overheadDecision.noExtraAgentsPollingOrMeasurementMessages) 'overhead acceptance fields must match derived controls'
+foreach ($negativeControl in @($overhead.negativeControls)) {
+    $negativeDecision = Get-OverheadDecision -Baseline $negativeControl.baseline -Candidate $negativeControl.candidate -Budget $negativeControl.budget
+    Assert-True (-not $negativeDecision.accepted) "overhead negative control '$($negativeControl.case)' must fail derived acceptance"
+}
+$requiredNegativeControls = @('budget-exceeded', 'changed-outcome', 'changed-workload', 'extra-agent', 'extra-polling', 'extra-message', 'missing-comparable-evidence')
+$actualNegativeControls = @($overhead.negativeControls | ForEach-Object { [string]$_.case })
+foreach ($requiredNegativeControl in $requiredNegativeControls) {
+    Assert-True ($actualNegativeControls -contains $requiredNegativeControl) "overhead fixture must include negative control '$requiredNegativeControl'"
+}
+}
 
 $tokenSubtotalExample = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-token-subtotal'
 Assert-True ([string]$tokenSubtotalExample.counterSemantics.cachedInput -ceq 'included_in_input') 'token example must declare cached-input inclusion'
@@ -303,6 +339,9 @@ foreach ($contractMarker in @(
         'final-story correction'
         'Replaying the same ID'
         'same ID with any different payload is a conflict'
+        'finalStoryReviews counts every distinct authoritative final-story attempt'
+        'finalStoryReReviews can never exceed'
+        'projections of the full version-1'
         'append-only JSONL'
         'Performance pointer:'
         'delta(c) = c(end) - c(exact baseline)'
@@ -361,7 +400,7 @@ function ConvertTo-CanonicalValue {
 }
 
 function Get-CanonicalPayload {
-    param([System.Collections.IDictionary] $Payload)
+    param([AllowNull()] [object] $Payload)
 
     $canonical = ConvertTo-CanonicalValue -Value $Payload
     return (ConvertTo-Json -InputObject $canonical -Compress -Depth 20)
@@ -381,6 +420,242 @@ function Invoke-ReplayFixture {
     }
     if ([string]$Existing[$id] -ceq $incomingCanonical) { return 'noop' }
     return 'conflict'
+}
+
+function Get-ReviewPayloadWithoutEventId {
+    param([Parameter(Mandatory)] [object] $Event)
+
+    $payload = [ordered]@{}
+    foreach ($property in @($Event.PSObject.Properties)) {
+        if ($property.Name -cne 'eventId') {
+            $payload[$property.Name] = $property.Value
+        }
+    }
+    return Get-CanonicalPayload -Payload $payload
+}
+
+function Get-ReviewCountResult {
+    param([Parameter(Mandatory)] [object] $Fixture)
+
+    $events = @($Fixture.events)
+    $starts = @($events | Where-Object {
+            [string]$_.eventType -ceq 'review_started' -or
+            [string]$_.eventType -ceq 'final_review_started'
+        })
+    $attempts = @{}
+    foreach ($start in $starts) {
+        $attemptId = [string]$start.reviewAttemptId
+        Assert-True (-not [string]::IsNullOrWhiteSpace($attemptId)) 'review start must carry an attempt identity'
+        Assert-True (-not $attempts.ContainsKey($attemptId)) "authoritative review attempts must be unique: $attemptId"
+        $attempts[$attemptId] = $start
+    }
+
+    $initialStarts = @($starts | Where-Object { [string]$_.reviewKind -ceq 'initial_task' })
+    $initialTaskRefs = @($initialStarts | ForEach-Object { [string]$_.taskRef } | Sort-Object -Unique)
+    $correctionAttemptIds = @($starts |
+        Where-Object { [string]$_.reviewKind -ceq 'correction_rereview' } |
+        ForEach-Object { [string]$_.reviewAttemptId } |
+        Sort-Object -Unique)
+
+    $finalStarts = @($starts |
+        Where-Object { [string]$_.scope -ceq 'final_story' } |
+        Sort-Object { [DateTime]::Parse([string]$_.occurredAtUtc) })
+    $finalAttemptIds = @($finalStarts | ForEach-Object { [string]$_.reviewAttemptId } | Sort-Object -Unique)
+    $firstFinalAttemptId = if ($finalAttemptIds.Count -gt 0) { [string]$finalAttemptIds[0] } else { $null }
+    $finalReReviewAttemptIds = @($finalAttemptIds | Where-Object { [string]$_ -cne $firstFinalAttemptId })
+    $seenFinalAttemptIds = @{}
+    foreach ($finalStart in $finalStarts) {
+        $attemptId = [string]$finalStart.reviewAttemptId
+        $expectedKind = if ($seenFinalAttemptIds.Count -eq 0) { 'final_story' } else { 'final_story_rereview' }
+        Assert-True ([string]$finalStart.reviewKind -ceq $expectedKind) "final attempt $attemptId must use the derived review kind $expectedKind"
+        $seenFinalAttemptIds[$attemptId] = $true
+    }
+
+    $acceptedFirstAttemptTasks = 0
+    $closedInitialOutcomes = 0
+    foreach ($taskRef in $initialTaskRefs) {
+        $taskStarts = @($initialStarts |
+            Where-Object { [string]$_.taskRef -ceq [string]$taskRef } |
+            Sort-Object { [DateTime]::Parse([string]$_.occurredAtUtc) })
+        $firstStart = $taskStarts[0]
+        $firstAttemptId = [string]$firstStart.reviewAttemptId
+        $closures = @($events |
+            Where-Object {
+                $attemptProperty = $_.PSObject.Properties['reviewAttemptId']
+                $null -ne $attemptProperty -and [string]$attemptProperty.Value -ceq $firstAttemptId -and
+                ([string]$_.eventType -ceq 'review_findings' -or
+                    [string]$_.eventType -ceq 'review_accepted')
+            } |
+            Sort-Object { [DateTime]::Parse([string]$_.occurredAtUtc) })
+        if ($closures.Count -eq 0) { continue }
+        $closedInitialOutcomes++
+        if ([string]$closures[0].eventType -ceq 'review_accepted') {
+            $acceptedFirstAttemptTasks++
+        }
+    }
+
+    $denominator = $initialTaskRefs.Count
+    if ($denominator -eq 0) {
+        $rate = [ordered]@{
+            state = 'not_applicable'
+            value = $null
+            numerator = 0
+            denominator = 0
+            coverage = 'story_end_only intentionally has no per-task review denominator'
+        }
+    }
+    else {
+        $rateState = if ($closedInitialOutcomes -eq $denominator) { 'measured' } else { 'partial' }
+        $rate = [ordered]@{
+            state = $rateState
+            value = [double]$acceptedFirstAttemptTasks / [double]$denominator
+            numerator = $acceptedFirstAttemptTasks
+            denominator = $denominator
+            coverage = "$closedInitialOutcomes of $denominator initial task review outcomes are authoritative"
+        }
+    }
+
+    return [pscustomobject]@{
+        initialTaskReviews = $initialTaskRefs.Count
+        correctionReReviews = $correctionAttemptIds.Count
+        finalStoryReviews = $finalAttemptIds.Count
+        finalStoryReReviews = $finalReReviewAttemptIds.Count
+        tasksWithInitialReview = $denominator
+        acceptedFirstAttemptTasks = $acceptedFirstAttemptTasks
+        firstPassAcceptanceRate = [pscustomobject]$rate
+    }
+}
+
+function Get-ReviewObservationResult {
+    param([Parameter(Mandatory)] [object] $Fixture)
+
+    $ledgerByEventId = @{}
+    $attemptPayloadById = @{}
+    $closedAtByAttemptId = @{}
+    foreach ($event in @($Fixture.events)) {
+        $eventId = [string]$event.eventId
+        Assert-True (-not [string]::IsNullOrWhiteSpace($eventId)) 'review fixture events must have event IDs'
+        Assert-True (-not $ledgerByEventId.ContainsKey($eventId)) "fixture authoritative event IDs must be unique: $eventId"
+        $ledgerByEventId[$eventId] = Get-CanonicalPayload -Payload $event
+
+        if ([string]$event.eventType -ceq 'review_started' -or [string]$event.eventType -ceq 'final_review_started') {
+            $attemptId = [string]$event.reviewAttemptId
+            Assert-True (-not [string]::IsNullOrWhiteSpace($attemptId)) 'review fixture starts must have attempt IDs'
+            Assert-True (-not $attemptPayloadById.ContainsKey($attemptId)) "fixture authoritative attempt IDs must be unique: $attemptId"
+            $attemptPayloadById[$attemptId] = Get-ReviewPayloadWithoutEventId -Event $event
+        }
+
+        if ([string]$event.eventType -ceq 'review_findings' -or
+            [string]$event.eventType -ceq 'review_accepted' -or
+            [string]$event.eventType -ceq 'final_review_accepted') {
+            $attemptId = [string]$event.reviewAttemptId
+            if (-not [string]::IsNullOrWhiteSpace($attemptId)) {
+                $occurred = [DateTime]::Parse([string]$event.occurredAtUtc)
+                if (-not $closedAtByAttemptId.ContainsKey($attemptId) -or $occurred -lt $closedAtByAttemptId[$attemptId]) {
+                    $closedAtByAttemptId[$attemptId] = $occurred
+                }
+            }
+        }
+    }
+
+    $duplicateEventCount = 0
+    $duplicateAttemptCount = 0
+    $conflictCount = 0
+    $staleCount = 0
+    $unhandledCount = 0
+    foreach ($observation in @($Fixture.observations)) {
+        $eventId = [string]$observation.eventId
+        $attemptId = [string]$observation.reviewAttemptId
+        $canonical = Get-CanonicalPayload -Payload $observation
+        if ($ledgerByEventId.ContainsKey($eventId)) {
+            if ([string]$ledgerByEventId[$eventId] -ceq $canonical) {
+                $duplicateEventCount++
+            }
+            else {
+                $conflictCount++
+            }
+            continue
+        }
+
+        if ($attemptPayloadById.ContainsKey($attemptId)) {
+            $occurred = [DateTime]::Parse([string]$observation.occurredAtUtc)
+            if ($closedAtByAttemptId.ContainsKey($attemptId) -and $occurred -gt $closedAtByAttemptId[$attemptId]) {
+                $staleCount++
+            }
+            elseif ([string]$attemptPayloadById[$attemptId] -ceq (Get-ReviewPayloadWithoutEventId -Event $observation)) {
+                $duplicateAttemptCount++
+            }
+            else {
+                $conflictCount++
+            }
+            continue
+        }
+
+        $unhandledCount++
+    }
+
+    return [pscustomobject]@{
+        duplicateEventCount = $duplicateEventCount
+        duplicateAttemptCount = $duplicateAttemptCount
+        conflictCount = $conflictCount
+        staleCount = $staleCount
+        unhandledCount = $unhandledCount
+    }
+}
+
+function Get-OverheadDecision {
+    param(
+        [AllowNull()] [object] $Baseline,
+        [AllowNull()] [object] $Candidate,
+        [AllowNull()] [object] $Budget
+    )
+
+    if ($null -eq $Baseline -or $null -eq $Candidate -or $null -eq $Budget) {
+        return [pscustomobject]@{
+            accepted = $false
+            state = 'unavailable'
+            sameOutcome = $false
+            sameWorkload = $false
+            withinBudget = $false
+            noExtraAgentsPollingOrMeasurementMessages = $false
+            elapsedMilliseconds = $null
+            elapsedPercent = $null
+        }
+    }
+
+    $sameOutcome = [string]$Baseline.outcomeFingerprint -ceq [string]$Candidate.outcomeFingerprint
+    $sameWorkload = -not [string]::IsNullOrWhiteSpace([string]$Baseline.workloadId) -and
+        [string]$Baseline.workloadId -ceq [string]$Candidate.workloadId
+    $elapsedDelta = [double]$Candidate.elapsedMilliseconds - [double]$Baseline.elapsedMilliseconds
+    $elapsedOverhead = [math]::Max(0, $elapsedDelta)
+    $elapsedPercent = if ([double]$Baseline.elapsedMilliseconds -gt 0) {
+        [math]::Round(($elapsedOverhead / [double]$Baseline.elapsedMilliseconds) * 100, 6)
+    }
+    else {
+        $null
+    }
+    $eventDelta = [int]$Candidate.eventCount - [int]$Baseline.eventCount
+    $noExtra = [int]$Candidate.addedAgents -eq 0 -and
+        [int]$Candidate.pollingEvents -eq 0 -and
+        [int]$Candidate.measurementOnlyMessages -eq 0
+    $withinBudget = $null -ne $elapsedPercent -and
+        $elapsedOverhead -le [double]$Budget.maxElapsedMilliseconds -and
+        $elapsedPercent -le [double]$Budget.maxElapsedPercent -and
+        $eventDelta -le [int]$Budget.maxAddedEvents -and
+        [int]$Candidate.addedAgents -le [int]$Budget.maxAddedAgents -and
+        [int]$Candidate.pollingEvents -le [int]$Budget.maxPollingEvents -and
+        [int]$Candidate.measurementOnlyMessages -le [int]$Budget.maxMeasurementOnlyMessages
+
+    return [pscustomobject]@{
+        accepted = $sameOutcome -and $sameWorkload -and $withinBudget -and $noExtra
+        state = if ($sameOutcome -and $sameWorkload -and $null -ne $elapsedPercent) { 'measured' } else { 'partial' }
+        sameOutcome = $sameOutcome
+        sameWorkload = $sameWorkload
+        withinBudget = $withinBudget
+        noExtraAgentsPollingOrMeasurementMessages = $noExtra
+        elapsedMilliseconds = [int]$elapsedOverhead
+        elapsedPercent = $elapsedPercent
+    }
 }
 
 $replayStore = @{}
@@ -534,6 +809,8 @@ $safePayload = [ordered]@{ provenance = [ordered]@{ source = 'workflow_transitio
 Assert-NoPrivateFields -Payload $safePayload
 $privatePayload = [ordered]@{ provenance = [ordered]@{ source = 'workflow_transition' }; prompt = 'not allowed' }
 Assert-Throws { Assert-NoPrivateFields -Payload $privatePayload } 'privacy fixture must reject prompt/transcript/secret fields'
+
+& $task148Assertions
 
 Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, stable phase identities, final findings closure, recursive replay/no-op/conflict identity, interval coverage/overlap, external recovery pointer, report identity, exact token subtotal semantics, cumulative baseline/reset handling, privacy rejection, review-attempt counting in both modes, same-head re-reviews, unavailable review usage, and bounded baseline/candidate overhead; synthetic and non-live.'
 exit 0

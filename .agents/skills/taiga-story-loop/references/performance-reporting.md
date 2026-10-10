@@ -386,7 +386,7 @@ coverage is not a complete total.
 | `implementationTokens`, `reviewTokens`, `coordinationTokens` | tokens | Sum valid cumulative deltas by role and stream | source-backed usage samples | Null when unavailable; partial when only some streams/intervals are covered. |
 | `totalTokens` | tokens | Sum attributable role totals only when their states/semantics permit | role usage metrics | Partial remains partial; never treat unavailable roles as zero. |
 | `tasksCompleted` | tasks | Count accepted task identities in the declared ordered task set | accepted lifecycle events and story task metadata | Unknown when the ordered set or acceptance evidence is incomplete. |
-| `initialTaskReviews`, `correctionReReviews`, `finalStoryReviews`, `finalStoryReReviews` | review requests/attempts | Count authoritative review identities using the #148 rules; initial task reviews count tasks with an initial attempt, correction re-reviews count actual correction attempts, and final metrics separate first from later final attempts | actual review handoff/acceptance events | Zero per-task reviews in `story_end_only` is valid; incomplete identity coverage is partial. Duplicate and stale observations never increment a count. |
+| `initialTaskReviews`, `correctionReReviews`, `finalStoryReviews`, `finalStoryReReviews` | review requests/attempts | Count authoritative review identities using the #148 rules; initial task reviews count tasks with an initial attempt, correction re-reviews count actual correction attempts, finalStoryReviews totals every final-story attempt, and finalStoryReReviews is its later-attempt subset | actual review handoff/acceptance events | Zero per-task reviews in `story_end_only` is valid; incomplete identity coverage is partial. Duplicate and stale observations never increment a count. |
 | `firstPassAcceptanceRate` | ratio and coverage counts | accepted-on-first-attempt tasks / tasks with an initial review | review request/acceptance identities | Zero denominator is `not_applicable`; report numerator, denominator, and coverage. |
 | `reviewMode` | enum | Assigned mode copied unchanged | setup authorization | Unavailable if setup mode is absent; never infer from observed event order. |
 | `modelsAndReasoning` | metadata records | Exact role/profile records, including changes | setup/host provenance | Unverified profile remains explicitly unverified; it is not a token estimate. |
@@ -642,8 +642,8 @@ reviewKind is assigned from the ordered lifecycle:
 | --- | --- | --- |
 | initial_task | First authoritative review request for a task before any correction | One initialTaskReviews task when at least one real attempt exists |
 | correction_rereview | A task review after correction_ready, linked to the finding that caused the correction | One correctionReReviews per authoritative review attempt |
-| final_story | First authoritative final-story review attempt | One finalStoryReviews |
-| final_story_rereview | Any later final-story attempt, whether a retry of the same request or a new request after findings/correction | One finalStoryReReviews per authoritative attempt, even on the same SHA |
+| final_story | First authoritative final-story review attempt | One finalStoryReviews; it is also the first member of the final-attempt total |
+| final_story_rereview | Any later final-story attempt, whether a retry of the same request or a new request after findings/correction | One finalStoryReviews and one finalStoryReReviews per authoritative attempt, even on the same SHA |
 
 An exact replay of an already recorded event ID and canonical payload is a
 duplicate no-op. Re-observing the same reviewAttemptId and event boundary
@@ -662,9 +662,11 @@ Review counts are calculated as follows:
 2. correctionReReviews counts authoritative correction_rereview attempts.
    A retry under the same request and a second real review on the same SHA are
    separate attempts and both count.
-3. finalStoryReviews counts the first authoritative final_story attempt.
-   finalStoryReReviews counts every later authoritative
-   final_story_rereview attempt, including a same-SHA retry.
+3. finalStoryReviews counts every distinct authoritative final-story attempt,
+   including the first and every later attempt. finalStoryReReviews is the
+   later-attempt subset: every authoritative final_story_rereview attempt,
+   including a same-SHA retry. Therefore finalStoryReReviews can never exceed
+   finalStoryReviews.
 4. tasksWithInitialReview is the denominator for firstPassAcceptanceRate.
    acceptedFirstAttemptTasks counts tasks whose first initial attempt closes
    with review_accepted before any findings or correction. The rate is
@@ -724,6 +726,14 @@ the acceptance shape without claiming a live performance number.
 
 The following fixtures are sanitized contract examples. Their IDs, timestamps,
 SHA values, counters, and expected values are synthetic.
+
+The compact review-count objects below are projections of the full version-1
+story_performance_event envelope. They show only fields used by these
+counter controls; a persisted ledger event must still include all required
+fields, including schemaVersion, kind, run/project/story identity, taskRef,
+role, session/worker provenance, transitionId, phaseId, occurredAtUtc,
+revision, reviewMode, and provenance. These projections are not valid ledger
+payloads by themselves.
 
 ```json
 {
@@ -816,14 +826,51 @@ SHA values, counters, and expected values are synthetic.
   "observations": [
     {
       "eventId": "task-146-review-start",
-      "kind": "duplicate",
-      "effect": "no_new_attempt"
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 146,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-146-request-1",
+      "reviewAttemptId": "task-146-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "occurredAtUtc": "2026-10-09T11:00:00Z"
     },
     {
+      "eventId": "task-146-review-start-reobserved",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 146,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-146-request-1",
+      "reviewAttemptId": "task-146-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "occurredAtUtc": "2026-10-09T11:00:00Z"
+    },
+    {
+      "eventId": "task-146-review-start",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 146,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-146-request-1",
+      "reviewAttemptId": "task-146-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "ffffffffffffffffffffffffffffffffffffffff",
+      "occurredAtUtc": "2026-10-09T11:00:00Z"
+    },
+    {
+      "eventId": "task-147-stale-start",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 147,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-147-request-1",
       "reviewAttemptId": "task-147-attempt-1",
-      "kind": "stale",
-      "effect": "no_new_attempt",
-      "reason": "initial attempt is already closed by review_findings"
+      "reviewAttemptOrdinal": 1,
+      "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "occurredAtUtc": "2026-10-09T11:20:00Z"
     }
   ],
   "expectedCounts": {
@@ -838,7 +885,7 @@ SHA values, counters, and expected values are synthetic.
       "value": 0.5,
       "numerator": 1,
       "denominator": 2,
-      "coverage": "two of two initial task review outcomes are authoritative"
+      "coverage": "2 of 2 initial task review outcomes are authoritative"
     }
   }
 }
@@ -950,7 +997,7 @@ SHA values, counters, and expected values are synthetic.
     }
   ],
   "expectedCounts": {
-    "finalStoryReviews": 1,
+    "finalStoryReviews": 3,
     "finalStoryReReviews": 2,
     "sameHeadDistinctAttempts": true
   }
@@ -989,6 +1036,7 @@ SHA values, counters, and expected values are synthetic.
   "reviewMode": "per_task",
   "baseline": {
     "instrumentation": "disabled",
+    "workloadId": "fixed-review-contract-workload-1",
     "outcomeFingerprint": "same-synthetic-outcome",
     "elapsedMilliseconds": 10000,
     "eventCount": 0,
@@ -999,6 +1047,7 @@ SHA values, counters, and expected values are synthetic.
   },
   "candidate": {
     "instrumentation": "contract-events-only",
+    "workloadId": "fixed-review-contract-workload-1",
     "outcomeFingerprint": "same-synthetic-outcome",
     "elapsedMilliseconds": 10100,
     "eventCount": 14,
@@ -1028,7 +1077,204 @@ SHA values, counters, and expected values are synthetic.
     "sameWorkload": true,
     "withinBudget": true,
     "noExtraAgentsPollingOrMeasurementMessages": true
-  }
+  },
+  "negativeControls": [
+    {
+      "case": "budget-exceeded",
+      "baseline": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10000,
+        "eventCount": 0,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "candidate": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 12000,
+        "eventCount": 14,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    },
+    {
+      "case": "changed-outcome",
+      "baseline": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10000,
+        "eventCount": 0,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "candidate": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "changed-synthetic-outcome",
+        "elapsedMilliseconds": 10100,
+        "eventCount": 14,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    },
+    {
+      "case": "changed-workload",
+      "baseline": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10000,
+        "eventCount": 0,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "candidate": {
+        "workloadId": "different-review-contract-workload",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10100,
+        "eventCount": 14,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    },
+    {
+      "case": "extra-agent",
+      "baseline": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10000,
+        "eventCount": 0,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "candidate": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10100,
+        "eventCount": 14,
+        "addedAgents": 1,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    },
+    {
+      "case": "extra-polling",
+      "baseline": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10000,
+        "eventCount": 0,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "candidate": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10100,
+        "eventCount": 14,
+        "addedAgents": 0,
+        "pollingEvents": 1,
+        "measurementOnlyMessages": 0
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    },
+    {
+      "case": "extra-message",
+      "baseline": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10000,
+        "eventCount": 0,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "candidate": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10100,
+        "eventCount": 14,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 1
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    },
+    {
+      "case": "missing-comparable-evidence",
+      "baseline": null,
+      "candidate": {
+        "workloadId": "fixed-review-contract-workload-1",
+        "outcomeFingerprint": "same-synthetic-outcome",
+        "elapsedMilliseconds": 10100,
+        "eventCount": 14,
+        "addedAgents": 0,
+        "pollingEvents": 0,
+        "measurementOnlyMessages": 0
+      },
+      "budget": {
+        "maxElapsedMilliseconds": 500,
+        "maxElapsedPercent": 10,
+        "maxAddedEvents": 14,
+        "maxAddedAgents": 0,
+        "maxPollingEvents": 0,
+        "maxMeasurementOnlyMessages": 0
+      }
+    }
+  ]
 }
 ```
 
@@ -1038,9 +1284,9 @@ SHA values, counters, and expected values are synthetic.
 | --- | --- | --- |
 | Per-task review identity/counting | synthetic-review-counts-per-task | Initial tasks, correction re-review attempts, duplicate observations, stale observations, and first-pass numerator/denominator produce the declared counts. |
 | Story-end-only review mode | synthetic-review-counts-story-end-only | Per-task and correction review counts are zero and first-pass rate is not_applicable; final-story review remains countable. |
-| Same-SHA final re-reviews | synthetic-final-rereviews-same-head | Distinct request/attempt identities count separately even when the reviewed SHA is unchanged; attempt ordinal distinguishes a real retry. |
+| Same-SHA final re-reviews | synthetic-final-rereviews-same-head | finalStoryReviews counts all three distinct final attempts while finalStoryReReviews counts the later two; attempt ordinal distinguishes a real retry on the unchanged SHA. |
 | Review usage fallback | synthetic-review-usage-unavailable-fallback | Absent reviewer counters remain unavailable with null counters and an explicit safe fallback; forbidden estimates are named. |
-| Bounded-overhead evidence | synthetic-overhead-baseline-candidate | Same workload/outcome, zero added agents/polling/measurement-only messages, explicit budgets, and unavailable usage do not become a false numeric token result. |
+| Bounded-overhead evidence | synthetic-overhead-baseline-candidate | Same workload/outcome, zero added agents/polling/measurement-only messages, explicit budgets, derived elapsed-only acceptance, and unavailable usage do not become a false numeric token result; negative controls fail. |
 
 These fixtures are synthetic controls only. They do not claim live review
 counts, worker usage, or production overhead. The recorder and aggregator may
