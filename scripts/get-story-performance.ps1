@@ -39,6 +39,22 @@ $script:EventTypes = @(
 )
 $script:ReviewStartEvents = @('review_started', 'final_review_started')
 $script:ReviewCloseEvents = @('review_findings', 'review_accepted', 'final_review_accepted')
+$script:TopLevelFields = @(
+    'schemaVersion', 'kind', 'eventId', 'runId', 'projectId', 'storyId',
+    'storyRef', 'taskRef', 'role', 'sessionId', 'workerId', 'transitionId',
+    'scope', 'phaseId', 'correctionId', 'reviewRequestId', 'reviewAttemptId',
+    'reviewKind', 'reviewAttemptOrdinal', 'supersedesReviewAttemptId',
+    'eventType', 'occurredAtUtc', 'revision', 'reviewMode', 'provenance',
+    'usage', 'waitId', 'waitKind', 'pullRequest'
+)
+$script:ProvenanceFields = @('source', 'observedBy', 'observer', 'coverage', 'synthetic')
+$script:UsageFields = @(
+    'state', 'streamId', 'role', 'sessionId', 'source', 'counterSemantics',
+    'coverage', 'sampledAtUtc', 'baselineAtUtc', 'counters', 'reason', 'fallback'
+)
+$script:CounterSemanticsFields = @('cachedInput', 'reasoning')
+$script:CounterFields = @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')
+$script:PullRequestFields = @('provider', 'owner', 'repository', 'number', 'reviewedHead')
 
 function Get-PropertyValue {
     param(
@@ -67,6 +83,23 @@ function Test-PropertyPresent {
     return $null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]
 }
 
+function Get-UnknownPropertyName {
+    param(
+        [AllowNull()] [object] $Object,
+        [Parameter(Mandatory)] [string[]] $Allowed
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+    foreach ($property in $Object.PSObject.Properties) {
+        if ($property.Name -notin $Allowed) {
+            return [string] $property.Name
+        }
+    }
+    return $null
+}
+
 function Test-NonBlankSafeString {
     param([AllowNull()] [object] $Value)
 
@@ -78,22 +111,158 @@ function Test-NonBlankSafeString {
 function Test-PositiveIntegerValue {
     param([AllowNull()] [object] $Value)
 
-    if ($null -eq $Value -or $Value -is [bool]) {
+    if (-not (Test-JsonIntegerValue -Value $Value)) {
         return $false
     }
     try {
         $decimal = [decimal] $Value
-        return $decimal -gt 0 -and $decimal -eq [decimal]::Truncate($decimal)
+        return $decimal -gt 0
     }
     catch {
         return $false
     }
 }
 
+function Test-JsonIntegerValue {
+    param([AllowNull()] [object] $Value)
+
+    if ($null -eq $Value -or $Value -is [bool] -or
+        $Value -isnot [byte] -and $Value -isnot [sbyte] -and
+        $Value -isnot [short] -and $Value -isnot [ushort] -and
+        $Value -isnot [int] -and $Value -isnot [uint] -and
+        $Value -isnot [long] -and $Value -isnot [ulong] -and
+        $Value -isnot [decimal] -and $Value -isnot [double] -and
+        $Value -isnot [single]) {
+        return $false
+    }
+    try {
+        $decimal = [decimal] $Value
+        return $decimal -eq [decimal]::Truncate($decimal)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Test-NonNegativeIntegerValue {
+    param([AllowNull()] [object] $Value)
+
+    if (-not (Test-JsonIntegerValue -Value $Value)) {
+        return $false
+    }
+    return [decimal] $Value -ge 0
+}
+
 function Test-FullRevision {
     param([AllowNull()] [object] $Value)
 
     return Test-NonBlankSafeString -Value $Value -and [string] $Value -match '^[0-9a-fA-F]{40}$'
+}
+
+function Get-UsageValidationError {
+    param(
+        [AllowNull()] [object] $Usage,
+        [Parameter(Mandatory)] [string] $EventRole
+    )
+
+    if ($null -eq $Usage) {
+        return $null
+    }
+    if ($Usage -isnot [System.Management.Automation.PSCustomObject]) {
+        return 'usage must be an object or null'
+    }
+    $unknown = Get-UnknownPropertyName -Object $Usage -Allowed $script:UsageFields
+    if ($null -ne $unknown) {
+        return "unknown usage field '$unknown'"
+    }
+    foreach ($name in @('state', 'source', 'coverage')) {
+        if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $Usage $name))) {
+            return "usage.$name must be present when usage is supplied"
+        }
+    }
+    $state = [string] (Get-PropertyValue $Usage 'state')
+    if ($state -cnotin @('measured', 'partial', 'unavailable', 'not_applicable')) {
+        return 'usage.state is unsupported'
+    }
+    foreach ($name in @('streamId', 'sessionId', 'reason', 'fallback')) {
+        $value = Get-PropertyValue $Usage $name
+        if ($null -ne $value -and -not (Test-NonBlankSafeString -Value $value)) {
+            return "usage.$name must be null or a nonblank safe string"
+        }
+    }
+    $usageRole = Get-PropertyValue $Usage 'role'
+    if ($null -ne $usageRole -and [string] $usageRole -cnotin @('coordinator', 'implementer', 'reviewer')) {
+        return 'usage.role is unsupported'
+    }
+    foreach ($name in @('sampledAtUtc', 'baselineAtUtc')) {
+        $value = Get-PropertyValue $Usage $name
+        if ($null -ne $value) {
+            $parsed = [DateTimeOffset]::MinValue
+            if (-not (Try-GetUtcTime -Value $value -Parsed ([ref] $parsed))) {
+                return "usage.$name must be a UTC timestamp or null"
+            }
+        }
+    }
+
+    $counterSemantics = Get-PropertyValue $Usage 'counterSemantics'
+    $counters = Get-PropertyValue $Usage 'counters'
+    if ($null -ne $counterSemantics) {
+        if ($counterSemantics -isnot [System.Management.Automation.PSCustomObject]) {
+            return 'usage.counterSemantics must be an object or null'
+        }
+        $unknown = Get-UnknownPropertyName -Object $counterSemantics -Allowed $script:CounterSemanticsFields
+        if ($null -ne $unknown) {
+            return "unknown usage.counterSemantics field '$unknown'"
+        }
+        $cachedInput = Get-PropertyValue $counterSemantics 'cachedInput'
+        $reasoning = Get-PropertyValue $counterSemantics 'reasoning'
+        if ($null -ne $cachedInput -and [string] $cachedInput -cnotin @('included_in_input', 'disjoint_from_input', 'unknown')) {
+            return 'usage.counterSemantics.cachedInput is unsupported'
+        }
+        if ($null -ne $reasoning -and [string] $reasoning -cnotin @('included_in_output', 'disjoint_from_output', 'unknown')) {
+            return 'usage.counterSemantics.reasoning is unsupported'
+        }
+    }
+    $hasNumericCounters = $false
+    if ($null -ne $counters) {
+        if ($counters -isnot [System.Management.Automation.PSCustomObject]) {
+            return 'usage.counters must be an object or null'
+        }
+        $unknown = Get-UnknownPropertyName -Object $counters -Allowed $script:CounterFields
+        if ($null -ne $unknown) {
+            return "unknown usage.counters field '$unknown'"
+        }
+        $hasNumericCounters = @($counters.PSObject.Properties).Count -gt 0
+        foreach ($property in $counters.PSObject.Properties) {
+            if (-not (Test-NonNegativeIntegerValue -Value $property.Value)) {
+                return "usage.counters.$($property.Name) must be a nonnegative integer"
+            }
+        }
+    }
+    if ($hasNumericCounters) {
+        if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $Usage 'streamId')) -or
+            $null -eq $usageRole -or $null -eq (Get-PropertyValue $Usage 'sampledAtUtc') -or
+            $null -eq $counterSemantics) {
+            return 'numeric usage samples require stream, role, sampledAtUtc, and counterSemantics'
+        }
+        if ([string] $usageRole -cne $EventRole) {
+            return 'usage.role must match event role'
+        }
+        if ($null -eq (Get-PropertyValue $counterSemantics 'cachedInput') -or
+            $null -eq (Get-PropertyValue $counterSemantics 'reasoning')) {
+            return 'numeric usage samples require both counter semantics'
+        }
+        if ($state -eq 'measured' -and
+            ($null -eq (Get-PropertyValue $Usage 'baselineAtUtc') -or
+            [string] (Get-PropertyValue $counterSemantics 'cachedInput') -eq 'unknown' -or
+            [string] (Get-PropertyValue $counterSemantics 'reasoning') -eq 'unknown')) {
+            return 'measured usage requires a baseline and known counter semantics'
+        }
+    }
+    elseif ($state -eq 'measured') {
+        return 'measured usage requires nonempty counters'
+    }
+    return $null
 }
 
 function Get-BindingKey {
@@ -105,6 +274,21 @@ function Get-BindingKey {
         [string] (Get-PropertyValue $Event 'storyId')
         [string] (Get-PropertyValue $Event 'storyRef')
     ) -join '|'
+}
+
+function Get-SafePullRequest {
+    param([AllowNull()] [object] $PullRequest)
+
+    if ($null -eq $PullRequest) {
+        return $null
+    }
+    return [pscustomobject][ordered]@{
+        provider = Get-PropertyValue $PullRequest 'provider'
+        owner = Get-PropertyValue $PullRequest 'owner'
+        repository = Get-PropertyValue $PullRequest 'repository'
+        number = Get-PropertyValue $PullRequest 'number'
+        reviewedHead = Get-PropertyValue $PullRequest 'reviewedHead'
+    }
 }
 
 function Get-ImmutableBoundaryCanonical {
@@ -122,6 +306,11 @@ function Get-EventValidationError {
 
     if ($null -eq $Event -or $Event -isnot [System.Management.Automation.PSCustomObject]) {
         return 'event must be a JSON object'
+    }
+
+    $unknown = Get-UnknownPropertyName -Object $Event -Allowed $script:TopLevelFields
+    if ($null -ne $unknown) {
+        return "unknown envelope field '$unknown'"
     }
 
     $required = @(
@@ -193,6 +382,10 @@ function Get-EventValidationError {
     if ($provenance -isnot [System.Management.Automation.PSCustomObject]) {
         return 'provenance must be an object'
     }
+    $unknown = Get-UnknownPropertyName -Object $provenance -Allowed $script:ProvenanceFields
+    if ($null -ne $unknown) {
+        return "unknown provenance field '$unknown'"
+    }
     foreach ($name in @('source', 'coverage')) {
         if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $provenance $name))) {
             return "provenance.$name must be a nonblank safe string"
@@ -202,20 +395,14 @@ function Get-EventValidationError {
         -not (Test-NonBlankSafeString -Value (Get-PropertyValue $provenance 'observer'))) {
         return 'provenance requires observedBy or observer'
     }
+    $synthetic = Get-PropertyValue $provenance 'synthetic'
+    if ($null -ne $synthetic -and $synthetic -isnot [bool]) {
+        return 'provenance.synthetic must be Boolean or null'
+    }
 
-    $usage = Get-PropertyValue $Event 'usage'
-    if ($null -ne $usage) {
-        if ($usage -isnot [System.Management.Automation.PSCustomObject]) {
-            return 'usage must be an object or null'
-        }
-        foreach ($name in @('state', 'source', 'coverage')) {
-            if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $usage $name))) {
-                return "usage.$name must be present when usage is supplied"
-            }
-        }
-        if ([string] (Get-PropertyValue $usage 'state') -cnotin @('measured', 'partial', 'unavailable', 'not_applicable')) {
-            return 'usage.state is unsupported'
-        }
+    $usageError = Get-UsageValidationError -Usage (Get-PropertyValue $Event 'usage') -EventRole ([string] (Get-PropertyValue $Event 'role'))
+    if ($null -ne $usageError) {
+        return $usageError
     }
 
     $eventType = [string] (Get-PropertyValue $Event 'eventType')
@@ -263,6 +450,15 @@ function Get-EventValidationError {
         }
         if ($pullRequest -isnot [System.Management.Automation.PSCustomObject]) {
             return 'pr_ready requires a pullRequest object'
+        }
+        $unknown = Get-UnknownPropertyName -Object $pullRequest -Allowed $script:PullRequestFields
+        if ($null -ne $unknown) {
+            return "unknown pullRequest field '$unknown'"
+        }
+        foreach ($name in $script:PullRequestFields) {
+            if (-not (Test-PropertyPresent -Object $pullRequest -Name $name)) {
+                return "pullRequest.$name is required"
+            }
         }
         foreach ($name in @('provider', 'owner', 'repository')) {
             if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $pullRequest $name))) {
@@ -449,6 +645,15 @@ function Get-PhaseIdentity {
     return ($scope, $task, $phase, $correction -join '|')
 }
 
+function Get-WaitIdentity {
+    param([Parameter(Mandatory)] [object] $Event)
+
+    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $task = Get-TaskText -Event $Event
+    $waitId = [string] (Get-PropertyValue $Event 'waitId')
+    return ($scope, $task, $waitId -join '|')
+}
+
 function Get-ReviewIdentity {
     param([Parameter(Mandatory)] [object] $Event)
 
@@ -544,13 +749,28 @@ function Get-IntervalResult {
         [void] $Anomalies.Add((New-Anomaly -Code 'conflicting_boundary' -Message "$Kind interval has more than one start or end boundary" -Identity $Identity -EventIds @($startItems + $endItems | ForEach-Object { $_.EventId })))
     }
     else {
-        $difference = $end.Time - $start.Time
-        if ($difference.TotalMilliseconds -lt 0) {
+        $waitConflict = $false
+        if ($Kind -eq 'wait') {
+            $startWaitKind = [string] (Get-PropertyValue $start.Event 'waitKind')
+            $endWaitKind = [string] (Get-PropertyValue $end.Event 'waitKind')
+            $startRole = [string] (Get-PropertyValue $start.Event 'role')
+            $endRole = [string] (Get-PropertyValue $end.Event 'role')
+            $waitConflict = $startWaitKind -cne $endWaitKind -or $startRole -cne $endRole
+            if ($waitConflict) {
+                $state = 'partial'
+                $missing = 'wait kind or actor attribution changed between boundaries'
+                [void] $Anomalies.Add((New-Anomaly -Code 'conflicting_boundary' -Message 'Wait boundaries disagree on immutable wait kind or actor attribution and were not paired' -Identity $Identity -EventIds @($start.EventId, $end.EventId)))
+            }
+        }
+        if (-not $waitConflict) {
+            $difference = $end.Time - $start.Time
+        }
+        if (-not $waitConflict -and $difference.TotalMilliseconds -lt 0) {
             $state = 'partial'
             $missing = 'end boundary precedes start boundary'
             [void] $Anomalies.Add((New-Anomaly -Code 'negative_interval' -Message "$Kind interval has a reversed UTC boundary" -Identity $Identity -EventIds @($start.EventId, $end.EventId)))
         }
-        else {
+        elseif (-not $waitConflict) {
             $elapsed = [long] [Math]::Round($difference.TotalMilliseconds, [MidpointRounding]::AwayFromZero)
         }
     }
@@ -635,6 +855,20 @@ function Add-OverlapAnomalies {
     }
 }
 
+function Get-ByteSlice {
+    param(
+        [Parameter(Mandatory)] [byte[]] $Bytes,
+        [Parameter(Mandatory)] [int] $Offset,
+        [Parameter(Mandatory)] [int] $Count
+    )
+
+    $result = [byte[]]::new($Count)
+    if ($Count -gt 0) {
+        [Array]::Copy($Bytes, $Offset, $result, 0, $Count)
+    }
+    return ,$result
+}
+
 function Get-UncoveredStorySpan {
     param(
         [Parameter(Mandatory)] [object] $StorySpan,
@@ -713,12 +947,37 @@ function Read-EventLedger {
 
     $byEventId = @{}
     $records = [System.Collections.Generic.List[object]]::new()
-    $lineNumber = 0
     $ledgerBytes = [IO.File]::ReadAllBytes($Path)
-    $allLines = @(Get-Content -LiteralPath $Path -Encoding UTF8)
-    $hasCompleteFinalNewline = $ledgerBytes.Length -gt 0 -and $ledgerBytes[$ledgerBytes.Length - 1] -eq [byte] 0x0A
-    $completeLineCount = if ($hasCompleteFinalNewline) { $allLines.Count } else { [Math]::Max(0, $allLines.Count - 1) }
-    for ($lineIndex = 0; $lineIndex -lt $completeLineCount; $lineIndex++) {
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $allLines = [System.Collections.Generic.List[object]]::new()
+    $lineStart = 0
+    for ($offset = 0; $offset -lt $ledgerBytes.Length; $offset++) {
+        if ($ledgerBytes[$offset] -ne [byte] 0x0A) {
+            continue
+        }
+        $lineLength = $offset - $lineStart
+        $contentLength = $lineLength
+        if ($contentLength -gt 0 -and $ledgerBytes[$offset - 1] -eq [byte] 0x0D) {
+            $contentLength--
+        }
+        $lineBytes = Get-ByteSlice -Bytes $ledgerBytes -Offset $lineStart -Count $contentLength
+        try {
+            $line = $utf8.GetString($lineBytes)
+            if ($allLines.Count -eq 0 -and $line.Length -gt 0 -and $line[0] -eq [char] 0xFEFF) {
+                $line = $line.Substring(1)
+            }
+        }
+        catch {
+            [void] $Anomalies.Add((New-Anomaly -Code 'invalid_utf8' -Message 'A ledger line was not valid UTF-8 and was excluded from aggregation' -Line ($allLines.Count + 1)))
+            $line = $null
+        }
+        [void] $allLines.Add($line)
+        $lineStart = $offset + 1
+    }
+
+    $tailLength = $ledgerBytes.Length - $lineStart
+    $hasCompleteFinalNewline = $tailLength -eq 0
+    for ($lineIndex = 0; $lineIndex -lt $allLines.Count; $lineIndex++) {
         $line = $allLines[$lineIndex]
         $lineNumber = $lineIndex + 1
         if ([string]::IsNullOrWhiteSpace($line)) {
@@ -777,8 +1036,8 @@ function Read-EventLedger {
         [void] $records.Add($record)
     }
 
-    if (-not $hasCompleteFinalNewline -and $allLines.Count -gt 0) {
-        [void] $Anomalies.Add((New-Anomaly -Code 'incomplete_tail' -Message 'The final ledger fragment has no terminating newline and was excluded as an interrupted tail' -Line ($completeLineCount + 1)))
+    if (-not $hasCompleteFinalNewline) {
+        [void] $Anomalies.Add((New-Anomaly -Code 'incomplete_tail' -Message 'The final ledger fragment has no terminating newline and was excluded as an interrupted tail' -Line ($allLines.Count + 1)))
     }
 
     return @($records | Sort-Object Time, Line)
@@ -925,11 +1184,11 @@ foreach ($record in $records) {
         'correction_started' { Add-ToIndex -Index $correctionStarts -Key (Get-PhaseIdentity $event) -Value $record }
         'correction_ready' { Add-ToIndex -Index $correctionEnds -Key (Get-PhaseIdentity $event) -Value $record }
         'wait_started' {
-            $waitKey = ([string](Get-PropertyValue $event 'scope'), [string](Get-PropertyValue $event 'waitId') -join '|')
+            $waitKey = Get-WaitIdentity -Event $event
             Add-ToIndex -Index $waitStarts -Key $waitKey -Value $record
         }
         'wait_ended' {
-            $waitKey = ([string](Get-PropertyValue $event 'scope'), [string](Get-PropertyValue $event 'waitId') -join '|')
+            $waitKey = Get-WaitIdentity -Event $event
             Add-ToIndex -Index $waitEnds -Key $waitKey -Value $record
         }
         { $_ -in $script:ReviewStartEvents } { Add-ToIndex -Index $reviewStarts -Key (Get-ReviewIdentity $event) -Value $record }
@@ -963,7 +1222,7 @@ foreach ($record in @($records | Where-Object { $_.EventType -in $script:ReviewS
 # Keep one immutable closure per attempt. Distinct closure kinds or times are
 # conflicting evidence, not a reason to choose whichever event was read first.
 $reviewEndsByAttempt = @{}
-foreach ($key in @($reviewEnds.Keys)) {
+foreach ($key in @($reviewEnds.Keys | Sort-Object)) {
     foreach ($record in @($reviewEnds[$key])) {
         $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
         if (-not $reviewEndsByAttempt.ContainsKey($attemptKey)) {
@@ -978,8 +1237,15 @@ foreach ($record in @($dedupedReviewStarts | Sort-Object Time, Line)) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
     $closures = if ($reviewEndsByAttempt.ContainsKey($attemptKey)) { @($reviewEndsByAttempt[$attemptKey]) } else { @() }
     $matchingClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -eq (Get-ReviewIdentity $record.Event) })
+    $mismatchedClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -ne (Get-ReviewIdentity $record.Event) })
     $closureConflict = $false
-    if ($closures.Count -gt 0 -and $matchingClosures.Count -eq 0) {
+    if ($mismatchedClosures.Count -gt 0) {
+        $closureConflict = $true
+        $closureIds = @($record.EventId) + @($mismatchedClosures | ForEach-Object { $_.EventId })
+        [void] $anomalies.Add((New-Anomaly -Code 'conflicting_review_identity' -Message 'A review attempt has incompatible closure evidence; matching evidence is not accepted alongside a mismatched closure' -Identity $attemptKey -EventIds $closureIds))
+        $matchingClosures = @()
+    }
+    elseif ($closures.Count -gt 0 -and $matchingClosures.Count -eq 0) {
         $closureConflict = $true
         $closureIds = @($record.EventId) + @($closures | ForEach-Object { $_.EventId })
         [void] $anomalies.Add((New-Anomaly -Code 'conflicting_review_identity' -Message 'Review closure identity does not match the recorded start; it cannot close that attempt' -Identity $attemptKey -EventIds $closureIds))
@@ -1056,7 +1322,7 @@ foreach ($record in @($dedupedReviewStarts | Sort-Object Time, Line)) {
 
 # Any closure without a matching attempt is not allowed to close a different
 # request, and is retained as an explicit anomaly.
-foreach ($attemptKey in @($reviewEndsByAttempt.Keys)) {
+foreach ($attemptKey in @($reviewEndsByAttempt.Keys | Sort-Object)) {
     if (-not $reviewStartByAttempt.ContainsKey($attemptKey)) {
         foreach ($record in @($reviewEndsByAttempt[$attemptKey])) {
             [void] $anomalies.Add((New-Anomaly -Code 'orphan_review_closure' -Message 'Review closure has no matching review start and was excluded from pairing' -Identity $attemptKey -EventIds @($record.EventId)))
@@ -1122,6 +1388,15 @@ $initialEvidencePartial = @($initialAttempts | Where-Object { $_.state -ne 'meas
 $correctionEvidencePartial = @($correctionAttempts | Where-Object { $_.state -ne 'measured' }).Count -gt 0
 $finalEvidencePartial = @($finalAttempts | Where-Object { $_.state -ne 'measured' }).Count -gt 0
 $initialTaskRefs = @($initialAttempts | Where-Object { $null -ne $_.taskRef } | ForEach-Object { [string] $_.taskRef } | Sort-Object -Unique)
+$missingInitialReviewTaskRefs = @()
+if ($effectiveReviewMode -eq 'per_task' -and $taskSetWasDeclared) {
+    $initialTaskRefValues = @($initialTaskRefs | ForEach-Object { [int] $_ })
+    $missingInitialReviewTaskRefs = @($declaredTaskRefs | Where-Object { $_ -notin $initialTaskRefValues })
+    if ($missingInitialReviewTaskRefs.Count -gt 0) {
+        [void] $anomalies.Add((New-Anomaly -Code 'missing_initial_review_evidence' -Message 'Declared per-task identities have no authoritative initial review attempt; observed review denominators remain based on actual initial attempts' -Identity ($missingInitialReviewTaskRefs -join ',')))
+        $taskCoverageState = 'partial'
+    }
+}
 $acceptedFirst = 0
 $firstPassIncomplete = 0
 $firstPassRejected = 0
@@ -1141,7 +1416,7 @@ foreach ($taskRef in $initialTaskRefs) {
         })
         if ($priorFindingOrCorrection.Count -gt 0) {
             $firstPassRejected++
-            [void] $anomalies.Add((New-Anomaly -Code 'first_pass_invalidated' -Message 'An initial acceptance followed a finding or correction boundary for the same task; it is not first-pass acceptance' -Identity ([string] $taskRef) -EventIds @($first.reviewAttemptId) + @($priorFindingOrCorrection | ForEach-Object { $_.EventId })))
+            [void] $anomalies.Add((New-Anomaly -Code 'first_pass_invalidated' -Message 'An initial acceptance followed a finding or correction boundary for the same task; it is not first-pass acceptance' -Identity ([string] $taskRef) -EventIds (@($first.reviewAttemptId) + @($priorFindingOrCorrection | ForEach-Object { $_.EventId }))))
         }
         else {
             $acceptedFirst++
@@ -1202,7 +1477,7 @@ $report = [ordered]@{
     storyId = if ($storyIds.Count -eq 1) { $storyIds[0] } else { $null }
     storyRef = if ($storyRefs.Count -eq 1) { $storyRefs[0] } else { $null }
     reviewMode = $effectiveReviewMode
-    pullRequest = if ($prReady.Count -eq 1) { Get-PropertyValue $prReady[0].Event 'pullRequest' } else { $null }
+    pullRequest = if ($prReady.Count -eq 1) { Get-SafePullRequest -PullRequest (Get-PropertyValue $prReady[0].Event 'pullRequest') } else { $null }
     metrics = [ordered]@{
         timeToPr = $timeToPrMetric
         implementationElapsed = $implementationMetric
@@ -1228,6 +1503,7 @@ $report = [ordered]@{
             declaredTaskRefs = @($declaredTaskRefs)
             observedTaskRefs = @($observedTaskRefs)
             missingDeclaredTaskRefs = @($missingDeclaredTaskRefs)
+            missingInitialReviewTaskRefs = @($missingInitialReviewTaskRefs)
             undeclaredTaskRefs = @($undeclaredTaskRefs)
         }
         uncoveredStorySpan = $uncoveredStorySpan
