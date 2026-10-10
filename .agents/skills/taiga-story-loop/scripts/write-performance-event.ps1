@@ -678,6 +678,21 @@ function Parse-Event {
     return $event
 }
 
+function Assert-EventStoryBinding {
+    param(
+        [Parameter(Mandatory)] [object] $Event,
+        [Parameter(Mandatory)] [int] $ExpectedProjectId,
+        [Parameter(Mandatory)] [int] $ExpectedStoryId,
+        [Parameter(Mandatory)] [int] $ExpectedStoryRef
+    )
+
+    if ([int] $Event.projectId -ne $ExpectedProjectId -or
+        [int] $Event.storyId -ne $ExpectedStoryId -or
+        [int] $Event.storyRef -ne $ExpectedStoryRef) {
+        Fail-Recorder 'event story binding does not match the selected external run'
+    }
+}
+
 function Convert-ToCanonicalValue {
     param([AllowNull()] [object] $Value)
 
@@ -711,7 +726,7 @@ function Convert-ToCanonicalJson {
 }
 
 function Get-Sha256HexBytes {
-    param([Parameter(Mandatory)] [byte[]] $Bytes)
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $Bytes)
 
     $hash = [Security.Cryptography.SHA256]::Create()
     try {
@@ -800,16 +815,22 @@ function Copy-ByteRange {
     if ($Count -gt 0) {
         [Array]::Copy($Bytes, $Offset, $result, 0, $Count)
     }
-    return $result
+    return ,$result
 }
 
 function Read-LedgerState {
-    param([Parameter(Mandatory)] [string] $LedgerPath)
+    param(
+        [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [string] $ExpectedRunId,
+        [Parameter(Mandatory)] [int] $ExpectedProjectId,
+        [Parameter(Mandatory)] [int] $ExpectedStoryId,
+        [Parameter(Mandatory)] [int] $ExpectedStoryRef
+    )
 
     if (-not (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) {
         return [pscustomobject]@{
             Records = @()
-            CorruptRecords = @()
+            InvalidRecords = @()
             IncompleteTail = $null
             NeedsSeparator = $false
         }
@@ -819,7 +840,7 @@ function Read-LedgerState {
     if ($bytes.Length -eq 0) {
         return [pscustomobject]@{
             Records = @()
-            CorruptRecords = @()
+            InvalidRecords = @()
             IncompleteTail = $null
             NeedsSeparator = $false
         }
@@ -827,7 +848,7 @@ function Read-LedgerState {
 
     $encoding = [Text.UTF8Encoding]::new($false, $true)
     $records = @()
-    $corrupt = @()
+    $invalid = @()
     $lineStart = 0
     $lineNumber = 0
     for ($offset = 0; $offset -lt $bytes.Length; $offset++) {
@@ -843,6 +864,7 @@ function Read-LedgerState {
         }
         $lineBytes = Copy-ByteRange -Bytes $bytes -Offset $lineStart -Count $contentLength
         $lineStart = $offset + 1
+        $diagnosticType = 'schema_invalid_record'
         try {
             $line = $encoding.GetString($lineBytes)
             if ([string]::IsNullOrWhiteSpace($line)) {
@@ -854,6 +876,18 @@ function Read-LedgerState {
                 $null -eq $eventIdProperty -or [string]::IsNullOrWhiteSpace([string] $eventIdProperty.Value)) {
                 throw [FormatException]::new('ledger record is not an event object')
             }
+            $recordRunId = Get-Property -Object $candidate -Name 'runId'
+            $recordProjectId = Get-Property -Object $candidate -Name 'projectId'
+            $recordStoryId = Get-Property -Object $candidate -Name 'storyId'
+            $recordStoryRef = Get-Property -Object $candidate -Name 'storyRef'
+            if (($null -ne $recordRunId -and [string] $recordRunId.Value -cne $ExpectedRunId) -or
+                ($null -ne $recordProjectId -and [string] $recordProjectId.Value -cne [string] $ExpectedProjectId) -or
+                ($null -ne $recordStoryId -and [string] $recordStoryId.Value -cne [string] $ExpectedStoryId) -or
+                ($null -ne $recordStoryRef -and [string] $recordStoryRef.Value -cne [string] $ExpectedStoryRef)) {
+                $diagnosticType = 'foreign_run'
+            }
+            Assert-Event -Event $candidate -ExpectedRunId $ExpectedRunId
+            Assert-EventStoryBinding -Event $candidate -ExpectedProjectId $ExpectedProjectId -ExpectedStoryId $ExpectedStoryId -ExpectedStoryRef $ExpectedStoryRef
             $records += [pscustomobject]@{
                 EventId = [string] $eventIdProperty.Value
                 CanonicalJson = Convert-ToCanonicalJson -Value $candidate
@@ -861,7 +895,8 @@ function Read-LedgerState {
             }
         }
         catch {
-            $corrupt += [pscustomobject]@{
+            $invalid += [pscustomobject]@{
+                diagnosticType = $diagnosticType
                 lineNumber = $lineNumber
                 byteLength = $contentLength
                 digest = Get-Sha256HexBytes -Bytes $lineBytes
@@ -882,7 +917,7 @@ function Read-LedgerState {
 
     return [pscustomobject]@{
         Records = $records
-        CorruptRecords = $corrupt
+        InvalidRecords = $invalid
         IncompleteTail = $incompleteTail
         NeedsSeparator = $tailLength -gt 0
     }
@@ -1019,18 +1054,23 @@ $conflictDiagnosticPath = $null
 
 try {
     $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds -ReadyPath $normalizedLockReadyPath
-    $ledgerState = Read-LedgerState -LedgerPath $ledgerPath
+    $ledgerState = Read-LedgerState `
+        -LedgerPath $ledgerPath `
+        -ExpectedRunId $RunId `
+        -ExpectedProjectId ([int] $event.projectId) `
+        -ExpectedStoryId ([int] $event.storyId) `
+        -ExpectedStoryRef ([int] $event.storyRef)
 
-    foreach ($corruptRecord in @($ledgerState.CorruptRecords)) {
+    foreach ($invalidRecord in @($ledgerState.InvalidRecords)) {
         $diagnosticPaths += Write-Diagnostic `
             -LedgerPath $ledgerPath `
             -RunId $RunId `
-            -DiagnosticType 'corrupt_record' `
+            -DiagnosticType $invalidRecord.diagnosticType `
             -EventId $null `
-            -ExistingDigest $null `
+            -ExistingDigest $invalidRecord.digest `
             -IncomingDigest $null `
-            -LineNumber $corruptRecord.lineNumber `
-            -ByteLength $corruptRecord.byteLength
+            -LineNumber $invalidRecord.lineNumber `
+            -ByteLength $invalidRecord.byteLength
     }
     if ($null -ne $ledgerState.IncompleteTail) {
         $diagnosticPaths += Write-Diagnostic `
@@ -1044,8 +1084,21 @@ try {
             -ByteLength $ledgerState.IncompleteTail.byteLength
     }
 
-    $matchingRecords = @($ledgerState.Records | Where-Object { $_.EventId -ceq [string] $event.eventId })
-    if ($matchingRecords.Count -gt 0) {
+    $foreignRecords = @($ledgerState.InvalidRecords | Where-Object { $_.diagnosticType -ceq 'foreign_run' })
+    if ($foreignRecords.Count -gt 0) {
+        $operationResult = [ordered]@{
+            status = 'error'
+            errorCategory = 'run_binding_conflict'
+            eventId = [string] $event.eventId
+            runId = $RunId
+            ledgerPath = $ledgerPath
+            diagnosticPath = $diagnosticPaths[0]
+        }
+        $operationExitCode = 3
+    }
+    else {
+        $matchingRecords = @($ledgerState.Records | Where-Object { $_.EventId -ceq [string] $event.eventId })
+        if ($matchingRecords.Count -gt 0) {
         $conflict = @($matchingRecords | Where-Object { $_.CanonicalJson -cne $incomingCanonical })
         if ($conflict.Count -gt 0) {
             $conflictDiagnosticPath = Write-Diagnostic `
@@ -1076,20 +1129,21 @@ try {
                 diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
             }
         }
-    }
-    else {
-        Write-LedgerLine `
-            -LedgerPath $ledgerPath `
-            -Line $serializedEvent `
-            -PrependNewline:([bool] $ledgerState.NeedsSeparator) `
-            -FaultAfterBytes $FaultAfterBytes
-        $operationResult = [ordered]@{
-            status = 'appended'
-            eventId = [string] $event.eventId
-            runId = $RunId
-            ledgerPath = $ledgerPath
-            recoveredIncompleteTail = $null -ne $ledgerState.IncompleteTail
-            diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
+        }
+        else {
+            Write-LedgerLine `
+                -LedgerPath $ledgerPath `
+                -Line $serializedEvent `
+                -PrependNewline:([bool] $ledgerState.NeedsSeparator) `
+                -FaultAfterBytes $FaultAfterBytes
+            $operationResult = [ordered]@{
+                status = 'appended'
+                eventId = [string] $event.eventId
+                runId = $RunId
+                ledgerPath = $ledgerPath
+                recoveredIncompleteTail = $null -ne $ledgerState.IncompleteTail
+                diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
+            }
         }
     }
 }

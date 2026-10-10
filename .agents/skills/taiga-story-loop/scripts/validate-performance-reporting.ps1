@@ -143,6 +143,23 @@ function New-RecorderStoryEvent {
     }
 }
 
+function Test-BytePrefix {
+    param(
+        [Parameter(Mandatory)] [byte[]] $Value,
+        [Parameter(Mandatory)] [byte[]] $Prefix
+    )
+
+    if ($Value.Length -lt $Prefix.Length) {
+        return $false
+    }
+    for ($index = 0; $index -lt $Prefix.Length; $index++) {
+        if ($Value[$index] -ne $Prefix[$index]) {
+            return $false
+        }
+    }
+    return $true
+}
+
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $referencePath = Join-Path $skillRoot 'references/performance-reporting.md'
 Assert-True (Test-Path -LiteralPath $referencePath -PathType Leaf) 'capability reference is present'
@@ -1012,6 +1029,13 @@ try {
     $restartRepeat = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson $restartJson
     $restartRepeatResult = Get-RecorderProcessResult -Invocation $restartRepeat -Context 'restart replay'
     Assert-True ($restartRepeat.ExitCode -eq 0 -and $restartRepeatResult.status -ceq 'noop') 'same legitimate run replay after restart must be a no-op'
+    $sameRunDifferentStory = New-RecorderStoryEvent -EventId 'synthetic-restart-foreign-story' -RunId $restartRunId -StoryId 725 -StoryRef 141 -TransitionId 'restart-foreign-story'
+    $sameRunBeforeMismatch = [IO.File]::ReadAllBytes([string]$restartFirstResult.ledgerPath)
+    $sameRunMismatch = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson ($sameRunDifferentStory | ConvertTo-Json -Compress -Depth 20)
+    $sameRunMismatchResult = Get-RecorderProcessResult -Invocation $sameRunMismatch -Context 'same-run different-story binding'
+    Assert-True ($sameRunMismatch.ExitCode -eq 3 -and $sameRunMismatchResult.errorCategory -ceq 'run_binding_conflict') 'same run with a different story binding must be rejected'
+    Assert-True (Test-BytePrefix -Value ([IO.File]::ReadAllBytes([string]$restartFirstResult.ledgerPath)) -Prefix $sameRunBeforeMismatch) 'same-run binding rejection must not mutate the valid ledger'
+    Assert-True ([IO.File]::ReadAllText([string]$sameRunMismatchResult.diagnosticPath).Contains('"diagnosticType":"foreign_run"', [StringComparison]::Ordinal)) 'same-run binding rejection must record foreign-run evidence'
 
     $historicalReportPath = Join-Path (Join-Path $recorderRoot $restartRunId) 'report.json'
     $historicalReport = '{"reportId":"historical-report-1","state":"retained"}'
@@ -1055,6 +1079,30 @@ try {
     Assert-True ($ioOutput -notmatch '(?i)prompt|transcript|password|authToken|secret') 'I/O failure output must not expose sensitive payload names'
     Assert-True ([IO.File]::ReadAllText($ioPath) -ceq 'not-a-directory') 'I/O failure must preserve the blocking target'
 
+    $readOnlyRunId = 'synthetic-reporting-read-only'
+    $readOnlyEvent = New-RecorderStoryEvent -EventId 'synthetic-read-only-baseline' -RunId $readOnlyRunId -StoryId 726 -StoryRef 142 -TransitionId 'read-only-baseline'
+    $readOnlyBaseline = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $readOnlyRunId -EventJson ($readOnlyEvent | ConvertTo-Json -Compress -Depth 20)
+    $readOnlyBaselineResult = Get-RecorderProcessResult -Invocation $readOnlyBaseline -Context 'read-only fixture baseline'
+    Assert-True ($readOnlyBaseline.ExitCode -eq 0 -and $readOnlyBaselineResult.status -ceq 'appended') 'read-only fixture baseline must append'
+    $readOnlyLedgerPath = [string]$readOnlyBaselineResult.ledgerPath
+    $readOnlyBefore = [IO.File]::ReadAllBytes($readOnlyLedgerPath)
+    $readOnlyReportPath = Join-Path (Join-Path $recorderRoot $readOnlyRunId) 'report.json'
+    $readOnlyReport = '{"reportId":"read-only-report","state":"retained"}'
+    [IO.File]::WriteAllText($readOnlyReportPath, $readOnlyReport, [Text.UTF8Encoding]::new($false))
+    try {
+        [IO.File]::SetAttributes($readOnlyLedgerPath, [IO.FileAttributes]::ReadOnly)
+        $readOnlyNext = New-RecorderStoryEvent -EventId 'synthetic-read-only-next' -RunId $readOnlyRunId -StoryId 726 -StoryRef 142 -TransitionId 'read-only-next'
+        $readOnlyInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $readOnlyRunId -EventJson ($readOnlyNext | ConvertTo-Json -Compress -Depth 20)
+        $readOnlyResult = Get-RecorderProcessResult -Invocation $readOnlyInvocation -Context 'read-only ledger failure'
+        Assert-True ($readOnlyInvocation.ExitCode -eq 2 -and $readOnlyResult.errorCategory -ceq 'write_failed') 'read-only ledger failure must return a safe write error'
+        Assert-True (([IO.File]::ReadAllBytes($readOnlyLedgerPath)).Length -eq $readOnlyBefore.Length) 'read-only ledger failure must preserve ledger length'
+        Assert-True (Test-BytePrefix -Value ([IO.File]::ReadAllBytes($readOnlyLedgerPath)) -Prefix $readOnlyBefore) 'read-only ledger failure must preserve ledger bytes'
+        Assert-True ([IO.File]::ReadAllText($readOnlyReportPath) -ceq $readOnlyReport) 'read-only ledger failure must preserve the historical report'
+    }
+    finally {
+        [IO.File]::SetAttributes($readOnlyLedgerPath, [IO.FileAttributes]::Normal)
+    }
+
     $corruptRunId = 'synthetic-reporting-corrupt-middle'
     $corruptFirst = New-RecorderStoryEvent -EventId 'synthetic-corrupt-first' -RunId $corruptRunId -StoryId 726 -StoryRef 142 -TransitionId 'corrupt-first'
     $corruptSecond = New-RecorderStoryEvent -EventId 'synthetic-corrupt-second' -RunId $corruptRunId -StoryId 726 -StoryRef 142 -TransitionId 'corrupt-second'
@@ -1062,20 +1110,51 @@ try {
     $corruptSecondInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $corruptRunId -EventJson ($corruptSecond | ConvertTo-Json -Compress -Depth 20)
     Assert-True ($corruptFirstInvocation.ExitCode -eq 0 -and $corruptSecondInvocation.ExitCode -eq 0) 'malformed-middle fixture setup events must append'
     $corruptLedgerPath = Join-Path (Join-Path $recorderRoot $corruptRunId) 'events.jsonl'
-    $malformedMiddle = '{"secret":"never-persist-in-diagnostics"}'
-    $corruptLedgerBefore = (($corruptFirst | ConvertTo-Json -Compress -Depth 20), $malformedMiddle, ($corruptSecond | ConvertTo-Json -Compress -Depth 20)) -join [Environment]::NewLine
-    $corruptLedgerBefore += [Environment]::NewLine
-    [IO.File]::WriteAllText($corruptLedgerPath, $corruptLedgerBefore, [Text.UTF8Encoding]::new($false))
+    $malformedMiddle = '{"eventId":"invalid-middle","secret":"never-persist-in-diagnostics"}'
+    $utf8NoBom = [Text.UTF8Encoding]::new($false)
+    $byteParts = @(
+        $utf8NoBom.GetBytes(($corruptFirst | ConvertTo-Json -Compress -Depth 20) + [Environment]::NewLine)
+        $utf8NoBom.GetBytes($malformedMiddle + [Environment]::NewLine)
+        $utf8NoBom.GetBytes([Environment]::NewLine)
+        [byte[]]@(0x7B, 0x22, 0xE9, 0x22, 0x3A, 0x31, 0x7D)
+        $utf8NoBom.GetBytes([Environment]::NewLine)
+        $utf8NoBom.GetBytes(($corruptSecond | ConvertTo-Json -Compress -Depth 20) + [Environment]::NewLine)
+    )
+    $corruptByteList = [Collections.Generic.List[byte]]::new()
+    foreach ($bytePart in $byteParts) {
+        foreach ($byte in [byte[]]$bytePart) {
+            [void]$corruptByteList.Add($byte)
+        }
+    }
+    $corruptLedgerBeforeBytes = $corruptByteList.ToArray()
+    [IO.File]::WriteAllBytes($corruptLedgerPath, $corruptLedgerBeforeBytes)
     $corruptNext = New-RecorderStoryEvent -EventId 'synthetic-corrupt-next' -RunId $corruptRunId -StoryId 726 -StoryRef 142 -TransitionId 'corrupt-next'
     $corruptNextInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $corruptRunId -EventJson ($corruptNext | ConvertTo-Json -Compress -Depth 20)
     $corruptNextResult = Get-RecorderProcessResult -Invocation $corruptNextInvocation -Context 'malformed-middle recovery'
     Assert-True ($corruptNextInvocation.ExitCode -eq 0 -and $corruptNextResult.status -ceq 'appended') 'malformed-middle recovery append must succeed'
-    $corruptLedgerAfter = [IO.File]::ReadAllText($corruptLedgerPath)
-    Assert-True ($corruptLedgerAfter.StartsWith($corruptLedgerBefore, [StringComparison]::Ordinal)) 'malformed middle record must remain append-only'
-    Assert-True ($corruptLedgerAfter.Contains([string]$corruptFirst.eventId, [StringComparison]::Ordinal) -and $corruptLedgerAfter.Contains([string]$corruptSecond.eventId, [StringComparison]::Ordinal)) 'malformed-middle recovery must preserve both complete records'
+    $corruptLedgerAfterBytes = [IO.File]::ReadAllBytes($corruptLedgerPath)
+    Assert-True (Test-BytePrefix -Value $corruptLedgerAfterBytes -Prefix $corruptLedgerBeforeBytes) 'malformed middle record must remain append-only'
+    $corruptLedgerAfterText = [Text.UTF8Encoding]::new($false, $false).GetString($corruptLedgerAfterBytes)
+    Assert-True ($corruptLedgerAfterText.Contains([string]$corruptFirst.eventId, [StringComparison]::Ordinal) -and $corruptLedgerAfterText.Contains([string]$corruptSecond.eventId, [StringComparison]::Ordinal)) 'malformed-middle recovery must preserve both complete records'
     $corruptDiagnostics = [IO.File]::ReadAllText([string]$corruptNextResult.diagnosticPath)
-    Assert-True ($corruptDiagnostics.Contains('"diagnosticType":"corrupt_record"', [StringComparison]::Ordinal)) 'malformed middle must produce a corruption diagnostic'
+    Assert-True ($corruptDiagnostics.Contains('"diagnosticType":"schema_invalid_record"', [StringComparison]::Ordinal)) 'schema-invalid middle must produce a schema diagnostic'
     Assert-True (-not $corruptDiagnostics.Contains('never-persist-in-diagnostics', [StringComparison]::Ordinal) -and -not $corruptDiagnostics.Contains('secret', [StringComparison]::Ordinal)) 'corruption diagnostics must exclude raw sensitive payloads'
+
+    $foreignLedgerRunId = 'synthetic-reporting-foreign-ledger'
+    $foreignSourceRunId = 'synthetic-reporting-foreign-source'
+    $foreignLedgerPath = Join-Path (Join-Path $recorderRoot $foreignLedgerRunId) 'events.jsonl'
+    [IO.Directory]::CreateDirectory((Split-Path -Parent $foreignLedgerPath)) | Out-Null
+    $foreignPersistedEvent = New-RecorderStoryEvent -EventId 'synthetic-foreign-persisted' -RunId $foreignSourceRunId -StoryId 725 -StoryRef 141 -TransitionId 'foreign-persisted'
+    $foreignPersistedJson = $foreignPersistedEvent | ConvertTo-Json -Compress -Depth 20
+    [IO.File]::WriteAllText($foreignLedgerPath, $foreignPersistedJson + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $foreignLedgerBefore = [IO.File]::ReadAllBytes($foreignLedgerPath)
+    $foreignIncomingEvent = New-RecorderStoryEvent -EventId 'synthetic-foreign-incoming' -RunId $foreignLedgerRunId -StoryId 725 -StoryRef 141 -TransitionId 'foreign-incoming'
+    $foreignInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $foreignLedgerRunId -EventJson ($foreignIncomingEvent | ConvertTo-Json -Compress -Depth 20)
+    $foreignResult = Get-RecorderProcessResult -Invocation $foreignInvocation -Context 'foreign persisted run binding'
+    Assert-True ($foreignInvocation.ExitCode -eq 3 -and $foreignResult.errorCategory -ceq 'run_binding_conflict') 'foreign persisted run must be rejected explicitly'
+    Assert-True ((Test-BytePrefix -Value ([IO.File]::ReadAllBytes($foreignLedgerPath)) -Prefix $foreignLedgerBefore) -and (([IO.File]::ReadAllBytes($foreignLedgerPath)).Length -eq $foreignLedgerBefore.Length)) 'foreign persisted run rejection must preserve its ledger'
+    $foreignDiagnostics = [IO.File]::ReadAllText([string]$foreignResult.diagnosticPath)
+    Assert-True ($foreignDiagnostics.Contains('"diagnosticType":"foreign_run"', [StringComparison]::Ordinal)) 'foreign persisted run must produce a foreign-run diagnostic'
 }
 finally {
     if (Test-Path -LiteralPath $recorderRoot) {
