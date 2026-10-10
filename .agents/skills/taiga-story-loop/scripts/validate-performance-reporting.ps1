@@ -87,6 +87,10 @@ foreach ($marker in @(
         'addedAgents'
         'measurement-only messages'
         'same-SHA retry'
+        'observedAtUtc'
+        'mismatched closure identity'
+        'reversed closure'
+        'Identity and payload conflict checks run first'
         'negativeControls'
         'budget-exceeded'
         'changed-outcome'
@@ -208,12 +212,18 @@ Assert-True ([string]$correctionReviewStart.revision -ceq 'ccccccccccccccccccccc
 Assert-True ([string]$perTaskReviews.events[0].revision -ceq [string]$perTaskReviews.events[1].revision) 'review start and acceptance must retain the same revision'
 $task148Assertions = {
     $perTaskCounts = Get-ReviewCountResult -Fixture $perTaskReviews
-$perTaskObservations = Get-ReviewObservationResult -Fixture $perTaskReviews
-Assert-True ($perTaskObservations.duplicateEventCount -eq 1) 'fixture control must derive one exact duplicate event'
-Assert-True ($perTaskObservations.duplicateAttemptCount -eq 1) 'fixture control must derive one same-attempt duplicate with a new event ID'
-Assert-True ($perTaskObservations.conflictCount -eq 1) 'fixture control must derive one changed-payload conflict'
-Assert-True ($perTaskObservations.staleCount -eq 1) 'fixture control must derive one stale closed-attempt observation'
-Assert-True ($perTaskObservations.unhandledCount -eq 0) 'fixture control must classify every observation'
+    $perTaskObservations = Get-ReviewObservationResult -Fixture $perTaskReviews
+    Assert-True ($perTaskObservations.duplicateEventCount -eq 1) 'fixture control must derive one exact duplicate event'
+    Assert-True ($perTaskObservations.duplicateAttemptCount -eq 1) 'fixture control must derive one same-attempt duplicate with a new event ID'
+    Assert-True ($perTaskObservations.conflictCount -eq 2) 'fixture control must derive changed-payload conflicts before stale classification'
+    Assert-True ($perTaskObservations.staleCount -eq 1) 'fixture control must derive one stale closed-attempt observation'
+    Assert-True ($perTaskObservations.unhandledCount -eq 0) 'fixture control must classify every observation'
+    Assert-True ($perTaskCounts.invalidClosureCount -eq 0) 'authoritative fixture closures must match immutable start identity and chronology'
+    Assert-True (@($perTaskCounts.closureControlResults).Count -eq 2) 'fixture control must include mismatched and reversed closures'
+    $mismatchedClosure = @($perTaskCounts.closureControlResults | Where-Object { [string]$_.case -ceq 'mismatched-closure-identity' })[0]
+    $reversedClosure = @($perTaskCounts.closureControlResults | Where-Object { [string]$_.case -ceq 'reversed-closure' })[0]
+    Assert-True (-not $mismatchedClosure.result.valid -and [string]$mismatchedClosure.result.reason -ceq 'mismatched-reviewRequestId') 'mismatched closure identity must be rejected'
+    Assert-True (-not $reversedClosure.result.valid -and [string]$reversedClosure.result.reason -ceq 'reversed-chronology') 'reversed closure must be rejected'
 Assert-True ([int]$perTaskReviews.expectedCounts.initialTaskReviews -eq $perTaskCounts.initialTaskReviews) 'per-task expected initial count must match the derived event count'
 Assert-True ([int]$perTaskReviews.expectedCounts.correctionReReviews -eq $perTaskCounts.correctionReReviews) 'per-task expected correction count must match the derived event count'
 Assert-True ([int]$perTaskReviews.expectedCounts.finalStoryReviews -eq $perTaskCounts.finalStoryReviews) 'per-task expected final count must match the derived event count'
@@ -427,11 +437,32 @@ function Get-ReviewPayloadWithoutEventId {
 
     $payload = [ordered]@{}
     foreach ($property in @($Event.PSObject.Properties)) {
-        if ($property.Name -cne 'eventId') {
+        if ($property.Name -cne 'eventId' -and $property.Name -cne 'observedAtUtc') {
             $payload[$property.Name] = $property.Value
         }
     }
     return Get-CanonicalPayload -Payload $payload
+}
+
+function Test-ReviewClosure {
+    param(
+        [Parameter(Mandatory)] [object] $Start,
+        [Parameter(Mandatory)] [object] $Closure
+    )
+
+    foreach ($field in @('reviewRequestId', 'reviewAttemptId', 'scope', 'reviewKind', 'reviewAttemptOrdinal', 'revision')) {
+        if ([string]$Start.$field -cne [string]$Closure.$field) {
+            return [pscustomobject]@{ valid = $false; reason = "mismatched-$field" }
+        }
+    }
+
+    $startTime = [DateTime]::Parse([string]$Start.occurredAtUtc)
+    $closureTime = [DateTime]::Parse([string]$Closure.occurredAtUtc)
+    if ($closureTime -lt $startTime) {
+        return [pscustomobject]@{ valid = $false; reason = 'reversed-chronology' }
+    }
+
+    return [pscustomobject]@{ valid = $true; reason = $null }
 }
 
 function Get-ReviewCountResult {
@@ -471,6 +502,52 @@ function Get-ReviewCountResult {
         $seenFinalAttemptIds[$attemptId] = $true
     }
 
+    $validClosuresByAttempt = @{}
+    $invalidClosureCount = 0
+    foreach ($event in $events | Where-Object {
+            [string]$_.eventType -ceq 'review_findings' -or
+            [string]$_.eventType -ceq 'review_accepted' -or
+            [string]$_.eventType -ceq 'final_review_accepted'
+        }) {
+        $attemptId = [string]$event.reviewAttemptId
+        if (-not $attempts.ContainsKey($attemptId)) {
+            $invalidClosureCount++
+            continue
+        }
+        $validation = Test-ReviewClosure -Start $attempts[$attemptId] -Closure $event
+        if (-not $validation.valid) {
+            $invalidClosureCount++
+            continue
+        }
+        if (-not $validClosuresByAttempt.ContainsKey($attemptId)) {
+            $validClosuresByAttempt[$attemptId] = @()
+        }
+        $validClosuresByAttempt[$attemptId] += $event
+    }
+
+    $closureControls = if ($null -ne $Fixture.PSObject.Properties['closureControls']) {
+        @($Fixture.closureControls)
+    }
+    else {
+        @()
+    }
+    $closureControlResults = @()
+    foreach ($control in $closureControls) {
+        $attemptId = [string]$control.reviewAttemptId
+        if ($attempts.ContainsKey($attemptId)) {
+            $closureControlResults += [pscustomobject]@{
+                case = [string]$control.case
+                result = Test-ReviewClosure -Start $attempts[$attemptId] -Closure $control
+            }
+        }
+        else {
+            $closureControlResults += [pscustomobject]@{
+                case = [string]$control.case
+                result = [pscustomobject]@{ valid = $false; reason = 'unknown-attempt' }
+            }
+        }
+    }
+
     $acceptedFirstAttemptTasks = 0
     $closedInitialOutcomes = 0
     foreach ($taskRef in $initialTaskRefs) {
@@ -479,14 +556,12 @@ function Get-ReviewCountResult {
             Sort-Object { [DateTime]::Parse([string]$_.occurredAtUtc) })
         $firstStart = $taskStarts[0]
         $firstAttemptId = [string]$firstStart.reviewAttemptId
-        $closures = @($events |
-            Where-Object {
-                $attemptProperty = $_.PSObject.Properties['reviewAttemptId']
-                $null -ne $attemptProperty -and [string]$attemptProperty.Value -ceq $firstAttemptId -and
-                ([string]$_.eventType -ceq 'review_findings' -or
-                    [string]$_.eventType -ceq 'review_accepted')
-            } |
-            Sort-Object { [DateTime]::Parse([string]$_.occurredAtUtc) })
+        $closures = if ($validClosuresByAttempt.ContainsKey($firstAttemptId)) {
+            @($validClosuresByAttempt[$firstAttemptId] | Sort-Object { [DateTime]::Parse([string]$_.occurredAtUtc) })
+        }
+        else {
+            @()
+        }
         if ($closures.Count -eq 0) { continue }
         $closedInitialOutcomes++
         if ([string]$closures[0].eventType -ceq 'review_accepted') {
@@ -523,6 +598,8 @@ function Get-ReviewCountResult {
         tasksWithInitialReview = $denominator
         acceptedFirstAttemptTasks = $acceptedFirstAttemptTasks
         firstPassAcceptanceRate = [pscustomobject]$rate
+        invalidClosureCount = $invalidClosureCount
+        closureControlResults = $closureControlResults
     }
 }
 
@@ -531,6 +608,7 @@ function Get-ReviewObservationResult {
 
     $ledgerByEventId = @{}
     $attemptPayloadById = @{}
+    $startByAttemptId = @{}
     $closedAtByAttemptId = @{}
     foreach ($event in @($Fixture.events)) {
         $eventId = [string]$event.eventId
@@ -543,13 +621,16 @@ function Get-ReviewObservationResult {
             Assert-True (-not [string]::IsNullOrWhiteSpace($attemptId)) 'review fixture starts must have attempt IDs'
             Assert-True (-not $attemptPayloadById.ContainsKey($attemptId)) "fixture authoritative attempt IDs must be unique: $attemptId"
             $attemptPayloadById[$attemptId] = Get-ReviewPayloadWithoutEventId -Event $event
+            $startByAttemptId[$attemptId] = $event
         }
 
         if ([string]$event.eventType -ceq 'review_findings' -or
             [string]$event.eventType -ceq 'review_accepted' -or
             [string]$event.eventType -ceq 'final_review_accepted') {
             $attemptId = [string]$event.reviewAttemptId
-            if (-not [string]::IsNullOrWhiteSpace($attemptId)) {
+            if (-not [string]::IsNullOrWhiteSpace($attemptId) -and
+                $startByAttemptId.ContainsKey($attemptId) -and
+                (Test-ReviewClosure -Start $startByAttemptId[$attemptId] -Closure $event).valid) {
                 $occurred = [DateTime]::Parse([string]$event.occurredAtUtc)
                 if (-not $closedAtByAttemptId.ContainsKey($attemptId) -or $occurred -lt $closedAtByAttemptId[$attemptId]) {
                     $closedAtByAttemptId[$attemptId] = $occurred
@@ -578,15 +659,24 @@ function Get-ReviewObservationResult {
         }
 
         if ($attemptPayloadById.ContainsKey($attemptId)) {
-            $occurred = [DateTime]::Parse([string]$observation.occurredAtUtc)
-            if ($closedAtByAttemptId.ContainsKey($attemptId) -and $occurred -gt $closedAtByAttemptId[$attemptId]) {
-                $staleCount++
-            }
-            elseif ([string]$attemptPayloadById[$attemptId] -ceq (Get-ReviewPayloadWithoutEventId -Event $observation)) {
-                $duplicateAttemptCount++
+            $payloadMatches = [string]$attemptPayloadById[$attemptId] -ceq (Get-ReviewPayloadWithoutEventId -Event $observation)
+            if (-not $payloadMatches) {
+                $conflictCount++
             }
             else {
-                $conflictCount++
+                $observedAtProperty = $observation.PSObject.Properties['observedAtUtc']
+                $observedAt = if ($null -ne $observedAtProperty) {
+                    [DateTime]::Parse([string]$observedAtProperty.Value)
+                }
+                else {
+                    [DateTime]::Parse([string]$observation.occurredAtUtc)
+                }
+                if ($closedAtByAttemptId.ContainsKey($attemptId) -and $observedAt -gt $closedAtByAttemptId[$attemptId]) {
+                    $staleCount++
+                }
+                else {
+                    $duplicateAttemptCount++
+                }
             }
             continue
         }

@@ -654,6 +654,16 @@ that arrives after its attempt has already closed, does not introduce a new
 attempt, and is marked stale for diagnostics. Duplicates and stale
 observations never increment review counts.
 
+A closing event is authoritative only when its reviewRequestId,
+reviewAttemptId, scope, reviewKind, reviewAttemptOrdinal, and revision all
+match the recorded start, and its immutable occurredAtUtc is not earlier than
+the start. A mismatched closure identity or reversed closure is rejected from the paired
+interval and makes the affected coverage partial; it cannot close or accept a
+different attempt. A diagnostic observation may carry observedAtUtc, which is
+not part of the immutable event payload. Identity and payload conflict checks
+run first; only an identity-matching observation whose observedAtUtc is later
+than the recorded closure is classified stale.
+
 Review counts are calculated as follows:
 
 1. initialTaskReviews is the number of declared task identities with an
@@ -870,7 +880,47 @@ payloads by themselves.
       "reviewAttemptId": "task-147-attempt-1",
       "reviewAttemptOrdinal": 1,
       "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "occurredAtUtc": "2026-10-09T11:20:00Z"
+      "occurredAtUtc": "2026-10-09T11:10:00Z",
+      "observedAtUtc": "2026-10-09T11:20:00Z"
+    },
+    {
+      "eventId": "task-147-late-changed-payload",
+      "eventType": "review_started",
+      "scope": "task",
+      "taskRef": 147,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-147-request-1",
+      "reviewAttemptId": "task-147-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "ffffffffffffffffffffffffffffffffffffffff",
+      "occurredAtUtc": "2026-10-09T11:10:00Z",
+      "observedAtUtc": "2026-10-09T11:20:00Z"
+    }
+  ],
+  "closureControls": [
+    {
+      "case": "mismatched-closure-identity",
+      "eventType": "review_findings",
+      "scope": "task",
+      "taskRef": 147,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "unrelated-request",
+      "reviewAttemptId": "task-147-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "ffffffffffffffffffffffffffffffffffffffff",
+      "occurredAtUtc": "2026-10-09T11:15:00Z"
+    },
+    {
+      "case": "reversed-closure",
+      "eventType": "review_accepted",
+      "scope": "task",
+      "taskRef": 146,
+      "reviewKind": "initial_task",
+      "reviewRequestId": "task-146-request-1",
+      "reviewAttemptId": "task-146-attempt-1",
+      "reviewAttemptOrdinal": 1,
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "occurredAtUtc": "2026-10-09T10:59:00Z"
     }
   ],
   "expectedCounts": {
@@ -1282,7 +1332,7 @@ payloads by themselves.
 
 | Requirement | Fixture ID | Deterministic assertion |
 | --- | --- | --- |
-| Per-task review identity/counting | synthetic-review-counts-per-task | Initial tasks, correction re-review attempts, duplicate observations, stale observations, and first-pass numerator/denominator produce the declared counts. |
+| Per-task review identity/counting | synthetic-review-counts-per-task | Initial tasks, correction re-review attempts, duplicate observations, stale observations, mismatched closure identity, reversed closure, and first-pass numerator/denominator produce the declared counts and coverage. |
 | Story-end-only review mode | synthetic-review-counts-story-end-only | Per-task and correction review counts are zero and first-pass rate is not_applicable; final-story review remains countable. |
 | Same-SHA final re-reviews | synthetic-final-rereviews-same-head | finalStoryReviews counts all three distinct final attempts while finalStoryReReviews counts the later two; attempt ordinal distinguishes a real retry on the unchanged SHA. |
 | Review usage fallback | synthetic-review-usage-unavailable-fallback | Absent reviewer counters remain unavailable with null counters and an explicit safe fallback; forbidden estimates are named. |
