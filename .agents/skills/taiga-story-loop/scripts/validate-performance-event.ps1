@@ -1,4 +1,4 @@
-# Synthetic validation for the task #149 external event recorder.
+# Synthetic validation for the task #149/#150 external event recorder.
 # No network, Taiga, Git, browser, workflow state, or live data is used.
 
 [CmdletBinding()]
@@ -23,17 +23,49 @@ function Invoke-Recorder {
         [Parameter(Mandatory)] [string] $Recorder,
         [Parameter(Mandatory)] [string] $ExternalRunRoot,
         [Parameter(Mandatory)] [string] $RunId,
-        [Parameter(Mandatory)] [string] $EventJson
+        [Parameter(Mandatory)] [string] $EventJson,
+        [int] $LockTimeoutMilliseconds = -1,
+        [int] $FaultAfterBytes = -1
     )
 
     $pwsh = Join-Path $PSHOME 'pwsh.exe'
-    $output = & $pwsh -NoProfile -File $Recorder `
-        -ExternalRunRoot $ExternalRunRoot `
-        -RunId $RunId `
-        -EventJson $EventJson 2>&1
+    $arguments = @(
+        '-NoProfile'
+        '-File'
+        $Recorder
+        '-ExternalRunRoot'
+        $ExternalRunRoot
+        '-RunId'
+        $RunId
+        '-EventJson'
+        $EventJson
+    )
+    if ($LockTimeoutMilliseconds -ge 0) {
+        $arguments += @('-LockTimeoutMilliseconds', [string] $LockTimeoutMilliseconds)
+    }
+    if ($FaultAfterBytes -ge 0) {
+        $arguments += @('-FaultAfterBytes', [string] $FaultAfterBytes)
+    }
+    $output = & $pwsh @arguments 2>&1
     return [pscustomobject]@{
         ExitCode = [int] $LASTEXITCODE
         Output = @($output | ForEach-Object { [string] $_ })
+    }
+}
+
+function Get-RecorderResult {
+    param(
+        [Parameter(Mandatory)] [object] $Invocation,
+        [Parameter(Mandatory)] [string] $Context
+    )
+
+    $jsonLines = @($Invocation.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    Assert-True ($jsonLines.Count -gt 0) "$Context returns a JSON result"
+    try {
+        return ($jsonLines[-1] | ConvertFrom-Json -DateKind String)
+    }
+    catch {
+        throw "Performance-event assertion failed: $Context returned non-JSON output '$($jsonLines[-1])'"
     }
 }
 
@@ -396,7 +428,173 @@ try {
     Assert-True ($privacy.ExitCode -ne 0) 'nested prompt/transcript metadata is rejected'
     Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) 'nested privacy rejection leaves the ledger unchanged'
 
-    Write-Output 'Passed performance-event recorder fixtures: documented event-family round-trips, unavailable and source-backed usage validation, invalid schema/type/timestamp/identity/event/PR/usage cases, run/path binding, allowlisted metadata, privacy rejection, and unchanged-ledger safety; synthetic and non-live.'
+    $idempotencyRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-idempotency-' + [guid]::NewGuid().ToString('N'))
+    $idempotencyRunId = 'synthetic-run-150-idempotency'
+    $idempotencyLedgerPath = Join-Path (Join-Path $idempotencyRoot $idempotencyRunId) 'events.jsonl'
+    $idempotencyEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-idempotency-event'
+        runId = $idempotencyRunId
+        transitionId = 'idempotency-first-write'
+    }
+    $idempotencyJson = Convert-EventToJson -Event $idempotencyEvent
+    $idempotencyFirst = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $idempotencyRoot -RunId $idempotencyRunId -EventJson $idempotencyJson
+    $idempotencyFirstResult = Get-RecorderResult -Invocation $idempotencyFirst -Context 'idempotency first write'
+    Assert-True ($idempotencyFirst.ExitCode -eq 0 -and $idempotencyFirstResult.status -ceq 'appended') 'first stable-ID write appends'
+    $beforeNoop = [IO.File]::ReadAllText($idempotencyLedgerPath)
+    $reorderedEvent = [ordered]@{}
+    foreach ($property in @($idempotencyEvent.PSObject.Properties | Sort-Object Name -Descending)) {
+        $reorderedEvent[$property.Name] = $property.Value
+    }
+    $reordered = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $idempotencyRoot -RunId $idempotencyRunId -EventJson (Convert-EventToJson -Event $reorderedEvent)
+    $reorderedResult = Get-RecorderResult -Invocation $reordered -Context 'canonicalized idempotency repeat'
+    Assert-True ($reordered.ExitCode -eq 0 -and $reorderedResult.status -ceq 'noop') 'reordered JSON object keys are an idempotent replay'
+    Assert-True ([IO.File]::ReadAllText($idempotencyLedgerPath) -ceq $beforeNoop) 'canonicalized replay does not append a duplicate line'
+    $idempotencyRepeat = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $idempotencyRoot -RunId $idempotencyRunId -EventJson $idempotencyJson
+    $idempotencyRepeatResult = Get-RecorderResult -Invocation $idempotencyRepeat -Context 'idempotency repeat'
+    Assert-True ($idempotencyRepeat.ExitCode -eq 0 -and $idempotencyRepeatResult.status -ceq 'noop') 'identical stable-ID replay is a no-op'
+    Assert-True ([IO.File]::ReadAllText($idempotencyLedgerPath) -ceq $beforeNoop) 'identical replay does not append a duplicate line'
+    $conflictingEvent = New-EventVariant -Base $idempotencyEvent -Changes @{
+        transitionId = 'idempotency-conflicting-write'
+    }
+    $conflicting = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $idempotencyRoot -RunId $idempotencyRunId -EventJson (Convert-EventToJson $conflictingEvent)
+    $conflictingResult = Get-RecorderResult -Invocation $conflicting -Context 'conflicting duplicate'
+    Assert-True ($conflicting.ExitCode -eq 3) 'conflicting stable-ID replay exits with a conflict result'
+    Assert-True ($conflictingResult.status -ceq 'error' -and $conflictingResult.errorCategory -ceq 'conflicting_duplicate') 'conflicting stable-ID replay is reported safely'
+    Assert-True (Test-Path -LiteralPath ([string] $conflictingResult.diagnosticPath) -PathType Leaf) 'conflicting replay writes a diagnostic sidecar'
+    Assert-True ([IO.File]::ReadAllText([string] $conflictingResult.diagnosticPath) -match '"diagnosticType":"conflicting_duplicate"') 'conflict sidecar records the conflict type'
+    Assert-True ([IO.File]::ReadAllText($idempotencyLedgerPath) -ceq $beforeNoop) 'conflicting replay does not mutate the event ledger'
+
+    $lockRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-lock-' + [guid]::NewGuid().ToString('N'))
+    $lockRunId = 'synthetic-run-150-lock'
+    $lockDirectory = Join-Path $lockRoot $lockRunId
+    [IO.Directory]::CreateDirectory($lockDirectory) | Out-Null
+    $lockPath = Join-Path $lockDirectory 'events.jsonl.lock'
+    $lockHolder = $null
+    try {
+        $lockHolder = [IO.FileStream]::new($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $lockEvent = New-EventVariant -Base $validEvent -Changes @{
+            eventId = 'synthetic-lock-timeout-event'
+            runId = $lockRunId
+            transitionId = 'lock-timeout'
+        }
+        $lockInvocation = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $lockRoot -RunId $lockRunId -EventJson (Convert-EventToJson $lockEvent) -LockTimeoutMilliseconds 0
+        $lockResult = Get-RecorderResult -Invocation $lockInvocation -Context 'bounded lock timeout'
+        Assert-True ($lockInvocation.ExitCode -eq 2) 'held ledger lock exits with a bounded failure'
+        Assert-True ($lockResult.status -ceq 'error' -and $lockResult.errorCategory -ceq 'lock_timeout') 'held ledger lock returns a safe timeout category'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $lockDirectory 'events.jsonl'))) 'lock timeout does not fabricate a ledger record'
+    }
+    finally {
+        if ($null -ne $lockHolder) {
+            $lockHolder.Dispose()
+        }
+    }
+
+    $recoveryRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-recovery-' + [guid]::NewGuid().ToString('N'))
+    $recoveryRunId = 'synthetic-run-150-recovery'
+    $recoveryLedgerPath = Join-Path (Join-Path $recoveryRoot $recoveryRunId) 'events.jsonl'
+    $confirmedEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-confirmed-before-fault'
+        runId = $recoveryRunId
+        transitionId = 'confirmed-before-fault'
+    }
+    $confirmed = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $confirmedEvent)
+    Assert-True ($confirmed.ExitCode -eq 0) 'confirmed event before fault appends'
+    $interruptedEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-interrupted-write'
+        runId = $recoveryRunId
+        transitionId = 'interrupted-write'
+    }
+    $faulted = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $interruptedEvent) -FaultAfterBytes 32
+    $faultedResult = Get-RecorderResult -Invocation $faulted -Context 'deterministic interrupted write'
+    Assert-True ($faulted.ExitCode -eq 2) 'deterministic partial write never reports success'
+    Assert-True ($faultedResult.status -ceq 'error' -and $faultedResult.errorCategory -ceq 'write_failed') 'partial write returns a safe write failure category'
+    $faultedBytes = [IO.File]::ReadAllBytes($recoveryLedgerPath)
+    Assert-True ($faultedBytes.Length -gt 0 -and $faultedBytes[$faultedBytes.Length - 1] -ne [byte] 0x0A) 'fault injection leaves an explicitly detectable incomplete tail'
+    $recoveredEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-recovered-after-tail'
+        runId = $recoveryRunId
+        transitionId = 'recovered-after-tail'
+    }
+    $recovered = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $recoveredEvent)
+    $recoveredResult = Get-RecorderResult -Invocation $recovered -Context 'incomplete-tail recovery'
+    Assert-True ($recovered.ExitCode -eq 0 -and $recoveredResult.status -ceq 'appended') 'next append recovers after an interrupted tail'
+    Assert-True ([bool] $recoveredResult.recoveredIncompleteTail) 'recovery result identifies the incomplete tail'
+    Assert-True (Test-Path -LiteralPath ([string] $recoveredResult.diagnosticPath) -PathType Leaf) 'tail recovery writes a diagnostic sidecar'
+    $recoveryDiagnostics = [IO.File]::ReadAllText([string] $recoveredResult.diagnosticPath)
+    Assert-True ($recoveryDiagnostics -match '"diagnosticType":"incomplete_tail"') 'tail recovery preserves incomplete-tail evidence'
+    $recoveryLedgerText = [IO.File]::ReadAllText($recoveryLedgerPath)
+    Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $confirmedEvent.eventId)) 'recovery preserves the confirmed complete event'
+    Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $recoveredEvent.eventId)) 'recovery appends the new complete event'
+
+    $concurrentRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-concurrent-' + [guid]::NewGuid().ToString('N'))
+    $concurrentRunId = 'synthetic-run-150-concurrent'
+    $concurrentDirectory = Join-Path $concurrentRoot $concurrentRunId
+    [IO.Directory]::CreateDirectory($concurrentDirectory) | Out-Null
+    $concurrentLockPath = Join-Path $concurrentDirectory 'events.jsonl.lock'
+    $concurrentLockHolder = $null
+    $concurrentJobs = @()
+    $concurrentJobScript = {
+        param(
+            [string] $RecorderPath,
+            [string] $RunRoot,
+            [string] $RunName,
+            [string] $Payload
+        )
+
+        $pwshPath = Join-Path $PSHOME 'pwsh.exe'
+        $captured = @(& $pwshPath -NoProfile -File $RecorderPath `
+            -ExternalRunRoot $RunRoot `
+            -RunId $RunName `
+            -EventJson $Payload `
+            -LockTimeoutMilliseconds 30000 2>&1 | ForEach-Object { [string] $_ })
+        [pscustomobject]@{
+            ExitCode = [int] $LASTEXITCODE
+            Output = $captured
+        }
+    }
+    try {
+        $concurrentLockHolder = [IO.FileStream]::new($concurrentLockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $concurrentEventA = New-EventVariant -Base $validEvent -Changes @{
+            eventId = 'synthetic-concurrent-a'
+            runId = $concurrentRunId
+            transitionId = 'concurrent-a'
+        }
+        $concurrentEventB = New-EventVariant -Base $validEvent -Changes @{
+            eventId = 'synthetic-concurrent-b'
+            runId = $concurrentRunId
+            transitionId = 'concurrent-b'
+        }
+        $concurrentJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, (Convert-EventToJson $concurrentEventA)
+        $concurrentJobs += Start-Job -ScriptBlock $concurrentJobScript -ArgumentList $recorder, $concurrentRoot, $concurrentRunId, (Convert-EventToJson $concurrentEventB)
+        $concurrentLockHolder.Dispose()
+        $concurrentLockHolder = $null
+        $completedConcurrentJobs = @(Wait-Job -Job $concurrentJobs -Timeout 60)
+        Assert-True ($completedConcurrentJobs.Count -eq 2) 'concurrent recorder fixtures complete within the bounded wait'
+        $concurrentResults = @($concurrentJobs | Receive-Job)
+        Assert-True ($concurrentResults.Count -eq 2) 'both concurrent recorder fixtures return results'
+        foreach ($concurrentResult in $concurrentResults) {
+            Assert-True ($concurrentResult.ExitCode -eq 0) 'concurrent distinct event append exits zero'
+            $concurrentOperation = Get-RecorderResult -Invocation $concurrentResult -Context 'concurrent distinct event'
+            Assert-True ($concurrentOperation.status -ceq 'appended') 'concurrent distinct event reports append'
+        }
+        $concurrentLedgerPath = Join-Path $concurrentDirectory 'events.jsonl'
+        $concurrentLines = @(Get-Content -LiteralPath $concurrentLedgerPath)
+        $concurrentIds = @($concurrentLines | ForEach-Object { ([string] (($_ | ConvertFrom-Json -DateKind String).eventId)) })
+        Assert-True ($concurrentLines.Count -eq 2) 'concurrent distinct events persist as exactly two lines'
+        Assert-True (@($concurrentIds | Sort-Object -Unique).Count -eq 2) 'concurrent distinct events persist once each'
+        Assert-True ($concurrentIds -contains [string] $concurrentEventA.eventId) 'concurrent event A is present'
+        Assert-True ($concurrentIds -contains [string] $concurrentEventB.eventId) 'concurrent event B is present'
+    }
+    finally {
+        if ($null -ne $concurrentLockHolder) {
+            $concurrentLockHolder.Dispose()
+        }
+        if ($concurrentJobs.Count -gt 0) {
+            Remove-Job -Job $concurrentJobs -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Write-Output 'Passed performance-event recorder fixtures: documented event-family round-trips, idempotent replay/conflict diagnostics, bounded lock timeout, interrupted-tail recovery, concurrent distinct appends, unavailable and source-backed usage validation, invalid schema/type/timestamp/identity/event/PR/usage cases, run/path binding, allowlisted metadata, privacy rejection, and unchanged-ledger safety; synthetic and non-live.'
     exit 0
 }
 finally {

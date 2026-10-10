@@ -18,7 +18,11 @@ param(
     [string] $EventJson,
 
     [Parameter(Mandatory, ParameterSetName = 'File')]
-    [string] $EventPath
+    [string] $EventPath,
+
+    [int] $LockTimeoutMilliseconds = 5000,
+
+    [int] $FaultAfterBytes = -1
 )
 
 Set-StrictMode -Version Latest
@@ -672,14 +676,206 @@ function Parse-Event {
     return $event
 }
 
+function Convert-ToCanonicalValue {
+    param([AllowNull()] [object] $Value)
+
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $ordered = [ordered]@{}
+        foreach ($key in @($Value.Keys | Sort-Object { [string] $_ })) {
+            $ordered[[string] $key] = Convert-ToCanonicalValue -Value $Value[$key]
+        }
+        return $ordered
+    }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $ordered = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
+            $ordered[$property.Name] = Convert-ToCanonicalValue -Value $property.Value
+        }
+        return $ordered
+    }
+    if ($Value -is [System.Array]) {
+        return @($Value | ForEach-Object { Convert-ToCanonicalValue -Value $_ })
+    }
+    return $Value
+}
+
+function Convert-ToCanonicalJson {
+    param([Parameter(Mandatory)] [object] $Value)
+
+    return (Convert-ToCanonicalValue -Value $Value | ConvertTo-Json -Compress -Depth 50)
+}
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)] [string] $Text)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($Text)
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $hash.Dispose()
+    }
+}
+
+function Get-UtcNowText {
+    return [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Acquire-LedgerLock {
+    param(
+        [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [int] $TimeoutMilliseconds
+    )
+
+    $lockPath = "$LedgerPath.lock"
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -le $TimeoutMilliseconds) {
+        try {
+            return [IO.FileStream]::new(
+                $lockPath,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None,
+                1,
+                [IO.FileOptions]::WriteThrough)
+        }
+        catch [IO.IOException] {
+            if ($TimeoutMilliseconds -eq 0 -or $clock.ElapsedMilliseconds -ge $TimeoutMilliseconds) {
+                throw [TimeoutException]::new('ledger lock wait exceeded the configured bound')
+            }
+            [Threading.Thread]::Yield() | Out-Null
+        }
+    }
+    throw [TimeoutException]::new('ledger lock wait exceeded the configured bound')
+}
+
+function Read-LedgerState {
+    param([Parameter(Mandatory)] [string] $LedgerPath)
+
+    if (-not (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) {
+        return [pscustomobject]@{
+            Records = @()
+            CorruptRecords = @()
+            IncompleteTail = $null
+            NeedsSeparator = $false
+        }
+    }
+
+    $bytes = [IO.File]::ReadAllBytes($LedgerPath)
+    if ($bytes.Length -eq 0) {
+        return [pscustomobject]@{
+            Records = @()
+            CorruptRecords = @()
+            IncompleteTail = $null
+            NeedsSeparator = $false
+        }
+    }
+
+    $encoding = [Text.UTF8Encoding]::new($false, $true)
+    $text = $encoding.GetString($bytes)
+    $needsSeparator = $bytes[$bytes.Length - 1] -ne [byte] 0x0A
+    $rawLines = @($text -split "`n", -1)
+    if (-not $needsSeparator -and $rawLines.Count -gt 0 -and $rawLines[-1] -eq '') {
+        $rawLines = @($rawLines[0..($rawLines.Count - 2)])
+    }
+
+    $records = @()
+    $corrupt = @()
+    $incompleteTail = $null
+    for ($index = 0; $index -lt $rawLines.Count; $index++) {
+        $lineNumber = $index + 1
+        $line = $rawLines[$index].TrimEnd("`r")
+        if ($needsSeparator -and $index -eq $rawLines.Count - 1) {
+            $incompleteTail = [pscustomobject]@{
+                lineNumber = $lineNumber
+                byteLength = [Text.UTF8Encoding]::new($false).GetByteCount($line)
+                digest = Get-Sha256Hex -Text $line
+            }
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            $corrupt += [pscustomobject]@{
+                lineNumber = $lineNumber
+                byteLength = 0
+                digest = Get-Sha256Hex -Text $line
+            }
+            continue
+        }
+
+        try {
+            $candidate = $line | ConvertFrom-Json -DateKind String
+            $eventIdProperty = if ($null -eq $candidate) { $null } else { Get-Property -Object $candidate -Name 'eventId' }
+            if ($null -eq $candidate -or $candidate -is [System.Array] -or
+                $null -eq $eventIdProperty -or [string]::IsNullOrWhiteSpace([string] $eventIdProperty.Value)) {
+                throw [FormatException]::new('ledger record is not an event object')
+            }
+            $records += [pscustomobject]@{
+                EventId = [string] $eventIdProperty.Value
+                CanonicalJson = Convert-ToCanonicalJson -Value $candidate
+                LineNumber = $lineNumber
+            }
+        }
+        catch {
+            $corrupt += [pscustomobject]@{
+                lineNumber = $lineNumber
+                byteLength = [Text.UTF8Encoding]::new($false).GetByteCount($line)
+                digest = Get-Sha256Hex -Text $line
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Records = $records
+        CorruptRecords = $corrupt
+        IncompleteTail = $incompleteTail
+        NeedsSeparator = $needsSeparator
+    }
+}
+
+function Write-Diagnostic {
+    param(
+        [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $DiagnosticType,
+        [AllowNull()] [string] $EventId,
+        [AllowNull()] [string] $ExistingDigest,
+        [AllowNull()] [string] $IncomingDigest,
+        [AllowNull()] [int] $LineNumber,
+        [AllowNull()] [int] $ByteLength
+    )
+
+    $diagnosticPath = "$LedgerPath.diagnostics.jsonl"
+    $diagnostic = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_diagnostic'
+        diagnosticType = $DiagnosticType
+        runId = $RunId
+        eventId = $EventId
+        existingDigest = $ExistingDigest
+        incomingDigest = $IncomingDigest
+        lineNumber = $LineNumber
+        byteLength = $ByteLength
+        recordedAtUtc = Get-UtcNowText
+    }
+    Write-LedgerLine -LedgerPath $diagnosticPath -Line ($diagnostic | ConvertTo-Json -Compress -Depth 10)
+    return $diagnosticPath
+}
+
 function Write-LedgerLine {
     param(
         [Parameter(Mandatory)] [string] $LedgerPath,
-        [Parameter(Mandatory)] [string] $Line
+        [Parameter(Mandatory)] [string] $Line,
+        [switch] $PrependNewline,
+        [int] $FaultAfterBytes = -1
     )
 
     $encoding = [Text.UTF8Encoding]::new($false)
-    $bytes = $encoding.GetBytes($Line + [Environment]::NewLine)
+    $prefix = if ($PrependNewline) { [Environment]::NewLine } else { '' }
+    $bytes = $encoding.GetBytes($prefix + $Line + [Environment]::NewLine)
     $stream = $null
     try {
         $stream = [IO.FileStream]::new(
@@ -689,11 +885,20 @@ function Write-LedgerLine {
             [IO.FileShare]::Read,
             4096,
             [IO.FileOptions]::WriteThrough)
-        $stream.Write($bytes, 0, $bytes.Length)
+        $writeLength = if ($FaultAfterBytes -ge 0) { [Math]::Min($FaultAfterBytes, $bytes.Length) } else { $bytes.Length }
+        if ($writeLength -gt 0) {
+            $stream.Write($bytes, 0, $writeLength)
+        }
         $stream.Flush($true)
+        if ($writeLength -lt $bytes.Length) {
+            throw [IO.IOException]::new('deterministic write fault injected')
+        }
     }
     catch {
-        Fail-Recorder 'event ledger could not be written'
+        if ($FaultAfterBytes -ge 0) {
+            throw [InvalidOperationException]::new('deterministic write fault injected')
+        }
+        throw [IO.IOException]::new('event ledger could not be written')
     }
     finally {
         if ($null -ne $stream) {
@@ -705,6 +910,12 @@ function Write-LedgerLine {
 $expectedRoot = Get-FullPath -Path $ExternalRunRoot -Name 'ExternalRunRoot'
 Assert-ExternalRunRoot -Root $expectedRoot
 Assert-PathSafeRunId -Value $RunId
+if ($LockTimeoutMilliseconds -lt 0) {
+    Fail-Recorder "'LockTimeoutMilliseconds' must be nonnegative"
+}
+if ($FaultAfterBytes -lt -1) {
+    Fail-Recorder "'FaultAfterBytes' must be -1 or nonnegative"
+}
 
 $eventText = Read-EventJson
 $event = Parse-Event -Json $eventText
@@ -727,11 +938,115 @@ catch {
 }
 
 $serializedEvent = $event | ConvertTo-Json -Compress -Depth 20
-Write-LedgerLine -LedgerPath $ledgerPath -Line $serializedEvent
+$incomingCanonical = Convert-ToCanonicalJson -Value $event
+$incomingDigest = Get-Sha256Hex -Text $incomingCanonical
+$lock = $null
+$operationResult = $null
+$operationExitCode = 0
+$diagnosticPaths = @()
+$conflictDiagnosticPath = $null
 
-[ordered]@{
-    status = 'appended'
-    eventId = [string] $event.eventId
-    runId = [string] $event.runId
-    ledgerPath = $ledgerPath
-} | ConvertTo-Json -Compress
+try {
+    $lock = Acquire-LedgerLock -LedgerPath $ledgerPath -TimeoutMilliseconds $LockTimeoutMilliseconds
+    $ledgerState = Read-LedgerState -LedgerPath $ledgerPath
+
+    foreach ($corruptRecord in @($ledgerState.CorruptRecords)) {
+        $diagnosticPaths += Write-Diagnostic `
+            -LedgerPath $ledgerPath `
+            -RunId $RunId `
+            -DiagnosticType 'corrupt_record' `
+            -EventId $null `
+            -ExistingDigest $null `
+            -IncomingDigest $null `
+            -LineNumber $corruptRecord.lineNumber `
+            -ByteLength $corruptRecord.byteLength
+    }
+    if ($null -ne $ledgerState.IncompleteTail) {
+        $diagnosticPaths += Write-Diagnostic `
+            -LedgerPath $ledgerPath `
+            -RunId $RunId `
+            -DiagnosticType 'incomplete_tail' `
+            -EventId $null `
+            -ExistingDigest $ledgerState.IncompleteTail.digest `
+            -IncomingDigest $null `
+            -LineNumber $ledgerState.IncompleteTail.lineNumber `
+            -ByteLength $ledgerState.IncompleteTail.byteLength
+    }
+
+    $matchingRecords = @($ledgerState.Records | Where-Object { $_.EventId -ceq [string] $event.eventId })
+    if ($matchingRecords.Count -gt 0) {
+        $conflict = @($matchingRecords | Where-Object { $_.CanonicalJson -cne $incomingCanonical })
+        if ($conflict.Count -gt 0) {
+            $conflictDiagnosticPath = Write-Diagnostic `
+                -LedgerPath $ledgerPath `
+                -RunId $RunId `
+                -DiagnosticType 'conflicting_duplicate' `
+                -EventId ([string] $event.eventId) `
+                -ExistingDigest (Get-Sha256Hex -Text $conflict[0].CanonicalJson) `
+                -IncomingDigest $incomingDigest `
+                -LineNumber $conflict[0].LineNumber `
+                -ByteLength $null
+            $operationResult = [ordered]@{
+                status = 'error'
+                errorCategory = 'conflicting_duplicate'
+                eventId = [string] $event.eventId
+                runId = $RunId
+                ledgerPath = $ledgerPath
+                diagnosticPath = $conflictDiagnosticPath
+            }
+            $operationExitCode = 3
+        }
+        else {
+            $operationResult = [ordered]@{
+                status = 'noop'
+                eventId = [string] $event.eventId
+                runId = $RunId
+                ledgerPath = $ledgerPath
+                diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
+            }
+        }
+    }
+    else {
+        Write-LedgerLine `
+            -LedgerPath $ledgerPath `
+            -Line $serializedEvent `
+            -PrependNewline:([bool] $ledgerState.NeedsSeparator) `
+            -FaultAfterBytes $FaultAfterBytes
+        $operationResult = [ordered]@{
+            status = 'appended'
+            eventId = [string] $event.eventId
+            runId = $RunId
+            ledgerPath = $ledgerPath
+            recoveredIncompleteTail = $null -ne $ledgerState.IncompleteTail
+            diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
+        }
+    }
+}
+catch [TimeoutException] {
+    $operationResult = [ordered]@{
+        status = 'error'
+        errorCategory = 'lock_timeout'
+        eventId = [string] $event.eventId
+        runId = $RunId
+        ledgerPath = $ledgerPath
+    }
+    $operationExitCode = 2
+}
+catch {
+    $operationResult = [ordered]@{
+        status = 'error'
+        errorCategory = 'write_failed'
+        eventId = [string] $event.eventId
+        runId = $RunId
+        ledgerPath = $ledgerPath
+    }
+    $operationExitCode = 2
+}
+finally {
+    if ($null -ne $lock) {
+        $lock.Dispose()
+    }
+}
+
+$operationResult | ConvertTo-Json -Compress -Depth 20
+exit $operationExitCode
