@@ -133,11 +133,13 @@ foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', '
 $event = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-run-141/story-started'
 Assert-True ([string]$event.kind -ceq 'story_performance_event') 'event example must use the versioned event kind'
 Assert-True ([int]$event.schemaVersion -eq 1) 'event example must use schema version 1'
-foreach ($field in @('eventId', 'runId', 'projectId', 'storyId', 'storyRef', 'role', 'transitionId', 'eventType', 'occurredAtUtc', 'reviewMode', 'provenance')) {
+foreach ($field in @('eventId', 'runId', 'projectId', 'storyId', 'storyRef', 'scope', 'phaseId', 'role', 'transitionId', 'eventType', 'occurredAtUtc', 'reviewMode', 'provenance')) {
     $property = $event.PSObject.Properties[$field]
     Assert-True ($null -ne $property) "event example must include $field"
 }
 Assert-True ([string]$event.eventType -ceq 'story_started') 'event example must use an original epic event type'
+Assert-True ([string]$event.scope -ceq 'story') 'story_started example must use story scope'
+Assert-True ($null -eq $event.phaseId) 'story_started example must leave phase identity null'
 Assert-Contains $normalized '"occurredAtUtc": "2026-10-09T10:00:00Z"' 'event example timestamp must be UTC'
 Assert-True ($null -eq $event.usage) 'event example may omit usage without treating it as zero'
 
@@ -223,6 +225,9 @@ foreach ($contractMarker in @(
         'correctionId'
         'supersedesReviewAttemptId'
         '`revision` may be `null` before a commit exists'
+        '`phaseId` is `null`'
+        'explicit waits, which use `waitId` instead'
+        'or `final_review_started` when `scope=final_story`'
         'final-story correction'
         'Replaying the same ID'
         'same ID with any different payload is a conflict'

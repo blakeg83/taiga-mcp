@@ -219,7 +219,7 @@ are:
 | `sessionId` / `workerId` | nonblank when the source supplies them; otherwise `null` | Session and worker/chat provenance. Missing values reduce coverage; they are never synthesized from a prompt or transcript. |
 | `transitionId` | nonblank stable logical transition ID | Names the logical lifecycle transition and remains stable across re-observation. |
 | `scope` | `task`, `final_story`, or `story` | Disambiguates task review events from the whole-story review and its corrections. |
-| `phaseId` | nonblank stable interval identity for phase boundary events | The same phase ID is carried by the start and end observations even when the starting revision is `null`. |
+| `phaseId` | nonblank for implementation, review, and correction phase boundaries; otherwise `null` | The same phase ID is carried by the start and end observations even when the starting revision is `null`. `story_started`, `pr_ready`, `wait_started`, and `wait_ended` use story/wait identity instead and leave this field `null`. |
 | `correctionId` | nonblank for correction boundaries; otherwise `null` | Binds a correction start/ready pair and is distinct from the resulting revision and review attempt. |
 | `reviewRequestId` / `reviewAttemptId` | nullable outside review events | A request identifies the handoff; an attempt identifies one actual review. They are separate from `revision` and from `eventId`. |
 | `supersedesReviewAttemptId` | nullable outside correction events | Links a correction or final-story correction to the finding that caused it without rewriting the prior attempt. |
@@ -248,19 +248,19 @@ phase ends; a generic `phase_ended` event is unnecessary and prohibited.
 
 | Event type | Required identity | Closes or pairs with | Missing-data rule |
 | --- | --- | --- | --- |
-| `story_started` | story identity; coordinator role | `pr_ready` | Missing start makes time-to-PR unknown. |
+| `story_started` | `scope=story`, story identity; coordinator role | `pr_ready` with `scope=story` | `phaseId` is `null`; missing start makes time-to-PR unknown. |
 | `implementation_started` | `scope=task`, `taskRef`, `phaseId`; implementer role | `task_ready_for_review` with the same `phaseId` | `revision` may be `null` before a commit exists; missing end leaves the interval uncovered. |
 | `task_ready_for_review` | `scope=task`, `taskRef`, same `phaseId`, full `revision`; implementer role | next `review_started` for the same request | It is an implementation boundary, not proof that delivery or review occurred. |
 | `review_started` | scope, `phaseId`, `reviewRequestId`, `reviewAttemptId`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same phase/attempt identity | Missing end leaves review duration unknown. |
 | `review_findings` | same phase/request/attempt and revision | `correction_started` for a task or final-story correction | Findings close the current review phase; they do not count as acceptance. This also closes a final review when `scope=final_story`. |
 | `review_accepted` | same review request/attempt and revision | acceptance of that task revision | Acceptance is evidence, not a provider write receipt or merge. |
 | `correction_started` | `scope`, `phaseId`, `correctionId`; `taskRef` for task scope; implementer role | `correction_ready` with the same phase/correction ID | Missing end leaves the correction interval uncovered. For final-story correction, `taskRef` is `null` and `supersedesReviewAttemptId` names the final finding. |
-| `correction_ready` | same scope/phase/correction ID; new full `revision`; implementer role | a new `review_started` request | The new revision supersedes the prior review input; it does not mutate history. |
+| `correction_ready` | same scope/phase/correction ID; new full `revision`; implementer role | a new `review_started` request, or `final_review_started` when `scope=final_story` | The new revision supersedes the prior review input; it does not mutate history. |
 | `final_review_started` | `scope=final_story`, final `phaseId`, `reviewRequestId`, `reviewAttemptId`, exact HEAD; reviewer role | `final_review_accepted` or `review_findings` with the same phase/attempt identity | Both acceptance and findings close the final review duration. |
 | `final_review_accepted` | same final request/attempt and exact HEAD | final-story approval | Does not authorize PR creation or merge by itself. |
-| `pr_ready` | PR identity and exact reviewed HEAD; coordinator role | report identity | Missing PR readiness prevents a confirmed PR report. Unknown provider delivery is not readiness. |
-| `wait_started` | stable `waitId`, wait kind, affected scope | `wait_ended` with the same `waitId` | An open wait is reported as uncovered/unknown; it is never inferred from elapsed wall time. |
-| `wait_ended` | same `waitId` and scope | closes the explicit wait interval | An end without a start is an anomaly and contributes no duration. |
+| `pr_ready` | `scope=story`, PR identity and exact reviewed HEAD; coordinator role | report identity | `phaseId` is `null`; missing PR readiness prevents a confirmed PR report. Unknown provider delivery is not readiness. |
+| `wait_started` | stable `waitId`, wait kind, affected scope | `wait_ended` with the same `waitId` | `phaseId` is `null`; an open wait is reported as uncovered/unknown, never inferred from elapsed wall time. |
+| `wait_ended` | same `waitId` and scope | closes the explicit wait interval | `phaseId` is `null`; an end without a start is an anomaly and contributes no duration. |
 
 Pairing is by scope, stable identity, and chronological UTC boundaries, never
 by array position or nearest timestamp. A missing boundary, reversed boundary,
@@ -270,7 +270,9 @@ valid intervals for their own phase metric, preserve overlap diagnostics, and
 never subtract one phase from total wall time to invent coordination or wait
 time. Uncovered gaps remain explicit.
 
-An implementation interval uses one `phaseId` from
+`phaseId` is required for implementation, review, and correction boundaries.
+It is nullable for the story-level `story_started`/`pr_ready` pair and for
+explicit waits, which use `waitId` instead. An implementation interval uses one `phaseId` from
 `implementation_started` through `task_ready_for_review`; the start may have
 `revision: null` and the ready event must carry the resulting full SHA. A task
 correction uses a new `correctionId` and phase ID, starts after
@@ -509,6 +511,8 @@ number, and token values are fixtures, not observations from this run.
   "storyId": 725,
   "storyRef": 141,
   "taskRef": null,
+  "scope": "story",
+  "phaseId": null,
   "role": "coordinator",
   "sessionId": "synthetic-coordinator-session",
   "workerId": "synthetic-coordinator-thread",
