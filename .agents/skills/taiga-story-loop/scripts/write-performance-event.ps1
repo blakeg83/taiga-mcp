@@ -30,14 +30,16 @@ $script:TopLevelFields = @(
     'scope', 'phaseId', 'correctionId', 'reviewRequestId', 'reviewAttemptId',
     'reviewKind', 'reviewAttemptOrdinal', 'supersedesReviewAttemptId',
     'eventType', 'occurredAtUtc', 'revision', 'reviewMode', 'provenance',
-    'usage'
+    'usage', 'waitId', 'waitKind', 'pullRequest'
 )
 
 $script:NullableTopLevelFields = @(
     'taskRef', 'sessionId', 'workerId', 'phaseId', 'correctionId',
     'reviewRequestId', 'reviewAttemptId', 'reviewKind', 'reviewAttemptOrdinal',
-    'supersedesReviewAttemptId', 'revision', 'usage'
+    'supersedesReviewAttemptId', 'revision', 'usage', 'waitId', 'waitKind',
+    'pullRequest'
 )
+$script:RequiredTopLevelFields = @($script:TopLevelFields | Where-Object { $_ -notin @('waitId', 'waitKind', 'pullRequest') })
 
 $script:EventTypes = @(
     'story_started', 'implementation_started', 'task_ready_for_review',
@@ -57,6 +59,7 @@ $script:UsageFields = @(
 )
 $script:CounterSemanticsFields = @('cachedInput', 'reasoning')
 $script:CounterFields = @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')
+$script:PullRequestFields = @('provider', 'owner', 'repository', 'number', 'reviewedHead')
 
 function Fail-Recorder {
     param([Parameter(Mandatory)] [string] $Message)
@@ -213,7 +216,7 @@ function Assert-UtcTimestamp {
 
     Assert-NonBlankString -Value $Value -Name $Name
     $text = [string] $Value
-    if (-not $text.EndsWith('Z', [System.StringComparison]::Ordinal)) {
+    if ($text -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$') {
         Fail-Recorder "'$Name' must be an ISO 8601 UTC timestamp ending in Z"
     }
 
@@ -224,6 +227,22 @@ function Assert-UtcTimestamp {
             [Globalization.DateTimeStyles]::RoundtripKind,
             [ref] $parsed) -or $parsed.Offset -ne [TimeSpan]::Zero) {
         Fail-Recorder "'$Name' must be an ISO 8601 UTC timestamp ending in Z"
+    }
+}
+
+function Assert-PullRequest {
+    param([AllowNull()] [object] $PullRequest)
+
+    Assert-JsonObject -Value $PullRequest -Name 'pullRequest'
+    Assert-AllowlistedProperties -Object $PullRequest -Allowed $script:PullRequestFields -Context 'pullRequest'
+    Assert-RequiredProperties -Object $PullRequest -Names $script:PullRequestFields -Context 'pullRequest'
+    Assert-NonBlankString -Value $PullRequest.provider -Name 'pullRequest.provider'
+    Assert-NonBlankString -Value $PullRequest.owner -Name 'pullRequest.owner'
+    Assert-NonBlankString -Value $PullRequest.repository -Name 'pullRequest.repository'
+    Assert-PositiveInteger -Value $PullRequest.number -Name 'pullRequest.number'
+    Assert-Revision -Revision $PullRequest.reviewedHead
+    if ($null -eq $PullRequest.reviewedHead) {
+        Fail-Recorder "'pullRequest.reviewedHead' must be a full Git SHA"
     }
 }
 
@@ -393,7 +412,7 @@ function Assert-Event {
 
     Assert-JsonObject -Value $Event -Name 'event'
     Assert-AllowlistedProperties -Object $Event -Allowed $script:TopLevelFields -Context 'event'
-    Assert-RequiredProperties -Object $Event -Names $script:TopLevelFields -Context 'event'
+    Assert-RequiredProperties -Object $Event -Names $script:RequiredTopLevelFields -Context 'event'
 
     Assert-PositiveInteger -Value $Event.schemaVersion -Name 'schemaVersion'
     if ([int] $Event.schemaVersion -ne 1) {
@@ -439,39 +458,120 @@ function Assert-Event {
     Assert-Provenance -Provenance $Event.provenance
     Assert-Usage -Usage $Event.usage
 
-    if ([string] $Event.scope -ceq 'task' -and $null -eq $Event.taskRef) {
+    $eventType = [string] $Event.eventType
+    $scope = [string] $Event.scope
+    $role = [string] $Event.role
+    $reviewEvents = @('review_started', 'review_findings', 'review_accepted', 'final_review_started', 'final_review_accepted')
+    $correctionEvents = @('correction_started', 'correction_ready')
+    $waitEvents = @('wait_started', 'wait_ended')
+
+    if ($scope -ceq 'task' -and $null -eq $Event.taskRef) {
         Fail-Recorder "task-scoped events require a positive taskRef"
     }
-    if ([string] $Event.scope -in @('story', 'final_story') -and $null -ne $Event.taskRef) {
+    if ($scope -in @('story', 'final_story') -and $null -ne $Event.taskRef) {
         Fail-Recorder "story-scoped events require taskRef to be null"
     }
 
-    if ([string] $Event.eventType -in @(
-            'implementation_started', 'task_ready_for_review', 'review_started',
-            'review_findings', 'review_accepted', 'correction_started',
-            'correction_ready', 'final_review_started', 'final_review_accepted')) {
-        if ($null -eq $Event.phaseId) {
-            Fail-Recorder "phase-boundary events require a phaseId"
+    $waitIdProperty = Get-Property -Object $Event -Name 'waitId'
+    $waitKindProperty = Get-Property -Object $Event -Name 'waitKind'
+    $pullRequestProperty = Get-Property -Object $Event -Name 'pullRequest'
+    $waitId = if ($null -eq $waitIdProperty) { $null } else { $waitIdProperty.Value }
+    $waitKind = if ($null -eq $waitKindProperty) { $null } else { $waitKindProperty.Value }
+    $pullRequest = if ($null -eq $pullRequestProperty) { $null } else { $pullRequestProperty.Value }
+
+    if ($eventType -in $waitEvents) {
+        Assert-NonBlankString -Value $waitId -Name 'waitId'
+        Assert-NonBlankString -Value $waitKind -Name 'waitKind'
+        if ($null -ne $Event.phaseId) {
+            Fail-Recorder "wait boundary events require phaseId to be null"
+        }
+        if ($null -ne $Event.revision) {
+            Fail-Recorder "wait boundary events require revision to be null"
         }
     }
-    if ([string] $Event.eventType -in @('story_started', 'pr_ready', 'wait_started', 'wait_ended') -and
-        $null -ne $Event.phaseId) {
-        Fail-Recorder "story and wait boundary events require phaseId to be null"
+    elseif ($null -ne $waitId -or $null -ne $waitKind) {
+        Fail-Recorder "wait identity fields are allowed only on wait boundary events"
     }
-    if ([string] $Event.eventType -in @('task_ready_for_review', 'correction_ready', 'final_review_started', 'final_review_accepted', 'pr_ready')) {
-        if ($null -eq $Event.revision) {
-            Fail-Recorder "this event type requires a full revision"
+
+    if ($eventType -ceq 'story_started') {
+        if ($scope -cne 'story' -or $role -cne 'coordinator') {
+            Fail-Recorder "story_started requires story scope and coordinator role"
+        }
+        if ($null -ne $Event.phaseId -or $null -ne $Event.revision) {
+            Fail-Recorder "story_started requires null phaseId and revision"
         }
     }
-    if ([string] $Event.eventType -in @('review_started', 'review_findings', 'review_accepted', 'final_review_started', 'final_review_accepted')) {
+    elseif ($eventType -ceq 'pr_ready') {
+        if ($scope -cne 'story' -or $role -cne 'coordinator') {
+            Fail-Recorder "pr_ready requires story scope and coordinator role"
+        }
+        if ($null -ne $Event.phaseId -or $null -eq $Event.revision) {
+            Fail-Recorder "pr_ready requires null phaseId and a full revision"
+        }
+        Assert-PullRequest -PullRequest $pullRequest
+    }
+    elseif ($null -ne $pullRequest) {
+        Fail-Recorder "pullRequest is allowed only on pr_ready"
+    }
+
+    if ($eventType -ceq 'implementation_started') {
+        if ($scope -cne 'task' -or $role -cne 'implementer' -or $null -eq $Event.phaseId) {
+            Fail-Recorder "implementation_started requires task scope, implementer role and phaseId"
+        }
+    }
+    elseif ($eventType -ceq 'task_ready_for_review') {
+        if ($scope -cne 'task' -or $role -cne 'implementer' -or $null -eq $Event.phaseId -or $null -eq $Event.revision) {
+            Fail-Recorder "task_ready_for_review requires task scope, implementer role, phaseId and full revision"
+        }
+    }
+
+    if ($eventType -in $reviewEvents) {
+        if ($scope -notin @('task', 'final_story') -or $role -cne 'reviewer' -or $null -eq $Event.phaseId -or $null -eq $Event.revision) {
+            Fail-Recorder "review events require review scope, reviewer role, phaseId and full revision"
+        }
         foreach ($name in @('reviewRequestId', 'reviewAttemptId', 'reviewKind', 'reviewAttemptOrdinal')) {
-            if ($null -eq (Get-Property -Object $Event -Name $name).Value) {
+            $property = Get-Property -Object $Event -Name $name
+            if ($null -eq $property -or $null -eq $property.Value) {
                 Fail-Recorder "review events require '$name'"
             }
         }
+        if ($scope -ceq 'task' -and [string] $Event.reviewKind -notin @('initial_task', 'correction_rereview')) {
+            Fail-Recorder "task review events require an initial_task or correction_rereview kind"
+        }
+        if ($scope -ceq 'final_story' -and [string] $Event.reviewKind -notin @('final_story', 'final_story_rereview')) {
+            Fail-Recorder "final-story review events require a final-story review kind"
+        }
     }
-    if ([string] $Event.eventType -in @('correction_started', 'correction_ready') -and $null -eq $Event.correctionId) {
-        Fail-Recorder "correction events require a correctionId"
+
+    if ($eventType -in @('final_review_started', 'final_review_accepted') -and $scope -cne 'final_story') {
+        Fail-Recorder "final review events require final_story scope"
+    }
+
+    if ($eventType -in $correctionEvents) {
+        if ($scope -notin @('task', 'final_story') -or $role -cne 'implementer' -or $null -eq $Event.phaseId -or $null -eq $Event.correctionId -or $null -eq $Event.supersedesReviewAttemptId) {
+            Fail-Recorder "correction events require correction scope, implementer role, phaseId, correctionId and supersedesReviewAttemptId"
+        }
+        if ($eventType -ceq 'correction_started' -and $null -ne $Event.revision) {
+            Fail-Recorder "correction_started requires a null revision"
+        }
+        if ($eventType -ceq 'correction_ready' -and $null -eq $Event.revision) {
+            Fail-Recorder "correction_ready requires a full revision"
+        }
+    }
+
+    if ($eventType -notin $reviewEvents -and $eventType -notin $correctionEvents) {
+        foreach ($name in @('reviewRequestId', 'reviewAttemptId', 'reviewKind', 'reviewAttemptOrdinal')) {
+            $property = Get-Property -Object $Event -Name $name
+            if ($null -ne $property -and $null -ne $property.Value) {
+                Fail-Recorder "'$name' is allowed only on review events"
+            }
+        }
+    }
+    if ($eventType -notin $correctionEvents -and $null -ne $Event.correctionId) {
+        Fail-Recorder "correctionId is allowed only on correction events"
+    }
+    if ($scope -ceq 'final_story' -and $eventType -in $correctionEvents -and $null -ne $Event.taskRef) {
+        Fail-Recorder "final-story correction events require taskRef to be null"
     }
 }
 
