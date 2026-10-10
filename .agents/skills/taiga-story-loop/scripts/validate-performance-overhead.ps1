@@ -384,9 +384,11 @@ function Get-SourceBoundAnalysis {
     $aggregateUsageResolveLine = @($aggregatorLines | Select-String -Pattern 'Resolve-UsageEvidence -Evidence' | Select-Object -First 1)
     $aggregateLinearOrderLine = @($aggregatorLines | Select-String -Pattern 'return Sort-RecordsByTimeLinear -Records' | Select-Object -First 1)
     $aggregateRangePlanLine = @($aggregatorLines | Select-String -Pattern 'New-UsageRangePlan -Intervals' | Select-Object -First 1)
-    $aggregateBinaryUsageSearchLines = @($aggregatorLines | Select-String -Pattern 'Find-FirstUsageSampleIndex|Find-FirstGreaterUsageSampleIndex')
+    $aggregateBinaryUsageSearchLines = @($aggregatorLines | Select-String -Pattern 'Find-FirstUsageSampleIndex|Find-FirstGreaterUsageSampleIndex|Find-FirstUsageIssueIndex -Prefix')
+    $aggregateInputComparisonSortLines = @($aggregatorLines | Select-String -Pattern 'Sort-Object (start|sampleTime|Time|Line|startUtc|start,)')
+    $aggregateLinearIssueQueryLines = @($aggregatorLines | Select-String -Pattern 'Find-FirstUsageIssueIndex -NextIssue')
     Assert-True ($recorderIncrementalLine.Count -eq 1 -and $recorderColdLine.Count -eq 1 -and $recorderCheckpointLine.Count -eq 1) 'source analysis must find the recorder incremental/checkpoint and cold-rebuild paths'
-    Assert-True ($aggregateReadLine.Count -eq 1 -and $aggregateOverlapLine.Count -eq 1 -and $aggregateUsageIndexLine.Count -eq 1 -and $aggregateUsageResolveLine.Count -eq 1 -and $aggregateLinearOrderLine.Count -eq 1 -and $aggregateRangePlanLine.Count -eq 1 -and $aggregateBinaryUsageSearchLines.Count -eq 0) 'source analysis must find linear aggregator ordering/range-sweep paths without binary usage searches'
+    Assert-True ($aggregateReadLine.Count -eq 1 -and $aggregateOverlapLine.Count -eq 1 -and $aggregateUsageIndexLine.Count -eq 1 -and $aggregateUsageResolveLine.Count -eq 1 -and $aggregateLinearOrderLine.Count -eq 1 -and $aggregateRangePlanLine.Count -eq 1 -and $aggregateBinaryUsageSearchLines.Count -eq 0 -and $aggregateInputComparisonSortLines.Count -eq 0 -and $aggregateLinearIssueQueryLines.Count -ge 5) 'source analysis must find linear aggregator ordering/range-sweep/issue-query paths without input-sized comparison sorts or binary usage searches'
     return [ordered]@{
         state = 'bounded'
         evidence = 'automated_source_assertion'
@@ -412,7 +414,7 @@ function Get-SourceBoundAnalysis {
             intervalSweepLine = [int]$aggregateOverlapLine[0].LineNumber
             usageIndexLine = [int]$aggregateUsageIndexLine[0].LineNumber
             usageResolveLine = [int]$aggregateUsageResolveLine[0].LineNumber
-            complexity = 'linear ledger byte/record read plus fixed-pass radix ordering/index construction, O(records + task groups) first-pass grouping, O(samples + intervals) grouped usage-boundary sweeps, and linear sweep passes; no pairwise interval or full-ledger scan per usage interval'
+            complexity = 'linear ledger byte/record read plus fixed-pass radix ordering/index construction, O(records + task groups) first-pass grouping, O(samples + intervals) grouped usage-boundary and first-issue sweeps, and linear overlap/coverage passes; no pairwise interval or full-ledger scan per usage interval'
             processingClaim = 'linear_ledger_scan_with_linear_index_and_usage_sweeps'
         }
         productionThreshold = 'unavailable_without an authorized production workload and environment-controlled benchmark'
