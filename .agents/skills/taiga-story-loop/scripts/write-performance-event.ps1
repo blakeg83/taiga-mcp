@@ -325,7 +325,10 @@ function Assert-PathSafeRunId {
 }
 
 function Assert-Usage {
-    param([AllowNull()] [object] $Usage)
+    param(
+        [AllowNull()] [object] $Usage,
+        [AllowNull()] [string] $EventRole
+    )
 
     if ($null -eq $Usage) {
         return
@@ -353,22 +356,70 @@ function Assert-Usage {
     Assert-NullableString -Value $(if ($null -eq $fallback) { $null } else { $fallback.Value }) -Name 'usage.fallback'
 
     $counterSemantics = Get-Property -Object $Usage -Name 'counterSemantics'
-    if ($null -ne $counterSemantics -and $null -ne $counterSemantics.Value) {
-        Assert-JsonObject -Value $counterSemantics.Value -Name 'usage.counterSemantics'
-        Assert-AllowlistedProperties -Object $counterSemantics.Value -Allowed $script:CounterSemanticsFields -Context 'usage.counterSemantics'
-        foreach ($property in $counterSemantics.Value.PSObject.Properties) {
-            Assert-EnumValue -Value $property.Value -Name "usage.counterSemantics.$($property.Name)" -Allowed @('included_in_input', 'disjoint_from_input', 'included_in_output', 'disjoint_from_output', 'unknown')
+    $counters = Get-Property -Object $Usage -Name 'counters'
+    $counterSemanticsValue = if ($null -eq $counterSemantics) { $null } else { $counterSemantics.Value }
+    $countersValue = if ($null -eq $counters) { $null } else { $counters.Value }
+    $hasCounterSemantics = $null -ne $counterSemanticsValue
+    $hasNumericCounters = $null -ne $countersValue
+
+    if ($hasCounterSemantics) {
+        Assert-JsonObject -Value $counterSemanticsValue -Name 'usage.counterSemantics'
+        Assert-AllowlistedProperties -Object $counterSemanticsValue -Allowed $script:CounterSemanticsFields -Context 'usage.counterSemantics'
+        foreach ($property in $counterSemanticsValue.PSObject.Properties) {
+            if ($property.Name -ceq 'cachedInput') {
+                Assert-EnumValue -Value $property.Value -Name 'usage.counterSemantics.cachedInput' -Allowed @('included_in_input', 'disjoint_from_input', 'unknown')
+            }
+            elseif ($property.Name -ceq 'reasoning') {
+                Assert-EnumValue -Value $property.Value -Name 'usage.counterSemantics.reasoning' -Allowed @('included_in_output', 'disjoint_from_output', 'unknown')
+            }
         }
     }
 
-    $counters = Get-Property -Object $Usage -Name 'counters'
-    if ($null -ne $counters -and $null -ne $counters.Value) {
-        Assert-JsonObject -Value $counters.Value -Name 'usage.counters'
-        Assert-AllowlistedProperties -Object $counters.Value -Allowed $script:CounterFields -Context 'usage.counters'
-        foreach ($property in $counters.Value.PSObject.Properties) {
+    if ($hasNumericCounters) {
+        Assert-JsonObject -Value $countersValue -Name 'usage.counters'
+        Assert-AllowlistedProperties -Object $countersValue -Allowed $script:CounterFields -Context 'usage.counters'
+        if (@($countersValue.PSObject.Properties).Count -eq 0) {
+            $hasNumericCounters = $false
+        }
+        foreach ($property in $countersValue.PSObject.Properties) {
             Assert-NonNegativeInteger -Value $property.Value -Name "usage.counters.$($property.Name)"
         }
     }
+
+    if ($hasNumericCounters) {
+        $streamText = if ($null -eq $streamId) { $null } else { $streamId.Value }
+        $roleText = if ($null -eq $usageRole) { $null } else { $usageRole.Value }
+        $sampleText = if ($null -eq $sampledAtUtc) { $null } else { $sampledAtUtc.Value }
+        $baselineText = if ($null -eq $baselineAtUtc) { $null } else { $baselineAtUtc.Value }
+        Assert-NonBlankString -Value $streamText -Name 'usage.streamId'
+        Assert-EnumValue -Value $roleText -Name 'usage.role' -Allowed $script:Roles
+        if (-not [string]::IsNullOrWhiteSpace($EventRole) -and [string] $roleText -cne $EventRole) {
+            Fail-Recorder "usage.role must match event role"
+        }
+        Assert-UtcTimestamp -Value $sampleText -Name 'usage.sampledAtUtc'
+        Assert-UtcTimestamp -Value $baselineText -Name 'usage.baselineAtUtc'
+        if (-not $hasCounterSemantics) {
+            Fail-Recorder 'numeric usage samples require counterSemantics'
+        }
+        foreach ($name in @('cachedInput', 'reasoning')) {
+            $property = Get-Property -Object $counterSemanticsValue -Name $name
+            if ($null -eq $property -or $null -eq $property.Value) {
+                Fail-Recorder "numeric usage samples require usage.counterSemantics.$name"
+            }
+        }
+    }
+
+    if ([string] $Usage.state -ceq 'measured') {
+        if (-not $hasNumericCounters) {
+            Fail-Recorder "measured usage requires nonempty counters"
+        }
+        $cachedSemantics = (Get-Property -Object $counterSemanticsValue -Name 'cachedInput').Value
+        $reasoningSemantics = (Get-Property -Object $counterSemanticsValue -Name 'reasoning').Value
+        if ([string] $cachedSemantics -ceq 'unknown' -or [string] $reasoningSemantics -ceq 'unknown') {
+            Fail-Recorder "measured usage requires known counter semantics"
+        }
+    }
+
 }
 
 function Assert-Provenance {
@@ -456,7 +507,7 @@ function Assert-Event {
     Assert-Revision -Revision $Event.revision
     Assert-EnumValue -Value $Event.reviewMode -Name 'reviewMode' -Allowed $script:ReviewModes
     Assert-Provenance -Provenance $Event.provenance
-    Assert-Usage -Usage $Event.usage
+    Assert-Usage -Usage $Event.usage -EventRole ([string] $Event.role)
 
     $eventType = [string] $Event.eventType
     $scope = [string] $Event.scope
@@ -501,7 +552,7 @@ function Assert-Event {
             Fail-Recorder "story_started requires null phaseId and revision"
         }
     }
-    elseif ($eventType -ceq 'pr_ready') {
+    if ($eventType -ceq 'pr_ready') {
         if ($scope -cne 'story' -or $role -cne 'coordinator') {
             Fail-Recorder "pr_ready requires story scope and coordinator role"
         }
@@ -509,6 +560,9 @@ function Assert-Event {
             Fail-Recorder "pr_ready requires null phaseId and a full revision"
         }
         Assert-PullRequest -PullRequest $pullRequest
+        if ([string] $pullRequest.reviewedHead -cne [string] $Event.revision) {
+            Fail-Recorder "pullRequest.reviewedHead must match event revision"
+        }
     }
     elseif ($null -ne $pullRequest) {
         Fail-Recorder "pullRequest is allowed only on pr_ready"

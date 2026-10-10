@@ -198,6 +198,7 @@ try {
         supersedesReviewAttemptId = 'task-149-attempt-1'
         eventType = 'correction_started'
         revision = $null
+        usage = $null
         reviewRequestId = $null
         reviewAttemptId = $null
         reviewKind = $null
@@ -257,10 +258,22 @@ try {
         transitionId = 'wait-ended'
         eventType = 'wait_ended'
     }
+    $usageUnavailable = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-usage-unavailable'
+        transitionId = 'usage-unavailable'
+        usage = [ordered]@{
+            state = 'unavailable'
+            source = 'no-attributable-worker-stream'
+            coverage = 'none'
+            counters = $null
+            reason = 'synthetic unavailable fixture'
+            fallback = 'retain unknown usage'
+        }
+    }
     $validVariants = @(
         $implementationStarted, $taskReady, $reviewStarted, $reviewAccepted,
         $correctionStarted, $correctionReady, $finalReviewStarted, $finalFindings,
-        $finalAccepted, $prReady, $waitStarted, $waitEnded
+        $finalAccepted, $prReady, $waitStarted, $waitEnded, $usageUnavailable
     )
     foreach ($variant in $validVariants) {
         $variantJson = Convert-EventToJson -Event $variant
@@ -268,7 +281,7 @@ try {
         Assert-True ($result.ExitCode -eq 0) "documented event '$($variant.eventType)' appends successfully"
     }
     $allLines = @(Get-Content -LiteralPath $ledgerPath)
-    Assert-True ($allLines.Count -eq 13) 'documented event families append one complete record each'
+    Assert-True ($allLines.Count -eq 14) 'documented event families append one complete record each'
 
     $beforeInvalid = [IO.File]::ReadAllText($ledgerPath)
 
@@ -288,6 +301,44 @@ try {
         eventId = 'invalid-wait-identity'
         waitId = $null
     }
+    $forbiddenNestedPullRequest = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'invalid-non-pr-pull-request'
+        pullRequest = [ordered]@{ prompt = 'never persist' }
+    }
+    $mismatchedPullRequestRevision = New-EventVariant -Base $prReady -Changes @{
+        eventId = 'invalid-pr-revision-binding'
+        revision = $revisionA
+    }
+    $usageMissingBinding = New-EventVariant -Base $reviewStarted -Changes @{
+        eventId = 'invalid-usage-binding'
+        usage = [ordered]@{
+            state = 'measured'
+            source = 'synthetic'
+            coverage = 'direct'
+            counters = [ordered]@{ inputTokens = 10 }
+            counterSemantics = [ordered]@{
+                cachedInput = 'included_in_output'
+                reasoning = 'included_in_input'
+            }
+        }
+    }
+    $usageWrongRelationships = New-EventVariant -Base $reviewStarted -Changes @{
+        eventId = 'invalid-usage-relationships'
+        usage = [ordered]@{
+            state = 'partial'
+            streamId = 'synthetic-review-stream'
+            role = 'reviewer'
+            source = 'synthetic_fixture'
+            coverage = 'partial'
+            sampledAtUtc = '2026-10-10T10:10:00Z'
+            baselineAtUtc = '2026-10-10T10:00:00Z'
+            counters = [ordered]@{ inputTokens = 10 }
+            counterSemantics = [ordered]@{
+                cachedInput = 'included_in_output'
+                reasoning = 'included_in_input'
+            }
+        }
+    }
     $invalidCases = @(
         [pscustomobject]@{ Name = 'malformed JSON'; Json = '{not-json'; Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'schema type'; Json = (Convert-EventToJson (Copy-Event $validEvent) | ForEach-Object { $_ -replace '"schemaVersion":1', '"schemaVersion":"1"' }); Root = $externalRoot; Run = $runId },
@@ -298,7 +349,11 @@ try {
         [pscustomobject]@{ Name = 'story role identity'; Json = (Convert-EventToJson $wrongStoryRole); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'review revision identity'; Json = (Convert-EventToJson $missingReviewRevision); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'PR identity'; Json = (Convert-EventToJson $missingPullRequest); Root = $externalRoot; Run = $runId },
-        [pscustomobject]@{ Name = 'wait identity'; Json = (Convert-EventToJson $missingWaitIdentity); Root = $externalRoot; Run = $runId }
+        [pscustomobject]@{ Name = 'wait identity'; Json = (Convert-EventToJson $missingWaitIdentity); Root = $externalRoot; Run = $runId },
+        [pscustomobject]@{ Name = 'non-PR nested payload'; Json = (Convert-EventToJson $forbiddenNestedPullRequest); Root = $externalRoot; Run = $runId },
+        [pscustomobject]@{ Name = 'PR revision binding'; Json = (Convert-EventToJson $mismatchedPullRequestRevision); Root = $externalRoot; Run = $runId },
+        [pscustomobject]@{ Name = 'usage stream/sample binding'; Json = (Convert-EventToJson $usageMissingBinding); Root = $externalRoot; Run = $runId },
+        [pscustomobject]@{ Name = 'usage counter relationships'; Json = (Convert-EventToJson $usageWrongRelationships); Root = $externalRoot; Run = $runId }
     )
 
     foreach ($case in $invalidCases) {
@@ -318,7 +373,7 @@ try {
     Assert-True ($privacy.ExitCode -ne 0) 'nested prompt/transcript metadata is rejected'
     Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) 'nested privacy rejection leaves the ledger unchanged'
 
-    Write-Output 'Passed performance-event recorder fixtures: documented event-family round-trips, usage validation, invalid schema/type/timestamp/identity/event cases, run/path binding, allowlisted metadata, privacy rejection, and unchanged-ledger safety; synthetic and non-live.'
+    Write-Output 'Passed performance-event recorder fixtures: documented event-family round-trips, unavailable and source-backed usage validation, invalid schema/type/timestamp/identity/event/PR/usage cases, run/path binding, allowlisted metadata, privacy rejection, and unchanged-ledger safety; synthetic and non-live.'
     exit 0
 }
 finally {
