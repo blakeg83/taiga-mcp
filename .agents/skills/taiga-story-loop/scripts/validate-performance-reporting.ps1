@@ -1,5 +1,5 @@
 # SYNTHETIC PERFORMANCE-CAPABILITY CHECK.
-# This fixture validates the task #146 capability matrix and sanitized
+# This fixture validates the task #146 capability matrix, sanitized
 # examples. It does not contact Taiga, Codex, GitHub, a browser, or a live
 # provider, and it does not read prompt bodies, transcripts, or session logs.
 
@@ -50,6 +50,97 @@ function Get-RequiredExample {
     $matches = @($Examples | Where-Object { [string]$_.exampleId -ceq $ExampleId })
     Assert-True ($matches.Count -eq 1) "example '$ExampleId' must appear exactly once"
     return $matches[0]
+}
+
+function Invoke-RecorderProcess {
+    param(
+        [Parameter(Mandatory)] [string] $Recorder,
+        [Parameter(Mandatory)] [string] $ExternalRunRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $EventJson,
+        [int] $FaultAfterBytes = -1
+    )
+
+    $pwsh = Join-Path $PSHOME 'pwsh.exe'
+    $arguments = @(
+        '-NoProfile'
+        '-File'
+        $Recorder
+        '-ExternalRunRoot'
+        $ExternalRunRoot
+        '-RunId'
+        $RunId
+        '-EventJson'
+        $EventJson
+    )
+    if ($FaultAfterBytes -ge 0) {
+        $arguments += @('-FaultAfterBytes', [string] $FaultAfterBytes)
+    }
+    $output = & $pwsh @arguments 2>&1
+    return [pscustomobject]@{
+        ExitCode = [int] $LASTEXITCODE
+        Output = @($output | ForEach-Object { [string] $_ })
+    }
+}
+
+function Get-RecorderProcessResult {
+    param(
+        [Parameter(Mandatory)] [object] $Invocation,
+        [Parameter(Mandatory)] [string] $Context
+    )
+
+    $jsonLines = @($Invocation.Output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    Assert-True ($jsonLines.Count -gt 0) "$Context returns a JSON result"
+    try {
+        return ($jsonLines[-1] | ConvertFrom-Json -DateKind String)
+    }
+    catch {
+        throw "Performance-reporting assertion failed: $Context returned non-JSON output '$($jsonLines[-1])'"
+    }
+}
+
+function New-RecorderStoryEvent {
+    param(
+        [Parameter(Mandatory)] [string] $EventId,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [int] $StoryId,
+        [Parameter(Mandatory)] [int] $StoryRef,
+        [Parameter(Mandatory)] [string] $TransitionId
+    )
+
+    return [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_event'
+        eventId = $EventId
+        runId = $RunId
+        projectId = 12
+        storyId = $StoryId
+        storyRef = $StoryRef
+        taskRef = $null
+        role = 'coordinator'
+        sessionId = 'synthetic-reporting-session'
+        workerId = 'synthetic-reporting-worker'
+        transitionId = $TransitionId
+        scope = 'story'
+        phaseId = $null
+        correctionId = $null
+        reviewRequestId = $null
+        reviewAttemptId = $null
+        reviewKind = $null
+        reviewAttemptOrdinal = $null
+        supersedesReviewAttemptId = $null
+        eventType = 'story_started'
+        occurredAtUtc = '2026-10-10T12:00:00Z'
+        revision = $null
+        reviewMode = 'per_task'
+        provenance = [ordered]@{
+            source = 'synthetic_reporting_fixture'
+            observedBy = 'validator'
+            coverage = 'direct'
+            synthetic = $true
+        }
+        usage = $null
+    }
 }
 
 $skillRoot = Split-Path -Parent $PSScriptRoot
@@ -908,5 +999,90 @@ Assert-Throws { Assert-NoPrivateFields -Payload $privatePayload } 'privacy fixtu
 
 & $task148Assertions
 
-Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, stable phase identities, final findings closure, recursive replay/no-op/conflict identity, interval coverage/overlap, external recovery pointer, report identity, exact token subtotal semantics, cumulative baseline/reset handling, privacy rejection, review-attempt counting in both modes, same-head re-reviews, unavailable review usage, and bounded baseline/candidate overhead; synthetic and non-live.'
+$recorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
+Assert-True (Test-Path -LiteralPath $recorderPath -PathType Leaf) 'recorder entry point is present for lifecycle fixtures'
+$recorderRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-reporting-recorder-' + [guid]::NewGuid().ToString('N'))
+try {
+    $restartRunId = 'synthetic-reporting-restart'
+    $restartEvent = New-RecorderStoryEvent -EventId 'synthetic-restart-start' -RunId $restartRunId -StoryId 726 -StoryRef 142 -TransitionId 'restart-start'
+    $restartJson = $restartEvent | ConvertTo-Json -Compress -Depth 20
+    $restartFirst = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson $restartJson
+    $restartFirstResult = Get-RecorderProcessResult -Invocation $restartFirst -Context 'restart first append'
+    Assert-True ($restartFirst.ExitCode -eq 0 -and $restartFirstResult.status -ceq 'appended') 'first process append must succeed'
+    $restartRepeat = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson $restartJson
+    $restartRepeatResult = Get-RecorderProcessResult -Invocation $restartRepeat -Context 'restart replay'
+    Assert-True ($restartRepeat.ExitCode -eq 0 -and $restartRepeatResult.status -ceq 'noop') 'same legitimate run replay after restart must be a no-op'
+
+    $historicalReportPath = Join-Path (Join-Path $recorderRoot $restartRunId) 'report.json'
+    $historicalReport = '{"reportId":"historical-report-1","state":"retained"}'
+    [IO.File]::WriteAllText($historicalReportPath, $historicalReport, [Text.UTF8Encoding]::new($false))
+    $restartNext = New-RecorderStoryEvent -EventId 'synthetic-restart-next' -RunId $restartRunId -StoryId 726 -StoryRef 142 -TransitionId 'restart-next'
+    $restartNextInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson ($restartNext | ConvertTo-Json -Compress -Depth 20)
+    Assert-True ($restartNextInvocation.ExitCode -eq 0) 'new event after restart must append'
+    Assert-True ([IO.File]::ReadAllText($historicalReportPath) -ceq $historicalReport) 'recorder must not mutate or delete a historical sibling report'
+
+    $interrupted = New-RecorderStoryEvent -EventId 'synthetic-reporting-interrupted' -RunId $restartRunId -StoryId 726 -StoryRef 142 -TransitionId 'reporting-interrupted'
+    $interruptedInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson ($interrupted | ConvertTo-Json -Compress -Depth 20) -FaultAfterBytes 24
+    $interruptedResult = Get-RecorderProcessResult -Invocation $interruptedInvocation -Context 'restart interrupted append'
+    Assert-True ($interruptedInvocation.ExitCode -eq 2 -and $interruptedResult.errorCategory -ceq 'write_failed') 'interrupted restart append must not report success'
+    $recovered = New-RecorderStoryEvent -EventId 'synthetic-reporting-recovered' -RunId $restartRunId -StoryId 726 -StoryRef 142 -TransitionId 'reporting-recovered'
+    $recoveredInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $restartRunId -EventJson ($recovered | ConvertTo-Json -Compress -Depth 20)
+    $recoveredResult = Get-RecorderProcessResult -Invocation $recoveredInvocation -Context 'restart recovery append'
+    Assert-True ($recoveredInvocation.ExitCode -eq 0 -and [bool]$recoveredResult.recoveredIncompleteTail) 'interrupted restart must recover on the next process'
+    $restartLedgerText = [IO.File]::ReadAllText([string]$restartFirstResult.ledgerPath)
+    Assert-True ($restartLedgerText.Contains([string]$restartEvent.eventId, [StringComparison]::Ordinal)) 'restart must preserve the confirmed first event'
+    Assert-True ($restartLedgerText.Contains([string]$restartNext.eventId, [StringComparison]::Ordinal)) 'restart must preserve the confirmed post-restart event'
+    Assert-True ($restartLedgerText.Contains([string]$recovered.eventId, [StringComparison]::Ordinal)) 'restart recovery must append the next complete event'
+
+    $isolatedRunId = 'synthetic-reporting-isolated'
+    $isolatedEvent = New-RecorderStoryEvent -EventId 'synthetic-isolated-story' -RunId $isolatedRunId -StoryId 725 -StoryRef 141 -TransitionId 'isolated-story-start'
+    $isolatedInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $isolatedRunId -EventJson ($isolatedEvent | ConvertTo-Json -Compress -Depth 20)
+    $isolatedResult = Get-RecorderProcessResult -Invocation $isolatedInvocation -Context 'isolated run append'
+    Assert-True ($isolatedInvocation.ExitCode -eq 0 -and $isolatedResult.status -ceq 'appended') 'separate run append must succeed'
+    $isolatedLedgerText = [IO.File]::ReadAllText([string]$isolatedResult.ledgerPath)
+    Assert-True ($isolatedLedgerText.Contains([string]$isolatedEvent.eventId, [StringComparison]::Ordinal)) 'separate run ledger must contain its own event'
+    Assert-True (-not $isolatedLedgerText.Contains([string]$restartEvent.eventId, [StringComparison]::Ordinal)) 'separate run ledger must not contain another story event'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $recorderRoot $isolatedRunId 'report.json'))) 'separate run must not inherit another run report'
+
+    $ioRunId = 'synthetic-reporting-io-failure'
+    $ioPath = Join-Path $recorderRoot $ioRunId
+    [IO.Directory]::CreateDirectory($recorderRoot) | Out-Null
+    [IO.File]::WriteAllText($ioPath, 'not-a-directory', [Text.UTF8Encoding]::new($false))
+    $ioEvent = New-RecorderStoryEvent -EventId 'synthetic-io-failure' -RunId $ioRunId -StoryId 726 -StoryRef 142 -TransitionId 'io-failure'
+    $ioInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $ioRunId -EventJson ($ioEvent | ConvertTo-Json -Compress -Depth 20)
+    Assert-True ($ioInvocation.ExitCode -ne 0) 'file-as-directory I/O failure must be rejected'
+    $ioOutput = $ioInvocation.Output -join ' | '
+    Assert-True ($ioOutput -notmatch '(?i)prompt|transcript|password|authToken|secret') 'I/O failure output must not expose sensitive payload names'
+    Assert-True ([IO.File]::ReadAllText($ioPath) -ceq 'not-a-directory') 'I/O failure must preserve the blocking target'
+
+    $corruptRunId = 'synthetic-reporting-corrupt-middle'
+    $corruptFirst = New-RecorderStoryEvent -EventId 'synthetic-corrupt-first' -RunId $corruptRunId -StoryId 726 -StoryRef 142 -TransitionId 'corrupt-first'
+    $corruptSecond = New-RecorderStoryEvent -EventId 'synthetic-corrupt-second' -RunId $corruptRunId -StoryId 726 -StoryRef 142 -TransitionId 'corrupt-second'
+    $corruptFirstInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $corruptRunId -EventJson ($corruptFirst | ConvertTo-Json -Compress -Depth 20)
+    $corruptSecondInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $corruptRunId -EventJson ($corruptSecond | ConvertTo-Json -Compress -Depth 20)
+    Assert-True ($corruptFirstInvocation.ExitCode -eq 0 -and $corruptSecondInvocation.ExitCode -eq 0) 'malformed-middle fixture setup events must append'
+    $corruptLedgerPath = Join-Path (Join-Path $recorderRoot $corruptRunId) 'events.jsonl'
+    $malformedMiddle = '{"secret":"never-persist-in-diagnostics"}'
+    $corruptLedgerBefore = (($corruptFirst | ConvertTo-Json -Compress -Depth 20), $malformedMiddle, ($corruptSecond | ConvertTo-Json -Compress -Depth 20)) -join [Environment]::NewLine
+    $corruptLedgerBefore += [Environment]::NewLine
+    [IO.File]::WriteAllText($corruptLedgerPath, $corruptLedgerBefore, [Text.UTF8Encoding]::new($false))
+    $corruptNext = New-RecorderStoryEvent -EventId 'synthetic-corrupt-next' -RunId $corruptRunId -StoryId 726 -StoryRef 142 -TransitionId 'corrupt-next'
+    $corruptNextInvocation = Invoke-RecorderProcess -Recorder $recorderPath -ExternalRunRoot $recorderRoot -RunId $corruptRunId -EventJson ($corruptNext | ConvertTo-Json -Compress -Depth 20)
+    $corruptNextResult = Get-RecorderProcessResult -Invocation $corruptNextInvocation -Context 'malformed-middle recovery'
+    Assert-True ($corruptNextInvocation.ExitCode -eq 0 -and $corruptNextResult.status -ceq 'appended') 'malformed-middle recovery append must succeed'
+    $corruptLedgerAfter = [IO.File]::ReadAllText($corruptLedgerPath)
+    Assert-True ($corruptLedgerAfter.StartsWith($corruptLedgerBefore, [StringComparison]::Ordinal)) 'malformed middle record must remain append-only'
+    Assert-True ($corruptLedgerAfter.Contains([string]$corruptFirst.eventId, [StringComparison]::Ordinal) -and $corruptLedgerAfter.Contains([string]$corruptSecond.eventId, [StringComparison]::Ordinal)) 'malformed-middle recovery must preserve both complete records'
+    $corruptDiagnostics = [IO.File]::ReadAllText([string]$corruptNextResult.diagnosticPath)
+    Assert-True ($corruptDiagnostics.Contains('"diagnosticType":"corrupt_record"', [StringComparison]::Ordinal)) 'malformed middle must produce a corruption diagnostic'
+    Assert-True (-not $corruptDiagnostics.Contains('never-persist-in-diagnostics', [StringComparison]::Ordinal) -and -not $corruptDiagnostics.Contains('secret', [StringComparison]::Ordinal)) 'corruption diagnostics must exclude raw sensitive payloads'
+}
+finally {
+    if (Test-Path -LiteralPath $recorderRoot) {
+        Remove-Item -LiteralPath $recorderRoot -Recurse -Force
+    }
+}
+Assert-True (-not (Test-Path -LiteralPath $recorderRoot)) 'recorder fixture cleanup must remove only its disposable external root'
+
+Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, stable phase identities, final findings closure, recursive replay/no-op/conflict identity, interval coverage/overlap, external recovery pointer, report identity, exact token subtotal semantics, cumulative baseline/reset handling, privacy rejection, review-attempt counting in both modes, same-head re-reviews, unavailable review usage, bounded baseline/candidate overhead, recorder restart/isolation/I-O failure, malformed-middle retention, safe diagnostics, historical-report preservation, and disposable lifecycle cleanup; synthetic and non-live.'
 exit 0
