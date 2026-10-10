@@ -30,6 +30,17 @@ function Assert-Contains {
     Assert-True $Text.Contains($Needle, [StringComparison]::Ordinal) $Message
 }
 
+function Assert-Throws {
+    param(
+        [Parameter(Mandatory)] [scriptblock] $Action,
+        [Parameter(Mandatory)] [string] $Message
+    )
+
+    $threw = $false
+    try { & $Action } catch { $threw = $true }
+    Assert-True $threw $Message
+}
+
 function Get-RequiredExample {
     param(
         [Parameter(Mandatory)] [object[]] $Examples,
@@ -74,7 +85,7 @@ Assert-Contains $normalized 'Account-level limits' 'account-level limits must be
 Assert-True ($normalized.Contains('unknown, not zero')) 'unknown values must not be converted to zero'
 
 $jsonMatches = [regex]::Matches($reference, '(?ms)^```json\s*\r?\n(?<json>.*?)\r?\n```')
-Assert-True ($jsonMatches.Count -ge 5) 'reference must contain the three discovery examples plus event and report examples'
+Assert-True ($jsonMatches.Count -ge 9) 'reference must contain discovery, phase, token, event, and report examples'
 
 $examples = @()
 foreach ($match in $jsonMatches) {
@@ -142,6 +153,36 @@ Assert-True ([string]$report.metrics.implementationTokens.state -ceq 'unavailabl
 Assert-True ($null -eq $report.metrics.implementationTokens.value) 'unavailable report metric must remain null'
 Assert-True ([string]$report.metrics.firstPassAcceptanceRate.state -ceq 'not_applicable') 'zero-denominator rate must be not applicable'
 
+$nullBeforeCommit = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-phase-null-before-commit'
+Assert-True (@($nullBeforeCommit.events).Count -eq 2) 'null-before-commit example must contain a start and ready event'
+Assert-True ([string]$nullBeforeCommit.events[0].eventType -ceq 'implementation_started') 'null-before-commit example must start implementation'
+Assert-True ([string]$nullBeforeCommit.events[1].eventType -ceq 'task_ready_for_review') 'null-before-commit example must end at task-ready'
+Assert-True ([string]$nullBeforeCommit.events[0].phaseId -ceq [string]$nullBeforeCommit.events[1].phaseId) 'implementation start and ready must share phase identity'
+Assert-True ($null -eq $nullBeforeCommit.events[0].revision) 'implementation start may be null before commit'
+Assert-True ([string]$nullBeforeCommit.events[1].revision -match '^[0-9a-f]{40}$') 'task-ready must carry a full resulting revision'
+
+$correction = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-correction-new-revision'
+Assert-True (@($correction.events).Count -eq 2) 'correction example must contain a start and ready event'
+Assert-True ([string]$correction.events[0].correctionId -ceq [string]$correction.events[1].correctionId) 'correction pair must share correction identity'
+Assert-True ([string]$correction.events[0].phaseId -ceq [string]$correction.events[1].phaseId) 'correction pair must share phase identity'
+Assert-True ($null -eq $correction.events[0].revision) 'correction start may be null before the corrected commit'
+Assert-True ([string]$correction.events[1].revision -ceq '2222222222222222222222222222222222222222') 'correction ready must carry the new revision'
+Assert-True (-not [string]::IsNullOrWhiteSpace([string]$correction.events[0].supersedesReviewAttemptId)) 'correction must link the finding attempt it supersedes'
+
+$finalFindings = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-final-review-findings'
+Assert-True (@($finalFindings.events).Count -eq 2) 'final findings example must contain start and findings'
+Assert-True ([string]$finalFindings.events[0].scope -ceq 'final_story' -and [string]$finalFindings.events[1].scope -ceq 'final_story') 'final findings must use final-story scope'
+Assert-True ([string]$finalFindings.events[0].phaseId -ceq [string]$finalFindings.events[1].phaseId) 'final review findings must share phase identity'
+Assert-True ([string]$finalFindings.events[0].reviewAttemptId -ceq [string]$finalFindings.events[1].reviewAttemptId) 'final review findings must share attempt identity'
+Assert-True ([string]$finalFindings.events[1].eventType -ceq 'review_findings') 'final review findings must close through review_findings'
+
+$tokenSubtotalExample = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-token-subtotal'
+Assert-True ([string]$tokenSubtotalExample.counterSemantics.cachedInput -ceq 'included_in_input') 'token example must declare cached-input inclusion'
+Assert-True ([string]$tokenSubtotalExample.counterSemantics.reasoning -ceq 'included_in_output') 'token example must declare reasoning inclusion'
+Assert-True ([int]$tokenSubtotalExample.components.input -eq 100) 'token example input component must exclude a cached-input double count'
+Assert-True ([int]$tokenSubtotalExample.components.output -eq 30) 'token example output component must exclude a reasoning double count'
+Assert-True ([int]$tokenSubtotalExample.roleTotalTokens -eq 130) 'token example role total must follow the declared formula'
+
 $requiredEventTypes = @(
     'story_started',
     'implementation_started',
@@ -178,11 +219,21 @@ foreach ($fixtureId in @(
 foreach ($contractMarker in @(
         'schemaVersion: 1'
         'eventId'
+        'phaseId'
+        'correctionId'
+        'supersedesReviewAttemptId'
+        '`revision` may be `null` before a commit exists'
+        'final-story correction'
         'Replaying the same ID'
         'same ID with any different payload is a conflict'
         'append-only JSONL'
         'Performance pointer:'
         'delta(c) = c(end) - c(exact baseline)'
+        'inputComponent ='
+        'roleTotalTokens = inputComponent + outputComponent'
+        'cachedInput = included_in_input'
+        'reasoning = included_in_output'
+        'state: partial` and `value: null'
         'runId + projectId + storyId + PR provider/owner/repository/number + exact reviewed HEAD'
         'timeToPr'
         'implementationElapsed'
@@ -203,16 +254,40 @@ foreach ($contractMarker in @(
         'changedFiles'
         'linesAdded'
         'linesDeleted'
-        'Cached-input and reasoning counters remain separate')) {
+        'Cached-input and reasoning counters remain separate'
+        'Prompt, transcript, source-text, and secret fields are rejected')) {
     Assert-Contains $normalized $contractMarker "contract is missing '$contractMarker'"
+}
+
+function ConvertTo-CanonicalValue {
+    param([AllowNull()] [object] $Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in @($Value.Keys | Sort-Object { [string]$_ })) {
+            $result[[string]$key] = ConvertTo-CanonicalValue -Value $Value[$key]
+        }
+        return $result
+    }
+    if ($Value -is [pscustomobject]) {
+        $result = [ordered]@{}
+        foreach ($property in @($Value.PSObject.Properties | Sort-Object Name)) {
+            $result[$property.Name] = ConvertTo-CanonicalValue -Value $property.Value
+        }
+        return $result
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { ConvertTo-CanonicalValue -Value $_ })
+    }
+    return $Value
 }
 
 function Get-CanonicalPayload {
     param([System.Collections.IDictionary] $Payload)
 
-    return (($Payload.GetEnumerator() |
-            Sort-Object -Property Key |
-            ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join '|')
+    $canonical = ConvertTo-CanonicalValue -Value $Payload
+    return (ConvertTo-Json -InputObject $canonical -Compress -Depth 20)
 }
 
 function Invoke-ReplayFixture {
@@ -239,12 +314,39 @@ $conflictingEvent = [ordered]@{ eventId = 'fixture-event-1'; eventType = 'pr_rea
 Assert-True ((Invoke-ReplayFixture -Existing $replayStore -Incoming $conflictingEvent) -ceq 'conflict') 'same-ID different-payload replay should conflict'
 Assert-True ([string]$replayStore['fixture-event-1'] -match 'story_started') 'conflict must preserve the first complete event'
 
+$nestedStore = @{}
+$nestedEventA = [ordered]@{
+    eventId = 'fixture-nested-event'
+    eventType = 'review_started'
+    provenance = [ordered]@{ source = 'workflow_transition'; coverage = 'direct' }
+    usage = [ordered]@{ state = 'unavailable'; counters = $null }
+}
+$nestedEventB = [ordered]@{
+    usage = [ordered]@{ counters = $null; state = 'unavailable' }
+    provenance = [ordered]@{ coverage = 'direct'; source = 'workflow_transition' }
+    eventType = 'review_started'
+    eventId = 'fixture-nested-event'
+}
+Assert-True ((Invoke-ReplayFixture -Existing $nestedStore -Incoming $nestedEventA) -ceq 'appended') 'nested event should append'
+Assert-True ((Invoke-ReplayFixture -Existing $nestedStore -Incoming $nestedEventB) -ceq 'noop') 'reordered nested keys should be a no-op'
+$nestedConflict = [ordered]@{
+    eventId = 'fixture-nested-event'
+    eventType = 'review_started'
+    provenance = [ordered]@{ source = 'workflow_transition'; coverage = 'partial' }
+    usage = [ordered]@{ state = 'unavailable'; counters = $null }
+}
+Assert-True ((Invoke-ReplayFixture -Existing $nestedStore -Incoming $nestedConflict) -ceq 'conflict') 'changed nested value should conflict'
+Assert-True ([string]$nestedStore['fixture-nested-event'] -match '"coverage":"direct"') 'nested conflict must preserve the first payload'
+
 function Get-CumulativeDelta {
     param(
         [Nullable[int]] $Baseline,
-        [Nullable[int]] $End
+        [Nullable[int]] $End,
+        [Nullable[int]] $SampleAtUtc,
+        [Nullable[int]] $RunEndUtc
     )
 
+    if ($null -ne $SampleAtUtc -and $null -ne $RunEndUtc -and [int]$SampleAtUtc -gt [int]$RunEndUtc) { return $null }
     if ($null -eq $Baseline -or $null -eq $End -or [int]$End -lt [int]$Baseline) { return $null }
     return [int]$End - [int]$Baseline
 }
@@ -252,6 +354,109 @@ function Get-CumulativeDelta {
 Assert-True ((Get-CumulativeDelta -Baseline 100 -End 145) -eq 45) 'exact-boundary cumulative delta should be calculated'
 Assert-True ($null -eq (Get-CumulativeDelta -Baseline $null -End 145)) 'missing baseline should remain unknown'
 Assert-True ($null -eq (Get-CumulativeDelta -Baseline 145 -End 120)) 'counter reset should remain unknown'
+Assert-True ($null -eq (Get-CumulativeDelta -Baseline 100 -End 145 -SampleAtUtc 110 -RunEndUtc 100)) 'post-run sample must not be attributed'
 
-Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, replay/no-op/conflict identity, event vocabulary, metric semantics, cumulative baseline/reset handling, and unavailable fallback; synthetic and non-live.'
+function Get-IntervalMilliseconds {
+    param(
+        [Nullable[int]] $Start,
+        [Nullable[int]] $End
+    )
+
+    if ($null -eq $Start -or $null -eq $End -or [int]$End -lt [int]$Start) { return $null }
+    return ([int]$End - [int]$Start) * 1000
+}
+
+Assert-True ((Get-IntervalMilliseconds -Start 10 -End 20) -eq 10000) 'paired phase interval should calculate elapsed milliseconds'
+Assert-True ($null -eq (Get-IntervalMilliseconds -Start 10 -End $null)) 'missing phase end should remain unknown'
+Assert-True ($null -eq (Get-IntervalMilliseconds -Start 20 -End 10)) 'reversed phase interval should remain unknown'
+$implementationDuration = Get-IntervalMilliseconds -Start 10 -End 20
+$reviewDuration = Get-IntervalMilliseconds -Start 15 -End 25
+Assert-True (($implementationDuration + $reviewDuration) -eq 20000) 'overlapping phases must retain separate elapsed totals'
+Assert-True (($implementationDuration + $reviewDuration) -ne (Get-IntervalMilliseconds -Start 10 -End 25)) 'overlap must not be subtracted from phase totals'
+
+function Test-RecoveryPointer {
+    param([string] $Pointer)
+
+    return ($Pointer -match '^Performance pointer: schema=1 \| run=[^|]+ \| project=[^|]+ \| story=[^|]+ \| ledger=(?!C:\\Users\\Blake\\\.codex\\worktrees)[^|]+ \| lastEvent=[^|]+ \| lastObservedUtc=.+$' -and
+        $Pointer -notmatch '(?i)prompt|transcript|secret|password')
+}
+
+$pointer = 'Performance pointer: schema=1 | run=synthetic-run-141 | project=12 | story=725/141 | ledger=C:\\Temp\\TaigaMCP\\synthetic-run-141\\events.jsonl | lastEvent=synthetic-event-1 | lastObservedUtc=2026-10-09T10:00:00Z'
+Assert-True (Test-RecoveryPointer -Pointer $pointer) 'recovery pointer must be compact, external, and privacy-safe'
+
+function Get-ReportIdentity {
+    param(
+        [string] $RunId,
+        [int] $ProjectId,
+        [int] $StoryId,
+        [string] $Provider,
+        [string] $Owner,
+        [string] $Repository,
+        [int] $Number,
+        [string] $ReviewedHead
+    )
+
+    return ($RunId, $ProjectId, $StoryId, $Provider, $Owner, $Repository, $Number, $ReviewedHead) -join '|'
+}
+
+$reportIdentityA = Get-ReportIdentity -RunId 'run-1' -ProjectId 12 -StoryId 725 -Provider 'github' -Owner 'blakeg83' -Repository 'taiga-mcp' -Number 321 -ReviewedHead ('a' * 40)
+$reportIdentityB = Get-ReportIdentity -RunId 'run-1' -ProjectId 12 -StoryId 725 -Provider 'github' -Owner 'blakeg83' -Repository 'taiga-mcp' -Number 321 -ReviewedHead ('a' * 40)
+$reportIdentityC = Get-ReportIdentity -RunId 'run-1' -ProjectId 12 -StoryId 725 -Provider 'github' -Owner 'blakeg83' -Repository 'taiga-mcp' -Number 321 -ReviewedHead ('b' * 40)
+Assert-True ($reportIdentityA -ceq $reportIdentityB) 'same story/PR/exact HEAD must reuse report identity'
+Assert-True ($reportIdentityA -cne $reportIdentityC) 'new exact HEAD must create a new report identity'
+
+function Get-RoleTokenSubtotal {
+    param(
+        [Nullable[int]] $InputDelta,
+        [Nullable[int]] $CachedInputDelta,
+        [Nullable[int]] $OutputDelta,
+        [Nullable[int]] $ReasoningDelta,
+        [string] $CachedInputRelationship,
+        [string] $ReasoningRelationship
+    )
+
+    if ($CachedInputRelationship -notin @('included_in_input', 'disjoint_from_input') -or
+        $ReasoningRelationship -notin @('included_in_output', 'disjoint_from_output')) {
+        return [ordered]@{ state = 'partial'; value = $null }
+    }
+    if ($null -eq $InputDelta -or $null -eq $OutputDelta) {
+        return [ordered]@{ state = 'partial'; value = $null }
+    }
+    if ($CachedInputRelationship -eq 'disjoint_from_input' -and $null -eq $CachedInputDelta) {
+        return [ordered]@{ state = 'partial'; value = $null }
+    }
+    if ($ReasoningRelationship -eq 'disjoint_from_output' -and $null -eq $ReasoningDelta) {
+        return [ordered]@{ state = 'partial'; value = $null }
+    }
+    $inputComponent = [int]$InputDelta
+    if ($CachedInputRelationship -eq 'disjoint_from_input') { $inputComponent += [int]$CachedInputDelta }
+    $outputComponent = [int]$OutputDelta
+    if ($ReasoningRelationship -eq 'disjoint_from_output') { $outputComponent += [int]$ReasoningDelta }
+    return [ordered]@{ state = 'measured'; value = $inputComponent + $outputComponent; input = $inputComponent; output = $outputComponent }
+}
+
+$includedSubtotal = Get-RoleTokenSubtotal -InputDelta 100 -CachedInputDelta 40 -OutputDelta 30 -ReasoningDelta 8 -CachedInputRelationship included_in_input -ReasoningRelationship included_in_output
+Assert-True ([string]$includedSubtotal.state -ceq 'measured' -and [int]$includedSubtotal.value -eq 130) 'included subtotals must not double-count cached or reasoning tokens'
+$disjointSubtotal = Get-RoleTokenSubtotal -InputDelta 100 -CachedInputDelta 40 -OutputDelta 30 -ReasoningDelta 8 -CachedInputRelationship disjoint_from_input -ReasoningRelationship disjoint_from_output
+Assert-True ([int]$disjointSubtotal.value -eq 178) 'disjoint subtotals must add only explicitly disjoint components'
+$unknownSubtotal = Get-RoleTokenSubtotal -InputDelta 100 -CachedInputDelta 40 -OutputDelta 30 -ReasoningDelta 8 -CachedInputRelationship unknown -ReasoningRelationship included_in_output
+Assert-True ([string]$unknownSubtotal.state -ceq 'partial' -and $null -eq $unknownSubtotal.value) 'unspecified token inclusion must remain partial and null'
+
+function Assert-NoPrivateFields {
+    param([System.Collections.IDictionary] $Payload)
+
+    $forbidden = @('prompt', 'transcript', 'sourceText', 'secret', 'password', 'authToken', 'messageBody')
+    foreach ($key in $Payload.Keys) {
+        if ([string]$key -in $forbidden) { throw "private field is not allowed: $key" }
+        $value = $Payload[$key]
+        if ($value -is [System.Collections.IDictionary]) { Assert-NoPrivateFields -Payload $value }
+    }
+}
+
+$safePayload = [ordered]@{ provenance = [ordered]@{ source = 'workflow_transition'; coverage = 'direct' }; usage = $null }
+Assert-NoPrivateFields -Payload $safePayload
+$privatePayload = [ordered]@{ provenance = [ordered]@{ source = 'workflow_transition' }; prompt = 'not allowed' }
+Assert-Throws { Assert-NoPrivateFields -Payload $privatePayload } 'privacy fixture must reject prompt/transcript/secret fields'
+
+Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, stable phase identities, final findings closure, recursive replay/no-op/conflict identity, interval coverage/overlap, external recovery pointer, report identity, exact token subtotal semantics, cumulative baseline/reset handling, privacy rejection, and unavailable fallback; synthetic and non-live.'
 exit 0

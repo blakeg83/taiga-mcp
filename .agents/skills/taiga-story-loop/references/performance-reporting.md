@@ -218,7 +218,11 @@ are:
 | `role` | `coordinator`, `implementer`, or `reviewer` | Actor responsible for the observed transition, not a guess from message text. |
 | `sessionId` / `workerId` | nonblank when the source supplies them; otherwise `null` | Session and worker/chat provenance. Missing values reduce coverage; they are never synthesized from a prompt or transcript. |
 | `transitionId` | nonblank stable logical transition ID | Names the logical lifecycle transition and remains stable across re-observation. |
+| `scope` | `task`, `final_story`, or `story` | Disambiguates task review events from the whole-story review and its corrections. |
+| `phaseId` | nonblank stable interval identity for phase boundary events | The same phase ID is carried by the start and end observations even when the starting revision is `null`. |
+| `correctionId` | nonblank for correction boundaries; otherwise `null` | Binds a correction start/ready pair and is distinct from the resulting revision and review attempt. |
 | `reviewRequestId` / `reviewAttemptId` | nullable outside review events | A request identifies the handoff; an attempt identifies one actual review. They are separate from `revision` and from `eventId`. |
+| `supersedesReviewAttemptId` | nullable outside correction events | Links a correction or final-story correction to the finding that caused it without rewriting the prior attempt. |
 | `eventType` | one event vocabulary value below | No free-form event type is accepted by the contract. |
 | `occurredAtUtc` | UTC ISO 8601 timestamp ending in `Z` | Generated at the actual transition. It is not an LLM estimate or a local-time conversion. |
 | `revision` | full Git SHA or `null` before a revision exists | Exact reviewed/changed revision. A shortened SHA is invalid. |
@@ -245,14 +249,14 @@ phase ends; a generic `phase_ended` event is unnecessary and prohibited.
 | Event type | Required identity | Closes or pairs with | Missing-data rule |
 | --- | --- | --- | --- |
 | `story_started` | story identity; coordinator role | `pr_ready` | Missing start makes time-to-PR unknown. |
-| `implementation_started` | `taskRef`; implementer role | `task_ready_for_review` or `correction_ready` for the same task/revision interval | Missing end leaves that implementation interval uncovered. |
-| `task_ready_for_review` | `taskRef`, `revision`; implementer role | next `review_started` for the same request | It is an implementation boundary, not proof that delivery or review occurred. |
-| `review_started` | task/final scope, `reviewRequestId`, `reviewAttemptId`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same attempt identity | Missing end leaves review duration unknown. |
-| `review_findings` | same review request/attempt and revision | `correction_started` for that task | Findings close the current review phase; they do not count as acceptance. |
+| `implementation_started` | `scope=task`, `taskRef`, `phaseId`; implementer role | `task_ready_for_review` with the same `phaseId` | `revision` may be `null` before a commit exists; missing end leaves the interval uncovered. |
+| `task_ready_for_review` | `scope=task`, `taskRef`, same `phaseId`, full `revision`; implementer role | next `review_started` for the same request | It is an implementation boundary, not proof that delivery or review occurred. |
+| `review_started` | scope, `phaseId`, `reviewRequestId`, `reviewAttemptId`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same phase/attempt identity | Missing end leaves review duration unknown. |
+| `review_findings` | same phase/request/attempt and revision | `correction_started` for a task or final-story correction | Findings close the current review phase; they do not count as acceptance. This also closes a final review when `scope=final_story`. |
 | `review_accepted` | same review request/attempt and revision | acceptance of that task revision | Acceptance is evidence, not a provider write receipt or merge. |
-| `correction_started` | `taskRef`, corrected-attempt identity; implementer role | `correction_ready` | Missing end leaves the correction interval uncovered. |
-| `correction_ready` | `taskRef`, new full `revision`; implementer role | a new `review_started` request | The new revision supersedes the prior review input; it does not mutate history. |
-| `final_review_started` | final `reviewRequestId`, `reviewAttemptId`, exact HEAD; reviewer role | `final_review_accepted` | Missing end leaves final review duration unknown. |
+| `correction_started` | `scope`, `phaseId`, `correctionId`; `taskRef` for task scope; implementer role | `correction_ready` with the same phase/correction ID | Missing end leaves the correction interval uncovered. For final-story correction, `taskRef` is `null` and `supersedesReviewAttemptId` names the final finding. |
+| `correction_ready` | same scope/phase/correction ID; new full `revision`; implementer role | a new `review_started` request | The new revision supersedes the prior review input; it does not mutate history. |
+| `final_review_started` | `scope=final_story`, final `phaseId`, `reviewRequestId`, `reviewAttemptId`, exact HEAD; reviewer role | `final_review_accepted` or `review_findings` with the same phase/attempt identity | Both acceptance and findings close the final review duration. |
 | `final_review_accepted` | same final request/attempt and exact HEAD | final-story approval | Does not authorize PR creation or merge by itself. |
 | `pr_ready` | PR identity and exact reviewed HEAD; coordinator role | report identity | Missing PR readiness prevents a confirmed PR report. Unknown provider delivery is not readiness. |
 | `wait_started` | stable `waitId`, wait kind, affected scope | `wait_ended` with the same `waitId` | An open wait is reported as uncovered/unknown; it is never inferred from elapsed wall time. |
@@ -265,6 +269,16 @@ Worker phase intervals may overlap coordinator or reviewer intervals. Sum the
 valid intervals for their own phase metric, preserve overlap diagnostics, and
 never subtract one phase from total wall time to invent coordination or wait
 time. Uncovered gaps remain explicit.
+
+An implementation interval uses one `phaseId` from
+`implementation_started` through `task_ready_for_review`; the start may have
+`revision: null` and the ready event must carry the resulting full SHA. A task
+correction uses a new `correctionId` and phase ID, starts after
+`review_findings`, and ends at `correction_ready` with the new full SHA. A
+final-story finding closes the current `scope=final_story` review phase. Its
+correction uses `taskRef: null`, a new correction/phase ID, and
+`supersedesReviewAttemptId`; the next final review is a new request/attempt and
+phase, even when it reviews the same SHA again.
 
 ### Persistence and recovery pointer
 
@@ -326,6 +340,31 @@ reasoning is included in output, that component is partial/unavailable rather
 than estimated. Unknown is never zero, and raw tokens are never converted to
 subscription allowance or monetary cost.
 
+The numeric role-total formula is defined only for these explicit source
+semantics:
+
+```text
+inputComponent =
+  delta(inputTokens)                              when cachedInput = included_in_input
+  delta(inputTokens) + delta(cachedInputTokens)   when cachedInput = disjoint_from_input
+
+outputComponent =
+  delta(outputTokens)                             when reasoning = included_in_output
+  delta(outputTokens) + delta(reasoningTokens)    when reasoning = disjoint_from_output
+
+roleTotalTokens = inputComponent + outputComponent
+```
+
+The `cachedInput` and `reasoning` relationships are required source metadata,
+not assumptions. If either relationship is `unknown`, or a needed delta is
+missing/reset/ambiguous, the role total has `state: partial` and
+`value: null`, with any known raw components retained separately. If no
+attributable component exists, its state is `unavailable`. A story total is
+`measured` only when every included role total is measured; otherwise its value
+is null and its state remains partial or unavailable. Thus cached input is
+never counted twice, reasoning is never silently added to output, and an
+unspecified inclusion rule cannot produce a numeric total.
+
 ### Report metrics
 
 Every report metric includes `state`, `value` (or `null`), `unit`, `source`,
@@ -353,6 +392,111 @@ coverage is not a complete total.
 
 The following objects are synthetic examples. Their IDs, SHA, timestamps, PR
 number, and token values are fixtures, not observations from this run.
+
+```json
+{
+  "exampleId": "synthetic-phase-null-before-commit",
+  "evidenceClass": "synthetic_fixture",
+  "events": [
+    {
+      "eventType": "implementation_started",
+      "scope": "task",
+      "taskRef": 147,
+      "phaseId": "task-147-implementation-1",
+      "revision": null,
+      "occurredAtUtc": "2026-10-09T10:00:00Z"
+    },
+    {
+      "eventType": "task_ready_for_review",
+      "scope": "task",
+      "taskRef": 147,
+      "phaseId": "task-147-implementation-1",
+      "revision": "1111111111111111111111111111111111111111",
+      "occurredAtUtc": "2026-10-09T10:10:00Z"
+    }
+  ]
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-correction-new-revision",
+  "evidenceClass": "synthetic_fixture",
+  "events": [
+    {
+      "eventType": "correction_started",
+      "scope": "task",
+      "taskRef": 147,
+      "phaseId": "task-147-correction-1",
+      "correctionId": "task-147-correction-1",
+      "supersedesReviewAttemptId": "task-147-review-attempt-1",
+      "revision": null,
+      "occurredAtUtc": "2026-10-09T10:20:00Z"
+    },
+    {
+      "eventType": "correction_ready",
+      "scope": "task",
+      "taskRef": 147,
+      "phaseId": "task-147-correction-1",
+      "correctionId": "task-147-correction-1",
+      "supersedesReviewAttemptId": "task-147-review-attempt-1",
+      "revision": "2222222222222222222222222222222222222222",
+      "occurredAtUtc": "2026-10-09T10:30:00Z"
+    }
+  ]
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-final-review-findings",
+  "evidenceClass": "synthetic_fixture",
+  "events": [
+    {
+      "eventType": "final_review_started",
+      "scope": "final_story",
+      "phaseId": "story-141-final-review-1",
+      "reviewRequestId": "story-141-final-request-1",
+      "reviewAttemptId": "story-141-final-attempt-1",
+      "revision": "3333333333333333333333333333333333333333",
+      "occurredAtUtc": "2026-10-09T10:40:00Z"
+    },
+    {
+      "eventType": "review_findings",
+      "scope": "final_story",
+      "phaseId": "story-141-final-review-1",
+      "reviewRequestId": "story-141-final-request-1",
+      "reviewAttemptId": "story-141-final-attempt-1",
+      "revision": "3333333333333333333333333333333333333333",
+      "occurredAtUtc": "2026-10-09T10:50:00Z"
+    }
+  ]
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-token-subtotal",
+  "evidenceClass": "synthetic_fixture",
+  "role": "reviewer",
+  "deltas": {
+    "inputTokens": 100,
+    "cachedInputTokens": 40,
+    "outputTokens": 30,
+    "reasoningTokens": 8
+  },
+  "counterSemantics": {
+    "cachedInput": "included_in_input",
+    "reasoning": "included_in_output"
+  },
+  "components": {
+    "input": 100,
+    "output": 30
+  },
+  "roleTotalTokens": 130,
+  "note": "cached input and reasoning remain raw detail fields; neither is added twice"
+}
+```
 
 ```json
 {
@@ -457,7 +601,7 @@ replace the in-memory control without changing the contract vocabulary.
 | Counter subtotal semantics | `usage-subtotals` | Cached-input and reasoning subtotals remain separate and are never double-counted. |
 | Report identity | `report-identity` | Same run/story/PR/exact HEAD reuses identity; a new exact HEAD creates a new identity. |
 | Metric completeness | `metric-semantics` | Each epic metric declares unit, calculation, source, coverage, and missing-data semantics. |
-| Privacy and unavailable fallback | `privacy-unavailable` | No prompt/transcript/source/secret data is accepted; unavailable usage remains null with an explicit reason. |
+| Privacy and unavailable fallback | `privacy-unavailable` | Prompt, transcript, source-text, and secret fields are rejected; allowlisted provenance source labels remain valid and unavailable usage remains null with an explicit reason. |
 
 The matrix is synthetic executable evidence, not a claim that a recorder or
 host telemetry source is already available. Task #148 owns the detailed
