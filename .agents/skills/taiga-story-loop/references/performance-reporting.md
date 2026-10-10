@@ -183,8 +183,9 @@ no network calls and writes no state.
 
 ## Deferred ownership and boundaries
 
-- Task #147 defines event identity, persistence, timestamp coverage, metric
-  semantics, and versioned event/report schemas.
+- Task #147 (the versioned contract section above) defines event identity,
+  persistence, timestamp coverage, metric semantics, and versioned event/report
+  schemas.
 - Task #148 defines review-attempt counting and bounded-overhead acceptance
   cases.
 - Story #142 owns safe event recording; story #143 owns deterministic
@@ -193,3 +194,272 @@ no network calls and writes no state.
 
 This task therefore records what can be attributed and how unavailable data is
 represented, without inventing a collector or changing workflow authority.
+
+## Versioned event and report contract (task #147)
+
+This section defines the version-1 contract that later recorder, aggregation,
+and workflow-hook work must consume. It is a contract only: this story does
+not implement the recorder, aggregation, or hooks.
+
+### Canonical event envelope
+
+Every persisted event is one JSON object with `schemaVersion: 1` and
+`kind: "story_performance_event"`. Required identity and provenance fields
+are:
+
+| Field | Required value/shape | Semantics |
+| --- | --- | --- |
+| `schemaVersion` | positive integer; currently `1` | Contract version, independent of the run or report revision. |
+| `eventId` | nonblank stable identifier | Ledger identity. The canonical event payload excludes no field except an implementation-only digest used to compare payloads. |
+| `runId` | nonblank run identity | Binds an event to one authorized story run; never infer it from a branch or chat title. |
+| `projectId` | positive internal project ID | Taiga project identity. |
+| `storyId` / `storyRef` | positive internal ID and displayed ref | Both are retained so provider identity and human-facing identity cannot be confused. |
+| `taskRef` | positive displayed ref or `null` | Required for task events; `null` for story-level events. A null task is not task zero. |
+| `role` | `coordinator`, `implementer`, or `reviewer` | Actor responsible for the observed transition, not a guess from message text. |
+| `sessionId` / `workerId` | nonblank when the source supplies them; otherwise `null` | Session and worker/chat provenance. Missing values reduce coverage; they are never synthesized from a prompt or transcript. |
+| `transitionId` | nonblank stable logical transition ID | Names the logical lifecycle transition and remains stable across re-observation. |
+| `reviewRequestId` / `reviewAttemptId` | nullable outside review events | A request identifies the handoff; an attempt identifies one actual review. They are separate from `revision` and from `eventId`. |
+| `eventType` | one event vocabulary value below | No free-form event type is accepted by the contract. |
+| `occurredAtUtc` | UTC ISO 8601 timestamp ending in `Z` | Generated at the actual transition. It is not an LLM estimate or a local-time conversion. |
+| `revision` | full Git SHA or `null` before a revision exists | Exact reviewed/changed revision. A shortened SHA is invalid. |
+| `reviewMode` | `per_task` or `story_end_only` | Captures the selected mode without changing workflow authority. |
+| `provenance` | object with source, observer and coverage | Explains where the observation came from and whether it is direct, partial, synthetic, or unavailable. |
+| `usage` | object or `null` | Optional source-backed usage sample. Null means not supplied, not zero. |
+
+`eventId` is the ledger's idempotency key. Replaying the same ID with a
+canonical payload that is byte-for-byte equivalent after JSON object-key
+normalization is a no-op and must not create a second event or counter delta.
+Replaying the same ID with any different payload is a conflict: preserve the
+first complete record, surface the conflict with both identities, and do not
+silently merge fields. A reobserved handoff is not a new review attempt.
+
+### Event vocabulary and pairing
+
+These are the original epic lifecycle events. `wait_started` and `wait_ended`
+are the only additional boundaries allowed by this contract, and they are
+recorded only when an existing workflow transition begins or ends an explicit
+wait that the report is required to measure. There is no generic polling event
+and no measurement-only worker message. Existing lifecycle end events serve as
+phase ends; a generic `phase_ended` event is unnecessary and prohibited.
+
+| Event type | Required identity | Closes or pairs with | Missing-data rule |
+| --- | --- | --- | --- |
+| `story_started` | story identity; coordinator role | `pr_ready` | Missing start makes time-to-PR unknown. |
+| `implementation_started` | `taskRef`; implementer role | `task_ready_for_review` or `correction_ready` for the same task/revision interval | Missing end leaves that implementation interval uncovered. |
+| `task_ready_for_review` | `taskRef`, `revision`; implementer role | next `review_started` for the same request | It is an implementation boundary, not proof that delivery or review occurred. |
+| `review_started` | task/final scope, `reviewRequestId`, `reviewAttemptId`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same attempt identity | Missing end leaves review duration unknown. |
+| `review_findings` | same review request/attempt and revision | `correction_started` for that task | Findings close the current review phase; they do not count as acceptance. |
+| `review_accepted` | same review request/attempt and revision | acceptance of that task revision | Acceptance is evidence, not a provider write receipt or merge. |
+| `correction_started` | `taskRef`, corrected-attempt identity; implementer role | `correction_ready` | Missing end leaves the correction interval uncovered. |
+| `correction_ready` | `taskRef`, new full `revision`; implementer role | a new `review_started` request | The new revision supersedes the prior review input; it does not mutate history. |
+| `final_review_started` | final `reviewRequestId`, `reviewAttemptId`, exact HEAD; reviewer role | `final_review_accepted` | Missing end leaves final review duration unknown. |
+| `final_review_accepted` | same final request/attempt and exact HEAD | final-story approval | Does not authorize PR creation or merge by itself. |
+| `pr_ready` | PR identity and exact reviewed HEAD; coordinator role | report identity | Missing PR readiness prevents a confirmed PR report. Unknown provider delivery is not readiness. |
+| `wait_started` | stable `waitId`, wait kind, affected scope | `wait_ended` with the same `waitId` | An open wait is reported as uncovered/unknown; it is never inferred from elapsed wall time. |
+| `wait_ended` | same `waitId` and scope | closes the explicit wait interval | An end without a start is an anomaly and contributes no duration. |
+
+Pairing is by scope, stable identity, and chronological UTC boundaries, never
+by array position or nearest timestamp. A missing boundary, reversed boundary,
+or ambiguous identity creates an anomaly and reduces that metric's coverage.
+Worker phase intervals may overlap coordinator or reviewer intervals. Sum the
+valid intervals for their own phase metric, preserve overlap diagnostics, and
+never subtract one phase from total wall time to invent coordination or wait
+time. Uncovered gaps remain explicit.
+
+### Persistence and recovery pointer
+
+The event ledger is append-only JSONL outside the source worktree, under a
+coordinator-selected external run root:
+
+`<external-run-root>/<runId>/events.jsonl`
+
+The path is run configuration, not an event payload field. One complete JSON
+object and newline is the append unit. A writer must serialize concurrent
+appends and flush the complete line before reporting success. An interrupted
+tail may be quarantined or reported as incomplete, but earlier complete lines
+remain authoritative and are never rewritten. Duplicate IDs are no-ops;
+conflicting IDs remain visible as conflicts.
+
+Reports are immutable siblings of the ledger and are keyed by a canonical
+report identity:
+
+`runId + projectId + storyId + PR provider/owner/repository/number + exact reviewed HEAD`
+
+Identical PR identity and exact HEAD is idempotent and reuses the same report
+identity. A newly approved HEAD creates a new retained report; it must not
+overwrite the old report. An unknown PR result creates no confirmed PR report,
+but never invalidates already recorded measurements.
+
+The continuation note carries only a compact recovery pointer, for example:
+
+```text
+Performance pointer: schema=1 | run=<run-id> | project=<project-id> | story=<story-id>/<story-ref> | ledger=<external-ledger-path> | lastEvent=<event-id> | lastObservedUtc=<utc>
+```
+
+The pointer is not a historical registry and contains no prompt text,
+transcript, source, token payload, or copied event list. Recovery rereads the
+external ledger and verifies the last event identity before continuing.
+
+### Usage and interval semantics
+
+An optional `usage` sample is cumulative within one explicit `streamId`, role,
+session, and source. Its counters are source-defined nonnegative integers:
+`inputTokens`, `cachedInputTokens`, `outputTokens`, and `reasoningTokens`.
+Each sample also records `sampledAtUtc`, `baselineAtUtc` when known,
+`source`, `counterSemantics`, and `coverage`.
+
+For a counter `c`, a report may calculate a delta only when the same stream has
+an exact start-boundary baseline and an end sample, both are attributable to
+the run, and the counter does not decrease between them:
+
+`delta(c) = c(end) - c(exact baseline)`
+
+An interval crossing a counter decrease starts a named reset segment and is
+unknown; it is not clamped to zero. A missing baseline, absent counter,
+ambiguous stream, or sample after the run end reduces coverage or makes the
+affected value unavailable. Later samples are retained as later activity but
+are not attributed to the run.
+
+Cached-input and reasoning counters remain separate raw fields. They are not
+added to input or output a second time. If the source does not state whether
+reasoning is included in output, that component is partial/unavailable rather
+than estimated. Unknown is never zero, and raw tokens are never converted to
+subscription allowance or monetary cost.
+
+### Report metrics
+
+Every report metric includes `state`, `value` (or `null`), `unit`, `source`,
+`calculation`, `coverage`, and `missingData`. `state` is `measured`,
+`partial`, `unavailable`, or `not_applicable`; a numeric value with partial
+coverage is not a complete total.
+
+| Metric | Unit | Calculation | Source | Missing-data semantics |
+| --- | --- | --- | --- | --- |
+| `timeToPr` | milliseconds | Direct UTC difference `pr_ready - story_started` | paired story boundaries | Null/unavailable when either boundary is missing, reversed, or PR delivery is unknown. |
+| `implementationElapsed` | milliseconds | Sum valid implementation and correction intervals by task | paired `implementation_started`/`task_ready_for_review` or `correction_*` events | Partial when any required interval is uncovered; never derive by subtracting other phases. |
+| `reviewElapsed` | milliseconds | Sum valid task/final review intervals by distinct review attempt | paired `review_started` and finding/acceptance events | Partial/unavailable for open or ambiguous attempts. |
+| `coordinationElapsed` | milliseconds | Sum explicit coordinator intervals only | coordinator lifecycle/wait boundaries | Unavailable when no attributable coordinator interval exists. |
+| `waitingElapsed` | milliseconds | Sum explicit `wait_started`/`wait_ended` intervals | wait boundary events | Unknown for open, orphaned, or inferred waits; no polling-based estimate. |
+| `implementationTokens`, `reviewTokens`, `coordinationTokens` | tokens | Sum valid cumulative deltas by role and stream | source-backed usage samples | Null when unavailable; partial when only some streams/intervals are covered. |
+| `totalTokens` | tokens | Sum attributable role totals only when their states/semantics permit | role usage metrics | Partial remains partial; never treat unavailable roles as zero. |
+| `tasksCompleted` | tasks | Count accepted task identities in the declared ordered task set | accepted lifecycle events and story task metadata | Unknown when the ordered set or acceptance evidence is incomplete. |
+| `initialTaskReviews`, `correctionReReviews`, `finalStoryReviews`, `finalStoryReReviews` | review attempts | Count distinct request/attempt identities by event scope | actual review handoff/acceptance events | Zero per-task reviews in `story_end_only` is valid; incomplete identity coverage is partial. Detailed cases are locked by #148. |
+| `firstPassAcceptanceRate` | ratio and coverage counts | accepted-on-first-attempt tasks / tasks with an initial review | review request/acceptance identities | Zero denominator is `not_applicable`; report numerator, denominator, and coverage. |
+| `reviewMode` | enum | Assigned mode copied unchanged | setup authorization | Unavailable if setup mode is absent; never infer from observed event order. |
+| `modelsAndReasoning` | metadata records | Exact role/profile records, including changes | setup/host provenance | Unverified profile remains explicitly unverified; it is not a token estimate. |
+| `changedFiles`, `linesAdded`, `linesDeleted` | counts | Exact base-to-reviewed-HEAD Git diff | revision freeze and Git | Null when base/HEAD or diff is unavailable; no complexity score is inferred. |
+
+### Concrete version-1 examples
+
+The following objects are synthetic examples. Their IDs, SHA, timestamps, PR
+number, and token values are fixtures, not observations from this run.
+
+```json
+{
+  "exampleId": "synthetic-run-141/story-started",
+  "schemaVersion": 1,
+  "kind": "story_performance_event",
+  "eventId": "synthetic-run-141/story-started",
+  "runId": "synthetic-run-141",
+  "projectId": 12,
+  "storyId": 725,
+  "storyRef": 141,
+  "taskRef": null,
+  "role": "coordinator",
+  "sessionId": "synthetic-coordinator-session",
+  "workerId": "synthetic-coordinator-thread",
+  "transitionId": "story-started",
+  "reviewRequestId": null,
+  "reviewAttemptId": null,
+  "eventType": "story_started",
+  "occurredAtUtc": "2026-10-09T10:00:00Z",
+  "revision": null,
+  "reviewMode": "per_task",
+  "provenance": {
+    "source": "workflow_transition",
+    "observedBy": "coordinator",
+    "coverage": "direct",
+    "synthetic": true
+  },
+  "usage": null
+}
+```
+
+```json
+{
+  "exampleId": "synthetic-run-141/project-12-story-725-pr-321-head-0123456789abcdef0123456789abcdef01234567",
+  "schemaVersion": 1,
+  "kind": "story_performance_report",
+  "reportId": "synthetic-run-141/project-12-story-725-pr-321-head-0123456789abcdef0123456789abcdef01234567",
+  "runId": "synthetic-run-141",
+  "projectId": 12,
+  "storyId": 725,
+  "storyRef": 141,
+  "reviewMode": "per_task",
+  "pullRequest": {
+    "provider": "github",
+    "owner": "blakeg83",
+    "repository": "taiga-mcp",
+    "number": 321,
+    "reviewedHead": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "metrics": {
+    "timeToPr": {
+      "state": "measured",
+      "value": 900000,
+      "unit": "milliseconds",
+      "source": "story_started -> pr_ready",
+      "calculation": "direct UTC difference",
+      "coverage": "both boundaries present",
+      "missingData": null
+    },
+    "implementationTokens": {
+      "state": "unavailable",
+      "value": null,
+      "unit": "tokens",
+      "source": "no attributable worker stream",
+      "calculation": "not calculated",
+      "coverage": "none",
+      "missingData": "worker stream was not exposed"
+    },
+    "firstPassAcceptanceRate": {
+      "state": "not_applicable",
+      "value": null,
+      "unit": "ratio",
+      "source": "review attempt identities",
+      "calculation": "accepted-on-first-attempt / tasks-with-initial-review",
+      "coverage": "zero denominator in this fixture",
+      "missingData": "not applicable"
+    }
+  },
+  "provenance": {
+    "eventSchemaVersion": 1,
+    "sourceCoverage": "synthetic fixture",
+    "generatedAtUtc": "2026-10-09T10:15:00Z"
+  }
+}
+```
+
+### Requirement-to-fixture matrix
+
+The focused validator names each fixture so a later recorder or aggregator can
+replace the in-memory control without changing the contract vocabulary.
+
+| Requirement | Fixture ID | Deterministic assertion |
+| --- | --- | --- |
+| Versioned envelope and required identity | `event-envelope-v1` | Valid event has schema/kind, run/project/story, role/session, transition, UTC, revision, provenance, and optional usage fields. |
+| Same-ID replay | `replay-same-id` | Same ID and same canonical payload is a no-op and preserves one record. |
+| Same-ID conflict | `replay-conflict` | Same ID with a changed field is surfaced as a conflict and cannot overwrite the first record. |
+| Original event vocabulary | `event-vocabulary-complete` | All eleven epic events are present; only explicit `wait_started`/`wait_ended` are accepted as additional boundaries. |
+| Phase pairing and overlap | `phase-coverage` | Valid pairs calculate elapsed milliseconds; missing/reversed boundaries remain unknown and overlapping intervals are not subtracted. |
+| External ledger and recovery pointer | `external-ledger-pointer` | The ledger is outside the worktree and the pointer contains only compact run/story/last-event metadata. |
+| Cumulative usage baseline | `usage-boundary-reset` | Exact-boundary deltas work; missing baseline, decreases, absent counters, and post-run samples reduce coverage or remain unknown. |
+| Counter subtotal semantics | `usage-subtotals` | Cached-input and reasoning subtotals remain separate and are never double-counted. |
+| Report identity | `report-identity` | Same run/story/PR/exact HEAD reuses identity; a new exact HEAD creates a new identity. |
+| Metric completeness | `metric-semantics` | Each epic metric declares unit, calculation, source, coverage, and missing-data semantics. |
+| Privacy and unavailable fallback | `privacy-unavailable` | No prompt/transcript/source/secret data is accepted; unavailable usage remains null with an explicit reason. |
+
+The matrix is synthetic executable evidence, not a claim that a recorder or
+host telemetry source is already available. Task #148 owns the detailed
+review-attempt and bounded-overhead acceptance cases that build on these
+identities and metrics.

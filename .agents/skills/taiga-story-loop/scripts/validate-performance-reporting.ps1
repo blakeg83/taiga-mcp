@@ -74,7 +74,7 @@ Assert-Contains $normalized 'Account-level limits' 'account-level limits must be
 Assert-True ($normalized.Contains('unknown, not zero')) 'unknown values must not be converted to zero'
 
 $jsonMatches = [regex]::Matches($reference, '(?ms)^```json\s*\r?\n(?<json>.*?)\r?\n```')
-Assert-True ($jsonMatches.Count -eq 3) 'reference must contain three sanitized JSON examples'
+Assert-True ($jsonMatches.Count -ge 5) 'reference must contain the three discovery examples plus event and report examples'
 
 $examples = @()
 foreach ($match in $jsonMatches) {
@@ -119,5 +119,139 @@ foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', '
     Assert-True ([int]$counterProperty.Value -ge 0) "$counterName must be nonnegative in the synthetic example"
 }
 
-Write-Output 'Passed performance-reporting capability fixture: source/provenance separation, observed host metadata, unavailable fallback, partial stream coverage, and reset semantics; synthetic and non-live.'
+$event = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-run-141/story-started'
+Assert-True ([string]$event.kind -ceq 'story_performance_event') 'event example must use the versioned event kind'
+Assert-True ([int]$event.schemaVersion -eq 1) 'event example must use schema version 1'
+foreach ($field in @('eventId', 'runId', 'projectId', 'storyId', 'storyRef', 'role', 'transitionId', 'eventType', 'occurredAtUtc', 'reviewMode', 'provenance')) {
+    $property = $event.PSObject.Properties[$field]
+    Assert-True ($null -ne $property) "event example must include $field"
+}
+Assert-True ([string]$event.eventType -ceq 'story_started') 'event example must use an original epic event type'
+Assert-Contains $normalized '"occurredAtUtc": "2026-10-09T10:00:00Z"' 'event example timestamp must be UTC'
+Assert-True ($null -eq $event.usage) 'event example may omit usage without treating it as zero'
+
+$report = Get-RequiredExample -Examples $examples -ExampleId 'synthetic-run-141/project-12-story-725-pr-321-head-0123456789abcdef0123456789abcdef01234567'
+Assert-True ([string]$report.kind -ceq 'story_performance_report') 'report example must use the versioned report kind'
+Assert-True ([int]$report.schemaVersion -eq 1) 'report example must use schema version 1'
+foreach ($field in @('reportId', 'runId', 'projectId', 'storyId', 'storyRef', 'reviewMode', 'pullRequest', 'metrics', 'provenance')) {
+    $property = $report.PSObject.Properties[$field]
+    Assert-True ($null -ne $property) "report example must include $field"
+}
+Assert-True ([string]$report.pullRequest.reviewedHead -match '^[0-9a-f]{40}$') 'report example must bind to a full reviewed HEAD'
+Assert-True ([string]$report.metrics.implementationTokens.state -ceq 'unavailable') 'report example must preserve unavailable usage state'
+Assert-True ($null -eq $report.metrics.implementationTokens.value) 'unavailable report metric must remain null'
+Assert-True ([string]$report.metrics.firstPassAcceptanceRate.state -ceq 'not_applicable') 'zero-denominator rate must be not applicable'
+
+$requiredEventTypes = @(
+    'story_started',
+    'implementation_started',
+    'task_ready_for_review',
+    'review_started',
+    'review_findings',
+    'review_accepted',
+    'correction_started',
+    'correction_ready',
+    'final_review_started',
+    'final_review_accepted',
+    'pr_ready'
+)
+foreach ($eventType in $requiredEventTypes) {
+    Assert-Contains $normalized $eventType "event vocabulary is missing $eventType"
+}
+foreach ($boundaryMarker in @('wait_started', 'wait_ended', 'generic `phase_ended` event is unnecessary and prohibited')) {
+    Assert-Contains $normalized $boundaryMarker "boundary contract is missing $boundaryMarker"
+}
+foreach ($fixtureId in @(
+        'event-envelope-v1'
+        'replay-same-id'
+        'replay-conflict'
+        'event-vocabulary-complete'
+        'phase-coverage'
+        'external-ledger-pointer'
+        'usage-boundary-reset'
+        'usage-subtotals'
+        'report-identity'
+        'metric-semantics'
+        'privacy-unavailable')) {
+    Assert-Contains $normalized $fixtureId "requirement-to-fixture matrix is missing $fixtureId"
+}
+foreach ($contractMarker in @(
+        'schemaVersion: 1'
+        'eventId'
+        'Replaying the same ID'
+        'same ID with any different payload is a conflict'
+        'append-only JSONL'
+        'Performance pointer:'
+        'delta(c) = c(end) - c(exact baseline)'
+        'runId + projectId + storyId + PR provider/owner/repository/number + exact reviewed HEAD'
+        'timeToPr'
+        'implementationElapsed'
+        'reviewElapsed'
+        'coordinationElapsed'
+        'waitingElapsed'
+        'implementationTokens'
+        'reviewTokens'
+        'coordinationTokens'
+        'totalTokens'
+        'tasksCompleted'
+        'initialTaskReviews'
+        'correctionReReviews'
+        'finalStoryReviews'
+        'finalStoryReReviews'
+        'firstPassAcceptanceRate'
+        'modelsAndReasoning'
+        'changedFiles'
+        'linesAdded'
+        'linesDeleted'
+        'Cached-input and reasoning counters remain separate')) {
+    Assert-Contains $normalized $contractMarker "contract is missing '$contractMarker'"
+}
+
+function Get-CanonicalPayload {
+    param([System.Collections.IDictionary] $Payload)
+
+    return (($Payload.GetEnumerator() |
+            Sort-Object -Property Key |
+            ForEach-Object { "{0}={1}" -f $_.Key, $_.Value }) -join '|')
+}
+
+function Invoke-ReplayFixture {
+    param(
+        [System.Collections.IDictionary] $Existing,
+        [System.Collections.IDictionary] $Incoming
+    )
+
+    $id = [string]$Incoming.eventId
+    $incomingCanonical = Get-CanonicalPayload $Incoming
+    if (-not $Existing.Contains($id)) {
+        $Existing[$id] = $incomingCanonical
+        return 'appended'
+    }
+    if ([string]$Existing[$id] -ceq $incomingCanonical) { return 'noop' }
+    return 'conflict'
+}
+
+$replayStore = @{}
+$syntheticEvent = [ordered]@{ eventId = 'fixture-event-1'; eventType = 'story_started'; occurredAtUtc = '2026-10-09T10:00:00Z' }
+Assert-True ((Invoke-ReplayFixture -Existing $replayStore -Incoming $syntheticEvent) -ceq 'appended') 'first event should append'
+Assert-True ((Invoke-ReplayFixture -Existing $replayStore -Incoming $syntheticEvent) -ceq 'noop') 'same-ID same-payload replay should be a no-op'
+$conflictingEvent = [ordered]@{ eventId = 'fixture-event-1'; eventType = 'pr_ready'; occurredAtUtc = '2026-10-09T10:00:00Z' }
+Assert-True ((Invoke-ReplayFixture -Existing $replayStore -Incoming $conflictingEvent) -ceq 'conflict') 'same-ID different-payload replay should conflict'
+Assert-True ([string]$replayStore['fixture-event-1'] -match 'story_started') 'conflict must preserve the first complete event'
+
+function Get-CumulativeDelta {
+    param(
+        [Nullable[int]] $Baseline,
+        [Nullable[int]] $End
+    )
+
+    if ($null -eq $Baseline -or $null -eq $End -or [int]$End -lt [int]$Baseline) { return $null }
+    return [int]$End - [int]$Baseline
+}
+
+Assert-True ((Get-CumulativeDelta -Baseline 100 -End 145) -eq 45) 'exact-boundary cumulative delta should be calculated'
+Assert-True ($null -eq (Get-CumulativeDelta -Baseline $null -End 145)) 'missing baseline should remain unknown'
+Assert-True ($null -eq (Get-CumulativeDelta -Baseline 145 -End 120)) 'counter reset should remain unknown'
+
+Write-Output 'Passed performance-reporting contract fixture: discovery provenance, versioned event/report examples, replay/no-op/conflict identity, event vocabulary, metric semantics, cumulative baseline/reset handling, and unavailable fallback; synthetic and non-live.'
 exit 0
