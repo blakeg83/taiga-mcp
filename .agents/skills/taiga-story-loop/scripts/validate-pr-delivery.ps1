@@ -290,6 +290,16 @@ function New-PerformanceEvent {
         [Parameter(Mandatory)] [string] $EventType,
         [Parameter(Mandatory)] [string] $OccurredAtUtc,
         [ValidateSet('per_task','story_end_only')] [string] $ReviewMode = 'per_task',
+        [ValidateSet('story','task','final_story')] [string] $Scope = 'story',
+        [AllowNull()] [object] $TaskRef = $null,
+        [AllowNull()] [object] $PhaseId = $null,
+        [ValidateSet('coordinator','implementer','reviewer')] [string] $Role = 'coordinator',
+        [AllowNull()] [object] $SessionId = 'synthetic-coordinator-session',
+        [AllowNull()] [object] $WorkerId = 'synthetic-coordinator',
+        [AllowNull()] [object] $ReviewRequestId = $null,
+        [AllowNull()] [object] $ReviewAttemptId = $null,
+        [AllowNull()] [object] $ReviewKind = $null,
+        [AllowNull()] [object] $ReviewAttemptOrdinal = $null,
         [AllowNull()] [object] $Revision = $null,
         [AllowNull()] [object] $PullRequest = $null
     )
@@ -302,18 +312,18 @@ function New-PerformanceEvent {
         projectId = 12
         storyId = 728
         storyRef = 144
-        taskRef = $null
-        role = 'coordinator'
-        sessionId = 'synthetic-coordinator-session'
-        workerId = 'synthetic-coordinator'
+        taskRef = $TaskRef
+        role = $Role
+        sessionId = $SessionId
+        workerId = $WorkerId
         transitionId = $EventId
-        scope = 'story'
-        phaseId = $null
+        scope = $Scope
+        phaseId = $PhaseId
         correctionId = $null
-        reviewRequestId = $null
-        reviewAttemptId = $null
-        reviewKind = $null
-        reviewAttemptOrdinal = $null
+        reviewRequestId = $ReviewRequestId
+        reviewAttemptId = $ReviewAttemptId
+        reviewKind = $ReviewKind
+        reviewAttemptOrdinal = $ReviewAttemptOrdinal
         supersedesReviewAttemptId = $null
         eventType = $EventType
         occurredAtUtc = $OccurredAtUtc
@@ -343,6 +353,64 @@ function Invoke-PerformanceRecorder {
     $eventJson = $Event | ConvertTo-Json -Compress -Depth 30
     & pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $eventJson *> $null
     return ($LASTEXITCODE -eq 0)
+}
+
+function Append-PerformanceEvents {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $ExternalRunRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [object[]] $Events
+    )
+
+    foreach ($event in $Events) {
+        Assert-True (Invoke-PerformanceRecorder -RecorderPath $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -Event $event) "synthetic lifecycle event must reach the recorder: $($event.eventId)"
+    }
+}
+
+function New-SyntheticTaskReviewEvents {
+    param(
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [int] $TaskRef,
+        [Parameter(Mandatory)] [string] $ReviewedHead,
+        [Parameter(Mandatory)] [string] $StartUtc,
+        [Parameter(Mandatory)] [string] $EndUtc
+    )
+
+    $phaseId = "task-$TaskRef-review"
+    $requestId = "task-$TaskRef-request-1"
+    $attemptId = "task-$TaskRef-attempt-1"
+    @(
+        (New-PerformanceEvent -RunId $RunId -EventId "$attemptId-start" -EventType 'review_started' -OccurredAtUtc $StartUtc -Scope task -TaskRef $TaskRef -PhaseId $phaseId -Role reviewer -SessionId 'synthetic-reviewer-session' -WorkerId 'synthetic-reviewer' -ReviewRequestId $requestId -ReviewAttemptId $attemptId -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $ReviewedHead),
+        (New-PerformanceEvent -RunId $RunId -EventId "$attemptId-accepted" -EventType 'review_accepted' -OccurredAtUtc $EndUtc -Scope task -TaskRef $TaskRef -PhaseId $phaseId -Role reviewer -SessionId 'synthetic-reviewer-session' -WorkerId 'synthetic-reviewer' -ReviewRequestId $requestId -ReviewAttemptId $attemptId -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $ReviewedHead)
+    )
+}
+
+function New-SyntheticSetupMetadata {
+    param([Parameter(Mandatory)] [string] $RunId)
+
+    [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_setup'
+        runId = $RunId
+        projectId = 12
+        storyId = 728
+        profiles = @(
+            [ordered]@{
+                role = 'coordinator'; workerId = 'synthetic-coordinator'; sessionId = 'synthetic-coordinator-session'; model = 'gpt-6.1-sol'; effort = 'medium'; effectiveFromUtc = '2026-10-10T02:59:00Z'; effectiveToUtc = $null; changeId = 'coordinator-profile'
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'validate-pr-delivery'; coverage = 'complete synthetic assignment interval'; synthetic = $true }
+            }
+            [ordered]@{
+                role = 'implementer'; workerId = 'synthetic-implementer'; sessionId = 'synthetic-implementer-session'; model = 'gpt-5.6-sol'; effort = 'high'; effectiveFromUtc = '2026-10-10T02:59:00Z'; effectiveToUtc = $null; changeId = 'implementer-profile'
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'validate-pr-delivery'; coverage = 'complete synthetic assignment interval'; synthetic = $true }
+            }
+            [ordered]@{
+                role = 'reviewer'; workerId = 'synthetic-reviewer'; sessionId = 'synthetic-reviewer-session'; model = 'gpt-6.1-sol'; effort = 'high'; effectiveFromUtc = '2026-10-10T02:59:00Z'; effectiveToUtc = $null; changeId = 'reviewer-profile'
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'validate-pr-delivery'; coverage = 'complete synthetic assignment interval'; synthetic = $true }
+            }
+        )
+        provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'validate-pr-delivery'; coverage = 'complete synthetic setup fixture'; synthetic = $true }
+    }
 }
 
 function New-SyntheticPerformanceRun {
@@ -413,7 +481,9 @@ function Invoke-ReportFinalization {
         [Parameter(Mandatory)] [string] $BaseRevision,
         [Parameter(Mandatory)] [string] $RepositoryPath,
         [ValidateSet('per_task','story_end_only')] [string] $ReviewMode = 'per_task',
-        [string] $OccurredAtUtc = '2026-10-10T02:00:00Z'
+        [string] $OccurredAtUtc = '2026-10-10T02:00:00Z',
+        [AllowEmptyCollection()] [int[]] $TaskRefs = @(),
+        [string] $MetadataPath
     )
 
     $pr = $Delivery.pr
@@ -472,10 +542,21 @@ function Invoke-ReportFinalization {
         $ledgerPath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'events.jsonl'
         $viewRoot = Join-Path $ExternalRunRoot 'revision-bound-views'
         $aggregationEventsPath = New-RevisionBoundLedgerView -LedgerPath $ledgerPath -ReviewedHead ([string]$Delivery.reviewedHead) -ViewRoot $viewRoot
-        $output = @(& pwsh -NoProfile -File $AggregatorPath -EventsPath $aggregationEventsPath -ReviewMode $ReviewMode -ReviewedHead ([string]$Delivery.reviewedHead) -BaseRevision $BaseRevision -RepositoryPath $RepositoryPath -ArtifactDirectory $ArtifactRoot 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            throw ($output -join [Environment]::NewLine)
+        $aggregatorParameters = @{
+            EventsPath = $aggregationEventsPath
+            ReviewMode = $ReviewMode
+            ReviewedHead = [string]$Delivery.reviewedHead
+            BaseRevision = $BaseRevision
+            RepositoryPath = $RepositoryPath
+            ArtifactDirectory = $ArtifactRoot
         }
+        if (@($TaskRefs).Count -gt 0) {
+            $aggregatorParameters['TaskRefs'] = [int[]]$TaskRefs
+        }
+        if (-not [string]::IsNullOrWhiteSpace($MetadataPath)) {
+            $aggregatorParameters['MetadataPath'] = $MetadataPath
+        }
+        $output = @(& $AggregatorPath @aggregatorParameters 2>&1)
         $report = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine) | ConvertFrom-Json -Depth 100
         $artifacts = Resolve-PublishedReportArtifacts -ArtifactRoot $ArtifactRoot -ReportId ([string]$report.reportId)
         $summary = "report=$($report.reportId); timeToPr=$($report.metrics.timeToPr.state); limitations=$(@($report.provenance.limitations) -join ', ')"
@@ -618,6 +699,40 @@ try {
     $runAWithBothHeads = @(Get-Content -LiteralPath $runA)
     Assert-True ($runAWithBothHeads.Count -eq 3 -and (Test-Path -LiteralPath $createdReport.jsonPath -PathType Leaf) -and
         [Convert]::ToBase64String([IO.File]::ReadAllBytes($createdReport.jsonPath)) -ceq [Convert]::ToBase64String($createdJsonBytes)) 'same-run changed HEAD sequence must preserve one story_started and one pr_ready per reviewed HEAD and retain immutable prior artifacts'
+
+    $knownRunId = 'synthetic-pr-report-known-dataflow'
+    $knownRun = New-SyntheticPerformanceRun -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId $knownRunId -OccurredAtUtc '2026-10-10T03:00:00Z'
+    $knownTaskRefs = @(155, 156, 157)
+    $knownTaskTimes = @(
+        [ordered]@{ task = 155; start = '2026-10-10T03:05:00Z'; end = '2026-10-10T03:06:00Z' }
+        [ordered]@{ task = 156; start = '2026-10-10T03:10:00Z'; end = '2026-10-10T03:11:00Z' }
+        [ordered]@{ task = 157; start = '2026-10-10T03:15:00Z'; end = '2026-10-10T03:16:00Z' }
+    )
+    foreach ($taskTime in $knownTaskTimes) {
+        $taskEvents = New-SyntheticTaskReviewEvents -RunId $knownRunId -TaskRef $taskTime.task -ReviewedHead $reportHeadA -StartUtc $taskTime.start -EndUtc $taskTime.end
+        Append-PerformanceEvents -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId $knownRunId -Events $taskEvents
+    }
+    $knownMetadataPath = Join-Path $reportFixtureRoot 'synthetic-known-setup-metadata.json'
+    $knownMetadata = New-SyntheticSetupMetadata -RunId $knownRunId
+    [IO.File]::WriteAllText($knownMetadataPath, ($knownMetadata | ConvertTo-Json -Depth 30), [Text.UTF8Encoding]::new($false))
+    $knownArtifactRoot = Join-Path $reportFixtureRoot 'known-artifacts'
+    $knownReport = Invoke-ReportFinalization -Delivery $confirmedCreate -RecorderPath $reportRecorderPath -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId $knownRunId -ArtifactRoot $knownArtifactRoot -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath -OccurredAtUtc '2026-10-10T03:30:00Z' -TaskRefs $knownTaskRefs -MetadataPath $knownMetadataPath
+    Assert-True ($knownReport.reportState -eq 'published') "complete-start/lifecycle/finalization fixture must publish through the actual aggregator (response: $($knownReport.response))"
+    $knownJson = Get-Content -Raw -LiteralPath $knownReport.jsonPath | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$knownJson.metrics.modelsAndReasoning.state -eq 'measured' -and
+        @($knownJson.metrics.modelsAndReasoning.value).Count -eq 3 -and
+        [string]$knownJson.provenance.setupMetadata.state -eq 'measured' -and
+        [string]$knownJson.coverage.taskSet.state -eq 'measured' -and
+        @($knownJson.coverage.taskSet.declaredTaskRefs).Count -eq 3 -and
+        [int]$knownJson.coverage.taskSet.declaredTaskRefs[0] -eq 155 -and
+        [int]$knownJson.coverage.taskSet.declaredTaskRefs[2] -eq 157) "finalization must preserve validated setup profiles and the authorized ordered task set (profiles=$(@($knownJson.metrics.modelsAndReasoning.value).Count), profileState=$($knownJson.metrics.modelsAndReasoning.state), metadataState=$($knownJson.provenance.setupMetadata.state), taskState=$($knownJson.coverage.taskSet.state), taskRefs=$($knownJson.coverage.taskSet.declaredTaskRefs -join ','))"
+    $missingMetadataArtifactRoot = Join-Path $reportFixtureRoot 'known-artifacts-missing-metadata'
+    $missingMetadataReport = Invoke-ReportFinalization -Delivery $confirmedCreate -RecorderPath $reportRecorderPath -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId $knownRunId -ArtifactRoot $missingMetadataArtifactRoot -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath -OccurredAtUtc '2026-10-10T03:30:00Z' -TaskRefs $knownTaskRefs
+    Assert-True ($missingMetadataReport.reportState -eq 'published') 'missing setup metadata must retain the bounded report fallback'
+    $missingMetadataJson = Get-Content -Raw -LiteralPath $missingMetadataReport.jsonPath | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$missingMetadataJson.metrics.modelsAndReasoning.state -eq 'unavailable' -and
+        [string]$missingMetadataJson.provenance.setupMetadata.state -eq 'unavailable' -and
+        [string]$missingMetadataJson.coverage.taskSet.state -eq 'measured') 'missing metadata fallback must disclose unavailable provenance without losing declared task coverage'
 
     $invalidProviderCases = @(
         [ordered]@{ name = 'wrong repository'; delivery = New-DeliveryVariant -BaseDelivery $confirmedCreate -Repository 'OtherRepo' }
