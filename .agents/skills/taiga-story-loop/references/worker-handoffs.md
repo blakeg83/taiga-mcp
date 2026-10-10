@@ -15,9 +15,12 @@ transcript, or a new chat for an ordinary correction.
 ## Recording the handoff boundary
 
 Each handoff has one performance observation at the boundary that already
-exists in this protocol. The implementer records `implementation_started` at
-the first concrete task-scoped edit/check and `task_ready_for_review` only after
-the clean committed revision packet is frozen. The reviewer records
+exists in this protocol. In both modes, the implementer records
+`implementation_started` at the first concrete task-scoped edit/check and
+`task_ready_for_review` after the clean committed revision packet is frozen at
+the implementation-ready milestone. In `per_task`, that frozen event precedes
+the direct reviewer handoff; in `story_end_only`, it closes implementation but
+does not dispatch a task review. The reviewer records
 `review_started` when it begins the exact request/attempt and records
 `review_findings` or `review_accepted` when that current attempt closes. A
 current finding starts an implementer-owned `correction_started` phase; the
@@ -43,9 +46,10 @@ telemetry-only summary/message. Recording failures leave the handoff and its
 ownership gates unchanged and disclose the affected measurement coverage.
 
 `per_task` records the task review/correction events above. `story_end_only`
-does not create per-task review or correction events and records only the
-final-story boundaries that actually occur; the selected mode is setup data,
-not an inference from whichever events happen to be present.
+does not create task-scoped review or correction events, but it still records
+implementation boundaries and final-story start, finding, correction, and
+re-review boundaries when they actually occur. The selected mode is setup
+data, not an inference from whichever events happen to be present.
 
 ## Task-ready message
 

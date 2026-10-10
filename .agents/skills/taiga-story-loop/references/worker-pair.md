@@ -100,11 +100,15 @@ observing an old revision is a duplicate/stale observation, not a new attempt.
 | An existing explicit coordinator/recovery wait opens or closes | coordinator: `wait_started`/`wait_ended` | stable wait ID and wait kind; never infer a wait from polling or elapsed time |
 | Confirmed reviewed PR creation or reuse | coordinator: `pr_ready` | story scope + PR identity + exact reviewed HEAD; owned by task #157 |
 
-In `per_task`, task review, finding, correction, and re-review events are
-recorded at their actual pair boundaries. In `story_end_only`, do not invent
-per-task review or correction events: retain the implementation evidence and
-record only the final-story boundaries that actually occur. Mode is copied
-from setup and is never inferred from the event sequence. Known model/effort
+In both modes, `implementation_started` and `task_ready_for_review` record the
+implementation interval at the first concrete task work and the frozen
+implementation-ready boundary. In `per_task`, task review, finding, correction,
+and re-review events are then recorded at their actual pair boundaries. In
+`story_end_only`, the implementation-ready `task_ready_for_review` event does
+not dispatch a reviewer and no task-scoped review/correction events are
+invented. Final-story review, finding, correction, and re-review boundaries
+remain valid in both modes. Mode is copied from setup and is never inferred
+from the event sequence. Known model/effort
 profiles and source-backed usage snapshots are optional provenance; an
 unavailable usage sample remains null/unavailable, never zero. Recorder or
 snapshot failure is fail-open for the workflow and is surfaced as measurement

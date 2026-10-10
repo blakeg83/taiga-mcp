@@ -33,9 +33,12 @@ authoritative.
 ### Performance observations at existing transitions
 
 The automatic flow records lifecycle events as side effects of the existing
-transition owner; it never creates a separate telemetry turn. The implementer
-records `implementation_started` at the first concrete task-scoped edit/check,
-`task_ready_for_review` after the exact clean revision packet is frozen,
+transition owner; it never creates a separate telemetry turn. In both modes,
+the implementer records `implementation_started` at the first concrete
+task-scoped edit/check and `task_ready_for_review` after the exact clean
+revision packet is frozen at the implementation-ready milestone. In
+`per_task`, that event precedes the direct task review; in `story_end_only`, it
+closes implementation without dispatching a task review. The implementer then
 `correction_started` when a current finding resumes correction, and
 `correction_ready` when the corrected packet is frozen. The reviewer records
 `review_started`, `review_findings`, and `review_accepted` for the same stable
@@ -58,8 +61,9 @@ reported as measurement coverage without a telemetry-only message or polling.
 
 The selected mode is copied from setup. `per_task` emits task review and
 correction observations at the direct pair boundaries; `story_end_only` emits
-no per-task review/correction observations and records only the final-story
-boundaries that actually occur. No mode is inferred from an incomplete ledger.
+no task-scoped review/correction observations, but retains implementation
+boundaries and final-story start, finding, correction, and re-review boundaries
+that actually occur. No mode is inferred from an incomplete ledger.
 
 ## Event transitions
 

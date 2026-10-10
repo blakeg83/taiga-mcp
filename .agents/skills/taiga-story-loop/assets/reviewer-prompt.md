@@ -75,8 +75,9 @@ no-op/reconciliation case. Explicit coordinator waits use a stable `waitId`;
 copy known model/effort and attributable usage snapshots when available; keep
 unavailable usage null and never estimate it.
 These observations are silent workflow side effects—no polling or
-telemetry-only/measurement-only message. In `story_end_only`, do not emit per-task review or
-correction events; only record final-story boundaries that actually occur.
+telemetry-only/measurement-only message. In `story_end_only`, do not emit
+task-scoped review or correction events; final-story findings, corrections, and
+re-reviews remain valid in both modes and must be recorded when they occur.
 
 Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
 the implementer to reconcile Taiga with the current version and advance the

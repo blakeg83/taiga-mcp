@@ -133,14 +133,16 @@ delivery remains an escalation and never enters `awaiting_review`.
 ### Lifecycle recording at task boundaries
 
 Record `implementation_started` when the resumed task reaches its first
-concrete task-scoped edit or check, not when a status-only write is made. For a
-`per_task` handoff, record `task_ready_for_review` after the exact clean commit
-and review packet are frozen, then let the reviewer own the matching
-`review_started` and `review_findings`/`review_accepted` observations. A current
-finding starts `correction_started`; the corrected commit records
-`correction_ready` before direct re-review. The reviewer owns the final-story
-review events. The coordinator owns explicit wait boundaries and the story/PR
-boundaries; `pr_ready` remains deferred to task #157.
+concrete task-scoped edit or check, not when a status-only write is made. In
+both modes, record `task_ready_for_review` after the exact clean commit at the
+implementation-ready milestone. In `per_task`, then let the reviewer own the
+matching `review_started` and `review_findings`/`review_accepted` observations;
+in `story_end_only`, the implementation boundary does not dispatch a task
+review. A current task finding starts `correction_started`; the corrected
+commit records `correction_ready` before direct re-review. The reviewer owns
+final-story start, finding, correction, and re-review events in both modes.
+The coordinator owns explicit wait boundaries and the story/PR boundaries;
+`pr_ready` remains deferred to task #157.
 
 Use the actual `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`
 recorder helper and stable `phaseId`, `correctionId`,
@@ -148,8 +150,9 @@ recorder helper and stable `phaseId`, `correctionId`,
 from [worker-handoffs](worker-handoffs.md#recording-the-handoff-boundary). Duplicate
 or stale messages do not create attempts or advance the ordered pointer. In
 `story_end_only`, preserve the existing implementation-ready advancement gate,
-omit per-task review/correction events, and record only final-story boundaries
-that actually occur. Copy known model/effort and attributable usage snapshots
+omit task-scoped review/correction events, and record final-story start,
+finding, correction, and re-review boundaries that actually occur. Copy known
+model/effort and attributable usage snapshots
 when available; absent counters stay unavailable/null. Recording is fail-open
 and never adds a polling loop or telemetry-only worker message.
 
