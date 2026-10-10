@@ -52,6 +52,7 @@ $setupAuthorizationScriptPath = Join-Path $PSScriptRoot 'validate-setup-authoriz
 $performanceReferencePath = Join-Path $skillRoot 'references/performance-reporting.md'
 $performanceRecorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
 $performanceStartScriptPath = Join-Path $PSScriptRoot 'validate-performance-start.ps1'
+$lifecycleBindingsScriptPath = Join-Path $PSScriptRoot 'validate-lifecycle-bindings.ps1'
 $repoRoot = (Resolve-Path (Join-Path $skillRoot '..\..\..')).Path
 $performanceAggregationPath = Join-Path $repoRoot 'scripts/get-story-performance.ps1'
 
@@ -117,6 +118,9 @@ if (-not (Test-Path $performanceReferencePath) -or
     -not (Test-Path $performanceStartScriptPath) -or
     -not (Test-Path $performanceAggregationPath)) {
     throw 'Missing performance-reporting reference, recorder, start fixture, or aggregator.'
+}
+if (-not (Test-Path $lifecycleBindingsScriptPath)) {
+    throw 'Missing lifecycle-boundary ownership fixture.'
 }
 
 $setupText = Get-Content $setupPath -Raw
@@ -1115,4 +1119,10 @@ if ($authorizationExit -ne 0) {
     throw "Setup-authorization fixture exited ${authorizationExit}: $($authorizationOutput -join [Environment]::NewLine)"
 }
 $authorizationOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus setup-authorization, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+$lifecycleOutput = @(& pwsh -NoProfile -File $lifecycleBindingsScriptPath 2>&1 | ForEach-Object { [string]$_ })
+$lifecycleExit = $LASTEXITCODE
+if ($lifecycleExit -ne 0) {
+    throw "Lifecycle-binding fixture exited ${lifecycleExit}: $($lifecycleOutput -join [Environment]::NewLine)"
+}
+$lifecycleOutput | Write-Output
+Write-Output "Passed $($results.Count) static setup scenarios plus setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

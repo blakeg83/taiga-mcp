@@ -130,6 +130,29 @@ interrupted or missing handoffs, not routine review waits. The final response
 after a confirmed handoff is the last implementer action; failed or unknown
 delivery remains an escalation and never enters `awaiting_review`.
 
+### Lifecycle recording at task boundaries
+
+Record `implementation_started` when the resumed task reaches its first
+concrete task-scoped edit or check, not when a status-only write is made. For a
+`per_task` handoff, record `task_ready_for_review` after the exact clean commit
+and review packet are frozen, then let the reviewer own the matching
+`review_started` and `review_findings`/`review_accepted` observations. A current
+finding starts `correction_started`; the corrected commit records
+`correction_ready` before direct re-review. The reviewer owns the final-story
+review events. The coordinator owns explicit wait boundaries and the story/PR
+boundaries; `pr_ready` remains deferred to task #157.
+
+Use the actual `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`
+recorder helper and stable `phaseId`, `correctionId`,
+`reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
+from [worker-handoffs](worker-handoffs.md#recording-the-handoff-boundary). Duplicate
+or stale messages do not create attempts or advance the ordered pointer. In
+`story_end_only`, preserve the existing implementation-ready advancement gate,
+omit per-task review/correction events, and record only final-story boundaries
+that actually occur. Copy known model/effort and attributable usage snapshots
+when available; absent counters stay unavailable/null. Recording is fail-open
+and never adds a polling loop or telemetry-only worker message.
+
 The ordinary handoff can be automated after the scope-bound `Start`: consume a
 durable `ready_for_review` event once, send the review request directly to the
 persistent reviewer, send one current finding directly back to the same

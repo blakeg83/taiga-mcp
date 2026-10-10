@@ -12,6 +12,41 @@ state and handles exceptional escalation, but does not relay or restate a
 routine finding or correction. Do not require a JSON receipt, a copied ticket
 transcript, or a new chat for an ordinary correction.
 
+## Recording the handoff boundary
+
+Each handoff has one performance observation at the boundary that already
+exists in this protocol. The implementer records `implementation_started` at
+the first concrete task-scoped edit/check and `task_ready_for_review` only after
+the clean committed revision packet is frozen. The reviewer records
+`review_started` when it begins the exact request/attempt and records
+`review_findings` or `review_accepted` when that current attempt closes. A
+current finding starts an implementer-owned `correction_started` phase; the
+corrected frozen packet records `correction_ready` before the direct re-review.
+The reviewer owns `final_review_started` and its finding/acceptance boundary.
+The coordinator owns `story_started`, explicit `wait_started`/
+`wait_ended`, and the confirmed `pr_ready` boundary; PR readiness remains the
+task #157 endpoint.
+
+Use the actual recorder
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with the
+setup `runId`, project/story identity, selected mode, actual UTC boundary, and
+the stable identity fields required by
+[performance-reporting](performance-reporting.md). A review request ID is not
+a review attempt ID: a retry increments `reviewAttemptOrdinal`, while an exact
+replay of an event, handoff, or stale revision is a no-op/reconciliation case.
+`phaseId` binds implementation/review/correction pairs, `correctionId` binds a
+correction pair, `reviewRequestId`/`reviewAttemptId` distinguish the request
+from one actual attempt, and `waitId` binds an explicit wait pair. Attach known
+model/effort and an attributable usage snapshot when available; preserve
+`unavailable`/null when it is not. Do not estimate usage or emit a routine
+telemetry-only summary/message. Recording failures leave the handoff and its
+ownership gates unchanged and disclose the affected measurement coverage.
+
+`per_task` records the task review/correction events above. `story_end_only`
+does not create per-task review or correction events and records only the
+final-story boundaries that actually occur; the selected mode is setup data,
+not an inference from whichever events happen to be present.
+
 ## Task-ready message
 
 The implementer sends this to the reviewer after the task's implementation

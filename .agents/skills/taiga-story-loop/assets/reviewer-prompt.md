@@ -63,6 +63,21 @@ An exact current acceptance releases the next task only when the declared
 review mode permits it. Do not treat an idle worker, elapsed time, duplicate
 event, stale SHA, or changed scope as review evidence.
 
+Record lifecycle observations at the actual review boundary with the existing
+performance recorder. When beginning an exact request/attempt, emit
+`review_started`; when the current attempt closes, emit `review_findings` or
+`review_accepted` with the same `phaseId`, `reviewRequestId`, `reviewAttemptId`,
+ordinal, review kind, and revision. For the whole-story review, use
+`final_review_started` and the matching final finding/acceptance event. Do not
+create an event for an old or
+duplicate handoff: stable attempt identity and exact revision make it a
+no-op/reconciliation case. Explicit coordinator waits use a stable `waitId`;
+copy known model/effort and attributable usage snapshots when available; keep
+unavailable usage null and never estimate it.
+These observations are silent workflow side effects—no polling or
+telemetry-only/measurement-only message. In `story_end_only`, do not emit per-task review or
+correction events; only record final-story boundaries that actually occur.
+
 Use the acceptance formats in `references/acceptance.md`. Task acceptance tells
 the implementer to reconcile Taiga with the current version and advance the
 ordered work. After the final task, send one story approval to the coordinator

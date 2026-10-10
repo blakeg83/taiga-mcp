@@ -30,6 +30,37 @@ The continuation note is a compact pointer, not proof of acceptance. Confirmed
 worker messages, Git state, Taiga versions, and review evidence remain
 authoritative.
 
+### Performance observations at existing transitions
+
+The automatic flow records lifecycle events as side effects of the existing
+transition owner; it never creates a separate telemetry turn. The implementer
+records `implementation_started` at the first concrete task-scoped edit/check,
+`task_ready_for_review` after the exact clean revision packet is frozen,
+`correction_started` when a current finding resumes correction, and
+`correction_ready` when the corrected packet is frozen. The reviewer records
+`review_started`, `review_findings`, and `review_accepted` for the same stable
+request/attempt identity, and owns `final_review_started` plus its finding or
+acceptance. The coordinator records `story_started`, explicit
+`wait_started`/`wait_ended`, and the confirmed `pr_ready` boundary owned by
+task #157.
+
+Every observation uses the actual
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` helper
+with the selected setup mode and the exact revision/identity available at that
+boundary. `phaseId`, `correctionId`, `reviewRequestId`, `reviewAttemptId`,
+`reviewAttemptOrdinal`, and `waitId` are stable keys, not values regenerated
+from message order. Duplicate event IDs and duplicate observations are no-ops;
+stale or conflicting handoffs stop for the existing reconciliation path and
+cannot increment an attempt. Known model/effort and attributable usage samples
+are provenance only; missing usage remains unavailable/null and never becomes a
+zero or an estimate. Recorder failure is fail-open for the workflow and is
+reported as measurement coverage without a telemetry-only message or polling.
+
+The selected mode is copied from setup. `per_task` emits task review and
+correction observations at the direct pair boundaries; `story_end_only` emits
+no per-task review/correction observations and records only the final-story
+boundaries that actually occur. No mode is inferred from an incomplete ledger.
+
 ## Event transitions
 
 | Event | Required proof | Automatic result |
