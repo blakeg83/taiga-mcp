@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run deterministic task #152 aggregation fixtures.
+    Run deterministic task #152 aggregation and task #154 artifact fixtures.
 
 The fixture is synthetic evidence only. It uses fixed UTC timestamps and a
 unique disposable external directory; it does not call Taiga, start a service,
@@ -662,25 +662,108 @@ try {
     $artifactMarkdownA = Join-Path $artifactRoot 'report-a.md'
     $artifactJsonB = Join-Path $artifactRoot 'report-b.json'
     $artifactMarkdownB = Join-Path $artifactRoot 'report-b.md'
+    $artifactManifestA = "$artifactJsonA.complete.json"
+    $artifactManifestB = "$artifactJsonB.complete.json"
+    $metadataPath = Join-Path $root 'setup-metadata.json'
+    $metadataJsonPath = Join-Path $artifactRoot 'metadata.json'
+    $metadataMarkdownPath = Join-Path $artifactRoot 'metadata.md'
+    $invalidMetadataPath = Join-Path $root 'invalid-setup-metadata.json'
+    $invalidMetadataOutputPath = Join-Path $artifactRoot 'invalid-metadata.json'
     $changedLedger = Join-Path $root 'changed-head.jsonl'
-    $artifactJsonRun = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA
-    Assert-True ($LASTEXITCODE -eq 0) 'artifact publication should aggregate successfully'
+
+    $setupMetadata = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_setup'
+        runId = 'synthetic-task-152'
+        projectId = 12
+        storyId = 727
+        profiles = @(
+            [ordered]@{
+                role = 'coordinator'; workerId = 'synthetic-coordinator'; sessionId = 'synthetic-coordinator-session'; model = 'gpt-6.1-sol'; effort = 'high'; effectiveFromUtc = '2026-10-09T09:59:00Z'; effectiveToUtc = '2026-10-09T10:30:00Z'; changeId = 'coordinator-initial';
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'exact assignment interval'; synthetic = $true }
+            }
+            [ordered]@{
+                role = 'implementer'; workerId = 'synthetic-implementer'; sessionId = 'synthetic-implementer-session'; model = 'gpt-5.6-luna'; effort = 'xhigh'; effectiveFromUtc = '2026-10-09T10:00:00Z'; effectiveToUtc = $null; changeId = 'implementer-profile-change-1';
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'exact assignment interval'; synthetic = $true }
+            }
+        )
+        provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'complete setup fixture'; synthetic = $true }
+    }
+    [IO.File]::WriteAllText($metadataPath, ($setupMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $metadataOutput = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153) -MetadataPath $metadataPath -OutputPath $metadataJsonPath -MarkdownPath $metadataMarkdownPath
+    Assert-True ($LASTEXITCODE -eq 0) 'validated setup metadata should aggregate and publish successfully'
+    $metadataReport = Get-Content -Raw -LiteralPath $metadataJsonPath | ConvertFrom-Json -Depth 100
+    $metadataMarkdown = Get-Content -Raw -LiteralPath $metadataMarkdownPath
+    Assert-True ([string]$metadataReport.metrics.modelsAndReasoning.state -ceq 'measured' -and
+        @($metadataReport.metrics.modelsAndReasoning.value).Count -eq 2 -and
+        [string]$metadataReport.metrics.modelsAndReasoning.value[1].model -ceq 'gpt-5.6-luna' -and
+        [string]$metadataReport.metrics.modelsAndReasoning.value[1].changeId -ceq 'implementer-profile-change-1' -and
+        [int]$metadataReport.provenance.setupMetadata.recordCount -eq 2) 'supplied setup profiles and changes must remain source-backed in JSON'
+    Assert-True ($metadataMarkdown.Contains('## Role profiles') -and $metadataMarkdown.Contains('model=gpt-6.1-sol') -and $metadataMarkdown.Contains('effort=xhigh') -and $metadataMarkdown.Contains('change=implementer-profile-change-1')) 'supplied setup profiles and changes must render semantically in Markdown'
+
+    $invalidMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20
+    $invalidMetadata.profiles[0].provenance.PSObject.Properties.Remove('source')
+    [IO.File]::WriteAllText($invalidMetadataPath, ($invalidMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $invalidMetadataOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $invalidMetadataPath -OutputPath $invalidMetadataOutputPath 2>&1
+    $invalidMetadataDiagnostic = [string]($invalidMetadataOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0 -and $invalidMetadataDiagnostic.Contains('setup_metadata_invalid') -and -not (Test-Path -LiteralPath $invalidMetadataOutputPath)) 'invalid setup provenance must fail safely before publishing'
+
+    $mismatchOutputPath = Join-Path $artifactRoot 'mismatched-head.json'
+    $mismatchOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -ReviewedHead $revisionA -OutputPath $mismatchOutputPath 2>&1
+    $mismatchDiagnostic = [string]($mismatchOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0 -and $mismatchDiagnostic.Contains('report_identity_conflict') -and -not (Test-Path -LiteralPath $mismatchOutputPath)) 'explicit and PR reviewed HEAD disagreement must fail before publication'
+
+    $missingIdentityDirectory = Join-Path $root 'unconfirmed-artifacts'
+    $missingIdentityOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $edgeLedger -ReviewMode per_task -ArtifactDirectory $missingIdentityDirectory 2>&1
+    $missingIdentityDiagnostic = [string]($missingIdentityOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0 -and $missingIdentityDiagnostic.Contains('report_identity_unavailable') -and -not (Test-Path -LiteralPath $missingIdentityDirectory)) 'artifact-directory publication must reject missing confirmed PR identity'
+
+    $preflightJsonPath = Join-Path $artifactRoot 'preflight.json'
+    $preflightMarkdownDirectory = Join-Path $artifactRoot 'preflight-markdown-directory'
+    [IO.Directory]::CreateDirectory($preflightMarkdownDirectory) | Out-Null
+    $preflightOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -OutputPath $preflightJsonPath -MarkdownPath $preflightMarkdownDirectory 2>&1
+    $preflightDiagnostic = [string]($preflightOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -ne 0 -and $preflightDiagnostic.Contains('report_artifact_conflict') -and
+        -not (Test-Path -LiteralPath $preflightJsonPath) -and -not (Test-Path -LiteralPath "$preflightJsonPath.complete.json")) 'all destinations must preflight before any report artifact is published'
+
+    $artifactJsonRun = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA 2>&1
+    $artifactPublicationDiagnostic = [string]($artifactJsonRun -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "artifact publication should aggregate successfully (diagnostic: $artifactPublicationDiagnostic)"
     $publishedArtifact = Get-Content -Raw -LiteralPath $artifactJsonA | ConvertFrom-Json -Depth 100
     $publishedMarkdown = Get-Content -Raw -LiteralPath $artifactMarkdownA
-    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$publishedArtifact.reportId)) 'published JSON should carry a stable report identity'
+    $publishedManifest = Get-Content -Raw -LiteralPath $artifactManifestA | ConvertFrom-Json -Depth 100
+    Assert-True ([int]$publishedArtifact.schemaVersion -eq 1 -and [string]$publishedArtifact.kind -ceq 'story_performance_report' -and
+        -not [string]::IsNullOrWhiteSpace([string]$publishedArtifact.reportId)) 'published JSON should carry the versioned report shape and stable identity'
+    foreach ($metricProperty in @($publishedArtifact.metrics.PSObject.Properties)) {
+        foreach ($metricField in @('state', 'value', 'unit', 'source', 'calculation', 'coverage', 'missingData')) {
+            Assert-True ($null -ne $metricProperty.Value.PSObject.Properties[$metricField]) "published metric $($metricProperty.Name) should declare $metricField"
+        }
+    }
     Assert-True ([string]$publishedArtifact.pullRequest.url -ceq 'https://github.com/blakeg83/taiga-mcp/pull/143') 'published JSON should expose the deterministic PR URL'
-    Assert-True ($publishedMarkdown -match [regex]::Escape([string]$publishedArtifact.reportId) -and
-        $publishedMarkdown -match [regex]::Escape($revisionB) -and
-        $publishedMarkdown -match '| implementationElapsed |' -and
-        $publishedMarkdown -match '| modelsAndReasoning |' -and
-        $publishedMarkdown -match 'Source:' -and
-        $publishedMarkdown -match 'Limitation:') 'Markdown should retain identity, reviewed HEAD, metrics, sources, and limitations'
+    Assert-True ([string]$publishedArtifact.pullRequest.reviewedHead -ceq [string]$publishedArtifact.comparison.reviewedHead) 'JSON PR and comparison HEADs must be frozen to one reviewed revision'
+    Assert-True ([string]$publishedManifest.kind -ceq 'story_performance_report_artifact_set' -and
+        [string]$publishedManifest.reportId -ceq [string]$publishedArtifact.reportId -and
+        [bool]$publishedManifest.confirmed -and @($publishedManifest.artifacts).Count -eq 2) 'completion manifest should bind both artifacts to the canonical report identity'
+    $manifestJsonEntry = @($publishedManifest.artifacts | Where-Object { $_.kind -ceq 'json' })[0]
+    $manifestMarkdownEntry = @($publishedManifest.artifacts | Where-Object { $_.kind -ceq 'markdown' })[0]
+    Assert-True ([string]$manifestJsonEntry.sha256 -ceq (Get-FileHash -Algorithm SHA256 -LiteralPath $artifactJsonA).Hash.ToLowerInvariant() -and
+        [string]$manifestMarkdownEntry.sha256 -ceq (Get-FileHash -Algorithm SHA256 -LiteralPath $artifactMarkdownA).Hash.ToLowerInvariant()) 'completion manifest should bind exact artifact bytes'
+    Assert-True ($publishedMarkdown.Contains([string]$publishedArtifact.reportId) -and
+        $publishedMarkdown.Contains($revisionB) -and
+        $publishedMarkdown.Contains('| implementationElapsed |') -and
+        $publishedMarkdown.Contains('| modelsAndReasoning |') -and
+        $publishedMarkdown.Contains('Source:') -and
+        $publishedMarkdown.Contains('limitation=') -and
+        $publishedMarkdown.Contains('- Changed files: unknown; state=unavailable') -and
+        -not $publishedMarkdown.Contains('@{state=')) 'Markdown should retain identity, reviewed HEAD, metrics, sources, limitations, and clean comparison summaries'
     $artifactJsonBytesBeforeReuse = [IO.File]::ReadAllBytes($artifactJsonA)
     $artifactMarkdownBytesBeforeReuse = [IO.File]::ReadAllBytes($artifactMarkdownA)
-    $reusedArtifactOutput = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA
+    $artifactManifestBytesBeforeReuse = [IO.File]::ReadAllBytes($artifactManifestA)
+    $reusedArtifactOutput = & $scriptPath -EventsPath $ledger -ReviewMode per_task -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA
     Assert-True ($LASTEXITCODE -eq 0) 'identical artifact publication should be idempotent'
     Assert-True (([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactJsonA))) -ceq ([Convert]::ToBase64String($artifactJsonBytesBeforeReuse)) -and
-        ([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactMarkdownA))) -ceq ([Convert]::ToBase64String($artifactMarkdownBytesBeforeReuse))) 'identical publication must reuse byte-identical artifacts'
+        ([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactMarkdownA))) -ceq ([Convert]::ToBase64String($artifactMarkdownBytesBeforeReuse)) -and
+        ([Convert]::ToBase64String([IO.File]::ReadAllBytes($artifactManifestA))) -ceq ([Convert]::ToBase64String($artifactManifestBytesBeforeReuse))) 'identical publication must reuse byte-identical artifacts and completion boundary'
     Assert-True (@(Get-ChildItem -LiteralPath $artifactRoot -Recurse -Force -File -Filter '*.tmp.*').Count -eq 0) 'successful publication must clean temporary siblings'
 
     $revisionC = 'cccccccccccccccccccccccccccccccccccccccc'
@@ -688,15 +771,20 @@ try {
     $changedEvents[-1].revision = $revisionC
     $changedEvents[-1].pullRequest.reviewedHead = $revisionC
     [IO.File]::WriteAllLines($changedLedger, @($changedEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }), [Text.UTF8Encoding]::new($false))
-    $changedArtifactOutput = & $scriptPath -EventsPath $changedLedger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonB -MarkdownPath $artifactMarkdownB
+    $changedArtifactOutput = & $scriptPath -EventsPath $changedLedger -ReviewMode per_task -ArtifactDirectory $artifactRoot
     Assert-True ($LASTEXITCODE -eq 0) 'a changed reviewed HEAD should publish a retained sibling report'
+    $artifactJsonB = @((Get-ChildItem -LiteralPath $artifactRoot -Filter 'story-performance-*.json' -File | Where-Object { $_.Name -notlike '*.complete.json' -and $_.FullName -ne $artifactJsonA } | Select-Object -ExpandProperty FullName))[0]
+    $artifactMarkdownB = @((Get-ChildItem -LiteralPath $artifactRoot -Filter 'story-performance-*.md' -File | Where-Object { $_.FullName -ne $artifactMarkdownA } | Select-Object -ExpandProperty FullName))[0]
+    $artifactManifestB = "$artifactJsonB.complete.json"
     $changedArtifact = Get-Content -Raw -LiteralPath $artifactJsonB | ConvertFrom-Json -Depth 100
     Assert-True ([string]$publishedArtifact.reportId -cne [string]$changedArtifact.reportId -and
         [string]$publishedArtifact.comparison.reviewedHead -ceq $revisionB -and
         [string]$changedArtifact.comparison.reviewedHead -ceq $revisionC -and
-        (Test-Path -LiteralPath $artifactJsonA) -and (Test-Path -LiteralPath $artifactJsonB)) 'distinct reviewed HEADs must retain distinct report identities and files'
+        (Test-Path -LiteralPath $artifactJsonA) -and (Test-Path -LiteralPath $artifactJsonB) -and
+        (Test-Path -LiteralPath $artifactManifestA) -and (Test-Path -LiteralPath $artifactManifestB) -and
+        ([IO.Path]::GetFileName($artifactJsonB) -like 'story-performance-*.json')) 'distinct reviewed HEADs must retain distinct report identities, completion manifests, and identity-derived destinations'
 
-    $conflictOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $changedLedger -ReviewMode per_task -TaskRefs @(152, 153) -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA 2>&1
+    $conflictOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $changedLedger -ReviewMode per_task -OutputPath $artifactJsonA -MarkdownPath $artifactMarkdownA 2>&1
     $conflictText = [string]($conflictOutput -join [Environment]::NewLine)
     Assert-True ($LASTEXITCODE -ne 0) "a changed report must conflict instead of replacing an existing artifact (diagnostic: $conflictText)"
     Assert-True ($conflictText -match 'report_artifact_conflict') "artifact conflict should expose a safe conflict diagnostic (diagnostic: $conflictText)"
@@ -708,12 +796,12 @@ try {
     $edgeArtifactDiagnostic = [string]($edgeArtifactOutput -join [Environment]::NewLine)
     Assert-True ($LASTEXITCODE -eq 0) "incomplete evidence should still publish a bounded Markdown artifact (diagnostic: $edgeArtifactDiagnostic)"
     $edgeMarkdown = Get-Content -Raw -LiteralPath $edgeArtifactMarkdown
-    Assert-True ($edgeMarkdown -match 'partial' -and $edgeMarkdown -match 'incomplete_tail' -and $edgeMarkdown -match 'unknown') 'incomplete artifact Markdown must retain explicit partial, anomaly, and unknown limitations'
+    Assert-True ($edgeMarkdown.Contains('partial') -and $edgeMarkdown.Contains('incomplete_tail') -and $edgeMarkdown.Contains('unknown')) 'incomplete artifact Markdown must retain explicit partial, anomaly, and unknown limitations'
 
     $repeatJson = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153)
     Assert-True ($LASTEXITCODE -eq 0 -and $repeatJson -ceq $jsonText) 'repeating aggregation over the same ledger should be byte stable'
 
-    Write-Output 'PASS: task #152 deterministic aggregation fixtures (per_task and story_end_only)'
+    Write-Output 'PASS: task #152 deterministic aggregation and task #154 revision-bound artifact fixtures (per_task and story_end_only)'
 }
 finally {
     if (Test-Path -LiteralPath $root) {

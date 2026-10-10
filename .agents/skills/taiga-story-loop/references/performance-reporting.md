@@ -342,6 +342,24 @@ identity. A newly approved HEAD creates a new retained report; it must not
 overwrite the old report. An unknown PR result creates no confirmed PR report,
 but never invalidates already recorded measurements.
 
+The report renderer accepts setup provenance separately from the event envelope
+through `-MetadataPath` (aliases: `-SetupMetadataPath`, `-AssignmentPath`, and
+`-ProfilesPath`). The input is a version-1 `story_performance_setup` object
+bound to the same `runId`, `projectId`, and `storyId`, with a nonempty `profiles`
+array. Each profile retains `role`, `workerId`, optional `sessionId`, exact
+`model`, `effort`, UTC `effectiveFromUtc`/`effectiveToUtc` bounds, an optional
+`changeId`, and its source-backed `provenance`. Invalid identity, timestamps,
+unknown fields, or provenance are rejected safely; absent metadata remains an
+explicitly unavailable metric. Multiple records for one role preserve profile
+changes rather than collapsing them.
+
+When `-ArtifactDirectory` is supplied, the renderer derives JSON and Markdown
+file names from a SHA-256 stem of the canonical report identity. Explicit
+`-OutputPath`/`-MarkdownPath` publication also emits a sibling
+`*.complete.json` manifest after all requested artifacts pass preflight and are
+placed. Consumers must require that manifest before treating a report set as
+complete; an interrupted or conflicting set never replaces retained history.
+
 The continuation note carries only a compact recovery pointer, for example:
 
 ```text

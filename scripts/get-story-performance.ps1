@@ -36,7 +36,13 @@ param(
     [string] $BaseRevision,
 
     [Alias('RepoPath', 'RepositoryRoot')]
-    [string] $RepositoryPath
+    [string] $RepositoryPath,
+
+    [Alias('SetupMetadataPath', 'AssignmentPath', 'ProfilesPath')]
+    [string] $MetadataPath,
+
+    [Alias('ReportDirectory', 'ArtifactRoot')]
+    [string] $ArtifactDirectory
 )
 
 Set-StrictMode -Version Latest
@@ -66,6 +72,8 @@ $script:UsageFields = @(
 $script:CounterSemanticsFields = @('cachedInput', 'reasoning')
 $script:CounterFields = @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')
 $script:PullRequestFields = @('provider', 'owner', 'repository', 'number', 'reviewedHead')
+$script:SetupMetadataFields = @('role', 'workerId', 'sessionId', 'model', 'effort', 'effectiveFromUtc', 'effectiveToUtc', 'changeId', 'provenance')
+$script:SetupMetadataRootFields = @('schemaVersion', 'kind', 'runId', 'projectId', 'storyId', 'profiles', 'provenance')
 
 function Get-PropertyValue {
     param(
@@ -316,7 +324,169 @@ function Get-SafePullRequest {
         repository = $repository
         number = $number
         url = $url
-        reviewedHead = Get-PropertyValue $PullRequest 'reviewedHead'
+        reviewedHead = ([string] (Get-PropertyValue $PullRequest 'reviewedHead')).ToLowerInvariant()
+    }
+}
+
+function Get-ValidatedSetupProvenance {
+    param(
+        [AllowNull()] [object] $Value,
+        [Parameter(Mandatory)] [string] $Context
+    )
+
+    if ($null -eq $Value -or $Value -isnot [System.Management.Automation.PSCustomObject]) {
+        throw [System.ArgumentException]::new("setup_metadata_invalid: $Context.provenance must be an object")
+    }
+    $unknown = Get-UnknownPropertyName -Object $Value -Allowed $script:ProvenanceFields
+    if ($null -ne $unknown) {
+        throw [System.ArgumentException]::new("setup_metadata_invalid: unknown $Context.provenance field '$unknown'")
+    }
+    foreach ($name in @('source', 'coverage')) {
+        if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $Value $name))) {
+            throw [System.ArgumentException]::new("setup_metadata_invalid: $Context.provenance.$name must be a nonblank safe string")
+        }
+    }
+    if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $Value 'observedBy')) -and
+        -not (Test-NonBlankSafeString -Value (Get-PropertyValue $Value 'observer'))) {
+        throw [System.ArgumentException]::new("setup_metadata_invalid: $Context.provenance requires observedBy or observer")
+    }
+    $synthetic = Get-PropertyValue $Value 'synthetic'
+    if ($null -ne $synthetic -and $synthetic -isnot [bool]) {
+        throw [System.ArgumentException]::new("setup_metadata_invalid: $Context.provenance.synthetic must be Boolean or null")
+    }
+    $result = [ordered]@{
+        source = [string] (Get-PropertyValue $Value 'source')
+        coverage = [string] (Get-PropertyValue $Value 'coverage')
+    }
+    foreach ($name in @('observedBy', 'observer', 'synthetic')) {
+        if (Test-PropertyPresent -Object $Value -Name $name) {
+            $result[$name] = Get-PropertyValue $Value $name
+        }
+    }
+    return [pscustomobject] $result
+}
+
+function Get-SetupMetadata {
+    param(
+        [AllowNull()] [string] $Path,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [int] $ProjectId,
+        [Parameter(Mandatory)] [int] $StoryId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [pscustomobject][ordered]@{
+            state = 'unavailable'
+            records = @()
+            source = 'setup assignment metadata'
+            coverage = 'no metadata input supplied'
+            missingData = 'validated role/model/effort metadata was not supplied'
+        }
+    }
+
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    if (-not [IO.File]::Exists($fullPath)) {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: metadata input file was not found')
+    }
+    try {
+        $root = [IO.File]::ReadAllText($fullPath, [Text.UTF8Encoding]::new($false)) | ConvertFrom-Json -Depth 100 -DateKind String
+    }
+    catch {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: metadata input is not valid UTF-8 JSON')
+    }
+    if ($null -eq $root -or $root -isnot [System.Management.Automation.PSCustomObject]) {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: metadata root must be an object')
+    }
+    $unknown = Get-UnknownPropertyName -Object $root -Allowed $script:SetupMetadataRootFields
+    if ($null -ne $unknown) {
+        throw [System.ArgumentException]::new("setup_metadata_invalid: unknown metadata field '$unknown'")
+    }
+    foreach ($name in $script:SetupMetadataRootFields) {
+        if (-not (Test-PropertyPresent -Object $root -Name $name)) {
+            throw [System.ArgumentException]::new("setup_metadata_invalid: metadata field '$name' is required")
+        }
+    }
+    if (-not (Test-PositiveIntegerValue -Value (Get-PropertyValue $root 'schemaVersion')) -or
+        [int] (Get-PropertyValue $root 'schemaVersion') -ne 1) {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: schemaVersion must be 1')
+    }
+    if ([string] (Get-PropertyValue $root 'kind') -cne 'story_performance_setup') {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: kind must be story_performance_setup')
+    }
+    if ([string] (Get-PropertyValue $root 'runId') -cne $RunId -or
+        [int] (Get-PropertyValue $root 'projectId') -ne $ProjectId -or
+        [int] (Get-PropertyValue $root 'storyId') -ne $StoryId) {
+        throw [System.ArgumentException]::new('setup_metadata_conflict: metadata run/project/story identity does not match the event ledger')
+    }
+    $rootProvenance = Get-ValidatedSetupProvenance -Value (Get-PropertyValue $root 'provenance') -Context 'metadata'
+    $profiles = Get-PropertyValue $root 'profiles'
+    if ($null -eq $profiles -or $profiles -isnot [System.Array] -or @($profiles).Count -eq 0) {
+        throw [System.ArgumentException]::new('setup_metadata_invalid: profiles must be a nonempty array')
+    }
+
+    $records = [System.Collections.Generic.List[object]]::new()
+    foreach ($profile in @($profiles)) {
+        if ($null -eq $profile -or $profile -isnot [System.Management.Automation.PSCustomObject]) {
+            throw [System.ArgumentException]::new('setup_metadata_invalid: each profile must be an object')
+        }
+        $unknown = Get-UnknownPropertyName -Object $profile -Allowed $script:SetupMetadataFields
+        if ($null -ne $unknown) {
+            throw [System.ArgumentException]::new("setup_metadata_invalid: unknown profile field '$unknown'")
+        }
+        foreach ($name in @('role', 'workerId', 'model', 'effort', 'effectiveFromUtc', 'provenance')) {
+            if (-not (Test-PropertyPresent -Object $profile -Name $name)) {
+                throw [System.ArgumentException]::new("setup_metadata_invalid: profile field '$name' is required")
+            }
+        }
+        $role = [string] (Get-PropertyValue $profile 'role')
+        if ($role -notin @('coordinator', 'implementer', 'reviewer')) {
+            throw [System.ArgumentException]::new('setup_metadata_invalid: profile.role is unsupported')
+        }
+        foreach ($name in @('workerId', 'model', 'effort')) {
+            if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $profile $name))) {
+                throw [System.ArgumentException]::new("setup_metadata_invalid: profile.$name must be a nonblank safe string")
+            }
+        }
+        foreach ($name in @('sessionId', 'changeId')) {
+            $value = Get-PropertyValue $profile $name
+            if ($null -ne $value -and -not (Test-NonBlankSafeString -Value $value)) {
+                throw [System.ArgumentException]::new("setup_metadata_invalid: profile.$name must be null or a nonblank safe string")
+            }
+        }
+        $start = [DateTimeOffset]::MinValue
+        if (-not (Try-GetUtcTime -Value (Get-PropertyValue $profile 'effectiveFromUtc') -Parsed ([ref] $start))) {
+            throw [System.ArgumentException]::new('setup_metadata_invalid: profile.effectiveFromUtc must be a UTC timestamp')
+        }
+        $end = $null
+        $endValue = Get-PropertyValue $profile 'effectiveToUtc'
+        if ($null -ne $endValue) {
+            $parsedEnd = [DateTimeOffset]::MinValue
+            if (-not (Try-GetUtcTime -Value $endValue -Parsed ([ref] $parsedEnd)) -or $parsedEnd -lt $start) {
+                throw [System.ArgumentException]::new('setup_metadata_invalid: profile.effectiveToUtc must be a UTC timestamp after effectiveFromUtc')
+            }
+            $end = [string] $endValue
+        }
+        $profileProvenance = Get-ValidatedSetupProvenance -Value (Get-PropertyValue $profile 'provenance') -Context 'profile'
+        $record = [ordered]@{
+            role = $role
+            workerId = [string] (Get-PropertyValue $profile 'workerId')
+            sessionId = Get-PropertyValue $profile 'sessionId'
+            model = [string] (Get-PropertyValue $profile 'model')
+            effort = [string] (Get-PropertyValue $profile 'effort')
+            effectiveFromUtc = [string] (Get-PropertyValue $profile 'effectiveFromUtc')
+            effectiveToUtc = $end
+            changeId = Get-PropertyValue $profile 'changeId'
+            provenance = $profileProvenance
+        }
+        [void] $records.Add([pscustomobject] $record)
+    }
+    return [pscustomobject][ordered]@{
+        state = 'measured'
+        records = @($records)
+        source = [string] (Get-PropertyValue $rootProvenance 'source')
+        coverage = "validated $($records.Count) role profile record(s), including explicit changes"
+        missingData = $null
+        provenance = $rootProvenance
     }
 }
 
@@ -490,13 +660,14 @@ function Get-EventValidationError {
             }
         }
         foreach ($name in @('provider', 'owner', 'repository')) {
-            if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $pullRequest $name))) {
+            if (-not (Test-NonBlankSafeString -Value (Get-PropertyValue $pullRequest $name)) -or
+                [string] (Get-PropertyValue $pullRequest $name) -match '\s') {
                 return "pullRequest.$name is required"
             }
         }
         if (-not (Test-PositiveIntegerValue -Value (Get-PropertyValue $pullRequest 'number')) -or
             -not (Test-FullRevision -Value (Get-PropertyValue $pullRequest 'reviewedHead')) -or
-            [string] (Get-PropertyValue $pullRequest 'reviewedHead') -cne [string] $revision) {
+            [string] (Get-PropertyValue $pullRequest 'reviewedHead') -ine [string] $revision) {
             return 'pullRequest identity must match pr_ready revision'
         }
     }
@@ -1122,16 +1293,32 @@ function Get-ReportIdentity {
     }
 
     $parts = @(
-        $RunId,
+        (ConvertTo-CanonicalIdentityComponent -Value $RunId),
         "project-$ProjectId",
         "story-$StoryId",
-        "pr-$([string] (Get-PropertyValue $PullRequest 'provider'))",
-        "owner-$([string] (Get-PropertyValue $PullRequest 'owner'))",
-        "repository-$([string] (Get-PropertyValue $PullRequest 'repository'))",
+        "pr-$(ConvertTo-CanonicalIdentityComponent -Value (Get-PropertyValue $PullRequest 'provider') -CaseInsensitive)",
+        "owner-$(ConvertTo-CanonicalIdentityComponent -Value (Get-PropertyValue $PullRequest 'owner') -CaseInsensitive)",
+        "repository-$(ConvertTo-CanonicalIdentityComponent -Value (Get-PropertyValue $PullRequest 'repository') -CaseInsensitive)",
         "number-$([string] (Get-PropertyValue $PullRequest 'number'))",
-        "head-$([string] (Get-PropertyValue $PullRequest 'reviewedHead'))"
+        "head-$((([string] (Get-PropertyValue $PullRequest 'reviewedHead')).ToLowerInvariant()))"
     )
     return ($parts -join '/')
+}
+
+function ConvertTo-CanonicalIdentityComponent {
+    param(
+        [Parameter(Mandatory)] [object] $Value,
+        [switch] $CaseInsensitive
+    )
+
+    if (-not (Test-NonBlankSafeString -Value $Value) -or [string] $Value -match '\s') {
+        throw [System.ArgumentException]::new('report_identity_invalid: PR identity components must be nonblank safe strings without whitespace')
+    }
+    $text = [string] $Value
+    if ($CaseInsensitive) {
+        $text = $text.ToLowerInvariant()
+    }
+    return [Uri]::EscapeDataString($text)
 }
 
 function ConvertTo-MarkdownCell {
@@ -1141,6 +1328,59 @@ function ConvertTo-MarkdownCell {
         return 'unknown'
     }
     return ([string] $Value).Replace('|', '\|').Replace("`r", ' ').Replace("`n", ' ')
+}
+
+function Get-ContainerValue {
+    param(
+        [AllowNull()] [object] $Container,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    if ($null -eq $Container) {
+        return $null
+    }
+    if ($Container -is [System.Collections.IDictionary] -and $Container.Contains($Name)) {
+        return $Container[$Name]
+    }
+    return Get-PropertyValue -Object $Container -Name $Name
+}
+
+function Get-MarkdownMetricValue {
+    param([AllowNull()] [object] $Metric)
+
+    if ($null -eq $Metric) {
+        return 'unknown'
+    }
+    $recordCount = Get-PropertyValue -Object $Metric -Name 'recordCount'
+    if ($null -ne $recordCount) {
+        $changeCount = Get-PropertyValue -Object $Metric -Name 'changeCount'
+        return "$recordCount profile record(s); $changeCount explicit change(s)"
+    }
+    $value = Get-PropertyValue -Object $Metric -Name 'value'
+    if ($null -eq $value) {
+        return 'unknown'
+    }
+    if ($value -is [System.Array]) {
+        return "$(@($value).Count) record(s)"
+    }
+    return [string] $value
+}
+
+function Get-MarkdownMetricSummary {
+    param([AllowNull()] [object] $Metric)
+
+    if ($null -eq $Metric) {
+        return 'unknown'
+    }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    [void] $parts.Add((Get-MarkdownMetricValue -Metric $Metric))
+    [void] $parts.Add("state=$(ConvertTo-MarkdownCell (Get-PropertyValue -Object $Metric -Name 'state'))")
+    [void] $parts.Add("coverage=$(ConvertTo-MarkdownCell (Get-PropertyValue -Object $Metric -Name 'coverage'))")
+    $missingData = Get-PropertyValue -Object $Metric -Name 'missingData'
+    if (-not [string]::IsNullOrWhiteSpace([string] $missingData)) {
+        [void] $parts.Add("limitation=$(ConvertTo-MarkdownCell $missingData)")
+    }
+    return ($parts -join '; ')
 }
 
 function ConvertTo-Markdown {
@@ -1180,15 +1420,28 @@ function ConvertTo-Markdown {
     }
     foreach ($property in $metricProperties) {
         $metric = $property.Value
-        $value = if ($null -eq $metric.value) { 'unknown' } else { [string] $metric.value }
+        $value = Get-MarkdownMetricValue -Metric $metric
         [void] $lines.Add("| $(ConvertTo-MarkdownCell $property.Name) | $(ConvertTo-MarkdownCell $metric.state) | $(ConvertTo-MarkdownCell $value) | $(ConvertTo-MarkdownCell $metric.unit) | $(ConvertTo-MarkdownCell $metric.source) | $(ConvertTo-MarkdownCell $metric.coverage) | $(ConvertTo-MarkdownCell $metric.missingData) |")
     }
     [void] $lines.Add('')
     [void] $lines.Add('## Comparison')
     [void] $lines.Add('')
-    [void] $lines.Add("- Changed files: $(ConvertTo-MarkdownCell $Report.comparison.changedFiles)")
-    [void] $lines.Add("- Lines added: $(ConvertTo-MarkdownCell $Report.comparison.linesAdded)")
-    [void] $lines.Add("- Lines deleted: $(ConvertTo-MarkdownCell $Report.comparison.linesDeleted)")
+    [void] $lines.Add("- Changed files: $(Get-MarkdownMetricSummary (Get-ContainerValue -Container $Report.comparison -Name 'changedFiles'))")
+    [void] $lines.Add("- Lines added: $(Get-MarkdownMetricSummary (Get-ContainerValue -Container $Report.comparison -Name 'linesAdded'))")
+    [void] $lines.Add("- Lines deleted: $(Get-MarkdownMetricSummary (Get-ContainerValue -Container $Report.comparison -Name 'linesDeleted'))")
+    $modelsMetric = Get-ContainerValue -Container $Report.metrics -Name 'modelsAndReasoning'
+    $modelsValue = if ($null -eq $modelsMetric) { $null } else { Get-PropertyValue -Object $modelsMetric -Name 'value' }
+    if ($null -ne $modelsValue -and @($modelsValue).Count -gt 0) {
+        [void] $lines.Add('')
+        [void] $lines.Add('## Role profiles')
+        [void] $lines.Add('')
+        foreach ($profile in @($modelsValue)) {
+            $change = if ([string]::IsNullOrWhiteSpace([string] $profile.changeId)) { 'initial' } else { [string] $profile.changeId }
+            $range = if ([string]::IsNullOrWhiteSpace([string] $profile.effectiveToUtc)) { "from $($profile.effectiveFromUtc)" } else { "$($profile.effectiveFromUtc) to $($profile.effectiveToUtc)" }
+            $profileProvenance = Get-PropertyValue -Object $profile -Name 'provenance'
+            [void] $lines.Add("- $(ConvertTo-MarkdownCell $profile.role): worker=$(ConvertTo-MarkdownCell $profile.workerId), model=$(ConvertTo-MarkdownCell $profile.model), effort=$(ConvertTo-MarkdownCell $profile.effort), change=$(ConvertTo-MarkdownCell $change), $range, source=$(ConvertTo-MarkdownCell (Get-PropertyValue -Object $profileProvenance -Name 'source'))")
+        }
+    }
     [void] $lines.Add('')
     [void] $lines.Add('## Provenance and limitations')
     [void] $lines.Add('')
@@ -1270,9 +1523,60 @@ function Assert-ArtifactCanPublish {
         [Parameter(Mandatory)] [string] $Content
     )
 
+    if ([IO.Directory]::Exists($Path)) {
+        throw [System.InvalidOperationException]::new("report_artifact_conflict: artifact destination is a directory '$Path'")
+    }
     if ([IO.File]::Exists($Path) -and -not (Test-ExactUtf8ArtifactContent -Path $Path -Content $Content)) {
         throw [System.InvalidOperationException]::new("report_artifact_conflict: refusing to replace existing artifact '$Path'")
     }
+}
+
+function Get-ArtifactFileStem {
+    param([Parameter(Mandatory)] [string] $ReportId)
+
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $hasher.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($ReportId))
+    }
+    finally {
+        $hasher.Dispose()
+    }
+    return "story-performance-$([Convert]::ToHexString($digest).ToLowerInvariant())"
+}
+
+function Get-CompletionManifestPath {
+    param([Parameter(Mandatory)] [string] $AnchorPath)
+
+    return "$AnchorPath.complete.json"
+}
+
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)] [string] $Content)
+
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $hasher.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($Content))
+    }
+    finally {
+        $hasher.Dispose()
+    }
+    return [Convert]::ToHexString($digest).ToLowerInvariant()
+}
+
+function New-ArtifactSetManifestContent {
+    param(
+        [AllowNull()] [string] $ReportId,
+        [Parameter(Mandatory)] [object[]] $Artifacts
+    )
+
+    $manifest = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_report_artifact_set'
+        reportId = $ReportId
+        confirmed = -not [string]::IsNullOrWhiteSpace($ReportId)
+        artifacts = @($Artifacts)
+    }
+    return ($manifest | ConvertTo-Json -Depth 20) + [Environment]::NewLine
 }
 
 function Publish-ImmutableArtifact {
@@ -2170,6 +2474,21 @@ function New-UnavailableMetadataMetric {
     return New-Metric -State 'unavailable' -Value $null -Unit 'metadata records' -Source 'setup/host provenance' -Calculation 'copy exact role/model/reasoning profile records' -Coverage 'the v1 event envelope exposes no model or reasoning-effort profile fields' -MissingData 'models and reasoning profiles were not source-backed for this run'
 }
 
+function New-SetupMetadataMetric {
+    param([Parameter(Mandatory)] [object] $SetupMetadata)
+
+    if ([string] $SetupMetadata.state -eq 'unavailable') {
+        return New-UnavailableMetadataMetric
+    }
+    $records = @($SetupMetadata.records)
+    $roles = @($records | ForEach-Object { [string] $_.role } | Sort-Object -Unique)
+    $changes = @($records | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_.changeId) })
+    $metric = New-Metric -State ([string] $SetupMetadata.state) -Value $records -Unit 'metadata records' -Source ([string] $SetupMetadata.source) -Calculation 'retain exact role/worker/model/effort records and ordered profile changes' -Coverage ([string] $SetupMetadata.coverage) -MissingData ([string] $SetupMetadata.missingData)
+    $metric | Add-Member -NotePropertyName roleCount -NotePropertyValue $roles.Count -Force
+    $metric | Add-Member -NotePropertyName changeCount -NotePropertyValue $changes.Count -Force
+    return $metric
+}
+
 function Get-TasksCompletedMetric {
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[int]] $DeclaredTaskRefs,
@@ -2383,17 +2702,43 @@ $implementationTokenMetric = Get-UsageMetric -Intervals @($implementationInterva
 $reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
 $coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -AllRecords $records -StorySpan $timeToPrInterval -Anomalies $anomalies
 $totalTokenMetric = Get-TotalUsageMetric -RoleMetrics @($implementationTokenMetric, $reviewTokenMetric, $coordinationTokenMetric)
-$modelsAndReasoningMetric = New-UnavailableMetadataMetric
-$tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals)
-
-$reviewedHeadCandidates = @()
-if (-not [string]::IsNullOrWhiteSpace($ReviewedHead)) {
-    $reviewedHeadCandidates = @([string] $ReviewedHead)
+$metadataRunId = if ($runIds.Count -eq 1) { [string] $runIds[0] } else { $null }
+$metadataProjectId = if ($projectIds.Count -eq 1) { [int] $projectIds[0] } else { $null }
+$metadataStoryId = if ($storyIds.Count -eq 1) { [int] $storyIds[0] } else { $null }
+if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and ($null -eq $metadataRunId -or $null -eq $metadataProjectId -or $null -eq $metadataStoryId)) {
+    throw [System.ArgumentException]::new('setup_metadata_conflict: metadata requires one unambiguous run/project/story binding')
+}
+$setupMetadata = if ([string]::IsNullOrWhiteSpace($MetadataPath)) {
+    Get-SetupMetadata -Path $null -RunId ([string] $metadataRunId) -ProjectId ([int] $metadataProjectId) -StoryId ([int] $metadataStoryId)
 }
 else {
-    $reviewedHeadCandidates = @($prReady | ForEach-Object { [string] (Get-PropertyValue $_.Event.pullRequest 'reviewedHead') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    Get-SetupMetadata -Path $MetadataPath -RunId $metadataRunId -ProjectId $metadataProjectId -StoryId $metadataStoryId
 }
-$reviewedHeadForDiff = if ($reviewedHeadCandidates.Count -eq 1) { [string] $reviewedHeadCandidates[0] } else { $null }
+$modelsAndReasoningMetric = New-SetupMetadataMetric -SetupMetadata $setupMetadata
+$tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals)
+
+$eventReviewedHeadCandidates = @($prReady | ForEach-Object { [string] (Get-PropertyValue $_.Event.pullRequest 'reviewedHead') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+if ($eventReviewedHeadCandidates.Count -gt 1) {
+    throw [System.InvalidOperationException]::new('report_identity_conflict: multiple pr_ready events carry different reviewed HEADs')
+}
+$explicitReviewedHead = if ([string]::IsNullOrWhiteSpace($ReviewedHead)) { $null } else { [string] $ReviewedHead }
+if ($null -ne $explicitReviewedHead -and -not (Test-FullRevision -Value $explicitReviewedHead)) {
+    throw [System.ArgumentException]::new('report_identity_invalid: explicit ReviewedHead must be a full Git SHA')
+}
+if ($null -ne $explicitReviewedHead -and $eventReviewedHeadCandidates.Count -eq 1 -and
+    $explicitReviewedHead -ine [string] $eventReviewedHeadCandidates[0]) {
+    throw [System.InvalidOperationException]::new('report_identity_conflict: explicit ReviewedHead disagrees with pr_ready reviewedHead')
+}
+$frozenReviewedHead = if ($eventReviewedHeadCandidates.Count -eq 1) {
+    ([string] $eventReviewedHeadCandidates[0]).ToLowerInvariant()
+}
+elseif ($null -ne $explicitReviewedHead) {
+    $explicitReviewedHead.ToLowerInvariant()
+}
+else {
+    $null
+}
+$reviewedHeadForDiff = $frozenReviewedHead
 $comparisonMetrics = Get-ComparisonMetrics -BaseRevision $BaseRevision -ReviewedHead $reviewedHeadForDiff -RepositoryPath $RepositoryPath
 $reportPullRequest = if ($prReady.Count -eq 1) { Get-SafePullRequest -PullRequest (Get-PropertyValue $prReady[0].Event 'pullRequest') } else { $null }
 $reportRunId = if ($runIds.Count -eq 1) { [string] $runIds[0] } else { $null }
@@ -2406,7 +2751,7 @@ $hasNonSyntheticEvidence = @($eventObjects | Where-Object { (Get-PropertyValue (
 $sourceCoverage = if ($hasSyntheticEvidence -and $hasNonSyntheticEvidence) { 'mixed synthetic and source-backed provenance' } elseif ($hasSyntheticEvidence) { 'synthetic provenance explicitly classified per event' } else { 'source provenance retained per event; numeric usage requires attributable authority' }
 $reportLimitations = @(
     'Unknown values remain null; unavailable evidence is never treated as zero.'
-    'Role model and reasoning-effort profiles are unavailable because the version-1 event envelope carries no profile fields.'
+    if ([string] $setupMetadata.state -eq 'unavailable') { 'Role model and reasoning-effort profiles are unavailable because no validated setup metadata input was supplied.' }
     if ($comparisonMetrics.changedFiles.state -eq 'unavailable' -or $comparisonMetrics.linesAdded.state -eq 'unavailable' -or $comparisonMetrics.linesDeleted.state -eq 'unavailable') { 'Git comparison metrics require an explicit valid base revision, reviewed HEAD, and repository path.' }
 )
 
@@ -2471,27 +2816,69 @@ $report = [ordered]@{
     provenance = [ordered]@{
         eventSchemaVersion = 1
         sourceCoverage = $sourceCoverage
-        sources = @('version-1 story performance event ledger', 'Git revision comparison when an explicit valid base and reviewed HEAD are supplied')
+        sources = @('version-1 story performance event ledger', 'Git revision comparison when an explicit valid base and reviewed HEAD are supplied') + $(if ([string] $setupMetadata.state -ne 'unavailable') { @('validated setup assignment metadata') } else { @() })
+        setupMetadata = [ordered]@{
+            state = [string] $setupMetadata.state
+            recordCount = @($setupMetadata.records).Count
+            coverage = [string] $setupMetadata.coverage
+        }
         limitations = @($reportLimitations)
     }
 }
 
 $json = $report | ConvertTo-Json -Depth 100
-if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $outputFullPath = Assert-ExternalArtifactPath -Path $OutputPath -RepositoryPath $RepositoryPath
+$resolvedOutputPath = $OutputPath
+$resolvedMarkdownPath = $MarkdownPath
+if (-not [string]::IsNullOrWhiteSpace($ArtifactDirectory)) {
+    if (-not [string]::IsNullOrWhiteSpace($OutputPath) -or -not [string]::IsNullOrWhiteSpace($MarkdownPath)) {
+        throw [System.ArgumentException]::new('report_artifact_invalid: ArtifactDirectory cannot be combined with OutputPath or MarkdownPath')
+    }
+    if ([string]::IsNullOrWhiteSpace($reportId)) {
+        throw [System.InvalidOperationException]::new('report_identity_unavailable: ArtifactDirectory publication requires one confirmed PR identity and reviewed HEAD')
+    }
+    $artifactDirectoryFullPath = [IO.Path]::GetFullPath($ArtifactDirectory)
+    [void] (Assert-ExternalArtifactPath -Path (Join-Path $artifactDirectoryFullPath '.report-artifact-path-check') -RepositoryPath $RepositoryPath)
+    $artifactStem = Get-ArtifactFileStem -ReportId $reportId
+    $resolvedOutputPath = Join-Path $artifactDirectoryFullPath "$artifactStem.json"
+    $resolvedMarkdownPath = Join-Path $artifactDirectoryFullPath "$artifactStem.md"
+}
+
+$outputFullPath = $null
+$outputContent = $null
+$markdownFullPath = $null
+$markdownContent = $null
+$manifestFullPath = $null
+$manifestContent = $null
+$artifactEntries = [System.Collections.Generic.List[object]]::new()
+if (-not [string]::IsNullOrWhiteSpace($resolvedOutputPath)) {
+    $outputFullPath = Assert-ExternalArtifactPath -Path $resolvedOutputPath -RepositoryPath $RepositoryPath
     $outputContent = $json + [Environment]::NewLine
     Assert-ArtifactCanPublish -Path $outputFullPath -Content $outputContent
+    [void] $artifactEntries.Add([ordered]@{ kind = 'json'; path = $outputFullPath; sha256 = Get-Sha256Hex -Content $outputContent })
 }
-if (-not [string]::IsNullOrWhiteSpace($MarkdownPath)) {
-    $markdownFullPath = Assert-ExternalArtifactPath -Path $MarkdownPath -RepositoryPath $RepositoryPath
+if (-not [string]::IsNullOrWhiteSpace($resolvedMarkdownPath)) {
+    $markdownFullPath = Assert-ExternalArtifactPath -Path $resolvedMarkdownPath -RepositoryPath $RepositoryPath
     $markdownContent = ConvertTo-Markdown -Report ([pscustomobject] $report)
     Assert-ArtifactCanPublish -Path $markdownFullPath -Content $markdownContent
+    [void] $artifactEntries.Add([ordered]@{ kind = 'markdown'; path = $markdownFullPath; sha256 = Get-Sha256Hex -Content $markdownContent })
 }
-if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+if ($artifactEntries.Count -gt 1 -and $outputFullPath.Equals($markdownFullPath, [StringComparison]::OrdinalIgnoreCase)) {
+    throw [System.InvalidOperationException]::new('report_artifact_conflict: JSON and Markdown destinations must differ')
+}
+if ($artifactEntries.Count -gt 0) {
+    $manifestAnchor = if ($null -ne $outputFullPath) { $outputFullPath } else { $markdownFullPath }
+    $manifestFullPath = Assert-ExternalArtifactPath -Path (Get-CompletionManifestPath -AnchorPath $manifestAnchor) -RepositoryPath $RepositoryPath
+    $manifestContent = New-ArtifactSetManifestContent -ReportId $reportId -Artifacts @($artifactEntries)
+    Assert-ArtifactCanPublish -Path $manifestFullPath -Content $manifestContent
+}
+if ($null -ne $outputFullPath) {
     [void] (Publish-ImmutableArtifact -Path $outputFullPath -Content $outputContent)
 }
-if (-not [string]::IsNullOrWhiteSpace($MarkdownPath)) {
+if ($null -ne $markdownFullPath) {
     [void] (Publish-ImmutableArtifact -Path $markdownFullPath -Content $markdownContent)
+}
+if ($null -ne $manifestFullPath) {
+    [void] (Publish-ImmutableArtifact -Path $manifestFullPath -Content $manifestContent)
 }
 
 Write-Output $json
