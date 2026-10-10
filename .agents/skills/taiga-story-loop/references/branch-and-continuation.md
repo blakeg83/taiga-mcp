@@ -27,11 +27,21 @@ scope:
 | Workers | current story implementer and reviewer chat IDs, when created |
 | Integrated review workers | fresh epic-fix implementer and epic reviewer chat IDs/hosts, when the epic gate is reached |
 | Review | PR URL, PR base/head, approval or wait state, and the next required action |
+| Performance | optional compact schema/run/story/ledger pointer and last observed event identity; history stays in the external ledger |
 | Recovery | one recovery automation ID, confirmed schedule state (`ACTIVE` or `PAUSED`), and any pending target |
 
 Do not copy a ticket transcript, model output, full diff, or a second state
 registry into the note. A missing value is an unresolved setup fact, not a
 placeholder to guess.
+
+Performance is initialized only after the submitted `Start` decision. The
+coordinator invokes the existing recorder for the real `story_started` boundary
+and then carries the pointer described in [the minimal continuation note](continuation-note.md).
+The pointer is a recovery binding, not a ledger or a timestamp source. A
+legitimate resume verifies the external ledger's last event and reuses its
+`runId`; a missing or unverifiable event leaves historical coverage
+unavailable. It must not create a second story start or reconstruct a missing
+`occurredAtUtc`.
 
 ## Fresh base and topology setup
 

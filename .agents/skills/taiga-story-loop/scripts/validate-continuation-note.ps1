@@ -285,6 +285,7 @@ try {
         'Merge' = 'pending'
         'Next' = 'wait for correction of task #77'
         'Recovery' = 'automation-id | schedule: PAUSED | target: none'
+        'Performance pointer' = 'schema=1 | run=synthetic-run-52 | project=12 | story=725/52 | ledger=C:\Synthetic\performance\synthetic-run-52\events.jsonl | lastEvent=synthetic-run-52-story-started | lastObservedUtc=2026-10-10T10:00:00Z'
         'Worker cursors' = 'implementer cursor-000 | reviewer cursor-000'
         'Task state' = 'revision-000 | implementing'
         'Gate' = 'none'
@@ -296,15 +297,18 @@ try {
     Assert-True $created.Changed 'creates initial complete snapshot'
     Assert-True (-not [IO.File]::Exists($path + '.previous')) 'initial creation has no invented previous snapshot'
 
-    # Existing snapshots predate the optional legacy final-review field and
-    # must remain writable while the coordinator reconciles them.
+    # Existing snapshots predate optional final-review and performance fields;
+    # both must remain writable while the coordinator reconciles them. The
+    # historical note must not acquire a fabricated measurement pointer.
     $compatSnapshot = [ordered]@{}
     foreach ($key in $snapshot.Keys) {
-        if ($key -cne 'Final review') { $compatSnapshot[$key] = $snapshot[$key] }
+        if ($key -notin @('Final review', 'Performance pointer')) { $compatSnapshot[$key] = $snapshot[$key] }
     }
     $compatResult = & $writer -NotePath $path -Snapshot $compatSnapshot
     Assert-True $compatResult.Changed 'older snapshot without Final review remains writable'
-    Assert-True (-not [IO.File]::ReadAllText($path).Contains('Final review:')) 'compatibility write does not invent an unobserved final-review state'
+    $compatText = [IO.File]::ReadAllText($path)
+    Assert-True (-not $compatText.Contains('Final review:')) 'compatibility write does not invent an unobserved final-review state'
+    Assert-True (-not $compatText.Contains('Performance pointer:')) 'historical note does not invent an unobserved performance pointer'
     & $writer -NotePath $path -Snapshot $snapshot | Out-Null
 
     # Existing active runs may omit Topology. Resolve the recorded scope before
@@ -385,7 +389,7 @@ try {
         $text = [IO.File]::ReadAllText($path)
         Assert-True (-not $text.Contains('historical review findings')) 'history is absent from routine snapshot'
         Assert-True (@($text -split "`n" | Where-Object { $_.StartsWith('Next: ') }).Count -eq 1) 'only one next action'
-        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'epic-fix-id @ local', 'epic-review-id @ local', 'automation-id', 'schedule: PAUSED', 'setup-message-ref', 'auth-synthetic-52')) {
+        foreach ($identity in @('synthetic-story-52', 'impl-id @ local', 'review-id @ local', 'epic-fix-id @ local', 'epic-review-id @ local', 'automation-id', 'schedule: PAUSED', 'setup-message-ref', 'auth-synthetic-52', 'synthetic-run-52-story-started', 'lastObservedUtc=2026-10-10T10:00:00Z')) {
             Assert-True ($text.Contains($identity)) "preserves $identity"
         }
     }
@@ -547,7 +551,7 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, setup-authorization persistence, authoritative stale-snapshot recovery, missing/conflicting evidence holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative stale-snapshot recovery, missing/conflicting evidence holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.

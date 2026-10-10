@@ -49,6 +49,11 @@ $acceptanceEvidenceManifestPath = Join-Path $skillRoot 'assets/acceptance-eviden
 $acceptanceEvidenceScriptPath = Join-Path $PSScriptRoot 'validate-acceptance-evidence.ps1'
 $setupAuthorizationPath = Join-Path $skillRoot 'references/setup-authorization.md'
 $setupAuthorizationScriptPath = Join-Path $PSScriptRoot 'validate-setup-authorization.ps1'
+$performanceReferencePath = Join-Path $skillRoot 'references/performance-reporting.md'
+$performanceRecorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
+$performanceStartScriptPath = Join-Path $PSScriptRoot 'validate-performance-start.ps1'
+$repoRoot = (Resolve-Path (Join-Path $skillRoot '..\..\..')).Path
+$performanceAggregationPath = Join-Path $repoRoot 'scripts/get-story-performance.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
@@ -107,6 +112,12 @@ if (-not (Test-Path $setupAuthorizationPath) -or
     -not (Test-Path $setupAuthorizationScriptPath)) {
     throw 'Missing setup-authorization contract or executable fixture.'
 }
+if (-not (Test-Path $performanceReferencePath) -or
+    -not (Test-Path $performanceRecorderPath) -or
+    -not (Test-Path $performanceStartScriptPath) -or
+    -not (Test-Path $performanceAggregationPath)) {
+    throw 'Missing performance-reporting reference, recorder, start fixture, or aggregator.'
+}
 
 $setupText = Get-Content $setupPath -Raw
 $normalizedSetup = [regex]::Replace($setupText, '\s+', ' ')
@@ -163,6 +174,11 @@ $acceptanceEvidenceManifestText = Get-Content $acceptanceEvidenceManifestPath -R
 $setupAuthorizationText = Get-Content $setupAuthorizationPath -Raw
 $normalizedSetupAuthorization = [regex]::Replace($setupAuthorizationText, '\s+', ' ')
 $setupAuthorizationScriptText = Get-Content $setupAuthorizationScriptPath -Raw
+$performanceText = Get-Content $performanceReferencePath -Raw
+$normalizedPerformance = [regex]::Replace($performanceText, '\s+', ' ')
+$performanceStartScriptText = Get-Content $performanceStartScriptPath -Raw
+$performanceRecorderText = Get-Content $performanceRecorderPath -Raw
+$performanceAggregationText = Get-Content $performanceAggregationPath -Raw
 
 function Assert-DocumentContains {
     param(
@@ -443,6 +459,37 @@ Assert-ContinuationContains 'stale feature guard' 'Do not create the next story 
 Assert-ContinuationContains 'epic migration classification' 'If the scope identifies an epic or multiple ordered stories'
 Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
 Assert-ContinuationContains 'ambiguous migration guard' 'feature fields alone do not select the legacy exception'
+Assert-ContinuationContains 'compact performance pointer' 'Performance pointer: <none before Start'
+Assert-ContinuationContains 'resume performance identity' 'Reuse the same run identity'
+Assert-ContinuationContains 'legacy measurement limitation' 'historical measurement coverage is explicitly unavailable'
+if (-not $normalizedSetup.Contains('invoke the actual recorder at')) {
+    throw 'Setup assertion failed: post-Start recorder hook'
+}
+if (-not $normalizedSetup.Contains('Do not call the recorder before this point')) {
+    throw 'Setup assertion failed: pre-Start recorder guard'
+}
+foreach ($marker in @(
+        'story_started'
+        'external ledger'
+        'lastEvent'
+        'lastObservedUtc'
+        'historical report')) {
+    if (-not $normalizedPerformance.Contains($marker)) {
+        throw "Performance-reporting assertion failed: $marker"
+    }
+}
+if (-not $performanceRecorderText.Contains("'story_started'")) {
+    throw 'Performance-reporting assertion failed: recorder event vocabulary'
+}
+foreach ($marker in @('Invoke-Recorder', 'synthetic-start-run-1', 'LegacyCoverage', 'lastObservedUtc=unavailable')) {
+    if (-not $performanceStartScriptText.Contains($marker)) {
+        throw "Performance-start fixture assertion failed: $marker"
+    }
+}
+if (-not $performanceAggregationText.Contains('MetadataPath') -or
+    -not $performanceAggregationText.Contains('story_performance_report')) {
+    throw 'Performance-reporting assertion failed: aggregator production entry point'
+}
 Assert-BranchScenarioContains 'story-two starting HEAD guard' 'story two starts at the current feature HEAD'
 Assert-BranchScenarioContains 'story-one inheritance guard' 'story two inherits the authoritative corrected story-one content'
 Assert-BranchScenarioContains 'reloaded resume receipt' 'Assert-ResumeReceipt $resumed'
