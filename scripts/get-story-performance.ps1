@@ -2080,7 +2080,91 @@ function New-UsageSampleIndex {
             })
     }
     foreach ($key in @($index.Keys)) {
-        $index[$key] = @($index[$key] | Sort-Object sampleTime, { [long] $_.record.Line })
+        $samples = @($index[$key] | Sort-Object sampleTime, { [long] $_.record.Line })
+        $sameTimeConflictPrefix = [long[]]::new($samples.Count + 1)
+        $edgeStreamPrefix = [long[]]::new($samples.Count + 1)
+        $edgeSemanticsPrefix = [long[]]::new($samples.Count + 1)
+        $edgeResetPrefix = [long[]]::new($samples.Count + 1)
+        $missingInputPrefix = [long[]]::new($samples.Count + 1)
+        $missingCachedInputPrefix = [long[]]::new($samples.Count + 1)
+        $missingOutputPrefix = [long[]]::new($samples.Count + 1)
+        $missingReasoningPrefix = [long[]]::new($samples.Count + 1)
+        $sameTimeConflict = [bool[]]::new($samples.Count)
+        $groupStart = 0
+        while ($groupStart -lt $samples.Count) {
+            $groupEnd = $groupStart + 1
+            $canonical = ConvertTo-CanonicalJson -Value ([ordered]@{
+                    sessionId = $samples[$groupStart].sessionId
+                    workerId = $samples[$groupStart].workerId
+                    semantics = $samples[$groupStart].semantics
+                    counters = $samples[$groupStart].counters
+                })
+            $conflict = $false
+            while ($groupEnd -lt $samples.Count -and $samples[$groupEnd].sampleTime -eq $samples[$groupStart].sampleTime) {
+                $candidateCanonical = ConvertTo-CanonicalJson -Value ([ordered]@{
+                        sessionId = $samples[$groupEnd].sessionId
+                        workerId = $samples[$groupEnd].workerId
+                        semantics = $samples[$groupEnd].semantics
+                        counters = $samples[$groupEnd].counters
+                    })
+                if ($candidateCanonical -cne $canonical) {
+                    $conflict = $true
+                }
+                $groupEnd++
+            }
+            if ($conflict) {
+                for ($groupIndex = $groupStart; $groupIndex -lt $groupEnd; $groupIndex++) {
+                    $sameTimeConflict[$groupIndex] = $true
+                }
+            }
+            $groupStart = $groupEnd
+        }
+
+        for ($sampleIndex = 0; $sampleIndex -lt $samples.Count; $sampleIndex++) {
+            $streamEdge = $false
+            $semanticsEdge = $false
+            $resetEdge = $false
+            if ($sampleIndex -gt 0) {
+                $previous = $samples[$sampleIndex - 1]
+                $current = $samples[$sampleIndex]
+                $streamEdge = $previous.sessionId -cne $current.sessionId -or $previous.workerId -cne $current.workerId
+                $previousCached = [string] (Get-PropertyValue $previous.semantics 'cachedInput')
+                $currentCached = [string] (Get-PropertyValue $current.semantics 'cachedInput')
+                $previousReasoning = [string] (Get-PropertyValue $previous.semantics 'reasoning')
+                $currentReasoning = [string] (Get-PropertyValue $current.semantics 'reasoning')
+                $semanticsEdge = $previousCached -cne $currentCached -or $previousReasoning -cne $currentReasoning
+                foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) {
+                    $previousCounter = Get-UsageCounter -Usage $previous.usage -Name $counterName
+                    $currentCounter = Get-UsageCounter -Usage $current.usage -Name $counterName
+                    if ($previousCounter.present -and $currentCounter.present -and $currentCounter.value -lt $previousCounter.value) {
+                        $resetEdge = $true
+                    }
+                }
+            }
+            $inputMissing = -not (Get-UsageCounter -Usage $samples[$sampleIndex].usage -Name 'inputTokens').present
+            $cachedInputMissing = -not (Get-UsageCounter -Usage $samples[$sampleIndex].usage -Name 'cachedInputTokens').present
+            $outputMissing = -not (Get-UsageCounter -Usage $samples[$sampleIndex].usage -Name 'outputTokens').present
+            $reasoningMissing = -not (Get-UsageCounter -Usage $samples[$sampleIndex].usage -Name 'reasoningTokens').present
+            $sameTimeConflictPrefix[$sampleIndex + 1] = $sameTimeConflictPrefix[$sampleIndex] + $(if ($sameTimeConflict[$sampleIndex]) { 1 } else { 0 })
+            $edgeStreamPrefix[$sampleIndex + 1] = $edgeStreamPrefix[$sampleIndex] + $(if ($streamEdge) { 1 } else { 0 })
+            $edgeSemanticsPrefix[$sampleIndex + 1] = $edgeSemanticsPrefix[$sampleIndex] + $(if ($semanticsEdge) { 1 } else { 0 })
+            $edgeResetPrefix[$sampleIndex + 1] = $edgeResetPrefix[$sampleIndex] + $(if ($resetEdge) { 1 } else { 0 })
+            $missingInputPrefix[$sampleIndex + 1] = $missingInputPrefix[$sampleIndex] + $(if ($inputMissing) { 1 } else { 0 })
+            $missingCachedInputPrefix[$sampleIndex + 1] = $missingCachedInputPrefix[$sampleIndex] + $(if ($cachedInputMissing) { 1 } else { 0 })
+            $missingOutputPrefix[$sampleIndex + 1] = $missingOutputPrefix[$sampleIndex] + $(if ($outputMissing) { 1 } else { 0 })
+            $missingReasoningPrefix[$sampleIndex + 1] = $missingReasoningPrefix[$sampleIndex] + $(if ($reasoningMissing) { 1 } else { 0 })
+        }
+        $index[$key] = [pscustomobject][ordered]@{
+            samples = $samples
+            sameTimeConflictPrefix = $sameTimeConflictPrefix
+            edgeStreamPrefix = $edgeStreamPrefix
+            edgeSemanticsPrefix = $edgeSemanticsPrefix
+            edgeResetPrefix = $edgeResetPrefix
+            missingInputPrefix = $missingInputPrefix
+            missingCachedInputPrefix = $missingCachedInputPrefix
+            missingOutputPrefix = $missingOutputPrefix
+            missingReasoningPrefix = $missingReasoningPrefix
+        }
     }
     return $index
 }
@@ -2094,12 +2178,60 @@ function Find-FirstUsageSampleIndex {
     $low = 0
     $high = $Samples.Count
     while ($low -lt $high) {
-        $middle = [int] (($low + $high) / 2)
+        $middle = $low + [int][math]::Floor(($high - $low) / 2.0)
         if ($Samples[$middle].sampleTime -lt $Target) {
             $low = $middle + 1
         }
         else {
             $high = $middle
+        }
+    }
+    return $low
+}
+
+function Find-FirstGreaterUsageSampleIndex {
+    param(
+        [Parameter(Mandatory)] [object[]] $Samples,
+        [Parameter(Mandatory)] [DateTimeOffset] $Target
+    )
+
+    $low = 0
+    $high = $Samples.Count
+    while ($low -lt $high) {
+        $middle = $low + [int][math]::Floor(($high - $low) / 2.0)
+        if ($Samples[$middle].sampleTime -le $Target) {
+            $low = $middle + 1
+        }
+        else {
+            $high = $middle
+        }
+    }
+    return $low
+}
+
+function Find-FirstUsageIssueIndex {
+    param(
+        [Parameter(Mandatory)] [long[]] $Prefix,
+        [Parameter(Mandatory)] [int] $StartIndex,
+        [Parameter(Mandatory)] [int] $EndIndex
+    )
+
+    if ($StartIndex -gt $EndIndex) {
+        return -1
+    }
+    $baseline = $Prefix[$StartIndex]
+    if ($Prefix[$EndIndex + 1] -eq $baseline) {
+        return -1
+    }
+    $low = $StartIndex
+    $high = $EndIndex
+    while ($low -lt $high) {
+        $middle = $low + [int][math]::Floor(($high - $low) / 2.0)
+        if ($Prefix[$middle + 1] -gt $baseline) {
+            $high = $middle
+        }
+        else {
+            $low = $middle + 1
         }
     }
     return $low
@@ -2114,16 +2246,19 @@ function Get-UsageSampleRange {
     )
 
     if (-not $UsageIndex.ContainsKey($Key)) {
-        return @()
+        return $null
     }
-    $samples = @($UsageIndex[$Key])
+    $bucket = $UsageIndex[$Key]
+    $samples = $bucket.samples
     $first = Find-FirstUsageSampleIndex -Samples $samples -Target $StartTime
-    $selected = [System.Collections.Generic.List[object]]::new()
-    for ($index = $first; $index -lt $samples.Count; $index++) {
-        if ($samples[$index].sampleTime -gt $EndTime) { break }
-        [void] $selected.Add($samples[$index])
+    $lastExclusive = Find-FirstGreaterUsageSampleIndex -Samples $samples -Target $EndTime
+    return [pscustomobject][ordered]@{
+        bucket = $bucket
+        samples = $samples
+        firstIndex = $first
+        lastIndex = $lastExclusive - 1
+        count = [Math]::Max(0, $lastExclusive - $first)
     }
-    return @($selected)
 }
 
 function Get-UsageBoundaryResult {
@@ -2318,70 +2453,63 @@ function Get-UsageBoundaryResult {
     $intermediateProblem = $false
     $intermediateProblemMessage = $null
     if ($timesValid) {
-        $candidateSamples = [System.Collections.Generic.List[object]]::new()
         $usageKey = Get-UsageSampleKey -Role $Role -StreamId $startStream -Source $startSource
-        foreach ($candidate in @(Get-UsageSampleRange -UsageIndex $UsageIndex -Key $usageKey -StartTime $startTime -EndTime $endTime)) {
-            [void] $candidateSamples.Add([pscustomobject][ordered]@{
-                    record = $candidate.record
-                    usage = $candidate.usage
-                    sampleTime = $candidate.sampleTime
-                    sessionId = $candidate.sessionId
-                    workerId = $candidate.workerId
-                    semantics = $candidate.semantics
-                    counters = $candidate.counters
-                })
-        }
-        $sampleGroups = @($candidateSamples | Group-Object { $_.sampleTime.ToUniversalTime().Ticks })
-        $sequence = [System.Collections.Generic.List[object]]::new()
-        foreach ($sampleGroup in @($sampleGroups | Sort-Object { [long] $_.Name })) {
-            $canonicalSamples = @($sampleGroup.Group | ForEach-Object {
-                    ConvertTo-CanonicalJson -Value ([ordered]@{
-                            sessionId = $_.sessionId
-                            workerId = $_.workerId
-                            semantics = $_.semantics
-                            counters = $_.counters
-                        })
-                } | Sort-Object -Unique)
-            if ($canonicalSamples.Count -gt 1) {
-                $intermediateProblem = $true
-                $intermediateProblemMessage = 'same-time usage snapshots disagree on worker, session, semantics, or counters'
-                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'Same-time usage snapshots disagree and cannot establish one cumulative sequence' -Identity $identity -EventIds @($sampleGroup.Group | ForEach-Object { $_.record.EventId })))
-            }
-            else {
-                [void] $sequence.Add(@($sampleGroup.Group | Sort-Object { $_.record.Line } | Select-Object -First 1))
-            }
-        }
-        $previousSample = $null
-        foreach ($sample in @($sequence | Sort-Object sampleTime, { $_.record.Line })) {
-            $sampleSemantics = $sample.semantics
-            if ($sample.sessionId -cne $startSession -or $sample.workerId -cne $startWorker) {
+        $usageRange = Get-UsageSampleRange -UsageIndex $UsageIndex -Key $usageKey -StartTime $startTime -EndTime $endTime
+        if ($null -ne $usageRange -and [int] $usageRange.count -gt 0) {
+            $bucket = $usageRange.bucket
+            $samples = $usageRange.samples
+            $firstSample = $samples[$usageRange.firstIndex]
+            $firstEventId = [string] $firstSample.record.EventId
+            if ($firstSample.sessionId -cne $startSession -or $firstSample.workerId -cne $startWorker) {
                 $intermediateProblem = $true
                 $intermediateProblemMessage = 'worker or session provenance changed within the attributable window'
-                [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'An intermediate usage sample changed worker or session provenance' -Identity $identity -EventIds @($sample.record.EventId)))
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'An intermediate usage sample changed worker or session provenance' -Identity $identity -EventIds @($firstEventId)))
             }
-            if ([string] (Get-PropertyValue $sampleSemantics 'cachedInput') -cne $cachedInput -or
-                [string] (Get-PropertyValue $sampleSemantics 'reasoning') -cne $reasoning) {
+            if ([string] (Get-PropertyValue $firstSample.semantics 'cachedInput') -cne $cachedInput -or
+                [string] (Get-PropertyValue $firstSample.semantics 'reasoning') -cne $reasoning) {
                 $intermediateProblem = $true
                 $intermediateProblemMessage = 'counter semantics changed within the attributable window'
-                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'An intermediate usage sample changed counter semantics' -Identity $identity -EventIds @($sample.record.EventId)))
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'An intermediate usage sample changed counter semantics' -Identity $identity -EventIds @($firstEventId)))
             }
-            foreach ($counterName in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) {
-                $currentCounter = Get-UsageCounter -Usage $sample.usage -Name $counterName
-                if ($counterName -in $requiredCounters -and -not $currentCounter.present) {
+
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.sameTimeConflictPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            if ($issueIndex -ge 0) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'same-time usage snapshots disagree on worker, session, semantics, or counters'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'Same-time usage snapshots disagree and cannot establish one cumulative sequence' -Identity $identity -EventIds @([string] $samples[$issueIndex].record.EventId)))
+            }
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeStreamPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            if ($issueIndex -ge 0) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'worker or session provenance changed within the attributable window'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_stream_conflict' -Message 'An intermediate usage sample changed worker or session provenance' -Identity $identity -EventIds @([string] $samples[$issueIndex - 1].record.EventId, [string] $samples[$issueIndex].record.EventId)))
+            }
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeSemanticsPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            if ($issueIndex -ge 0) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'counter semantics changed within the attributable window'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_intermediate_conflict' -Message 'An intermediate usage sample changed counter semantics' -Identity $identity -EventIds @([string] $samples[$issueIndex - 1].record.EventId, [string] $samples[$issueIndex].record.EventId)))
+            }
+            $issueIndex = Find-FirstUsageIssueIndex -Prefix $bucket.edgeResetPrefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+            if ($issueIndex -ge 0) {
+                $intermediateProblem = $true
+                $intermediateProblemMessage = 'a cumulative counter decreased at an intermediate usage sample'
+                [void] $Anomalies.Add((New-Anomaly -Code 'usage_counter_reset' -Message 'An intermediate cumulative usage sample decreased; the whole window crosses a reset segment' -Identity $identity -EventIds @([string] $samples[$issueIndex - 1].record.EventId, [string] $samples[$issueIndex].record.EventId)))
+            }
+            foreach ($requiredCounter in @($requiredCounters)) {
+                $prefix = switch ($requiredCounter) {
+                    'inputTokens' { $bucket.missingInputPrefix }
+                    'cachedInputTokens' { $bucket.missingCachedInputPrefix }
+                    'outputTokens' { $bucket.missingOutputPrefix }
+                    'reasoningTokens' { $bucket.missingReasoningPrefix }
+                }
+                $issueIndex = Find-FirstUsageIssueIndex -Prefix $prefix -StartIndex $usageRange.firstIndex -EndIndex $usageRange.lastIndex
+                if ($issueIndex -ge 0) {
                     $intermediateProblem = $true
                     $intermediateProblemMessage = 'a required counter is absent from an intermediate usage sample'
-                    [void] $Anomalies.Add((New-Anomaly -Code 'usage_missing_intermediate_counter' -Message 'An intermediate usage sample omitted a counter required by the declared semantics' -Identity $identity -EventIds @($sample.record.EventId)))
-                }
-                if ($null -ne $previousSample) {
-                    $previousCounter = Get-UsageCounter -Usage $previousSample.usage -Name $counterName
-                    if ($currentCounter.present -and $previousCounter.present -and $currentCounter.value -lt $previousCounter.value) {
-                        $intermediateProblem = $true
-                        $intermediateProblemMessage = 'a cumulative counter decreased at an intermediate usage sample'
-                        [void] $Anomalies.Add((New-Anomaly -Code 'usage_counter_reset' -Message 'An intermediate cumulative usage sample decreased; the whole window crosses a reset segment' -Identity $identity -EventIds @($previousSample.record.EventId, $sample.record.EventId)))
-                    }
+                    [void] $Anomalies.Add((New-Anomaly -Code 'usage_missing_intermediate_counter' -Message 'An intermediate usage sample omitted a counter required by the declared semantics' -Identity $identity -EventIds @([string] $samples[$issueIndex].record.EventId)))
                 }
             }
-            $previousSample = $sample
         }
     }
     if ($intermediateProblem) {
@@ -2846,6 +2974,30 @@ $initialEvidencePartial = @($initialAttempts | Where-Object { $_.state -ne 'meas
 $correctionEvidencePartial = @($correctionAttempts | Where-Object { $_.state -ne 'measured' }).Count -gt 0
 $finalEvidencePartial = @($finalAttempts | Where-Object { $_.state -ne 'measured' }).Count -gt 0
 $initialTaskRefs = @($initialAttempts | Where-Object { $null -ne $_.taskRef } | ForEach-Object { [string] $_.taskRef } | Sort-Object -Unique)
+$recordsByTaskRef = @{}
+foreach ($record in @($records)) {
+    $taskRefValue = Get-PropertyValue $record.Event 'taskRef'
+    if ($null -eq $taskRefValue) { continue }
+    $taskRefKey = [string] $taskRefValue
+    if (-not $recordsByTaskRef.ContainsKey($taskRefKey)) {
+        $recordsByTaskRef[$taskRefKey] = [System.Collections.Generic.List[object]]::new()
+    }
+    [void] $recordsByTaskRef[$taskRefKey].Add($record)
+}
+foreach ($taskRefKey in @($recordsByTaskRef.Keys)) {
+    $recordsByTaskRef[$taskRefKey] = @($recordsByTaskRef[$taskRefKey] | Sort-Object Time, Line)
+}
+$initialAttemptsByTaskRef = @{}
+foreach ($attempt in @($initialAttempts)) {
+    $taskRefKey = [string] $attempt.taskRef
+    if (-not $initialAttemptsByTaskRef.ContainsKey($taskRefKey)) {
+        $initialAttemptsByTaskRef[$taskRefKey] = [System.Collections.Generic.List[object]]::new()
+    }
+    [void] $initialAttemptsByTaskRef[$taskRefKey].Add($attempt)
+}
+foreach ($taskRefKey in @($initialAttemptsByTaskRef.Keys)) {
+    $initialAttemptsByTaskRef[$taskRefKey] = @($initialAttemptsByTaskRef[$taskRefKey] | Sort-Object startUtc, endUtc, identity)
+}
 $missingInitialReviewTaskRefs = @()
 if ($effectiveReviewMode -eq 'per_task' -and $taskSetWasDeclared) {
     $initialTaskRefValues = @($initialTaskRefs | ForEach-Object { [int] $_ })
@@ -2859,7 +3011,7 @@ $acceptedFirst = 0
 $firstPassIncomplete = 0
 $firstPassRejected = 0
 foreach ($taskRef in $initialTaskRefs) {
-    $taskAttempts = @($initialAttempts | Where-Object { [string] $_.taskRef -eq $taskRef } | Sort-Object startUtc)
+    $taskAttempts = if ($initialAttemptsByTaskRef.ContainsKey($taskRef)) { $initialAttemptsByTaskRef[$taskRef] } else { @() }
     $first = $taskAttempts[0]
     if ($first.state -ne 'measured') {
         $firstPassIncomplete++
@@ -2867,10 +3019,9 @@ foreach ($taskRef in $initialTaskRefs) {
     }
     if ([string] $first.closureEventType -eq 'review_accepted') {
         $endTime = [DateTimeOffset]::Parse([string] $first.endUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
-        $priorFindingOrCorrection = @($records | Where-Object {
-            [string] (Get-PropertyValue $_.Event 'taskRef') -eq $taskRef -and
-            $_.Time -le $endTime -and
-            $_.EventType -in @('review_findings', 'correction_started')
+        $taskRecords = if ($recordsByTaskRef.ContainsKey($taskRef)) { $recordsByTaskRef[$taskRef] } else { @() }
+        $priorFindingOrCorrection = @($taskRecords | Where-Object {
+            $_.Time -le $endTime -and $_.EventType -in @('review_findings', 'correction_started')
         })
         if ($priorFindingOrCorrection.Count -gt 0) {
             $firstPassRejected++

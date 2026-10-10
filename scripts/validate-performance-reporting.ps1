@@ -587,6 +587,17 @@ try {
     Assert-True (@($windowReport.anomalies | Where-Object { $_.code -eq 'usage_interval_outside_run' }).Count -eq 2) 'before-start and post-PR straddling intervals must disclose run-window violations'
     Assert-True (@($windowReport.anomalies | Where-Object { $_.code -eq 'usage_sample_after_run' }).Count -eq 1) 'post-PR samples must be disclosed'
 
+    $boundaryStart = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $boundaryMiddleA = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 110; outputTokens = 12 })
+    $boundaryMiddleB = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 120; outputTokens = 14 })
+    $boundaryEnd = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:02:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 160; outputTokens = 22 })
+    $boundaryReport = Invoke-UsageSafetyReport -TaskRefs @(219) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 219 -PhaseId 'safety-boundary-even' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:30Z' -StartUsage $boundaryStart -EndUsage $boundaryEnd -Revision $revisionA),
+        (New-Event -EventId 'usage-safety-boundary-middle-a' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 219 -WaitId 'usage-safety-boundary-a' -WaitKind 'synthetic' -Role 'implementer' -Usage $boundaryMiddleA),
+        (New-Event -EventId 'usage-safety-boundary-middle-b' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:02:00Z' -Scope 'task' -TaskRef 219 -WaitId 'usage-safety-boundary-b' -WaitKind 'synthetic' -Role 'implementer' -Usage $boundaryMiddleB)
+    )
+    Assert-True ([string]$boundaryReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$boundaryReport.metrics.implementationTokens.value -eq 72) 'even-sized usage index exact first/interior/last boundaries remain measured'
+
     $finalRetryPerTaskEvents = @(
         (New-Event -EventId 'per-task-final-story-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T11:30:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),
         (New-Event -EventId 'per-task-final-story-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-09T11:31:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),
@@ -709,7 +720,7 @@ try {
     Assert-True ([string]$edge.metrics.waitingElapsed.state -eq 'partial' -and [int64]$edge.metrics.waitingElapsed.value -eq 60000) 'valid wait overlap should be retained while the reversed wait remains partial'
     Assert-True ([string]$edge.metrics.coordinationElapsed.state -eq 'partial' -and [int64]$edge.metrics.coordinationElapsed.value -eq 60000) 'coordinationElapsed should remain partial when coordinator wait attribution is incomplete'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'missing_boundary' }).Count -ge 1) 'missing boundary should be diagnosed'
-    Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' }).Count -ge 6) 'cross-category overlap should be disclosed rather than subtracted'
+    Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' }).Count -ge 1) 'cross-category overlap clusters should be disclosed rather than subtracted'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'negative_interval' }).Count -ge 2) 'impossible reversed review and wait sequences should be diagnosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_start' }).Count -eq 1) 'changed review-start payload should be disclosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_closure' }).Count -eq 1) 'changed review-closure payload should be disclosed'
@@ -742,7 +753,7 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) 'exact overlap fixture should aggregate successfully'
     $overlap = $overlapJson | ConvertFrom-Json -Depth 100
     $overlapDiagnostics = @($overlap.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' })
-    Assert-True ($overlapDiagnostics.Count -eq 3) 'only nesting and genuine cross-category intersections should be disclosed; disjoint, touching, and zero-duration intervals should not'
+    Assert-True ($overlapDiagnostics.Count -eq 1) 'one connected overlap cluster should be disclosed; disjoint, touching, and zero-duration intervals should not'
 
     $artifactRoot = Join-Path $root 'published-reports'
     $artifactJsonA = Join-Path $artifactRoot 'report-a.json'

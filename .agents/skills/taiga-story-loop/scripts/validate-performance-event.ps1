@@ -487,6 +487,33 @@ try {
     Assert-True ([IO.File]::ReadAllText([string] $conflictingResult.diagnosticPath) -match '"diagnosticType":"conflicting_duplicate"') 'conflict sidecar records the conflict type'
     Assert-True ([IO.File]::ReadAllText($idempotencyLedgerPath) -ceq $beforeNoop) 'conflicting replay does not mutate the event ledger'
 
+    $foreignBindingRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-foreign-binding-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $foreignBindingRoot
+    $foreignBindingRunId = 'synthetic-run-150-foreign-binding'
+    $foreignSeedEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-foreign-binding-seed'
+        runId = $foreignBindingRunId
+        storyId = 730
+        transitionId = 'foreign-binding-seed'
+    }
+    $foreignSeed = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $foreignBindingRoot -RunId $foreignBindingRunId -EventJson (Convert-EventToJson $foreignSeedEvent)
+    Assert-True ($foreignSeed.ExitCode -eq 0) 'foreign-binding seed appends to its own story ledger'
+    $foreignAttemptEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-foreign-binding-attempt'
+        runId = $foreignBindingRunId
+        storyId = 729
+        transitionId = 'foreign-binding-attempt'
+    }
+    $foreignLedgerPath = Join-Path (Join-Path $foreignBindingRoot $foreignBindingRunId) 'events.jsonl'
+    $foreignBefore = [IO.File]::ReadAllText($foreignLedgerPath)
+    $foreignAttempt = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $foreignBindingRoot -RunId $foreignBindingRunId -EventJson (Convert-EventToJson $foreignAttemptEvent)
+    $foreignAttemptResult = Get-RecorderResult -Invocation $foreignAttempt -Context 'foreign binding rejection'
+    Assert-True ($foreignAttempt.ExitCode -eq 3 -and $foreignAttemptResult.errorCategory -ceq 'run_binding_conflict') 'foreign binding is rejected before append'
+    $foreignRetry = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $foreignBindingRoot -RunId $foreignBindingRunId -EventJson (Convert-EventToJson $foreignAttemptEvent)
+    $foreignRetryResult = Get-RecorderResult -Invocation $foreignRetry -Context 'foreign binding repeated rejection'
+    Assert-True ($foreignRetry.ExitCode -eq 3 -and $foreignRetryResult.errorCategory -ceq 'run_binding_conflict') 'foreign binding remains rejected after retry'
+    Assert-True ([IO.File]::ReadAllText($foreignLedgerPath) -ceq $foreignBefore) 'foreign binding rejection never advances or mutates the ledger'
+
     $lockRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-lock-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $lockRoot
     $lockRunId = 'synthetic-run-150-lock'
@@ -640,6 +667,38 @@ try {
     $missingIndexResult = Get-RecorderResult -Invocation $missingIndex -Context 'missing index recovery'
     Assert-True ($missingIndex.ExitCode -eq 0 -and $missingIndexResult.status -ceq 'appended') 'missing index recovery appends safely'
     Assert-True ([string] $missingIndexResult.scanMode -ceq 'cold_rebuild') 'missing index recovery discloses a cold rebuild'
+
+    $individualIndexRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-individual-index-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $individualIndexRoot
+    $individualIndexRunId = 'synthetic-run-150-individual-index'
+    $individualIndexEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-individual-index-replay'
+        runId = $individualIndexRunId
+        transitionId = 'individual-index-replay'
+    }
+    $individualIndexAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $individualIndexAppendResult = Get-RecorderResult -Invocation $individualIndexAppend -Context 'individual index append'
+    $individualIndexDirectory = [string] $individualIndexAppendResult.indexPath
+    $individualIndexLedger = [string] $individualIndexAppendResult.ledgerPath
+    $individualIndexFiles = @(Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)
+    Assert-True ($individualIndexFiles.Count -eq 1) 'individual index fixture creates one event marker'
+    [IO.File]::Delete($individualIndexFiles[0].FullName)
+    $missingIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $missingIndividualIndexReplayResult = Get-RecorderResult -Invocation $missingIndividualIndexReplay -Context 'missing individual index replay'
+    Assert-True ($missingIndividualIndexReplay.ExitCode -eq 0 -and $missingIndividualIndexReplayResult.status -ceq 'noop' -and [string] $missingIndividualIndexReplayResult.scanMode -ceq 'cold_rebuild') 'missing individual index replay rebuilds from the ledger and remains idempotent'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing individual index replay does not duplicate the ledger record'
+    $restoredIndividualIndexFile = @(Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0]
+    [IO.File]::WriteAllText($restoredIndividualIndexFile.FullName, '{broken-index', [Text.UTF8Encoding]::new($false))
+    $corruptIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $corruptIndividualIndexReplayResult = Get-RecorderResult -Invocation $corruptIndividualIndexReplay -Context 'corrupt individual index replay'
+    Assert-True ($corruptIndividualIndexReplay.ExitCode -eq 0 -and $corruptIndividualIndexReplayResult.status -ceq 'noop' -and [string] $corruptIndividualIndexReplayResult.scanMode -ceq 'cold_rebuild') 'corrupt individual index replay rebuilds from the ledger and remains idempotent'
+    $changedIndividualIndexEvent = New-EventVariant -Base $individualIndexEvent -Changes @{
+        transitionId = 'individual-index-conflict'
+    }
+    $changedIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (ConvertTo-Json -InputObject $changedIndividualIndexEvent -Compress -Depth 20)
+    $changedIndividualIndexReplayResult = Get-RecorderResult -Invocation $changedIndividualIndexReplay -Context 'corrupt individual index conflict'
+    Assert-True ($changedIndividualIndexReplay.ExitCode -eq 3 -and $changedIndividualIndexReplayResult.errorCategory -ceq 'conflicting_duplicate') 'corrupt individual index replay preserves conflict detection'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'corrupt individual index conflict does not mutate the ledger'
 
     $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $unicodeRoot

@@ -392,12 +392,12 @@ function Get-SourceBoundAnalysis {
             normalPath = [ordered]@{
                 checkpointLine = [int]$recorderCheckpointLine[0].LineNumber
                 incrementalReadLine = [int]$recorderIncrementalLine[0].LineNumber
-                complexity = 'O(appended bytes + one event-index marker + one checkpoint replacement) per ordinary append; no prior-ledger scan'
+                complexity = 'O(appended bytes + one event-index marker + one fixed-size Bloom membership filter + one checkpoint replacement) per ordinary append; no prior-ledger scan'
                 ledgerRead = 'incremental byte range from the complete-record checkpoint offset'
             }
             recoveryPath = [ordered]@{
                 coldRebuildLine = [int]$recorderColdLine[0].LineNumber
-                complexity = 'O(existing ledger bytes + valid records) only when checkpoint/index state is missing, stale, truncated, or corrupt'
+                complexity = 'O(existing ledger bytes + valid records) only when checkpoint/index/Bloom state is missing, stale, truncated, or corrupt'
                 ledgerAuthoritative = $true
             }
             constantHookWorkClaim = 'ordinary append bounded; cold rebuild separately disclosed'
@@ -409,7 +409,7 @@ function Get-SourceBoundAnalysis {
             intervalSweepLine = [int]$aggregateOverlapLine[0].LineNumber
             usageIndexLine = [int]$aggregateUsageIndexLine[0].LineNumber
             usageResolveLine = [int]$aggregateUsageResolveLine[0].LineNumber
-            complexity = 'linear ledger byte/record read plus O(records log records) deterministic ordering/index construction and linear sweep passes; no pairwise interval or full-ledger scan per usage interval'
+            complexity = 'linear ledger byte/record read plus O(records log records) deterministic ordering/index construction, O(records + task groups) first-pass grouping, O(intervals log samples) indexed usage-boundary queries, and linear sweep passes; no pairwise interval or full-ledger scan per usage interval'
             processingClaim = 'bounded_scan_with_log_ordering_and_linear_sweeps'
         }
         productionThreshold = 'unavailable_without an authorized production workload and environment-controlled benchmark'
@@ -460,6 +460,174 @@ function New-ScalingEventJson {
         pullRequest = $null
     }
     return ($event | ConvertTo-Json -Compress -Depth 20)
+}
+
+function New-DenseScalingEventJson {
+    param(
+        [Parameter(Mandatory)] [string] $EventId,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $EventType,
+        [Parameter(Mandatory)] [DateTimeOffset] $OccurredAt,
+        [Parameter(Mandatory)] [string] $Scope,
+        [AllowNull()] [Nullable[int]] $TaskRef,
+        [AllowNull()] [object] $PhaseId,
+        [AllowNull()] [object] $Revision,
+        [Parameter(Mandatory)] [string] $Role,
+        [Parameter(Mandatory)] [string] $SessionId,
+        [Parameter(Mandatory)] [string] $WorkerId,
+        [AllowNull()] [object] $ReviewRequestId,
+        [AllowNull()] [object] $ReviewAttemptId,
+        [AllowNull()] [object] $ReviewKind,
+        [AllowNull()] [Nullable[int]] $ReviewAttemptOrdinal,
+        [AllowNull()] [object] $WaitId,
+        [AllowNull()] [object] $WaitKind,
+        [AllowNull()] [object] $Usage,
+        [AllowNull()] [object] $PullRequest
+    )
+
+    $event = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_event'
+        eventId = $EventId
+        runId = $RunId
+        projectId = 12
+        storyId = 729
+        storyRef = 145
+        taskRef = $TaskRef
+        role = $Role
+        sessionId = $SessionId
+        workerId = $WorkerId
+        transitionId = $EventId
+        scope = $Scope
+        phaseId = $PhaseId
+        correctionId = $null
+        reviewRequestId = $ReviewRequestId
+        reviewAttemptId = $ReviewAttemptId
+        reviewKind = $ReviewKind
+        reviewAttemptOrdinal = $ReviewAttemptOrdinal
+        supersedesReviewAttemptId = $null
+        eventType = $EventType
+        occurredAtUtc = $OccurredAt.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+        revision = $Revision
+        reviewMode = 'per_task'
+        provenance = [ordered]@{
+            source = 'synthetic_fixture'
+            observedBy = 'validate-performance-overhead.ps1'
+            coverage = 'dense task and attributable usage scaling'
+            synthetic = $true
+        }
+        usage = $Usage
+        waitId = $WaitId
+        waitKind = $WaitKind
+        pullRequest = $PullRequest
+    }
+    return ($event | ConvertTo-Json -Compress -Depth 30)
+}
+
+function Get-DenseScalingEventJsons {
+    param(
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [int] $TaskCount
+    )
+
+    $events = [System.Collections.Generic.List[string]]::new()
+    $revision = 'dddddddddddddddddddddddddddddddddddddddd'
+    $zero = [DateTimeOffset]::new(2026, 10, 10, 0, 0, 0, [TimeSpan]::Zero)
+    $storyStart = New-DenseScalingEventJson -EventId "dense-$RunId-story-start" -RunId $RunId -EventType 'story_started' -OccurredAt $zero -Scope 'story' -TaskRef $null -PhaseId $null -Revision $null -Role 'coordinator' -SessionId 'dense-coordinator' -WorkerId 'dense-coordinator' -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null -WaitId $null -WaitKind $null -Usage $null -PullRequest $null
+    [void] $events.Add($storyStart)
+    for ($taskIndex = 1; $taskIndex -le $TaskCount; $taskIndex++) {
+        $taskRef = 1000 + $taskIndex
+        $start = $zero.AddMinutes(1).AddSeconds(($taskIndex - 1) * 15)
+        $end = $start.AddMinutes(5)
+        $phaseId = "dense-$RunId-task-$taskIndex"
+        $streamId = "dense-$RunId-implementer-stream"
+        $sessionId = "dense-$RunId-implementer-session"
+        $baseInput = 1000 + ($taskIndex * 100)
+        $baseOutput = 100 + ($taskIndex * 10)
+        $baselineText = $start.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+        $usageStart = [ordered]@{
+            state = 'measured'; streamId = $streamId; role = 'implementer'; sessionId = $sessionId; source = 'dense-synthetic-usage'
+            counterSemantics = [ordered]@{ cachedInput = 'included_in_input'; reasoning = 'included_in_output' }; coverage = 'dense exact boundary'
+            sampledAtUtc = $baselineText; baselineAtUtc = $baselineText
+            counters = [ordered]@{ inputTokens = $baseInput; outputTokens = $baseOutput }
+        }
+        [void] $events.Add((New-DenseScalingEventJson -EventId "dense-$RunId-task-$taskIndex-implementation-start" -RunId $RunId -EventType 'implementation_started' -OccurredAt $start -Scope 'task' -TaskRef $taskRef -PhaseId $phaseId -Revision $null -Role 'implementer' -SessionId $sessionId -WorkerId 'dense-implementer' -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null -WaitId $null -WaitKind $null -Usage $usageStart -PullRequest $null))
+        foreach ($sampleIndex in 1..3) {
+            $sampleTime = $start.AddMinutes($sampleIndex)
+            $sampleText = $sampleTime.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+            $usageSample = [ordered]@{
+                state = 'measured'; streamId = $streamId; role = 'implementer'; sessionId = $sessionId; source = 'dense-synthetic-usage'
+                counterSemantics = [ordered]@{ cachedInput = 'included_in_input'; reasoning = 'included_in_output' }; coverage = 'dense intermediate sample'
+                sampledAtUtc = $sampleText; baselineAtUtc = $baselineText
+                counters = [ordered]@{ inputTokens = $baseInput + ($sampleIndex * 10); outputTokens = $baseOutput + ($sampleIndex * 2) }
+            }
+            [void] $events.Add((New-DenseScalingEventJson -EventId "dense-$RunId-task-$taskIndex-sample-$sampleIndex" -RunId $RunId -EventType 'wait_started' -OccurredAt $sampleTime -Scope 'task' -TaskRef $taskRef -PhaseId $null -Revision $null -Role 'implementer' -SessionId $sessionId -WorkerId 'dense-implementer' -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null -WaitId "dense-$RunId-task-$taskIndex-sample-$sampleIndex" -WaitKind 'usage-sample' -Usage $usageSample -PullRequest $null))
+        }
+        $endText = $end.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'")
+        $usageEnd = [ordered]@{
+            state = 'measured'; streamId = $streamId; role = 'implementer'; sessionId = $sessionId; source = 'dense-synthetic-usage'
+            counterSemantics = [ordered]@{ cachedInput = 'included_in_input'; reasoning = 'included_in_output' }; coverage = 'dense exact boundary'
+            sampledAtUtc = $endText; baselineAtUtc = $baselineText
+            counters = [ordered]@{ inputTokens = $baseInput + 40; outputTokens = $baseOutput + 8 }
+        }
+        [void] $events.Add((New-DenseScalingEventJson -EventId "dense-$RunId-task-$taskIndex-implementation-ready" -RunId $RunId -EventType 'task_ready_for_review' -OccurredAt $end -Scope 'task' -TaskRef $taskRef -PhaseId $phaseId -Revision $revision -Role 'implementer' -SessionId $sessionId -WorkerId 'dense-implementer' -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null -WaitId $null -WaitKind $null -Usage $usageEnd -PullRequest $null))
+        $reviewStart = $end.AddSeconds(60)
+        $reviewEnd = $end.AddSeconds(120)
+        $reviewRequestId = "dense-$RunId-task-$taskIndex-review-request"
+        $reviewAttemptId = "dense-$RunId-task-$taskIndex-review-attempt"
+        [void] $events.Add((New-DenseScalingEventJson -EventId "dense-$RunId-task-$taskIndex-review-start" -RunId $RunId -EventType 'review_started' -OccurredAt $reviewStart -Scope 'task' -TaskRef $taskRef -PhaseId "$phaseId-review" -Revision $revision -Role 'reviewer' -SessionId "dense-$RunId-review-session" -WorkerId 'dense-reviewer' -ReviewRequestId $reviewRequestId -ReviewAttemptId $reviewAttemptId -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -WaitId $null -WaitKind $null -Usage $null -PullRequest $null))
+        [void] $events.Add((New-DenseScalingEventJson -EventId "dense-$RunId-task-$taskIndex-review-accepted" -RunId $RunId -EventType 'review_accepted' -OccurredAt $reviewEnd -Scope 'task' -TaskRef $taskRef -PhaseId "$phaseId-review" -Revision $revision -Role 'reviewer' -SessionId "dense-$RunId-review-session" -WorkerId 'dense-reviewer' -ReviewRequestId $reviewRequestId -ReviewAttemptId $reviewAttemptId -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -WaitId $null -WaitKind $null -Usage $null -PullRequest $null))
+    }
+    $prTime = $zero.AddMinutes(30)
+    $pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 190 + $TaskCount; reviewedHead = $revision }
+    [void] $events.Add((New-DenseScalingEventJson -EventId "dense-$RunId-pr-ready" -RunId $RunId -EventType 'pr_ready' -OccurredAt $prTime -Scope 'story' -TaskRef $null -PhaseId $null -Revision $revision -Role 'coordinator' -SessionId 'dense-coordinator' -WorkerId 'dense-coordinator' -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null -WaitId $null -WaitKind $null -Usage $null -PullRequest $pullRequest))
+    return @($events)
+}
+
+function Invoke-DenseProcessingScalingEvidence {
+    param(
+        [Parameter(Mandatory)] [string] $ExternalRoot,
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $AggregatorPath
+    )
+
+    $sizes = @(4, 16, 32)
+    $results = [System.Collections.Generic.List[object]]::new()
+    foreach ($size in $sizes) {
+        $runId = "dense-scaling-$size"
+        $eventJsons = @(Get-DenseScalingEventJsons -RunId $runId -TaskCount $size)
+        foreach ($eventJson in $eventJsons) {
+            $output = & pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRoot -RunId $runId -EventJson $eventJson 2>&1
+            Assert-True ([int]$LASTEXITCODE -eq 0) "dense scaling recorder append $runId must succeed"
+        }
+        $ledgerPath = Join-Path (Join-Path $ExternalRoot $runId) 'events.jsonl'
+        $expectedEventCount = 2 + ($size * 7)
+        $ledgerLines = @([IO.File]::ReadAllLines($ledgerPath)).Count
+        Assert-True ($ledgerLines -eq $expectedEventCount) "dense scaling ledger $runId must contain $expectedEventCount complete records"
+        $taskRefs = @(1..$size | ForEach-Object { 1000 + $_ })
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $aggregateOutput = & $AggregatorPath -EventsPath $ledgerPath -ReviewMode per_task -TaskRefs $taskRefs 2>&1
+        $aggregateExitCode = [int]$LASTEXITCODE
+        $timer.Stop()
+        $aggregateLines = @($aggregateOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        Assert-True ($aggregateExitCode -eq 0 -and $aggregateLines.Count -gt 0) "dense scaling aggregator $runId must succeed"
+        $report = ($aggregateLines -join [Environment]::NewLine) | ConvertFrom-Json -Depth 100 -DateKind String
+        Assert-True ([int]$report.coverage.validEventCount -eq $expectedEventCount) "dense scaling report $runId must account for all events"
+        Assert-True ([int]$report.metrics.initialTaskReviews.value -eq $size) "dense scaling report $runId must exercise the grouped first-pass task index"
+        Assert-True ([string]$report.metrics.implementationTokens.state -eq 'partial') "dense scaling report $runId must disclose overlapping attributable usage windows"
+        Assert-True (@($report.anomalies | Where-Object { $_.code -eq 'overlapping_usage_window' }).Count -ge 1) "dense scaling report $runId must disclose usage overlap"
+        [void]$results.Add([ordered]@{
+                taskCount = $size
+                eventCount = $ledgerLines
+                ledgerBytes = [long][IO.FileInfo]::new($ledgerPath).Length
+                aggregatorDurationMilliseconds = [math]::Round($timer.Elapsed.TotalMilliseconds, 3)
+                validEventCount = [int]$report.coverage.validEventCount
+                initialTaskReviews = [int]$report.metrics.initialTaskReviews.value
+                usageState = [string]$report.metrics.implementationTokens.state
+                overlapAnomalyCount = @($report.anomalies | Where-Object { $_.code -eq 'overlapping_usage_window' }).Count
+            })
+    }
+    return @($results)
 }
 
 function Invoke-ProcessingScalingEvidence {
@@ -561,6 +729,7 @@ try {
     Assert-True ([string]$acceptance.state -ceq 'pass') 'observed disabled/enabled workflow controls must satisfy bounded-operation acceptance'
 
     $scalingEvidence = Invoke-ProcessingScalingEvidence -ExternalRoot $externalRoot -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
+    $denseScalingEvidence = Invoke-DenseProcessingScalingEvidence -ExternalRoot $externalRoot -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
     $sourceBounds = Get-SourceBoundAnalysis -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
     Assert-True ([string]$sourceBounds.recorder.constantHookWorkClaim -ceq 'ordinary append bounded; cold rebuild separately disclosed' -and [string]$sourceBounds.aggregator.processingClaim -ceq 'bounded_scan_with_log_ordering_and_linear_sweeps' -and [string]$sourceBounds.state -ceq 'bounded') 'source bounds must prove bounded normal recording and non-pairwise aggregation'
 
@@ -592,7 +761,7 @@ try {
         [ordered]@{ scenario = 'validator-suite'; setup = 'all checked-in validate-*.ps1 files except this orchestrator'; action = 'run from repository root in fresh PowerShell processes'; expected = 'every validator exits 0'; observed = "$($validatorResults.Count) validators exited 0"; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'matched workflow controls'; setup = 'same automatic-review state machine, three disabled and three enabled cold samples'; action = 'derive transitions/messages/agents/polling/measurement-only counts from actual traces'; expected = 'same outcome and operation counts; only declared instrumentation helpers appear'; observed = 'observed traces matched; enabled recorder/aggregator calls and bytes recorded'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'helper duration'; setup = 'local monotonic Stopwatch, three samples per control, no sleeps'; action = 'measure control and enabled helper durations'; expected = 'actual samples with conditions, not a fixed-clock percentage'; observed = 'baseline/candidate control durations and candidate helper samples recorded'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection plus recorder/aggregator runs at ledger sizes 1, 8, and 32'; action = 'report normal/recovery/ordering bounds separately'; expected = 'ordinary append uses incremental checkpoint/index work; aggregation has no pairwise or per-interval full-ledger scan'; observed = "scaling sizes=$((@($scalingEvidence | ForEach-Object { $_.size }) -join ',')); last recorder scans=$((@($scalingEvidence | ForEach-Object { $_.recorderLastScanBytes }) -join ',')); aggregator samples=$((@($scalingEvidence | ForEach-Object { $_.aggregatorDurationMilliseconds }) -join ',')); normal recorder path and cold rebuild are distinguished"; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection plus recorder/aggregator runs at ledger sizes 1, 8, and 32 and dense task/usage runs at 4, 16, and 32 tasks'; action = 'report normal/recovery/ordering costs separately and exercise grouped first-pass plus overlapping usage paths'; expected = 'ordinary append uses incremental checkpoint/index work; aggregation has no pairwise or per-interval full-ledger scan'; observed = "scaling sizes=$((@($scalingEvidence | ForEach-Object { $_.size }) -join ',')); last recorder scans=$((@($scalingEvidence | ForEach-Object { $_.recorderLastScanBytes }) -join ',')); dense tasks=$((@($denseScalingEvidence | ForEach-Object { $_.taskCount }) -join ',')); dense aggregator samples=$((@($denseScalingEvidence | ForEach-Object { $_.aggregatorDurationMilliseconds }) -join ',')); normal recorder path, cold rebuild, grouped first-pass and dense usage overlap are distinguished"; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'attributable usage'; setup = 'current host capability matrix'; action = 'retain explicit unavailable state'; expected = 'no token estimate from account limits, text length, file size, event count, or timing'; observed = 'baseline/candidate usageState=unavailable'; evidence = 'unavailable'; status = 'not_run' },
         [ordered]@{ scenario = 'negative controls'; setup = 'bypassed trace, extra message/agent/event, and missing baseline mutations'; action = 'evaluate observed-evidence contract'; expected = 'unsafe or incomparable evidence never passes'; observed = "all $($negativeControls.Count) controls rejected"; evidence = 'automated_assertion'; status = 'passed' }
     )
@@ -619,6 +788,7 @@ try {
         }
         acceptance = $acceptance
         processingScaling = $scalingEvidence
+        denseProcessingScaling = $denseScalingEvidence
         negativeControls = $negativeControls
         scenarioEvidence = $scenarioEvidence
     } | ConvertTo-Json -Depth 60

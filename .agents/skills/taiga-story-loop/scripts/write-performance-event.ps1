@@ -66,6 +66,9 @@ $script:UsageFields = @(
 $script:CounterSemanticsFields = @('cachedInput', 'reasoning')
 $script:CounterFields = @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')
 $script:PullRequestFields = @('provider', 'owner', 'repository', 'number', 'reviewedHead')
+$script:BloomHeader = [byte[]]@(0x54, 0x4D, 0x42, 0x4C, 0x4F, 0x4F, 0x4D, 0x31)
+$script:BloomByteCount = 4096
+$script:BloomHashCount = 4
 
 function Fail-Recorder {
     param([Parameter(Mandatory)] [string] $Message)
@@ -728,9 +731,15 @@ function Convert-ToCanonicalJson {
 function Get-Sha256HexBytes {
     param([Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $Bytes)
 
+    return ([BitConverter]::ToString((Get-Sha256DigestBytes -Bytes $Bytes))).Replace('-', '').ToLowerInvariant()
+}
+
+function Get-Sha256DigestBytes {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $Bytes)
+
     $hash = [Security.Cryptography.SHA256]::Create()
     try {
-        return ([BitConverter]::ToString($hash.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+        return ,$hash.ComputeHash($Bytes)
     }
     finally {
         $hash.Dispose()
@@ -979,6 +988,12 @@ function Get-LedgerCheckpointPath {
     return "$LedgerPath.checkpoint.json"
 }
 
+function Get-LedgerBloomPath {
+    param([Parameter(Mandatory)] [string] $LedgerPath)
+
+    return "$LedgerPath.bloom"
+}
+
 function Get-EventIndexPath {
     param(
         [Parameter(Mandatory)] [string] $IndexDirectory,
@@ -1013,6 +1028,117 @@ function Write-AtomicText {
             [IO.File]::Delete($temporary)
         }
     }
+}
+
+function Write-AtomicBytes {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [byte[]] $Bytes
+    )
+
+    $parent = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        [IO.Directory]::CreateDirectory($parent) | Out-Null
+    }
+    $temporary = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
+    try {
+        [IO.File]::WriteAllBytes($temporary, $Bytes)
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            [IO.File]::Move($temporary, $Path, $true)
+        }
+        else {
+            [IO.File]::Move($temporary, $Path)
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary -PathType Leaf) {
+            [IO.File]::Delete($temporary)
+        }
+    }
+}
+
+function New-EmptyBloomFilter {
+    $bytes = [byte[]]::new($script:BloomHeader.Length + $script:BloomByteCount)
+    [Array]::Copy($script:BloomHeader, 0, $bytes, 0, $script:BloomHeader.Length)
+    return ,$bytes
+}
+
+function Read-BloomFilter {
+    param([Parameter(Mandatory)] [string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw [IO.InvalidDataException]::new('event bloom filter is missing')
+    }
+    try {
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        if ($bytes.Length -ne $script:BloomHeader.Length + $script:BloomByteCount) {
+            throw [IO.InvalidDataException]::new('event bloom filter has an invalid length')
+        }
+        for ($index = 0; $index -lt $script:BloomHeader.Length; $index++) {
+            if ($bytes[$index] -ne $script:BloomHeader[$index]) {
+                throw [IO.InvalidDataException]::new('event bloom filter has an invalid header')
+            }
+        }
+        return ,$bytes
+    }
+    catch {
+        throw [IO.InvalidDataException]::new('event bloom filter is invalid')
+    }
+}
+
+function Get-BloomBitPositions {
+    param([Parameter(Mandatory)] [string] $EventId)
+
+    $digest = Get-Sha256DigestBytes -Bytes ([Text.UTF8Encoding]::new($false).GetBytes($EventId))
+    $positions = [System.Collections.Generic.List[int]]::new()
+    for ($index = 0; $index -lt $script:BloomHashCount; $index++) {
+        $word = [BitConverter]::ToUInt32($digest, $index * 4)
+        [void] $positions.Add([int] ([uint64] $word % [uint64] ($script:BloomByteCount * 8)))
+    }
+    return @($positions)
+}
+
+function Test-BloomEventId {
+    param(
+        [Parameter(Mandatory)] [byte[]] $Bytes,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    foreach ($position in @(Get-BloomBitPositions -EventId $EventId)) {
+        $byteIndex = $script:BloomHeader.Length + [int] ($position / 8)
+        $mask = [byte] (1 -shl ($position % 8))
+        if (($Bytes[$byteIndex] -band $mask) -eq 0) {
+            return $false
+        }
+    }
+    return $true
+}
+
+function Add-BloomEventId {
+    param(
+        [Parameter(Mandatory)] [byte[]] $Bytes,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    foreach ($position in @(Get-BloomBitPositions -EventId $EventId)) {
+        $byteIndex = $script:BloomHeader.Length + [int] ($position / 8)
+        $mask = [byte] (1 -shl ($position % 8))
+        $Bytes[$byteIndex] = [byte] ($Bytes[$byteIndex] -bor $mask)
+    }
+}
+
+function Write-BloomFromRecords {
+    param(
+        [Parameter(Mandatory)] [string] $BloomPath,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records
+    )
+
+    $bytes = New-EmptyBloomFilter
+    foreach ($record in @($Records)) {
+        Add-BloomEventId -Bytes $bytes -EventId ([string] $record.EventId)
+    }
+    Write-AtomicBytes -Path $BloomPath -Bytes $bytes
+    return ,$bytes
 }
 
 function Read-IndexEntry {
@@ -1125,6 +1251,34 @@ function Write-LedgerCheckpoint {
     Write-AtomicText -Path $CheckpointPath -Text ($checkpoint | ConvertTo-Json -Compress -Depth 20)
 }
 
+function Test-LedgerCompleteBoundary {
+    param(
+        [Parameter(Mandatory)] [string] $LedgerPath,
+        [Parameter(Mandatory)] [long] $Offset
+    )
+
+    if ($Offset -eq 0) {
+        return $true
+    }
+    if (-not (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) {
+        return $false
+    }
+    $stream = $null
+    try {
+        $stream = [IO.FileStream]::new($LedgerPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        if ($stream.Length -lt $Offset) {
+            return $false
+        }
+        [void] $stream.Seek($Offset - 1, [IO.SeekOrigin]::Begin)
+        return $stream.ReadByte() -eq 0x0A
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+    }
+}
+
 function Read-LedgerCheckpoint {
     param(
         [Parameter(Mandatory)] [string] $CheckpointPath,
@@ -1150,7 +1304,11 @@ function Read-LedgerCheckpoint {
             [int] $checkpoint.storyId -ne $ExpectedStoryId -or
             [int] $checkpoint.storyRef -ne $ExpectedStoryRef -or
             $lastCompleteOffset -lt 0 -or $checkpointPhysicalLength -lt $lastCompleteOffset -or
+            [int] $checkpoint.nextLineNumber -lt 0 -or [long] $checkpoint.recordCount -lt 0 -or
             $physicalLength -lt $lastCompleteOffset -or $physicalLength -lt $checkpointPhysicalLength) {
+            return $null
+        }
+        if (-not (Test-LedgerCompleteBoundary -LedgerPath $LedgerPath -Offset $lastCompleteOffset)) {
             return $null
         }
         return [pscustomobject]@{
@@ -1270,6 +1428,7 @@ $runDirectory = Join-Path $expectedRoot $RunId
 $ledgerPath = Join-Path $runDirectory 'events.jsonl'
 $indexDirectory = Get-LedgerIndexDirectory -LedgerPath $ledgerPath
 $checkpointPath = Get-LedgerCheckpointPath -LedgerPath $ledgerPath
+$bloomPath = Get-LedgerBloomPath -LedgerPath $ledgerPath
 $normalizedLockReadyPath = $null
 if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
     $normalizedLockReadyPath = Get-FullPath -Path $LockReadyPath -Name 'LockReadyPath'
@@ -1283,7 +1442,8 @@ if (-not [string]::IsNullOrWhiteSpace($LockReadyPath)) {
         "$ledgerPath.lock",
         "$ledgerPath.diagnostics.jsonl",
         $indexDirectory,
-        $checkpointPath
+        $checkpointPath,
+        $bloomPath
     ) | ForEach-Object { [IO.Path]::GetFullPath($_).TrimEnd('\', '/') }
     if (@($reservedPaths | Where-Object { $_.Equals($normalizedLockReadyPath, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) {
         Fail-Recorder "'LockReadyPath' aliases a reserved external run path"
@@ -1326,6 +1486,15 @@ try {
         -ExpectedStoryRef ([int] $event.storyRef)
     $fullRebuild = $null -eq $checkpoint -or
         ([long] $checkpoint.RecordCount -gt 0 -and -not (Test-Path -LiteralPath $indexDirectory -PathType Container))
+    $bloomBytes = $null
+    if (-not $fullRebuild) {
+        try {
+            $bloomBytes = Read-BloomFilter -Path $bloomPath
+        }
+        catch [IO.InvalidDataException] {
+            $fullRebuild = $true
+        }
+    }
     $scanStartOffset = if ($fullRebuild) { 0L } else { [long] $checkpoint.LastCompleteOffset }
     $scanStartLineNumber = if ($fullRebuild) { 0 } else { [int] $checkpoint.NextLineNumber }
     $ledgerState = Read-LedgerChunk `
@@ -1338,10 +1507,17 @@ try {
         -ExpectedStoryRef ([int] $event.storyRef)
     if ($fullRebuild) {
         Write-IndexFromFullLedger -IndexDirectory $indexDirectory -LedgerState $ledgerState
+        $bloomBytes = Write-BloomFromRecords -BloomPath $bloomPath -Records $ledgerState.Records
         $recordCount = [long] $ledgerState.Records.Count
     }
     else {
         Update-IndexFromRecords -IndexDirectory $indexDirectory -Records $ledgerState.Records
+        foreach ($record in @($ledgerState.Records)) {
+            Add-BloomEventId -Bytes $bloomBytes -EventId ([string] $record.EventId)
+        }
+        if (@($ledgerState.Records).Count -gt 0) {
+            Write-AtomicBytes -Path $bloomPath -Bytes $bloomBytes
+        }
         $recordCount = [long] $checkpoint.RecordCount + [long] $ledgerState.Records.Count
     }
 
@@ -1373,6 +1549,43 @@ try {
     $checkpointLineNumber = [int] $ledgerState.NextLineNumber
 
     $foreignRecords = @($ledgerState.InvalidRecords | Where-Object { $_.diagnosticType -ceq 'foreign_run' })
+    $indexEntry = $null
+    $indexEntryNeedsRebuild = $false
+    if ($foreignRecords.Count -eq 0) {
+        try {
+            $indexEntry = Read-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId)
+        }
+        catch [IO.InvalidDataException] {
+            $indexEntryNeedsRebuild = $true
+        }
+        $eventMayExist = $false
+        if (-not $fullRebuild -and -not $indexEntryNeedsRebuild) {
+            $eventMayExist = Test-BloomEventId -Bytes $bloomBytes -EventId ([string] $event.eventId)
+        }
+        if (-not $fullRebuild -and ($indexEntryNeedsRebuild -or ($null -eq $indexEntry -and $eventMayExist))) {
+            $fullRebuild = $true
+            $scanStartOffset = 0L
+            $scanStartLineNumber = 0
+            $ledgerState = Read-LedgerChunk `
+                -LedgerPath $ledgerPath `
+                -StartOffset $scanStartOffset `
+                -StartLineNumber $scanStartLineNumber `
+                -ExpectedRunId $RunId `
+                -ExpectedProjectId ([int] $event.projectId) `
+                -ExpectedStoryId ([int] $event.storyId) `
+                -ExpectedStoryRef ([int] $event.storyRef)
+            Write-IndexFromFullLedger -IndexDirectory $indexDirectory -LedgerState $ledgerState
+            $bloomBytes = Write-BloomFromRecords -BloomPath $bloomPath -Records $ledgerState.Records
+            $recordCount = [long] $ledgerState.Records.Count
+            $checkpointPhysicalLength = [long] $ledgerState.PhysicalLength
+            $checkpointLastCompleteOffset = [long] $ledgerState.LastCompleteOffset
+            $checkpointLineNumber = [int] $ledgerState.NextLineNumber
+            $foreignRecords = @($ledgerState.InvalidRecords | Where-Object { $_.diagnosticType -ceq 'foreign_run' })
+            if ($foreignRecords.Count -eq 0) {
+                $indexEntry = Read-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId)
+            }
+        }
+    }
     if ($foreignRecords.Count -gt 0) {
         $operationResult = [ordered]@{
             status = 'error'
@@ -1385,9 +1598,10 @@ try {
         $operationExitCode = 3
     }
     else {
-        $indexEntry = Read-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId)
         if ($null -eq $indexEntry) {
             Write-IndexEntry -IndexDirectory $indexDirectory -EventId ([string] $event.eventId) -State pending -CanonicalJson $incomingCanonical -LineNumber $null -StartOffset $null -EndOffset $null
+            Add-BloomEventId -Bytes $bloomBytes -EventId ([string] $event.eventId)
+            Write-AtomicBytes -Path $bloomPath -Bytes $bloomBytes
         }
 
         if ($null -ne $indexEntry -and [string] $indexEntry.state -eq 'conflict') {
@@ -1479,11 +1693,19 @@ try {
                 scannedBytes = [long] $postWriteState.ScannedBytes
                 checkpointPath = $checkpointPath
                 indexPath = $indexDirectory
+                bloomPath = $bloomPath
                 diagnosticPath = if ($diagnosticPaths.Count -gt 0) { $diagnosticPaths[0] } else { $null }
             }
         }
     }
-    if ($null -eq $operationResult -or [string] $operationResult.status -ne 'appended') {
+    if ($null -ne $operationResult) {
+        $operationResult.scanMode = if ($fullRebuild) { 'cold_rebuild' } else { 'incremental' }
+        $operationResult.scannedBytes = [long] $ledgerState.ScannedBytes
+        $operationResult.checkpointPath = $checkpointPath
+        $operationResult.indexPath = $indexDirectory
+        $operationResult.bloomPath = $bloomPath
+    }
+    if ($foreignRecords.Count -eq 0 -and ($null -eq $operationResult -or [string] $operationResult.status -ne 'appended')) {
         Write-LedgerCheckpoint `
             -CheckpointPath $checkpointPath `
             -RunId $RunId `
@@ -1494,10 +1716,6 @@ try {
             -NextLineNumber $checkpointLineNumber `
             -RecordCount $recordCount `
             -PhysicalLength $checkpointPhysicalLength
-        $operationResult.scanMode = if ($fullRebuild) { 'cold_rebuild' } else { 'incremental' }
-        $operationResult.scannedBytes = [long] $ledgerState.ScannedBytes
-        $operationResult.checkpointPath = $checkpointPath
-        $operationResult.indexPath = $indexDirectory
     }
 }
 catch [TimeoutException] {
