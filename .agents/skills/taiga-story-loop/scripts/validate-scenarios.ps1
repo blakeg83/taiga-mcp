@@ -722,6 +722,9 @@ foreach ($marker in @(
         '## Performance report finalization'
         'confirmed create or reuse'
         'scripts/get-story-performance.ps1'
+        'revision-bound aggregation view'
+        'same append-only'
+        'does not mint a new'
         'concise report summary'
         'newly confirmed reviewed HEAD'
         'recorder, aggregator, or artifact publication fails')) {
@@ -738,13 +741,21 @@ foreach ($marker in @(
         'should-not-create'
         'unknown-state reconciliation'
         'Invoke-ReportFinalization'
+        'New-RevisionBoundLedgerView'
+        'Resolve-PublishedReportArtifacts'
         'providerConfirmed'
         'reportState'
         'duplicate confirmed PR observation'
         'newly confirmed reviewed HEAD'
         'recorder failure'
         'aggregator failure'
-        'JSON artifact')) {
+        'JSON artifact'
+        'wrong repository'
+        'wrong story branch'
+        'closed PR'
+        'unknown PR state'
+        'mismatched approved HEAD'
+        'response-lost create')) {
     if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains($marker)) {
         throw "PR delivery assertion failed: unknown-state fixture marker $marker"
     }

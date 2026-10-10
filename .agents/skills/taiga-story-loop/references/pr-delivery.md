@@ -113,10 +113,15 @@ After confirmed create or reuse:
    `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with
    the exact PR identity and reviewed HEAD. The run ledger remains external to
    the repository.
-2. Invoke the read-only `scripts/get-story-performance.ps1` aggregator with
-   that ledger, the selected review mode, the exact reviewed HEAD, captured
-   base, repository path, and an external artifact directory. The invocation
-   is not another provider operation and does not change PR or merge state.
+2. Build a revision-bound aggregation view from that same append-only
+   external ledger: retain the story/setup history and select only the
+   confirmed `pr_ready` event for this reviewed HEAD. Invoke the read-only
+   `scripts/get-story-performance.ps1` aggregator with that view, the
+   selected review mode, the exact reviewed HEAD, captured base, repository
+   path, and an external artifact directory. The view prevents an older
+   reviewed HEAD from causing an identity conflict; it does not mint a new
+   run or rewrite the ledger. The invocation is not another provider
+   operation and does not change PR or merge state.
 3. Include a concise report summary and the immutable JSON artifact reference
    in the normal `pr_ready_for_approval` response. Retain the Markdown sibling
    and manifest when the aggregator publishes the artifact set.
