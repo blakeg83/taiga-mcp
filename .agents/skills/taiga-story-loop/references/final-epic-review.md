@@ -48,6 +48,28 @@ reused for ordinary correction and exact-HEAD re-review rounds; a new chat is
 not created for each finding. A changed scope, repository, branch, or
 authorization requires coordinator reconciliation before either worker acts.
 
+## Confirmed dispatch and redispatch terminal boundary
+
+The initial integrated-review dispatch is confirmed only when both fresh pair
+members have real role- and worktree-matched `threadId`/`hostId` identities,
+both full scoped assignments have successful delivery results, the continuation
+snapshot replacement records the integrated pair and delivery references, and
+the existing recovery automation is provider-confirmed `ACTIVE`. A pending
+`clientThreadId`, missing host, ambiguous creation, failed or unknown delivery,
+unconfirmed snapshot replacement, or unresolved schedule state is not healthy
+dispatch. Reconcile the authoritative result before retrying, preserve known
+identities and sends, and do not create a duplicate pair or replay a confirmed
+assignment.
+
+After those facts are confirmed, the coordinator ends its foreground turn
+immediately. It does not wait, poll, keep alive, or reread routine worker
+transcripts, tickets, source, or diffs. This rule also applies after the
+coordinator has incorporated a reviewed correction and dispatched exact-HEAD
+re-review. The coordinator resumes only for final epic approval, an
+integration-ready correction, a genuine blocker, a scope/revision/authorization
+conflict, explicit user input, or evidenced recovery. Ordinary reviewer
+findings, correction work, and re-review remain within this same pair.
+
 Use [the integrated epic reviewer prompt](../assets/epic-reviewer-prompt.md)
 and [the integrated epic-fix implementation prompt](../assets/epic-fix-implementation-prompt.md)
 for the two assignments. The story prompts and story pair remain unchanged.

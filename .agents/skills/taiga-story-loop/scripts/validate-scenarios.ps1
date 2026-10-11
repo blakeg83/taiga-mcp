@@ -386,6 +386,12 @@ foreach ($marker in @(
 Assert-DocumentContains 'persistent pair reference' 'persistent story worker pair'
 Assert-DocumentContains 'pair resolution gate' 'resolves both results to usable'
 Assert-DocumentContains 'pending ID guard' 'pending `clientThreadId` is never a message destination'
+Assert-DocumentContains 'confirmed dispatch identity gate' 'both role/worktree-matched real `threadId`/`hostId` identities'
+Assert-DocumentContains 'confirmed dispatch assignment gate' 'successful scoped assignment delivery to both'
+Assert-DocumentContains 'confirmed dispatch continuation gate' 'a replaced continuation snapshot containing the pair'
+Assert-DocumentContains 'confirmed dispatch heartbeat gate' 'provider-confirmed `ACTIVE` recovery schedule'
+Assert-DocumentContains 'terminal coordinator boundary' 'ends its turn immediately'
+Assert-DocumentContains 'actionable resume boundary' 'integration-ready epic correction'
 Assert-DocumentContains 'standalone topology setup' 'standalone-story-direct-master'
 Assert-DocumentContains 'epic topology setup' 'epic-shared-feature'
 Assert-DocumentContains 'legacy topology setup' 'legacy-standalone-feature'
@@ -399,6 +405,9 @@ Assert-ContractsContains 'expected-red evidence' 'A nonzero command exit by itse
 Assert-ContractsContains 'exact expected-red reasons' 'exact permitted failure reason'
 Assert-ContractsContains 'complete expected-red set' 'one-for-one'
 Assert-ContractsContains 'ambiguous endpoint gate' 'missing or ambiguous artifact'
+Assert-ContractsContains 'coordinator dispatch boundary' '## Coordinator dispatch boundary'
+Assert-ContractsContains 'dispatch reconciliation' 'never create duplicate workers or replay a confirmed assignment'
+Assert-ContractsContains 'dispatch terminal rule' 'immediately ends its foreground turn'
 Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
 Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
@@ -523,6 +532,11 @@ Assert-HandoffContains 'failed delivery gate' 'An unsuccessful or unknown delive
 Assert-WorkerPairContains 'direct routine pair' 'routine findings and corrections stay within the worker pair'
 Assert-WorkerPairContains 'no routine relay' 'The coordinator is not a routine finding, correction, task-ready, or task-acceptance relay'
 Assert-WorkerPairContains 'no task-ready relay' 'task-ready, or task-acceptance relay'
+Assert-WorkerPairContains 'dispatch boundary' '## Confirmed dispatch and coordinator terminal turn'
+Assert-WorkerPairContains 'dispatch requires active heartbeat' 'required `ACTIVE` schedule for ordered work'
+Assert-WorkerPairContains 'dispatch ends coordinator turn' 'end the coordinator''s foreground turn immediately'
+Assert-WorkerPairContains 'dispatch no polling' 'no foreground `wait_threads`, progress polling, keep-alive loop'
+Assert-WorkerPairContains 'actionable resumption' 'Final story or epic approval'
 Assert-WorkerPairContains 'implementer owns advancement' 'implementer owns current-version Taiga checklist/status/'
 Assert-ConversationNamingContains 'story coordinator title' 'User Story #<ref> Coordinator'
 Assert-ConversationNamingContains 'story implementer title' 'User Story #<ref> Implementer'
@@ -922,7 +936,11 @@ foreach ($marker in @(
         'cross-story state transitions'
         'sends it directly to the fresh epic-fix implementer on an isolated integration-correction branch'
         'The coordinator does not relay findings'
-        'resulting exact feature HEAD again')) {
+        'resulting exact feature HEAD again'
+        'Confirmed dispatch and redispatch terminal boundary'
+        'both full scoped assignments have successful delivery results'
+        'coordinator ends its foreground turn immediately'
+        'integration-ready correction')) {
     if (-not $normalizedFinalEpicReview.Contains($marker)) {
         throw "Final epic review assertion failed: $marker"
     }

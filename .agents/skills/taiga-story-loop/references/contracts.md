@@ -56,6 +56,39 @@ standalone story PR as evidence that an epic story was integrated. See
 and active-run migration rules.
 ```
 
+## Coordinator dispatch boundary
+
+The same confirmed-dispatch contract applies to a story pair in either
+`per_task` or `story_end_only` mode and to the fresh integrated epic-review
+pair. Dispatch is not healthy until all of these facts are confirmed:
+
+- both role- and worktree-matched workers have usable real `threadId` and
+  `hostId` identities;
+- both full scoped assignments have successful delivery results;
+- the current continuation snapshot has been replaced with the pair identities,
+  assignment-delivery references, branch receipt, authorization summary, and
+  cursors; and
+- the existing recovery automation is provider-confirmed `ACTIVE` for the
+  ordered work it is meant to recover.
+
+Pending creation, missing identity, failed or unknown delivery, an unconfirmed
+continuation replacement, or a pending/failed/unknown schedule remains an
+unresolved setup result. Reconcile its authoritative outcome before retrying;
+preserve confirmed identities and sends, and never create duplicate workers or
+replay a confirmed assignment. Setup identity resolution and unknown-outcome
+reconciliation end when dispatch is confirmed; they do not authorize foreground
+progress monitoring.
+
+After confirmed dispatch, the coordinator immediately ends its foreground turn.
+The same rule applies after an integration or exact-HEAD re-review redispatch.
+There are no foreground waits, progress polls, keep-alive loops, or routine
+transcript, ticket, source, or diff reads after that boundary. Only a current,
+scope/revision-bound final approval, integration-ready epic correction, genuine
+blocker, scope/revision/authorization conflict, explicit user input, or
+evidenced recovery resumes coordinator work. Routine readiness, findings,
+corrections, task acceptance, and ordinary re-review remain direct worker-pair
+events and do not require a coordinator relay.
+
 The goal must be actionable without prescribing an implementation. Scope is
 the selected story's boundary, not a license to expand into neighboring work.
 Dependencies are explicit and ordered by the story or by a clarified user

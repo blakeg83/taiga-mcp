@@ -198,6 +198,35 @@ recorded feature/story objects and PR base under
 `legacy-standalone-feature`; do not run new setup or rewrite it as either new
 topology.
 
+### Confirmed dispatch ends the coordinator turn
+
+The coordinator may call setup dispatch healthy only after it has confirmed the
+same four facts for the current pair: both role/worktree-matched real
+`threadId`/`hostId` identities; successful scoped assignment delivery to both
+workers; a replaced continuation snapshot containing the pair, delivery
+references, branch receipt, authorization summary, and cursors; and the
+provider-confirmed `ACTIVE` recovery schedule required while ordered work can
+advance. A pending `clientThreadId`, missing host, ambiguous creation, failed or
+unknown assignment result, unsaved continuation replacement, or pending/failed/
+unknown schedule is unresolved setup, never healthy dispatch.
+
+Reconcile an unresolved creation, delivery, continuation, or schedule result
+from its authoritative source before retrying. Preserve usable identities and
+confirmed sends, and never create a duplicate pair or replay a confirmed
+assignment. Identity resolution and unknown-outcome reconciliation are setup
+actions; they are not permission to monitor worker progress in the foreground.
+
+After all four facts are confirmed, the coordinator records the current
+continuation and ends its turn immediately. This applies equally to story pairs
+in `per_task` and `story_end_only`, the fresh integrated epic-review pair, and
+an integration or exact-HEAD re-review redispatch. There are no foreground
+waits, progress polls, keep-alive loops, or routine transcript/ticket/source
+reads after this boundary. The coordinator resumes only for a current,
+scope/revision-bound final approval, integration-ready epic correction, genuine
+blocker, scope/revision/authorization conflict, explicit user input, or
+evidenced recovery. Routine readiness, findings, corrections, task acceptance,
+and ordinary re-review remain within the worker pair.
+
 Immediately after the submitted `Start` is authoritative and before worker
 dispatch, initialize the optional performance run. Choose a path-safe `runId`
 and coordinator-selected external run root outside the source worktree. Write
