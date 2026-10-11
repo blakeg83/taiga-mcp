@@ -41,6 +41,58 @@ scope, and the user-confirmed authorization record. The reviewer receives the
 implementer ID and the implementer receives the reviewer ID before task work
 begins.
 
+## Confirmed dispatch and coordinator terminal turn
+
+The coordinator has a confirmed dispatch only after all four setup facts are
+authoritative:
+
+1. both workers have real `threadId` and `hostId` values matched to the
+   requested role, scope, worktree, and branch; a pending `clientThreadId`,
+   missing host, ambiguous match, or failed creation is unresolved;
+2. both full, scope-bound assignments have a successful delivery result to the
+   intended worker; a pending, failed, timed-out, or unknown delivery is not
+   success;
+3. the coordinator has replaced the current continuation snapshot with the
+   pair identities, assignment-delivery references, branch receipt, authorization
+   summary, and current worker cursors; and
+4. the existing recovery automation provider has confirmed the required
+   `ACTIVE` schedule for ordered work. A requested, pending, failed, or unknown
+   schedule update is not an active heartbeat.
+
+Until all four facts are confirmed, setup remains unresolved. Reconcile the
+authoritative creation, delivery, continuation, or schedule result before
+retrying; preserve any confirmed identity or delivery, do not create a duplicate
+worker, and do not resend an assignment whose delivery is already confirmed.
+These setup-resolution reads are distinct from monitoring workers after
+dispatch and must not be used to label an incomplete setup healthy.
+
+Once the four facts are confirmed, record the dispatch as complete and end the
+coordinator's foreground turn immediately. This same terminal boundary applies
+to story pairs in both `per_task` and `story_end_only` modes, to the fresh
+integrated epic-review pair, and to every coordinator-owned integration or
+exact-HEAD re-review redispatch. After that boundary the coordinator performs
+no foreground `wait_threads`, progress polling, keep-alive loop, or routine
+worker transcript, ticket, source, or diff read. Ongoing work and ordinary
+review activity remain inside the worker pair; recovery happens only through the
+scheduled heartbeat or a current actionable event.
+
+The following events may resume coordinator work when they are current and
+scope/revision-bound:
+
+| Event | Coordinator action |
+| --- | --- |
+| Final story or epic approval | Reconcile the exact reviewed revision and continue the existing approval/delivery gate. |
+| Epic correction ready for integration | Verify the bound finding and revisions, perform the existing reviewed integration path, persist the resulting feature HEAD, and dispatch exact-HEAD re-review. A correction receipt is not acceptance. |
+| Genuine blocker | Reconcile the blocker and request only the required decision or recovery. |
+| Scope, revision, or authorization conflict | Hold advancement and reconcile the authoritative scope or revision. |
+| Explicit user input | Apply the user's current decision within the confirmed scope. |
+| Evidenced recovery | Reconcile a missing identity, interruption, failed/unknown external result, or other current recovery signal before any replay. |
+
+Routine readiness, findings, corrections, task acceptance, and ordinary
+re-review messages do not resume the coordinator and do not require a
+coordinator copy. They remain direct worker-pair events under the existing
+profiles, topology, authorization, and review/approval gates.
+
 ## Pending creation and reuse
 
 `create_thread` can return a pending `clientThreadId` while setup is running.

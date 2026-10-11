@@ -244,6 +244,126 @@ function Invoke-StaleSnapshotRecovery {
     }
 }
 
+function Get-HeartbeatScheduleState {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot)
+
+    $recovery = [string]$Snapshot['Recovery']
+    if ($recovery -match 'schedule:\s*(ACTIVE|PAUSED|pending)') {
+        return [string]$Matches[1]
+    }
+    return 'unknown'
+}
+
+function New-HeartbeatPlannerState {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot,
+        [Parameter(Mandatory)] [object[]] $Workers,
+        [Parameter(Mandatory)] [object[]] $WaitResult
+    )
+
+    [ordered]@{
+        Snapshot = $Snapshot
+        Workers = @($Workers)
+        WaitResult = @($WaitResult)
+        SnapshotReads = 0
+        WaitInvocations = [System.Collections.Generic.List[object]]::new()
+        SnapshotReplacements = [System.Collections.Generic.List[object]]::new()
+        TickHistory = [System.Collections.Generic.List[object]]::new()
+        Reconciliation = [System.Collections.Generic.List[object]]::new()
+        Events = [System.Collections.Generic.List[object]]::new()
+    }
+}
+
+function Get-HeartbeatWorkerCursorText {
+    param([Parameter(Mandatory)] [object[]] $Workers)
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    foreach ($role in @('implementer', 'reviewer')) {
+        $worker = @($Workers | Where-Object { [string]$_.Role -ceq $role } | Select-Object -First 1)
+        $cursor = if ($worker.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$worker[0].Cursor)) {
+            'none'
+        } else {
+            [string]$worker[0].Cursor
+        }
+        [void]$parts.Add("$role $cursor")
+    }
+    return $parts -join ' | '
+}
+
+function Invoke-HealthyHeartbeatTick {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
+
+    # The current continuation snapshot is the first and only planning read.
+    $State.SnapshotReads++
+    [void]$State.Events.Add('snapshot_read')
+    $schedule = Get-HeartbeatScheduleState -Snapshot $State.Snapshot
+    if ($schedule -eq 'PAUSED') {
+        return [pscustomobject]@{ Decision = 'quiet_paused'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+    if ($schedule -ne 'ACTIVE') {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'schedule_unresolved'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    foreach ($worker in @($State.Workers)) {
+        $unknownOutcome = [string]$worker.Outcome -in @('unknown', 'failed')
+        if (-not $worker.Confirmed -or $unknownOutcome -or
+            [string]::IsNullOrWhiteSpace([string]$worker.ThreadId) -or
+            [string]::IsNullOrWhiteSpace([string]$worker.HostId)) {
+            [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'worker_identity_or_external_outcome_unresolved'; Role = [string]$worker.Role; Action = 'bounded_reconciliation' })
+            [void]$State.Events.Add('reconcile_required')
+            return [pscustomobject]@{ Decision = 'reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+        }
+    }
+
+    $targets = @($State.Workers | Where-Object {
+        [string]$_.State -ceq 'running' -and
+        -not ([string]$_.Role -ceq 'implementer' -and [string]$_.State -ceq 'awaiting_review')
+    } | ForEach-Object {
+        [ordered]@{
+            Role = [string]$_.Role
+            ThreadId = [string]$_.ThreadId
+            HostId = [string]$_.HostId
+            AfterCursor = [string]$_.Cursor
+        }
+    })
+    if ($targets.Count -eq 0) {
+        return [pscustomobject]@{ Decision = 'quiet_no_active_workers'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $invocation = [ordered]@{ TimeoutMs = 0; Targets = $targets }
+    [void]$State.WaitInvocations.Add($invocation)
+    [void]$State.Events.Add('wait_threads')
+    $snapshotChanged = $false
+    foreach ($target in $targets) {
+        $observed = @($State.WaitResult | Where-Object { [string]$_.ThreadId -ceq [string]$target.ThreadId } | Select-Object -First 1)
+        if ($observed.Count -eq 0 -or [string]$observed[0].Outcome -in @('unknown', 'failed')) {
+            [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'wait_result_unresolved'; ThreadId = [string]$target.ThreadId; Action = 'bounded_reconciliation' })
+            [void]$State.Events.Add('reconcile_required')
+            return [pscustomobject]@{ Decision = 'reconcile_required'; Targets = $targets; Waits = 1; SnapshotChanged = $false }
+        }
+        $worker = @($State.Workers | Where-Object { [string]$_.ThreadId -ceq [string]$target.ThreadId } | Select-Object -First 1)[0]
+        if (-not [string]::IsNullOrWhiteSpace([string]$observed[0].Cursor) -and
+            [string]$observed[0].Cursor -cne [string]$worker.Cursor) {
+            $worker.Cursor = [string]$observed[0].Cursor
+            $snapshotChanged = $true
+        }
+    }
+
+    if ($snapshotChanged) {
+        $State.Snapshot['Worker cursors'] = Get-HeartbeatWorkerCursorText -Workers $State.Workers
+        [void]$State.SnapshotReplacements.Add([pscustomobject]@{ Reason = 'cursor_change'; Evidence = $State.Snapshot['Worker cursors'] })
+        [void]$State.Events.Add('snapshot_replace')
+    }
+    [pscustomobject]@{
+        Decision = if ($snapshotChanged) { 'cursor_persisted' } else { 'quiet_unchanged' }
+        Targets = $targets
+        Waits = 1
+        SnapshotChanged = $snapshotChanged
+    }
+}
+
 function Resolve-MigrationTopology([System.Collections.IDictionary] $Snapshot) {
     if ($Snapshot.Contains('Topology') -and -not [string]::IsNullOrWhiteSpace([string]$Snapshot['Topology'])) {
         return [string]$Snapshot['Topology']
@@ -527,6 +647,63 @@ try {
         $unconfirmedWorkerState['ConfirmedWrites'].Count -eq 1 -and
         $unconfirmedWorkerState['Advancements'].Count -eq 1) 'unconfirmed worker state does not replay external actions'
 
+    # The healthy heartbeat planner is deterministic: it reads the snapshot
+    # first, makes at most one nonblocking wait, and never records tick history.
+    $heartbeatSnapshot = [ordered]@{
+        Recovery = 'synthetic-heartbeat | schedule: ACTIVE | target: ACTIVE'
+        'Worker cursors' = 'implementer impl-cursor-a1 | reviewer review-cursor-a1'
+    }
+    $quietWorkers = @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'running'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+        [pscustomobject]@{ Role = 'reviewer'; State = 'running'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'review-thread'; HostId = 'local'; Cursor = 'review-cursor-a1' }
+    )
+    $quietWait = @(
+        [pscustomobject]@{ ThreadId = 'impl-thread'; Outcome = 'unchanged'; Cursor = 'impl-cursor-a1' }
+        [pscustomobject]@{ ThreadId = 'review-thread'; Outcome = 'unchanged'; Cursor = 'review-cursor-a1' }
+    )
+    $quietHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{} + $heartbeatSnapshot) -Workers $quietWorkers -WaitResult $quietWait
+    $quietTick = Invoke-HealthyHeartbeatTick -State $quietHeartbeat
+    Assert-True ($quietTick.Decision -eq 'quiet_unchanged' -and $quietHeartbeat.SnapshotReads -eq 1) 'unchanged heartbeat reads the current snapshot first and ends quietly'
+    Assert-True ($quietHeartbeat.WaitInvocations.Count -eq 1 -and $quietHeartbeat.WaitInvocations[0].TimeoutMs -eq 0 -and $quietHeartbeat.WaitInvocations[0].Targets.Count -eq 2) 'unchanged heartbeat uses one compact nonblocking wait for active workers'
+    Assert-True ($quietHeartbeat.Events[0] -ceq 'snapshot_read' -and $quietHeartbeat.SnapshotReplacements.Count -eq 0 -and $quietHeartbeat.TickHistory.Count -eq 0) 'unchanged heartbeat does not replace the snapshot or append tick history'
+
+    $reviewWaitSnapshot = [ordered]@{}
+    foreach ($key in $heartbeatSnapshot.Keys) { $reviewWaitSnapshot[$key] = $heartbeatSnapshot[$key] }
+    $reviewWaitWorkers = @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'awaiting_review'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+        [pscustomobject]@{ Role = 'reviewer'; State = 'running'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'review-thread'; HostId = 'local'; Cursor = 'review-cursor-a1' }
+    )
+    $reviewWait = New-HeartbeatPlannerState -Snapshot $reviewWaitSnapshot -Workers $reviewWaitWorkers -WaitResult @([pscustomobject]@{ ThreadId = 'review-thread'; Outcome = 'changed'; Cursor = 'review-cursor-b2' })
+    $reviewTick = Invoke-HealthyHeartbeatTick -State $reviewWait
+    Assert-True ($reviewTick.Decision -eq 'cursor_persisted' -and $reviewTick.Targets.Count -eq 1 -and $reviewTick.Targets[0].Role -ceq 'reviewer') 'awaiting_review implementer is excluded while a running reviewer remains eligible'
+    Assert-True ($reviewWait.WaitInvocations.Count -eq 1 -and $reviewWait.WaitInvocations[0].Targets[0].ThreadId -ceq 'review-thread' -and $reviewWait.WaitInvocations[0].Targets[0].HostId -ceq 'local' -and $reviewWait.WaitInvocations[0].Targets[0].AfterCursor -ceq 'review-cursor-a1') 'reviewer wait uses the recorded identity and afterCursor'
+    Assert-True ($reviewWait.SnapshotReplacements.Count -eq 1 -and $reviewWait.Snapshot['Worker cursors'].Contains('implementer impl-cursor-a1') -and $reviewWait.Snapshot['Worker cursors'].Contains('reviewer review-cursor-b2') -and $reviewWait.TickHistory.Count -eq 0) 'changed cursor replaces the snapshot without tick history'
+
+    $noActiveHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{ Recovery = 'synthetic-heartbeat | schedule: ACTIVE | target: ACTIVE'; 'Worker cursors' = 'implementer impl-cursor-a1 | reviewer review-cursor-a1' }) -Workers @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'awaiting_review'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+        [pscustomobject]@{ Role = 'reviewer'; State = 'waiting_for_implementation'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'review-thread'; HostId = 'local'; Cursor = 'review-cursor-a1' }
+    ) -WaitResult $quietWait
+    $noActiveTick = Invoke-HealthyHeartbeatTick -State $noActiveHeartbeat
+    Assert-True ($noActiveTick.Decision -eq 'quiet_no_active_workers' -and $noActiveHeartbeat.WaitInvocations.Count -eq 0 -and $noActiveHeartbeat.SnapshotReplacements.Count -eq 0) 'empty heartbeat target set ends silently without a wait'
+
+    $pausedHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{ Recovery = 'synthetic-heartbeat | schedule: PAUSED | target: none'; 'Worker cursors' = 'implementer impl-cursor-a1 | reviewer review-cursor-a1' }) -Workers $quietWorkers -WaitResult $quietWait
+    $pausedTick = Invoke-HealthyHeartbeatTick -State $pausedHeartbeat
+    Assert-True ($pausedTick.Decision -eq 'quiet_paused' -and $pausedHeartbeat.WaitInvocations.Count -eq 0) 'paused approval recovery performs no heartbeat wait'
+
+    $pendingHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{ Recovery = 'synthetic-heartbeat | schedule: pending | target: ACTIVE'; 'Worker cursors' = 'implementer impl-cursor-a1 | reviewer review-cursor-a1' }) -Workers $quietWorkers -WaitResult $quietWait
+    $pendingTick = Invoke-HealthyHeartbeatTick -State $pendingHeartbeat
+    Assert-True ($pendingTick.Decision -eq 'reconcile_required' -and $pendingHeartbeat.WaitInvocations.Count -eq 0 -and $pendingHeartbeat.Reconciliation.Count -eq 1) 'pending schedule opens bounded reconciliation without guessing a wait'
+
+    $missingIdentityWorkers = @($quietWorkers | ForEach-Object { [pscustomobject]@{ Role = $_.Role; State = $_.State; Confirmed = $_.Confirmed; Outcome = $_.Outcome; ThreadId = $_.ThreadId; HostId = $_.HostId; Cursor = $_.Cursor } })
+    $missingIdentityWorkers[1].HostId = ''
+    $missingIdentityHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{} + $heartbeatSnapshot) -Workers $missingIdentityWorkers -WaitResult $quietWait
+    $missingIdentityTick = Invoke-HealthyHeartbeatTick -State $missingIdentityHeartbeat
+    Assert-True ($missingIdentityTick.Decision -eq 'reconcile_required' -and $missingIdentityHeartbeat.WaitInvocations.Count -eq 0) 'missing worker identity opens reconciliation before any wait'
+
+    $unknownWaitHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{} + $heartbeatSnapshot) -Workers $quietWorkers -WaitResult @([pscustomobject]@{ ThreadId = 'impl-thread'; Outcome = 'unknown'; Cursor = 'impl-cursor-z9' }, [pscustomobject]@{ ThreadId = 'review-thread'; Outcome = 'unchanged'; Cursor = 'review-cursor-a1' })
+    $unknownWaitTick = Invoke-HealthyHeartbeatTick -State $unknownWaitHeartbeat
+    Assert-True ($unknownWaitTick.Decision -eq 'reconcile_required' -and $unknownWaitHeartbeat.WaitInvocations.Count -eq 1 -and $unknownWaitHeartbeat.SnapshotReplacements.Count -eq 0 -and $unknownWaitHeartbeat.TickHistory.Count -eq 0) 'unknown wait result opens bounded reconciliation without replay or cursor persistence'
+
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'
     Assert-Rejected $bad 'rejects history field'
@@ -551,7 +728,7 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative stale-snapshot recovery, missing/conflicting evidence holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative stale-snapshot recovery, bounded heartbeat target selection, quiet unchanged ticks, cursor-only replacement, awaiting_review exclusion, paused/pending schedule guards, missing/unknown outcome holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.

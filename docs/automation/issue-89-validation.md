@@ -56,3 +56,8 @@ implementer state under strict mode.
 The remaining fixtures cover exact-HEAD approval and an unanswered merge gate.
 They do not launch workers, mutate live Taiga/GitHub data, or measure live
 token/cost savings.
+
+For the later combined coordinator-idle boundary, see [story #208
+validation](story-208-validation.md). That report preserves these direct
+routes while adding the integrated epic correction exception and its exact-head
+re-review path.

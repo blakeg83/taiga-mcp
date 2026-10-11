@@ -48,6 +48,28 @@ reused for ordinary correction and exact-HEAD re-review rounds; a new chat is
 not created for each finding. A changed scope, repository, branch, or
 authorization requires coordinator reconciliation before either worker acts.
 
+## Confirmed dispatch and redispatch terminal boundary
+
+The initial integrated-review dispatch is confirmed only when both fresh pair
+members have real role- and worktree-matched `threadId`/`hostId` identities,
+both full scoped assignments have successful delivery results, the continuation
+snapshot replacement records the integrated pair and delivery references, and
+the existing recovery automation is provider-confirmed `ACTIVE`. A pending
+`clientThreadId`, missing host, ambiguous creation, failed or unknown delivery,
+unconfirmed snapshot replacement, or unresolved schedule state is not healthy
+dispatch. Reconcile the authoritative result before retrying, preserve known
+identities and sends, and do not create a duplicate pair or replay a confirmed
+assignment.
+
+After those facts are confirmed, the coordinator ends its foreground turn
+immediately. It does not wait, poll, keep alive, or reread routine worker
+transcripts, tickets, source, or diffs. This rule also applies after the
+coordinator has incorporated a reviewed correction and dispatched exact-HEAD
+re-review. The coordinator resumes only for final epic approval, an
+integration-ready correction, a genuine blocker, a scope/revision/authorization
+conflict, explicit user input, or evidenced recovery. Ordinary reviewer
+findings, correction work, and re-review remain within this same pair.
+
 Use [the integrated epic reviewer prompt](../assets/epic-reviewer-prompt.md)
 and [the integrated epic-fix implementation prompt](../assets/epic-fix-implementation-prompt.md)
 for the two assignments. The story prompts and story pair remain unchanged.
@@ -76,18 +98,24 @@ contradictory evidence.
 
 Before inspecting or accepting, the reviewer verifies the expected worktree,
 branch, exact full HEAD, diff range, and clean tracked-source state. If the
-review finds a defect, the reviewer records the finding against the exact
-feature HEAD and sends it directly to the fresh epic-fix implementer on an isolated
-integration-correction branch. The implementer verifies the assigned reviewer,
-scope, and exact reviewed HEAD, then resumes correction work in the same chat.
-The coordinator does not relay findings. The implementer returns a focused commit and
-integration checks; the correction is incorporated into the feature branch
-only through the normal reviewed path. The same fresh Sol 6.1 high reviewer
-then reviews the resulting exact feature HEAD again. Prior approval is
-superseded by any source, HEAD, branch, or requirement change; preserve
-conflicts and never reset, clean, stash, force-push, or silently substitute a
-revision. Ordinary corrections reuse both epic-review chats; they do not create
-a second correction pair.
+review finds a correctable defect, the reviewer records the finding against the
+exact feature HEAD and sends it directly to the same fresh epic-fix implementer
+on an isolated integration-correction branch. The coordinator is not copied or
+used as a routine finding relay. The implementer verifies the assigned reviewer,
+scope, and exact reviewed HEAD, then returns one integration-ready event to the
+coordinator after the correction is committed.
+
+That event must include the bound finding/review request, reviewed and corrected
+full revisions, correction branch/worktree, clean tracked-source evidence,
+correction delta, verification commands/results, and next action. It is a
+request for coordinator-owned integration, not epic acceptance. The coordinator
+verifies the packet, incorporates the correction into the feature branch,
+captures the resulting exact feature HEAD, persists continuation, and dispatches
+the same fresh Sol 6.1 high reviewer for exact-HEAD re-review. Prior approval is
+superseded by any source, HEAD, branch, or requirement change; preserve conflicts
+and never reset, clean, stash, force-push, or silently substitute a revision.
+Ordinary corrections reuse both epic-review chats; they do not create a second
+correction pair.
 
 Do not open the final feature-to-master PR while findings are unresolved. Do
 not turn a passing task review, all-story merge, or a stale final approval into
@@ -101,6 +129,7 @@ An accepted review records:
 
 ```text
 Epic #<ref> accepted
+Destination: coordinator
 Reviewer: gpt-6.1-sol / high
 Repository: <absolute repository path>
 Integration worktree: <absolute worktree>

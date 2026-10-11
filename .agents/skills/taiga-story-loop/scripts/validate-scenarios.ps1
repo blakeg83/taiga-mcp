@@ -35,6 +35,7 @@ $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
 $automaticFlowPath = Join-Path $skillRoot 'references/automatic-review-flow.md'
 $automaticFlowScriptPath = Join-Path $PSScriptRoot 'validate-automatic-review-flow.ps1'
+$coordinatorLifecycleScriptPath = Join-Path $PSScriptRoot 'validate-coordinator-lifecycle.ps1'
 $prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
 $prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
 $mergeApprovalPath = Join-Path $skillRoot 'references/merge-approval.md'
@@ -93,6 +94,9 @@ if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
 if (-not (Test-Path $automaticFlowPath) -or -not (Test-Path $automaticFlowScriptPath)) {
     throw 'Missing automatic review-flow contract or fixture.'
 }
+if (-not (Test-Path $coordinatorLifecycleScriptPath)) {
+    throw 'Missing coordinator lifecycle/action-trace fixture.'
+}
 if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath)) {
     throw 'Missing reviewed story PR delivery contract or fixture.'
 }
@@ -137,6 +141,7 @@ $branchText = Get-Content $branchPath -Raw
 $normalizedBranch = [regex]::Replace($branchText, '\s+', ' ')
 $continuationText = Get-Content $continuationPath -Raw
 $normalizedContinuation = [regex]::Replace($continuationText, '\s+', ' ')
+$continuationScriptText = Get-Content $continuationScriptPath -Raw
 $branchScenarioText = Get-Content $branchScenarioPath -Raw
 $normalizedBranchScenario = [regex]::Replace($branchScenarioText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
@@ -165,6 +170,7 @@ $routingText = Get-Content $routingPath -Raw
 $normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
 $automaticFlowText = Get-Content $automaticFlowPath -Raw
 $normalizedAutomaticFlow = [regex]::Replace($automaticFlowText, '\s+', ' ')
+$coordinatorLifecycleText = Get-Content $coordinatorLifecycleScriptPath -Raw
 $prDeliveryText = Get-Content $prDeliveryPath -Raw
 $normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
 $mergeApprovalText = Get-Content $mergeApprovalPath -Raw
@@ -386,6 +392,17 @@ foreach ($marker in @(
 Assert-DocumentContains 'persistent pair reference' 'persistent story worker pair'
 Assert-DocumentContains 'pair resolution gate' 'resolves both results to usable'
 Assert-DocumentContains 'pending ID guard' 'pending `clientThreadId` is never a message destination'
+Assert-DocumentContains 'confirmed dispatch identity gate' 'both role/worktree-matched real `threadId`/`hostId` identities'
+Assert-DocumentContains 'confirmed dispatch assignment gate' 'successful scoped assignment delivery to both'
+Assert-DocumentContains 'confirmed dispatch continuation gate' 'a replaced continuation snapshot containing the pair'
+Assert-DocumentContains 'confirmed dispatch heartbeat gate' 'provider-confirmed `ACTIVE` recovery schedule'
+Assert-DocumentContains 'terminal coordinator boundary' 'ends its turn immediately'
+Assert-DocumentContains 'actionable resume boundary' 'integration-ready epic correction'
+Assert-DocumentContains 'heartbeat snapshot-first rule' 'read the current continuation snapshot first'
+Assert-DocumentContains 'heartbeat one-wait rule' 'at most one `wait_threads(timeoutMs: 0)` snapshot per tick'
+Assert-DocumentContains 'heartbeat cursor persistence' 'Persist changed cursors by replacing the snapshot'
+Assert-DocumentContains 'heartbeat awaiting-review exclusion' 'exclude a confirmed `awaiting_review` implementer'
+Assert-DocumentContains 'heartbeat reconciliation guard' 'never guesses, replays, reminds, or redispatches'
 Assert-DocumentContains 'standalone topology setup' 'standalone-story-direct-master'
 Assert-DocumentContains 'epic topology setup' 'epic-shared-feature'
 Assert-DocumentContains 'legacy topology setup' 'legacy-standalone-feature'
@@ -399,6 +416,9 @@ Assert-ContractsContains 'expected-red evidence' 'A nonzero command exit by itse
 Assert-ContractsContains 'exact expected-red reasons' 'exact permitted failure reason'
 Assert-ContractsContains 'complete expected-red set' 'one-for-one'
 Assert-ContractsContains 'ambiguous endpoint gate' 'missing or ambiguous artifact'
+Assert-ContractsContains 'coordinator dispatch boundary' '## Coordinator dispatch boundary'
+Assert-ContractsContains 'dispatch reconciliation' 'never create duplicate workers or replay a confirmed assignment'
+Assert-ContractsContains 'dispatch terminal rule' 'immediately ends its foreground turn'
 Assert-PromptContains 'ordered task acceptance gate' 'reviewer acceptance of the exact current task commit'
 Assert-PromptContains 'acceptance before advancement' 'explicit reviewer acceptance of the exact current task commit recorded'
 Assert-PromptContains 'human status decision' 'A human status is never replaced automatically'
@@ -465,6 +485,15 @@ Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged
 Assert-ContinuationContains 'snapshot ownership' 'The coordinator owns this compact snapshot'
 Assert-ContinuationContains 'worker evidence ownership' 'The implementer owns current-version Taiga task and story progress writes'
 Assert-ContinuationContains 'quiet review wait' 'implementer in `awaiting_review` after a confirmed'
+Assert-ContinuationContains 'heartbeat snapshot first' 'Read the current continuation snapshot first and use its confirmed'
+Assert-ContinuationContains 'heartbeat active gate' '`ACTIVE` is required before any worker wait'
+Assert-ContinuationContains 'heartbeat identity reconciliation' 'missing/corrupt `threadId` or `hostId`'
+Assert-ContinuationContains 'heartbeat awaiting review exclusion' 'A confirmed implementer in `awaiting_review` is deliberately excluded'
+Assert-ContinuationContains 'heartbeat running reviewer eligibility' 'a separate actively running reviewer remains eligible'
+Assert-ContinuationContains 'heartbeat cursor target' 'Each target carries its recorded `threadId`, `hostId`, and `afterCursor`'
+Assert-ContinuationContains 'heartbeat one compact wait' 'at most one compact `wait_threads(timeoutMs: 0)` snapshot for the tick'
+Assert-ContinuationContains 'heartbeat cursor replacement' 'do not create tick history'
+Assert-ContinuationContains 'heartbeat pending reconciliation' '`pending` or an unrecognized schedule state opens bounded schedule reconciliation'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
 Assert-ContinuationContains 'epic migration classification' 'If the scope identifies an epic or multiple ordered stories'
 Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
@@ -472,6 +501,20 @@ Assert-ContinuationContains 'ambiguous migration guard' 'feature fields alone do
 Assert-ContinuationContains 'compact performance pointer' 'Performance pointer: <none before Start'
 Assert-ContinuationContains 'resume performance identity' 'Reuse the same run identity'
 Assert-ContinuationContains 'legacy measurement limitation' 'historical measurement coverage is explicitly unavailable'
+foreach ($marker in @(
+        'function New-HeartbeatPlannerState'
+        'function Invoke-HealthyHeartbeatTick'
+        'SnapshotReads'
+        'WaitInvocations'
+        'SnapshotReplacements'
+        'TickHistory'
+        'quiet_unchanged'
+        'cursor_persisted'
+        'reconcile_required')) {
+    if (-not $continuationScriptText.Contains($marker)) {
+        throw "Continuation heartbeat fixture assertion failed: $marker"
+    }
+}
 if (-not $normalizedSetup.Contains('invoke the actual recorder at')) {
     throw 'Setup assertion failed: post-Start recorder hook'
 }
@@ -523,6 +566,11 @@ Assert-HandoffContains 'failed delivery gate' 'An unsuccessful or unknown delive
 Assert-WorkerPairContains 'direct routine pair' 'routine findings and corrections stay within the worker pair'
 Assert-WorkerPairContains 'no routine relay' 'The coordinator is not a routine finding, correction, task-ready, or task-acceptance relay'
 Assert-WorkerPairContains 'no task-ready relay' 'task-ready, or task-acceptance relay'
+Assert-WorkerPairContains 'dispatch boundary' '## Confirmed dispatch and coordinator terminal turn'
+Assert-WorkerPairContains 'dispatch requires active heartbeat' 'required `ACTIVE` schedule for ordered work'
+Assert-WorkerPairContains 'dispatch ends coordinator turn' 'end the coordinator''s foreground turn immediately'
+Assert-WorkerPairContains 'dispatch no polling' 'no foreground `wait_threads`, progress polling, keep-alive loop'
+Assert-WorkerPairContains 'actionable resumption' 'Final story or epic approval'
 Assert-WorkerPairContains 'implementer owns advancement' 'implementer owns current-version Taiga checklist/status/'
 Assert-ConversationNamingContains 'story coordinator title' 'User Story #<ref> Coordinator'
 Assert-ConversationNamingContains 'story implementer title' 'User Story #<ref> Implementer'
@@ -619,6 +667,10 @@ foreach ($marker in @(
         'fresh, read-only reviewer'
         'gpt-6.1-sol` with `high`'
         'fresh epic-review pair'
+        'Send routine correctable findings directly to the same fresh epic-fix implementer'
+        'Do not copy or restate those findings to the coordinator'
+        'Destination: fresh epic-fix implementer'
+        'Destination: coordinator'
         'Do not reuse or ask to reuse a story reviewer chat'
         'Re-review through this same fresh epic-review pair')) {
     if (-not $normalizedEpicReviewerPrompt.Contains($marker)) {
@@ -631,6 +683,10 @@ foreach ($marker in @(
         'distinct from every story implementer chat'
         'Wait for a finding delivered directly by the assigned epic reviewer'
         'Verify the sender, scope, and exact reviewed HEAD'
+        'exactly one integration-ready event to the coordinator'
+        'bound finding and review request'
+        'Correction delta:'
+        'Acceptance: not yet'
         'reuse this fresh epic-fix implementer chat')) {
     if (-not $normalizedEpicFixPrompt.Contains($marker)) {
         throw "Epic-fix prompt assertion failed: $marker"
@@ -645,10 +701,13 @@ if (-not $normalizedAcceptance.Contains('The task-acceptance route is reviewer-t
     throw 'Acceptance assertion failed: direct task acceptance and implementer ownership must remain explicit'
 }
 if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
-    -not $normalizedRouting.Contains('fixed correction-count cutoff')) {
+    -not $normalizedRouting.Contains('fixed correction-count cutoff') -or
+    -not $normalizedRouting.Contains('Integrated epic-review destinations') -or
+    -not $normalizedRouting.Contains('Correction ready for integration') -or
+    -not $normalizedRouting.Contains('Story-worker routing remains unchanged')) {
     throw 'Routing assertion failed: no arbitrary cutoff policy'
 }
-foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied')) {
+foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied', 'epic_finding', 'Send-Epic-Integration-Ready', 'epic_integration_ready', 'integration-ready correction must carry evidence', 'routine epic finding must not be copied to the coordinator', 'rejected routine epic finding copy must not append a message')) {
     if (-not (Get-Content $routingScriptPath -Raw).Contains($marker)) {
         throw "Routing assertion failed: $marker"
     }
@@ -753,6 +812,31 @@ foreach ($marker in @(
         'next task handoff must validate the terminal handoff suffix')) {
     if (-not (Get-Content $automaticFlowScriptPath -Raw).Contains($marker)) {
         throw "Automatic review-flow fixture assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'function New-LifecycleState'
+        'function Confirm-Dispatch'
+        'function Persist-Continuation'
+        'function Assert-DispatchTerminal'
+        'function Invoke-HeartbeatTick'
+        'function Advance-NextTask'
+        'function Apply-RoutineEpicFinding'
+        'function Apply-EpicIntegrationReady'
+        'function Integrate-EpicCorrection'
+        'function Open-ApprovalGate'
+        'story_end_only'
+        'persisted_continuation'
+        'duplicate dispatch is not allowed'
+        'stale integration continuation must be rejected'
+        'exact_feature_head_rereview_dispatch'
+        'repeated heartbeat wait must be rejected'
+        'awaiting_review wake-up must be rejected'
+        'stale advancement event must be rejected'
+        'correction-ready evidence alone must not become acceptance'
+        'synthetic and non-live')) {
+    if (-not $coordinatorLifecycleText.Contains($marker)) {
+        throw "Coordinator lifecycle fixture assertion failed: $marker"
     }
 }
 foreach ($marker in @(
@@ -920,15 +1004,28 @@ foreach ($marker in @(
         'every linked story in authoritative order'
         'combined behavior across stories'
         'cross-story state transitions'
-        'sends it directly to the fresh epic-fix implementer on an isolated integration-correction branch'
-        'The coordinator does not relay findings'
-        'resulting exact feature HEAD again')) {
+        'sends it directly to the same fresh epic-fix implementer'
+        'The coordinator is not copied or used as a routine finding relay'
+        'dispatches the same fresh Sol 6.1 high reviewer for exact-HEAD re-review'
+        'Confirmed dispatch and redispatch terminal boundary'
+        'both full scoped assignments have successful delivery results'
+        'coordinator ends its foreground turn immediately'
+        'integration-ready correction'
+        'returns one integration-ready event to the coordinator'
+        'bound finding/review request'
+        'not epic acceptance'
+        'Destination: coordinator')) {
     if (-not $normalizedFinalEpicReview.Contains($marker)) {
         throw "Final epic review assertion failed: $marker"
     }
 }
 if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains('Passed offline final epic review fixture')) {
     throw 'Final epic review assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('Route-IntegrationReadyCorrection', 'Route-FinalEpicApproval', 'integration-ready corrections must reach the coordinator', 'not be treated as epic acceptance')) {
+    if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains($marker)) {
+        throw "Final epic review assertion failed: actionable route marker $marker"
+    }
 }
 foreach ($marker in @(
         'This contract applies to an epic or to an active legacy standalone run'
@@ -1320,4 +1417,10 @@ if ($lifecycleExit -ne 0) {
     throw "Lifecycle-binding fixture exited ${lifecycleExit}: $($lifecycleOutput -join [Environment]::NewLine)"
 }
 $lifecycleOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract static-content checks, setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+$coordinatorLifecycleOutput = @(& pwsh -NoProfile -File $coordinatorLifecycleScriptPath 2>&1 | ForEach-Object { [string]$_ })
+$coordinatorLifecycleExit = $LASTEXITCODE
+if ($coordinatorLifecycleExit -ne 0) {
+    throw "Coordinator lifecycle fixture exited ${coordinatorLifecycleExit}: $($coordinatorLifecycleOutput -join [Environment]::NewLine)"
+}
+$coordinatorLifecycleOutput | Write-Output
+Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract static-content checks, setup-authorization, lifecycle-boundary, coordinator-lifecycle, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

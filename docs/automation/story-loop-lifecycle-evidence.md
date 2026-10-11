@@ -24,6 +24,16 @@ and it is not evidence of a live rerun.
 - Deferred boundary: live trial execution and active-skill installation remain
   separately authorized operations and are not performed by task #105.
 
+## Current coordinator-idle follow-up
+
+This historical report remains scoped to story #99 and its task #101–#105
+evidence chain. The later Taiga story #208 work is documented separately in
+[story #208 coordinator-idle validation](story-208-validation.md). That report
+covers the current dispatch/end-turn contract, direct routine routes, bounded
+heartbeat recovery, coordinator-owned integrated-epic correction, and the
+synthetic/offline evidence boundary without retroactively changing the
+historical observations below.
+
 ## Evidence sources and integrity
 
 The live story contract names these attachments. Their local SHA1 values were

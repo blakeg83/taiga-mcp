@@ -173,6 +173,34 @@ The remaining healthy read budget is:
    interruption opens recovery. Load only the relevant evidence references
    and authoritative systems for that action, then replace the snapshot.
 
+The heartbeat planner applies this order on every scheduled tick:
+
+1. Read the current continuation snapshot first and use its confirmed
+   `Recovery` state, worker identities, states, and cursors as the only
+   planning input. `ACTIVE` is required before any worker wait; `PAUSED` ends
+   the tick quietly, and `pending` or an unrecognized schedule state opens
+   bounded schedule reconciliation.
+2. Validate every recorded worker identity needed for the current pair before
+   constructing wait targets. A missing/corrupt `threadId` or `hostId`, an
+   unknown or failed external result, or evidence of interruption opens
+   reconciliation and performs no guessed wait, replay, reminder, or duplicate
+   dispatch.
+3. Build one target set from actively running scoped workers only. A confirmed
+   implementer in `awaiting_review` is deliberately excluded from the target
+   set and is never woken; a separate actively running reviewer remains
+   eligible. Each target carries its recorded `threadId`, `hostId`, and
+   `afterCursor`.
+4. If the target set is nonempty, issue at most one compact
+   `wait_threads(timeoutMs: 0)` snapshot for the tick. A changed cursor is
+   persisted by replacing the continuation snapshot in place. Cursor changes
+   do not create tick history, timestamps, routine messages, or another wait.
+   An unchanged or non-actionable result ends silently without rewriting the
+   snapshot. A returned failure, unknown outcome, or actionable interruption
+   stops the healthy path and opens bounded reconciliation.
+5. If the target set is empty, end silently without a wait. The planner never
+   rereads transcripts, tickets, source, or historical notes merely because a
+   30-minute tick elapsed.
+
 Healthy and unanswered user waits do not reread tickets/comments, source,
 diffs, tests, historical notes, or full chat transcripts; they do not repeat
 prompts or send worker messages. A missing/corrupt snapshot requires
