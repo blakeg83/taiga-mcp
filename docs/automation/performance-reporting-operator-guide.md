@@ -130,6 +130,35 @@ Recovery rules are deliberately conservative:
   completed implementation, review, or PR-readiness transition. Reconcile
   before considering any retry; never blindly replay an ambiguous write.
 
+### Bounded historical reporting recovery
+
+When a retained ledger contains a validated, narrowly scoped field-shape defect
+that prevents an otherwise attributable report, recover the report through an
+explicitly labeled temporary view or in-memory projection. This is a reporting
+recovery, not a ledger repair or migration:
+
+- Hash and size the authoritative `events.jsonl` before the audit, and repeat
+  the check after reporting. A changed hash, length, or line count is a hard
+  stop.
+- Validate every proposed record against its run/project/story/task identity,
+  event type, phase, request and attempt identities, ordinal, correction link,
+  UTC boundary, and revision. Require the matching correction boundaries and
+  review start/closure records before normalizing anything.
+- Copy only the retained event data into a disposable, clearly named reporting
+  view. Change only the explicitly validated fields; preserve every other field
+  and event in order. Do not write the view back to the authoritative ledger or
+  its sidecars, and do not publish it as a replacement report without labeling
+  the source and normalization.
+- Run the normal reporter with the declared ordered task set. Record each
+  normalized event ID and before/after value, before/after metrics, every
+  anomaly, the temporary-view boundary, and the authoritative-ledger hash
+  comparison. Keep legitimate warnings such as overlapping intervals; only
+  remove the validated defect from the temporary view.
+- If identity, correction linkage, timestamps, revision evidence, or the
+  before/after hash check is incomplete, stop with precise partial/unavailable
+  coverage. Do not infer missing reviews, rewrite immutable history, or build a
+  generalized migration from a one-off recovery.
+
 Retain the sanitized report, command output, exact reviewed SHA, and the
 review handoff evidence required by the task or story. Remove only a unique,
 disposable external run root created by the current smoke or fixture run.
