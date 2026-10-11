@@ -442,7 +442,7 @@ try {
     $allLines = @(Get-Content -LiteralPath $ledgerPath)
     Assert-True ($allLines.Count -eq 15) 'documented event families append one complete record each'
 
-    $beforeInvalid = [IO.File]::ReadAllText($ledgerPath)
+    $beforeInvalidBytes = [IO.File]::ReadAllBytes($ledgerPath)
 
     $wrongStoryRole = New-EventVariant -Base $validEvent -Changes @{
         eventId = 'invalid-story-role'
@@ -552,7 +552,17 @@ try {
         if ($null -ne $expectedMessageProperty -and -not [string]::IsNullOrWhiteSpace([string]$expectedMessageProperty.Value)) {
             Assert-True (($result.Output -join ' ') -match [regex]::Escape([string]$expectedMessageProperty.Value)) "$($case.Name) reports the matching validation reason"
         }
-        Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) "$($case.Name) leaves the ledger unchanged"
+        $afterInvalidBytes = [IO.File]::ReadAllBytes($ledgerPath)
+        $ledgerUnchanged = $afterInvalidBytes.Length -eq $beforeInvalidBytes.Length
+        if ($ledgerUnchanged) {
+            for ($byteIndex = 0; $byteIndex -lt $beforeInvalidBytes.Length; $byteIndex++) {
+                if ($afterInvalidBytes[$byteIndex] -ne $beforeInvalidBytes[$byteIndex]) {
+                    $ledgerUnchanged = $false
+                    break
+                }
+            }
+        }
+        Assert-True $ledgerUnchanged "$($case.Name) leaves the ledger byte-for-byte unchanged"
     }
 
     $sourceBoundRoot = Join-Path $repoRoot '.agents\skills\taiga-story-loop\synthetic-ledger'
@@ -564,7 +574,17 @@ try {
     $nestedPrivacy.provenance | Add-Member -NotePropertyName transcript -NotePropertyValue 'never persist'
     $privacy = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $externalRoot -RunId $runId -EventJson (Convert-EventToJson $nestedPrivacy)
     Assert-True ($privacy.ExitCode -ne 0) 'nested prompt/transcript metadata is rejected'
-    Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) 'nested privacy rejection leaves the ledger unchanged'
+    $afterPrivacyBytes = [IO.File]::ReadAllBytes($ledgerPath)
+    $privacyLedgerUnchanged = $afterPrivacyBytes.Length -eq $beforeInvalidBytes.Length
+    if ($privacyLedgerUnchanged) {
+        for ($byteIndex = 0; $byteIndex -lt $beforeInvalidBytes.Length; $byteIndex++) {
+            if ($afterPrivacyBytes[$byteIndex] -ne $beforeInvalidBytes[$byteIndex]) {
+                $privacyLedgerUnchanged = $false
+                break
+            }
+        }
+    }
+    Assert-True $privacyLedgerUnchanged 'nested privacy rejection leaves the ledger byte-for-byte unchanged'
 
     $idempotencyRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-idempotency-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $idempotencyRoot
