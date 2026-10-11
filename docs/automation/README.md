@@ -122,6 +122,7 @@ parent-story writes must both be confirmed before ordered advancement.
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the
+[story performance reporting operator guide](performance-reporting-operator-guide.md),
 [comparison template](comparison-template.md), and the
 [deliberate trial guide](installation-and-trial.md).
 
