@@ -507,7 +507,7 @@ function Get-SetupMetadata {
         [void] $records.Add([pscustomobject] $record)
     }
     $profileConflicts = [System.Collections.Generic.List[object]]::new()
-    foreach ($group in @($records | Group-Object { "$($_.role)|$($_.workerId)|$($_.sessionId)" })) {
+    foreach ($group in @(Group-ValuesLinear -Values @($records) -KeySelector { param($record) "$($record.role)|$($record.workerId)|$($record.sessionId)" })) {
         $orderedItems = @($group.Group | ForEach-Object {
                 [pscustomobject]@{
                     profile = $_
@@ -1058,6 +1058,30 @@ function Get-UniqueValuesLinear {
     return @($unique)
 }
 
+function Group-ValuesLinear {
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Values,
+        [Parameter(Mandatory)] [scriptblock] $KeySelector
+    )
+
+    $buckets = @{}
+    $keyOrder = [System.Collections.Generic.List[string]]::new()
+    foreach ($value in $Values) {
+        $key = [string] (& $KeySelector $value)
+        if (-not $buckets.ContainsKey($key)) {
+            $buckets[$key] = [System.Collections.Generic.List[object]]::new()
+            [void] $keyOrder.Add($key)
+        }
+        [void] $buckets[$key].Add($value)
+    }
+    foreach ($key in $keyOrder) {
+        [pscustomobject][ordered]@{
+            Name = $key
+            Group = @($buckets[$key])
+        }
+    }
+}
+
 function Get-TaskText {
     param([AllowNull()] [object] $Event)
 
@@ -1136,12 +1160,13 @@ function Add-ToIndex {
         [Parameter(Mandatory)] [hashtable] $Index,
         [Parameter(Mandatory)] [string] $Key,
         [Parameter(Mandatory)] [object] $Value,
-        [AllowNull()] [System.Collections.Generic.List[string]] $KeyOrder
+        [AllowNull()] [System.Collections.Generic.List[string]] $KeyOrder,
+        [AllowNull()] [object] $KeySeen
     )
 
     if (-not $Index.ContainsKey($Key)) {
         $Index[$Key] = [System.Collections.ArrayList]::new()
-        if ($null -ne $KeyOrder -and -not $KeyOrder.Contains($Key)) {
+        if ($null -ne $KeyOrder -and $null -ne $KeySeen -and $KeySeen.Add($Key)) {
             [void] $KeyOrder.Add($Key)
         }
     }
@@ -1278,15 +1303,16 @@ function Get-IntervalCollection {
         }
     }
     else {
+        $fallbackKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         foreach ($key in $Starts.Keys) {
             $text = [string] $key
-            if (-not $keys.Contains($text)) {
+            if ($fallbackKeySeen.Add($text)) {
                 [void] $keys.Add($text)
             }
         }
         foreach ($key in $Ends.Keys) {
             $text = [string] $key
-            if (-not $keys.Contains($text)) {
+            if ($fallbackKeySeen.Add($text)) {
                 [void] $keys.Add($text)
             }
         }
@@ -1906,10 +1932,11 @@ $storyRefs = @(Get-UniqueValuesLinear -Values @($eventObjects | ForEach-Object {
 $eventModes = @(Get-UniqueValuesLinear -Values @($eventObjects | ForEach-Object { [string] (Get-PropertyValue $_ 'reviewMode') }))
 
 $declaredTaskRefs = [System.Collections.Generic.List[int]]::new()
+$declaredTaskRefSet = [System.Collections.Generic.HashSet[int]]::new()
 foreach ($candidateTaskRef in @($TaskRefs)) {
     if (Test-PositiveIntegerValue -Value $candidateTaskRef) {
         $candidateTaskRefInt = [int] $candidateTaskRef
-        if (-not $declaredTaskRefs.Contains($candidateTaskRefInt)) {
+        if ($declaredTaskRefSet.Add($candidateTaskRefInt)) {
             [void] $declaredTaskRefs.Add($candidateTaskRefInt)
         }
     }
@@ -1923,11 +1950,15 @@ if ($PSBoundParameters.ContainsKey('TaskRefs') -and @($TaskRefs | Where-Object {
 }
 $taskEventsBeforeFiltering = @($records | Where-Object { [string] (Get-PropertyValue $_.Event 'scope') -eq 'task' })
 $observedTaskRefs = @(Get-UniqueValuesLinear -Values @($taskEventsBeforeFiltering | ForEach-Object { [int] (Get-PropertyValue $_.Event 'taskRef') }))
+$observedTaskRefSet = [System.Collections.Generic.HashSet[int]]::new()
+foreach ($observedTaskRef in $observedTaskRefs) {
+    [void] $observedTaskRefSet.Add([int] $observedTaskRef)
+}
 $missingDeclaredTaskRefs = @(
-    if ($taskSetWasDeclared) { $declaredTaskRefs | Where-Object { $_ -notin $observedTaskRefs } }
+    if ($taskSetWasDeclared) { $declaredTaskRefs | Where-Object { -not $observedTaskRefSet.Contains([int] $_) } }
 )
 $undeclaredTaskRefs = @(
-    if ($taskSetWasDeclared) { $observedTaskRefs | Where-Object { $_ -notin $declaredTaskRefs } }
+    if ($taskSetWasDeclared) { $observedTaskRefs | Where-Object { -not $declaredTaskRefSet.Contains([int] $_) } }
 )
 if ($missingDeclaredTaskRefs.Count -gt 0) {
     [void] $anomalies.Add((New-Anomaly -Code 'missing_task_evidence' -Message 'Declared task identities have no attributable task events; affected review coverage is partial' -Identity ($missingDeclaredTaskRefs -join ',')))
@@ -1936,7 +1967,7 @@ if ($undeclaredTaskRefs.Count -gt 0) {
     [void] $anomalies.Add((New-Anomaly -Code 'undeclared_task_evidence' -Message 'Task events outside the declared ordered task set were quarantined from task review counts and phase totals' -Identity ($undeclaredTaskRefs -join ',')))
     $records = @($records | Where-Object {
         [string] (Get-PropertyValue $_.Event 'scope') -ne 'task' -or
-        [int] (Get-PropertyValue $_.Event 'taskRef') -in $declaredTaskRefs
+        $declaredTaskRefSet.Contains([int] (Get-PropertyValue $_.Event 'taskRef'))
     })
 }
 $taskCoverageState = if (-not $taskSetWasDeclared) { 'unavailable' } elseif ($missingDeclaredTaskRefs.Count -gt 0 -or $undeclaredTaskRefs.Count -gt 0) { 'partial' } else { 'measured' }
@@ -1976,33 +2007,37 @@ $timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Iden
 $implementationStarts = @{}
 $implementationEnds = @{}
 $implementationKeyOrder = [System.Collections.Generic.List[string]]::new()
+$implementationKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 $correctionStarts = @{}
 $correctionEnds = @{}
 $correctionKeyOrder = [System.Collections.Generic.List[string]]::new()
+$correctionKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 $waitStarts = @{}
 $waitEnds = @{}
 $waitKeyOrder = [System.Collections.Generic.List[string]]::new()
+$waitKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 $reviewStarts = @{}
 $reviewEnds = @{}
 $reviewEndKeyOrder = [System.Collections.Generic.List[string]]::new()
+$reviewEndKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 
 foreach ($record in $records) {
     $event = $record.Event
     switch ($record.EventType) {
-        'implementation_started' { Add-ToIndex -Index $implementationStarts -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $implementationKeyOrder }
-        'task_ready_for_review' { Add-ToIndex -Index $implementationEnds -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $implementationKeyOrder }
-        'correction_started' { Add-ToIndex -Index $correctionStarts -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $correctionKeyOrder }
-        'correction_ready' { Add-ToIndex -Index $correctionEnds -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $correctionKeyOrder }
+        'implementation_started' { Add-ToIndex -Index $implementationStarts -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $implementationKeyOrder -KeySeen $implementationKeySeen }
+        'task_ready_for_review' { Add-ToIndex -Index $implementationEnds -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $implementationKeyOrder -KeySeen $implementationKeySeen }
+        'correction_started' { Add-ToIndex -Index $correctionStarts -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $correctionKeyOrder -KeySeen $correctionKeySeen }
+        'correction_ready' { Add-ToIndex -Index $correctionEnds -Key (Get-PhaseIdentity $event) -Value $record -KeyOrder $correctionKeyOrder -KeySeen $correctionKeySeen }
         'wait_started' {
             $waitKey = Get-WaitIdentity -Event $event
-            Add-ToIndex -Index $waitStarts -Key $waitKey -Value $record -KeyOrder $waitKeyOrder
+            Add-ToIndex -Index $waitStarts -Key $waitKey -Value $record -KeyOrder $waitKeyOrder -KeySeen $waitKeySeen
         }
         'wait_ended' {
             $waitKey = Get-WaitIdentity -Event $event
-            Add-ToIndex -Index $waitEnds -Key $waitKey -Value $record -KeyOrder $waitKeyOrder
+            Add-ToIndex -Index $waitEnds -Key $waitKey -Value $record -KeyOrder $waitKeyOrder -KeySeen $waitKeySeen
         }
         { $_ -in $script:ReviewStartEvents } { Add-ToIndex -Index $reviewStarts -Key (Get-ReviewIdentity $event) -Value $record }
-        { $_ -in $script:ReviewCloseEvents } { Add-ToIndex -Index $reviewEnds -Key (Get-ReviewIdentity $event) -Value $record -KeyOrder $reviewEndKeyOrder }
+        { $_ -in $script:ReviewCloseEvents } { Add-ToIndex -Index $reviewEnds -Key (Get-ReviewIdentity $event) -Value $record -KeyOrder $reviewEndKeyOrder -KeySeen $reviewEndKeySeen }
     }
 }
 
@@ -2932,7 +2967,7 @@ function Resolve-UsageEvidence {
             -not [string]::IsNullOrWhiteSpace([string] $_.endUtc) -and
             $null -ne $_.deltas
         })
-    foreach ($attributionGroup in @($eligible | Group-Object { Get-UsageAttributionKey -Evidence $_ })) {
+    foreach ($attributionGroup in @(Group-ValuesLinear -Values $eligible -KeySelector { param($evidence) Get-UsageAttributionKey -Evidence $evidence })) {
         $orderedItems = @($attributionGroup.Group | ForEach-Object {
                 [pscustomobject]@{
                     evidence = $_
@@ -2951,7 +2986,7 @@ function Resolve-UsageEvidence {
                 Set-UsageEvidenceConflict -Entries $clusterEvidence -Anomalies $Anomalies -Message 'overlapping source-backed usage windows have multiple sources and were not summed'
                 return
             }
-            foreach ($streamGroup in @($clusterEvidence | Group-Object { [string] $_.streamId })) {
+            foreach ($streamGroup in @(Group-ValuesLinear -Values $clusterEvidence -KeySelector { param($evidence) [string] $evidence.streamId })) {
                 Resolve-UsageStreamOverlapClusters -Entries @($streamGroup.Group) -Anomalies $Anomalies
             }
         }
@@ -3082,11 +3117,22 @@ function Get-TasksCompletedMetric {
             $_.state -eq 'measured'
         } |
         ForEach-Object { [int] $_.taskRef }))
+    $acceptedTaskRefSet = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($acceptedTaskRef in $acceptedTaskRefs) {
+        [void] $acceptedTaskRefSet.Add([int] $acceptedTaskRef)
+    }
+    $allDeclaredTasksAccepted = $true
+    foreach ($declaredTaskRef in $DeclaredTaskRefs) {
+        if (-not $acceptedTaskRefSet.Contains([int] $declaredTaskRef)) {
+            $allDeclaredTasksAccepted = $false
+            break
+        }
+    }
     $metric = $null
     if ($DeclaredTaskRefs.Count -eq 0) {
         $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage 'no ordered task set was supplied' -MissingData 'task completion cannot be attributed without the declared ordered task set'
     }
-    elseif ($acceptedTaskRefs.Count -eq $DeclaredTaskRefs.Count -and $acceptedTaskRefs.Count -gt 0 -and @($DeclaredTaskRefs | Where-Object { $_ -notin $acceptedTaskRefs }).Count -eq 0) {
+    elseif ($acceptedTaskRefs.Count -eq $DeclaredTaskRefs.Count -and $acceptedTaskRefs.Count -gt 0 -and $allDeclaredTasksAccepted) {
         $metric = New-Metric -State 'measured' -Value $acceptedTaskRefs.Count -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "all $($DeclaredTaskRefs.Count) declared task identities have measured review acceptance" -MissingData $null
     }
     else {
@@ -3222,7 +3268,11 @@ foreach ($taskRefKey in @($initialAttemptsByTaskRef.Keys)) {
 $missingInitialReviewTaskRefs = @()
 if ($effectiveReviewMode -eq 'per_task' -and $taskSetWasDeclared) {
     $initialTaskRefValues = @($initialTaskRefs | ForEach-Object { [int] $_ })
-    $missingInitialReviewTaskRefs = @($declaredTaskRefs | Where-Object { $_ -notin $initialTaskRefValues })
+    $initialTaskRefSet = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($initialTaskRefValue in $initialTaskRefValues) {
+        [void] $initialTaskRefSet.Add([int] $initialTaskRefValue)
+    }
+    $missingInitialReviewTaskRefs = @($declaredTaskRefs | Where-Object { -not $initialTaskRefSet.Contains([int] $_) })
     if ($missingInitialReviewTaskRefs.Count -gt 0) {
         [void] $anomalies.Add((New-Anomaly -Code 'missing_initial_review_evidence' -Message 'Declared per-task identities have no authoritative initial review attempt; observed review denominators remain based on actual initial attempts' -Identity ($missingInitialReviewTaskRefs -join ',')))
         $taskCoverageState = 'partial'

@@ -367,6 +367,50 @@ function Test-OverheadAcceptance {
     }
 }
 
+function Invoke-ProductionKeyOrderBoundProbe {
+    param([Parameter(Mandatory)] [string] $AggregatorPath)
+
+    $source = [IO.File]::ReadAllText($AggregatorPath)
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref] $tokens, [ref] $errors)
+    Assert-True ($errors.Count -eq 0) 'production key-order probe source must parse'
+    $functionAst = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Add-ToIndex'
+        }, $true)
+    Assert-True ($null -ne $functionAst) 'production key-order probe must find Add-ToIndex'
+    Invoke-Expression $functionAst.Extent.Text
+
+    $observations = [System.Collections.Generic.List[object]]::new()
+    foreach ($keyCount in @(32, 64, 128)) {
+        $index = @{}
+        $keyOrder = [System.Collections.Generic.List[string]]::new()
+        $keySeen = [pscustomobject]@{
+            Calls = 0
+            Values = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        }
+        $keySeen | Add-Member -MemberType ScriptMethod -Name Add -Value {
+            param([string] $Key)
+            $this.Calls++
+            return $this.Values.Add($Key)
+        }
+        for ($indexValue = 0; $indexValue -lt $keyCount; $indexValue++) {
+            $key = "probe-key-$indexValue"
+            Add-ToIndex -Index $index -Key $key -Value $key -KeyOrder $keyOrder -KeySeen $keySeen
+        }
+        Assert-True ($keySeen.Calls -eq $keyCount -and $keyOrder.Count -eq $keyCount -and $index.Count -eq $keyCount) "production key-order probe must register each of $keyCount distinct keys once"
+        $observations.Add([ordered]@{
+                keyCount = $keyCount
+                keySeenAddCalls = [int] $keySeen.Calls
+                orderedKeyCount = [int] $keyOrder.Count
+                indexCount = [int] $index.Count
+                bound = 'one hash membership add per first-seen key; no growing-list membership scan'
+            })
+    }
+    return @($observations)
+}
+
 function Get-SourceBoundAnalysis {
     param(
         [Parameter(Mandatory)] [string] $RecorderPath,
@@ -387,8 +431,14 @@ function Get-SourceBoundAnalysis {
     $aggregateBinaryUsageSearchLines = @($aggregatorLines | Select-String -Pattern 'Find-FirstUsageSampleIndex|Find-FirstGreaterUsageSampleIndex|Find-FirstUsageIssueIndex -Prefix')
     $aggregateInputComparisonSortLines = @($aggregatorLines | Select-String -Pattern 'Sort-Object (start|sampleTime|Time|Line|startUtc|start,)')
     $aggregateLinearIssueQueryLines = @($aggregatorLines | Select-String -Pattern 'Find-FirstUsageIssueIndex -NextIssue')
+    $aggregateHiddenGroupLines = @($aggregatorLines | Select-String -Pattern 'Group-Object')
+    $aggregateLinearGroupLines = @($aggregatorLines | Select-String -Pattern 'Group-ValuesLinear -Values')
+    $aggregateGrowingTaskMembershipLines = @($aggregatorLines | Select-String -Pattern '\$declaredTaskRefs\.Contains|\$observedTaskRefs\.Contains|-notin \$observedTaskRefs|-notin \$declaredTaskRefs|-in \$declaredTaskRefs|-notin \$acceptedTaskRefs|-notin \$initialTaskRefValues')
+    $aggregateTaskSetLines = @($aggregatorLines | Select-String -Pattern 'HashSet\[int\]')
+    $aggregateKeySeenLines = @($aggregatorLines | Select-String -Pattern 'KeySeen|HashSet\[string\]')
     Assert-True ($recorderIncrementalLine.Count -eq 1 -and $recorderColdLine.Count -eq 1 -and $recorderCheckpointLine.Count -eq 1) 'source analysis must find the recorder incremental/checkpoint and cold-rebuild paths'
-    Assert-True ($aggregateReadLine.Count -eq 1 -and $aggregateOverlapLine.Count -eq 1 -and $aggregateUsageIndexLine.Count -eq 1 -and $aggregateUsageResolveLine.Count -eq 1 -and $aggregateLinearOrderLine.Count -eq 1 -and $aggregateRangePlanLine.Count -eq 1 -and $aggregateBinaryUsageSearchLines.Count -eq 0 -and $aggregateInputComparisonSortLines.Count -eq 0 -and $aggregateLinearIssueQueryLines.Count -ge 5) 'source analysis must find linear aggregator ordering/range-sweep/issue-query paths without input-sized comparison sorts or binary usage searches'
+    Assert-True ($aggregateReadLine.Count -eq 1 -and $aggregateOverlapLine.Count -eq 1 -and $aggregateUsageIndexLine.Count -eq 1 -and $aggregateUsageResolveLine.Count -eq 1 -and $aggregateLinearOrderLine.Count -eq 1 -and $aggregateRangePlanLine.Count -eq 1 -and $aggregateBinaryUsageSearchLines.Count -eq 0 -and $aggregateInputComparisonSortLines.Count -eq 0 -and $aggregateLinearIssueQueryLines.Count -ge 5 -and $aggregateHiddenGroupLines.Count -eq 0 -and $aggregateLinearGroupLines.Count -ge 3 -and $aggregateGrowingTaskMembershipLines.Count -eq 0 -and $aggregateTaskSetLines.Count -ge 4 -and $aggregateKeySeenLines.Count -ge 4) 'source analysis must find linear aggregator ordering/grouping/range-sweep/issue-query/task-membership paths without input-sized comparison sorts, hidden group ordering, growing-list membership scans, or binary usage searches'
+    $keyOrderProbe = @(Invoke-ProductionKeyOrderBoundProbe -AggregatorPath $AggregatorPath)
     return [ordered]@{
         state = 'bounded'
         evidence = 'automated_source_assertion'
@@ -414,8 +464,9 @@ function Get-SourceBoundAnalysis {
             intervalSweepLine = [int]$aggregateOverlapLine[0].LineNumber
             usageIndexLine = [int]$aggregateUsageIndexLine[0].LineNumber
             usageResolveLine = [int]$aggregateUsageResolveLine[0].LineNumber
-            complexity = 'linear ledger byte/record read plus fixed-pass radix ordering/index construction, O(records + task groups) first-pass grouping, O(samples + intervals) grouped usage-boundary and first-issue sweeps, and linear overlap/coverage passes; no pairwise interval or full-ledger scan per usage interval'
+            complexity = 'linear ledger byte/record read plus fixed-pass radix ordering/index construction, O(records + task groups + distinct task identities) hash-backed first-pass grouping/membership, O(samples + intervals) grouped usage-boundary and first-issue sweeps, and linear overlap/coverage passes; no pairwise interval or full-ledger scan per usage interval'
             processingClaim = 'linear_ledger_scan_with_linear_index_and_usage_sweeps'
+            keyOrderProbe = $keyOrderProbe
         }
         productionThreshold = 'unavailable_without an authorized production workload and environment-controlled benchmark'
         limitation = 'normal recorder appends are bounded by appended event/index/membership/checkpoint bytes; cold catch-up remains separate recovery work, while aggregation ordering and usage-boundary work is linear in its input records, samples, and intervals'
@@ -768,7 +819,7 @@ try {
         [ordered]@{ scenario = 'validator-suite'; setup = 'all checked-in validate-*.ps1 files except this orchestrator'; action = 'run from repository root in fresh PowerShell processes'; expected = 'every validator exits 0'; observed = "$($validatorResults.Count) validators exited 0"; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'matched workflow controls'; setup = 'same automatic-review state machine, three disabled and three enabled cold samples'; action = 'derive transitions/messages/agents/polling/measurement-only counts from actual traces'; expected = 'same outcome and operation counts; only declared instrumentation helpers appear'; observed = 'observed traces matched; enabled recorder/aggregator calls and bytes recorded'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'helper duration'; setup = 'local monotonic Stopwatch, three samples per control, no sleeps'; action = 'measure control and enabled helper durations'; expected = 'actual samples with conditions, not a fixed-clock percentage'; observed = 'baseline/candidate control durations and candidate helper samples recorded'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection plus recorder/aggregator runs at ledger sizes 1, 8, and 32 and dense task/usage runs at 4, 16, and 32 tasks'; action = 'report normal/recovery/ordering costs separately and exercise grouped first-pass plus overlapping usage paths'; expected = 'ordinary append uses incremental checkpoint/index work; aggregation has no pairwise or per-interval full-ledger scan'; observed = "scaling sizes=$((@($scalingEvidence | ForEach-Object { $_.size }) -join ',')); last recorder scans=$((@($scalingEvidence | ForEach-Object { $_.recorderLastScanBytes }) -join ',')); dense tasks=$((@($denseScalingEvidence | ForEach-Object { $_.taskCount }) -join ',')); dense aggregator samples=$((@($denseScalingEvidence | ForEach-Object { $_.aggregatorDurationMilliseconds }) -join ',')); normal recorder path, cold rebuild, grouped first-pass and dense usage overlap are distinguished"; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection plus recorder/aggregator runs at ledger sizes 1, 8, and 32 and dense task/usage runs at 4, 16, and 32 tasks'; action = 'report normal/recovery/ordering costs separately and exercise hash-backed grouping/membership plus overlapping usage paths'; expected = 'ordinary append uses incremental checkpoint/index work; aggregation has no pairwise or per-interval full-ledger scan'; observed = "scaling sizes=$((@($scalingEvidence | ForEach-Object { $_.size }) -join ',')); last recorder scans=$((@($scalingEvidence | ForEach-Object { $_.recorderLastScanBytes }) -join ',')); dense tasks=$((@($denseScalingEvidence | ForEach-Object { $_.taskCount }) -join ',')); dense aggregator samples=$((@($denseScalingEvidence | ForEach-Object { $_.aggregatorDurationMilliseconds }) -join ',')); key-order hash bound and explicit task-membership/grouping guards passed; normal recorder path, cold rebuild, hash-backed grouping and dense usage overlap are distinguished"; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'attributable usage'; setup = 'current host capability matrix'; action = 'retain explicit unavailable state'; expected = 'no token estimate from account limits, text length, file size, event count, or timing'; observed = 'baseline/candidate usageState=unavailable'; evidence = 'unavailable'; status = 'not_run' },
         [ordered]@{ scenario = 'negative controls'; setup = 'bypassed trace, extra message/agent/event, and missing baseline mutations'; action = 'evaluate observed-evidence contract'; expected = 'unsafe or incomparable evidence never passes'; observed = "all $($negativeControls.Count) controls rejected"; evidence = 'automated_assertion'; status = 'passed' }
     )
