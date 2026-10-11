@@ -219,6 +219,24 @@ The worker still does not poll, infer acceptance from idle status, or widen
 scope; duplicate, stale, unknown-delivery, and conflicting-revision events are
 no-ops or coordinator reconciliation cases.
 
+At the real workflow boundary, record the lifecycle observation with
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`: first
+concrete task work is `implementation_started`; a frozen implementation-ready
+packet in either mode is `task_ready_for_review`. In `per_task` it precedes the
+task review; in `story_end_only` it closes implementation without dispatching
+that review. The implementer owns task and final-story
+`correction_started`/`correction_ready`; the reviewer owns
+`review_started`, `review_findings`, `review_accepted`,
+`final_review_started`, `final_review_accepted`, and final-story re-reviews.
+Preserve the stable `phaseId`, `correctionId`,
+`reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
+from `references/worker-handoffs.md`. Copy the selected `per_task` or
+`story_end_only` mode from setup rather than inferring it. Include known
+model/effort and attributable usage only when source-backed; unavailable usage
+stays null/unavailable. Recording is fail-open and must not create a polling
+loop or a telemetry-only message. A duplicate/stale handoff is not a new
+attempt and cannot advance the task pointer.
+
 Resume this same chat only for an authorized actionable message or scoped
 recovery. Follow `references/worker-handoffs.md#message-driven-resume`: verify
 the assigned reviewer, current task, pending SHA, branch HEAD, and prior outcome

@@ -4,7 +4,8 @@ Keep one short note per authorized story-loop run, outside the source
 worktrees. It is a pointer to authoritative systems, not a durable workflow
 engine. Store only the selected scope, ordered story/task sequence,
 branch/worktree lineage, worker chats, PR identity, current stage,
-approval/merge state, and recovery reference.
+approval/merge state, recovery reference, and the optional compact performance
+pointer. Keep performance history in the external event ledger.
 
 ## Template
 
@@ -33,6 +34,7 @@ Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha 
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
 Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
+Performance pointer: <none before Start, or schema=1 | run=<run-id> | project=<project-id> | story=<story-id>/<story-ref> | ledger=<external-ledger-path> | lastEvent=<event-id> | lastObservedUtc=<utc>
 ```
 
 Values are updated only after their source system confirms a change. Keep the
@@ -65,6 +67,26 @@ Gate: <none/user_input/approval/trial> | <unresolved question or decision refere
 Pending action: <none or external operation identity and unknown outcome>
 Evidence: <current handoff/review/check references; no copied findings>
 ```
+
+`Performance pointer` is optional so notes written before story measurement was
+introduced remain readable and writable. After a submitted `Start`, a new run
+uses a fresh path-safe `runId`, appends one `story_started` event through
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`, and
+records the validated pointer only after the recorder confirms the append. The
+pointer may use `lastEvent=none | lastObservedUtc=unavailable` when the
+measurement attempt failed; that limitation is not a workflow failure. It
+contains no event list, prompt, transcript, source text, token payload, or
+secret. Setup metadata, when available, is a sibling of the external ledger
+and is not copied into the continuation note.
+
+On a legitimate resume, read the pointer and verify its `runId`, project/story
+binding, ledger path, and `lastEvent` against the external ledger before
+continuing. Reuse the same run identity and do not append another
+`story_started` event. If the pointer is absent, the old note remains valid but
+historical measurement coverage is explicitly unavailable; do not synthesize a
+start boundary or reconstruct a missing timestamp. A changed scope or a new
+authorized run gets a new pointer and run identity. Cancelled or still-open
+setup gates never create a pointer or ledger event.
 
 Keep the submitted setup decision, mode, scope reference, resolved
 authorization reference, and authorization boundaries, along with topology, PR/base/head approval identity, final

@@ -198,6 +198,21 @@ recorded feature/story objects and PR base under
 `legacy-standalone-feature`; do not run new setup or rewrite it as either new
 topology.
 
+Immediately after the submitted `Start` is authoritative and before worker
+dispatch, initialize the optional performance run. Choose a path-safe `runId`
+and coordinator-selected external run root outside the source worktree. Write
+the validated `story_performance_setup` metadata beside the ledger when
+assignment profiles are available, then invoke the actual recorder at
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with one
+`story_started` event containing the resolved project/story identity, review
+mode, authorization-safe provenance, and the actual UTC boundary. Do not call
+the recorder before this point, for a cancelled gate, or to manufacture a
+historical start during resume. On success, persist only the compact
+`Performance pointer` from [the continuation contract](continuation-note.md).
+If recording or metadata preparation fails, retain an unavailable measurement
+limitation and continue the normal workflow; do not invent a timestamp or
+block authorization, review, advancement, PR, or merge.
+
 For an epic, each story receives a distinct managed worktree and story branch;
 for a standalone story, the single story worktree and branch are created from
 the captured base and target `master` directly.
