@@ -435,7 +435,11 @@ function New-RevisionBoundLedgerView {
         [Parameter(Mandatory)] [string] $ViewRoot
     )
 
-    $records = @(Get-Content -LiteralPath $LedgerPath | ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+    $records = @(Get-Content -LiteralPath $LedgerPath | ForEach-Object {
+            $parsed = $_ | ConvertFrom-Json -Depth 100
+            if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') { $parsed = $parsed.event }
+            $parsed
+        })
     $selected = @($records | Where-Object {
         [string]$_.eventType -ne 'pr_ready' -or
         [string]$_.pullRequest.reviewedHead -eq $ReviewedHead

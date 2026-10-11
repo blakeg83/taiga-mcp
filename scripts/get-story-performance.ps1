@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Aggregate a version-1 story performance event ledger.
+    Aggregate a versioned story performance event ledger.
 
 .DESCRIPTION
     This entry point is deliberately read-only. It consumes the append-only
@@ -40,6 +40,8 @@ param(
 
     [Alias('SetupMetadataPath', 'AssignmentPath', 'ProfilesPath')]
     [string] $MetadataPath,
+
+    [string] $UsageMetadataPath,
 
     [Alias('ReportDirectory', 'ArtifactRoot')]
     [string] $ArtifactDirectory
@@ -287,12 +289,11 @@ function Get-UsageValidationError {
 function Get-BindingKey {
     param([Parameter(Mandatory)] [object] $Event)
 
-    return @(
-        [string] (Get-PropertyValue $Event 'runId')
-        [string] (Get-PropertyValue $Event 'projectId')
-        [string] (Get-PropertyValue $Event 'storyId')
-        [string] (Get-PropertyValue $Event 'storyRef')
-    ) -join '|'
+    $runId = [string] (Get-PropertyValue $Event 'runId')
+    $projectId = [string] (Get-PropertyValue $Event 'projectId')
+    $storyId = [string] (Get-PropertyValue $Event 'storyId')
+    $storyRef = [string] (Get-PropertyValue $Event 'storyRef')
+    return ConvertTo-IdentityTupleKey $runId $projectId $storyId $storyRef
 }
 
 function Get-SafePullRequest {
@@ -507,7 +508,10 @@ function Get-SetupMetadata {
         [void] $records.Add([pscustomobject] $record)
     }
     $profileConflicts = [System.Collections.Generic.List[object]]::new()
-    foreach ($group in @(Group-ValuesLinear -Values @($records) -KeySelector { param($record) "$($record.role)|$($record.workerId)|$($record.sessionId)" })) {
+    foreach ($group in @(Group-ValuesLinear -Values @($records) -KeySelector {
+                param($record)
+                ConvertTo-IdentityTupleKey $record.role $record.workerId $record.sessionId
+            })) {
         $orderedItems = @($group.Group | ForEach-Object {
                 [pscustomobject]@{
                     profile = $_
@@ -521,7 +525,9 @@ function Get-SetupMetadata {
         $flush = {
             if ($cluster.Count -le 1) { return }
             $profiles = @($cluster | ForEach-Object { $_.profile })
-            $signatures = @(Get-UniqueValuesLinear -Values @($profiles | ForEach-Object { "$($_.model)|$($_.effort)" }))
+            $signatures = @(Get-UniqueValuesLinear -Values @($profiles | ForEach-Object {
+                        ConvertTo-IdentityTupleKey $_.model $_.effort
+                    }))
             if ($signatures.Count -gt 1) {
                 [void] $profileConflicts.Add([pscustomobject][ordered]@{
                         identity = "$($profiles[0].role)/$($profiles[0].workerId)/$($profiles[0].sessionId)"
@@ -833,6 +839,27 @@ function ConvertTo-CanonicalJson {
     return (ConvertTo-CanonicalValue -Value $Value | ConvertTo-Json -Compress -Depth 100)
 }
 
+function New-OrdinalHashtable {
+    return [System.Collections.Hashtable]::new([System.StringComparer]::Ordinal)
+}
+
+function ConvertTo-IdentityTupleKey {
+    param(
+        [Parameter(Position = 0, ValueFromRemainingArguments = $true)] [AllowNull()] [AllowEmptyCollection()] [object[]] $Values
+    )
+
+    $normalized = [System.Collections.Generic.List[object]]::new()
+    foreach ($value in $Values) {
+        if ($null -eq $value) {
+            [void] $normalized.Add($null)
+        }
+        else {
+            [void] $normalized.Add([string] $value)
+        }
+    }
+    return ConvertTo-CanonicalJson -Value $normalized
+}
+
 function New-Anomaly {
     param(
         [Parameter(Mandatory)] [string] $Code,
@@ -1046,7 +1073,7 @@ function Sort-TimeWindowItemsLinear {
 function Get-UniqueValuesLinear {
     param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Values)
 
-    $seen = @{}
+    $seen = New-OrdinalHashtable
     $unique = [System.Collections.Generic.List[object]]::new()
     foreach ($value in $Values) {
         $key = [string] $value
@@ -1064,7 +1091,7 @@ function Group-ValuesLinear {
         [Parameter(Mandatory)] [scriptblock] $KeySelector
     )
 
-    $buckets = @{}
+    $buckets = New-OrdinalHashtable
     $keyOrder = [System.Collections.Generic.List[string]]::new()
     foreach ($value in $Values) {
         $key = [string] (& $KeySelector $value)
@@ -1092,56 +1119,69 @@ function Get-TaskText {
     return [string] $taskRef
 }
 
+function Get-IdentityText {
+    param(
+        [Parameter(Mandatory)] [object] $Event,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    $value = Get-PropertyValue $Event $Name
+    if ($null -eq $value) {
+        return $null
+    }
+    return [string] $value
+}
+
 function Get-PhaseIdentity {
     param([Parameter(Mandatory)] [object] $Event)
 
-    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $scope = Get-IdentityText -Event $Event -Name 'scope'
     $task = Get-TaskText -Event $Event
-    $phase = [string] (Get-PropertyValue $Event 'phaseId')
-    $correction = [string] (Get-PropertyValue $Event 'correctionId')
-    return ($scope, $task, $phase, $correction -join '|')
+    $phase = Get-IdentityText -Event $Event -Name 'phaseId'
+    $correction = Get-IdentityText -Event $Event -Name 'correctionId'
+    return ConvertTo-IdentityTupleKey $scope $task $phase $correction
 }
 
 function Get-WaitIdentity {
     param([Parameter(Mandatory)] [object] $Event)
 
-    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $scope = Get-IdentityText -Event $Event -Name 'scope'
     $task = Get-TaskText -Event $Event
-    $waitId = [string] (Get-PropertyValue $Event 'waitId')
-    return ($scope, $task, $waitId -join '|')
+    $waitId = Get-IdentityText -Event $Event -Name 'waitId'
+    return ConvertTo-IdentityTupleKey $scope $task $waitId
 }
 
 function Get-ReviewIdentity {
     param([Parameter(Mandatory)] [object] $Event)
 
-    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $scope = Get-IdentityText -Event $Event -Name 'scope'
     $task = Get-TaskText -Event $Event
-    $phase = [string] (Get-PropertyValue $Event 'phaseId')
-    $request = [string] (Get-PropertyValue $Event 'reviewRequestId')
-    $attempt = [string] (Get-PropertyValue $Event 'reviewAttemptId')
-    $ordinal = [string] (Get-PropertyValue $Event 'reviewAttemptOrdinal')
-    $kind = [string] (Get-PropertyValue $Event 'reviewKind')
-    $revision = [string] (Get-PropertyValue $Event 'revision')
-    return ($scope, $task, $phase, $request, $attempt, $ordinal, $kind, $revision -join '|')
+    $phase = Get-IdentityText -Event $Event -Name 'phaseId'
+    $request = Get-IdentityText -Event $Event -Name 'reviewRequestId'
+    $attempt = Get-IdentityText -Event $Event -Name 'reviewAttemptId'
+    $ordinal = Get-IdentityText -Event $Event -Name 'reviewAttemptOrdinal'
+    $kind = Get-IdentityText -Event $Event -Name 'reviewKind'
+    $revision = Get-IdentityText -Event $Event -Name 'revision'
+    return ConvertTo-IdentityTupleKey $scope $task $phase $request $attempt $ordinal $kind $revision
 }
 
 function Get-ReviewAttemptIdentity {
     param([Parameter(Mandatory)] [object] $Event)
 
-    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $scope = Get-IdentityText -Event $Event -Name 'scope'
     $task = Get-TaskText -Event $Event
-    $request = [string] (Get-PropertyValue $Event 'reviewRequestId')
-    $attempt = [string] (Get-PropertyValue $Event 'reviewAttemptId')
-    return ($scope, $task, $request, $attempt -join '|')
+    $request = Get-IdentityText -Event $Event -Name 'reviewRequestId'
+    $attempt = Get-IdentityText -Event $Event -Name 'reviewAttemptId'
+    return ConvertTo-IdentityTupleKey $scope $task $request $attempt
 }
 
 function Get-ReviewAttemptBindingIdentity {
     param([Parameter(Mandatory)] [object] $Event)
 
-    $scope = [string] (Get-PropertyValue $Event 'scope')
+    $scope = Get-IdentityText -Event $Event -Name 'scope'
     $task = Get-TaskText -Event $Event
-    $attempt = [string] (Get-PropertyValue $Event 'reviewAttemptId')
-    return ($scope, $task, $attempt -join '|')
+    $attempt = Get-IdentityText -Event $Event -Name 'reviewAttemptId'
+    return ConvertTo-IdentityTupleKey $scope $task $attempt
 }
 
 function Get-ReviewRequestBindingCanonical {
@@ -1444,6 +1484,87 @@ function Get-UncoveredStorySpan {
     }
 }
 
+function Get-Sha256HexBytes {
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $Bytes)
+
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try {
+        return [Convert]::ToHexString($hasher.ComputeHash($Bytes)).ToLowerInvariant()
+    }
+    finally {
+        $hasher.Dispose()
+    }
+}
+
+function Get-V2ContentChainDigest {
+    param(
+        [Parameter(Mandatory)] [string] $PreviousCommitDigest,
+        [Parameter(Mandatory)] [string] $OrphanSuffixDigest,
+        [Parameter(Mandatory)] [string] $EventDigest,
+        [Parameter(Mandatory)] [long] $RecordCount
+    )
+
+    return Get-Sha256Hex -Content ("story_performance_ledger_v2_chain_v1|$PreviousCommitDigest|$OrphanSuffixDigest|$EventDigest|$RecordCount")
+}
+
+function Get-V2FrameValidationError {
+    param(
+        [Parameter(Mandatory)] [object] $Frame,
+        [Parameter(Mandatory)] [string] $Line,
+        [Parameter(Mandatory)] [long] $FrameStartOffset,
+        [Parameter(Mandatory)] [long] $FrameEndOffset,
+        [Parameter(Mandatory)] [long] $PreviousFrameEndOffset,
+        [Parameter(Mandatory)] [string] $PreviousCommitDigest,
+        [Parameter(Mandatory)] [long] $PreviousRecordCount,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [byte[]] $OrphanBytes
+    )
+
+    try {
+        if ([int] (Get-PropertyValue $Frame 'schemaVersion') -ne 2 -or
+            [string] (Get-PropertyValue $Frame 'kind') -cne 'story_performance_event_frame') { return 'unsupported v2 frame envelope' }
+        $event = Get-PropertyValue $Frame 'event'
+        $anchor = Get-PropertyValue $Frame 'anchor'
+        if ($null -eq $event -or $null -eq $anchor) { return 'v2 frame event or anchor is missing' }
+        $eventDigest = Get-Sha256Hex -Content (ConvertTo-CanonicalJson -Value $event)
+        $anchorPayload = [ordered]@{
+            schemaVersion = [int] (Get-PropertyValue $anchor 'schemaVersion')
+            kind = [string] (Get-PropertyValue $anchor 'kind')
+            frameStartOffset = [long] (Get-PropertyValue $anchor 'frameStartOffset')
+            previousFrameEndOffset = [long] (Get-PropertyValue $anchor 'previousFrameEndOffset')
+            previousCommitDigest = [string] (Get-PropertyValue $anchor 'previousCommitDigest')
+            orphanSuffixDigest = [string] (Get-PropertyValue $anchor 'orphanSuffixDigest')
+            eventDigest = [string] (Get-PropertyValue $anchor 'eventDigest')
+            contentChainDigest = [string] (Get-PropertyValue $anchor 'contentChainDigest')
+            recordCount = [long] (Get-PropertyValue $anchor 'recordCount')
+            integrityRootHash = [string] (Get-PropertyValue $anchor 'integrityRootHash')
+            frameByteLength = [long] (Get-PropertyValue $anchor 'frameByteLength')
+        }
+        foreach ($digest in @($anchorPayload.previousCommitDigest, $anchorPayload.orphanSuffixDigest, $anchorPayload.eventDigest, $anchorPayload.contentChainDigest, $anchorPayload.integrityRootHash, [string] (Get-PropertyValue $anchor 'commitDigest'))) {
+            if ($digest -notmatch '^[0-9a-f]{64}$') { return 'v2 frame digest is invalid' }
+        }
+        if ($anchorPayload.kind -cne 'story_performance_ledger_commit' -or
+            $anchorPayload.schemaVersion -ne 2 -or
+            $anchorPayload.frameStartOffset -ne $FrameStartOffset -or
+            $anchorPayload.previousFrameEndOffset -ne $PreviousFrameEndOffset -or
+            $anchorPayload.previousCommitDigest -cne $PreviousCommitDigest -or
+            $anchorPayload.recordCount -ne ($PreviousRecordCount + 1L) -or
+            $anchorPayload.frameByteLength -ne ($FrameEndOffset - $FrameStartOffset) -or
+            $anchorPayload.frameByteLength -ne ([Text.UTF8Encoding]::new($false).GetByteCount($Line + [Environment]::NewLine)) -or
+            $anchorPayload.eventDigest -cne $eventDigest -or
+            $anchorPayload.orphanSuffixDigest -cne (Get-Sha256HexBytes -Bytes $OrphanBytes)) {
+            return 'v2 frame anchor does not bind the exact committed bytes'
+        }
+        $expectedCommitDigest = Get-Sha256Hex -Content ("story_performance_ledger_v2_commit_v1|$(ConvertTo-CanonicalJson -Value $anchorPayload)")
+        if ([string] (Get-PropertyValue $anchor 'commitDigest') -cne $expectedCommitDigest) { return 'v2 frame commit digest is invalid' }
+        $expectedChainDigest = Get-V2ContentChainDigest -PreviousCommitDigest $PreviousCommitDigest -OrphanSuffixDigest $anchorPayload.orphanSuffixDigest -EventDigest $eventDigest -RecordCount $anchorPayload.recordCount
+        if ($anchorPayload.contentChainDigest -cne $expectedChainDigest) { return 'v2 frame content chain is invalid' }
+        return $null
+    }
+    catch {
+        return 'v2 frame anchor could not be validated'
+    }
+}
+
 function Read-EventLedger {
     param(
         [Parameter(Mandatory)] [string] $Path,
@@ -1454,11 +1575,13 @@ function Read-EventLedger {
         throw [System.IO.FileNotFoundException]::new("Events ledger was not found: $Path")
     }
 
-    $byEventId = @{}
+    $byEventId = New-OrdinalHashtable
     $records = [System.Collections.Generic.List[object]]::new()
     $ledgerBytes = [IO.File]::ReadAllBytes($Path)
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $allLines = [System.Collections.Generic.List[object]]::new()
+    $allLineStarts = [System.Collections.Generic.List[long]]::new()
+    $allLineEnds = [System.Collections.Generic.List[long]]::new()
     $lineStart = 0
     for ($offset = 0; $offset -lt $ledgerBytes.Length; $offset++) {
         if ($ledgerBytes[$offset] -ne [byte] 0x0A) {
@@ -1481,11 +1604,17 @@ function Read-EventLedger {
             $line = $null
         }
         [void] $allLines.Add($line)
+        [void] $allLineStarts.Add([long] $lineStart)
+        [void] $allLineEnds.Add([long] ($offset + 1))
         $lineStart = $offset + 1
     }
 
     $tailLength = $ledgerBytes.Length - $lineStart
     $hasCompleteFinalNewline = $tailLength -eq 0
+    $v2Mode = $false
+    $v2PreviousCommitDigest = Get-Sha256Hex -Content 'story_performance_ledger_v2_genesis'
+    $v2PreviousFrameEndOffset = 0L
+    $v2PreviousRecordCount = 0L
     for ($lineIndex = 0; $lineIndex -lt $allLines.Count; $lineIndex++) {
         $line = $allLines[$lineIndex]
         $lineNumber = $lineIndex + 1
@@ -1498,6 +1627,41 @@ function Read-EventLedger {
         }
         catch {
             [void] $Anomalies.Add((New-Anomaly -Code 'malformed_event' -Message 'A ledger line was not valid JSON and was excluded from aggregation' -Line $lineNumber))
+            continue
+        }
+
+        if ([int] (Get-PropertyValue $event 'schemaVersion') -eq 2 -and
+            [string] (Get-PropertyValue $event 'kind') -ceq 'story_performance_event_frame') {
+            $frameEvent = Get-PropertyValue $event 'event'
+            $frameAnchor = Get-PropertyValue $event 'anchor'
+            if ($null -eq $frameEvent -or $null -eq $frameAnchor) {
+                [void] $Anomalies.Add((New-Anomaly -Code 'invalid_event_frame' -Message 'A v2 ledger frame without an event and commit anchor was excluded from aggregation' -Line $lineNumber))
+                continue
+            }
+            $v2Mode = $true
+            $frameStartOffset = [long] $allLineStarts[$lineIndex]
+            $frameEndOffset = [long] $allLineEnds[$lineIndex]
+            $orphanBytes = Get-ByteSlice -Bytes $ledgerBytes -Offset ([int] $v2PreviousFrameEndOffset) -Count ([int] ($frameStartOffset - $v2PreviousFrameEndOffset))
+            $frameError = Get-V2FrameValidationError `
+                -Frame $event `
+                -Line $line `
+                -FrameStartOffset $frameStartOffset `
+                -FrameEndOffset $frameEndOffset `
+                -PreviousFrameEndOffset $v2PreviousFrameEndOffset `
+                -PreviousCommitDigest $v2PreviousCommitDigest `
+                -PreviousRecordCount $v2PreviousRecordCount `
+                -OrphanBytes $orphanBytes
+            if ($null -ne $frameError) {
+                [void] $Anomalies.Add((New-Anomaly -Code 'invalid_event_frame' -Message "$frameError; orphan frame was excluded from aggregation" -Line $lineNumber))
+                continue
+            }
+            $event = $frameEvent
+            $v2PreviousCommitDigest = [string] (Get-PropertyValue $frameAnchor 'commitDigest')
+            $v2PreviousFrameEndOffset = $frameEndOffset
+            $v2PreviousRecordCount = [long] (Get-PropertyValue $frameAnchor 'recordCount')
+        }
+        elseif ($v2Mode -or ([string] $line -like '{"schemaVersion":2,"kind":"*')) {
+            [void] $Anomalies.Add((New-Anomaly -Code 'invalid_event_frame' -Message 'A v2 ledger orphan or unknown frame was excluded from aggregation' -Line $lineNumber))
             continue
         }
 
@@ -1550,6 +1714,88 @@ function Read-EventLedger {
     }
 
     return Sort-RecordsByTimeLinear -Records @($records)
+}
+
+function Get-ObservedRoleUsageMetadata {
+    param(
+        [AllowNull()] [string] $Path,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [int] $ProjectId,
+        [Parameter(Mandatory)] [int] $StoryId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw [System.ArgumentException]::new('usage_metadata_invalid: observed role token metadata was not found')
+    }
+    try {
+        $metadata = ([IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false, $true)) | ConvertFrom-Json -Depth 100 -DateKind String)
+    }
+    catch {
+        throw [System.ArgumentException]::new('usage_metadata_invalid: observed role token metadata is not valid UTF-8 JSON')
+    }
+    if ($null -eq $metadata -or [int] (Get-PropertyValue $metadata 'schemaVersion') -ne 1 -or
+        [string] (Get-PropertyValue $metadata 'kind') -cne 'story_performance_role_token_usage') {
+        throw [System.ArgumentException]::new('usage_metadata_invalid: unsupported observed role token metadata envelope')
+    }
+    if ([string] (Get-PropertyValue $metadata 'runId') -cne $RunId -or
+        [int] (Get-PropertyValue $metadata 'projectId') -ne $ProjectId -or
+        [int] (Get-PropertyValue $metadata 'storyId') -ne $StoryId) {
+        throw [System.ArgumentException]::new('usage_metadata_conflict: observed role token metadata identity does not match the event ledger')
+    }
+    $semantics = Get-PropertyValue $metadata 'counterSemantics'
+    if ($null -eq $semantics -or [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $semantics 'aggregation'))) {
+        throw [System.ArgumentException]::new('usage_metadata_invalid: cumulative counter semantics are required')
+    }
+    return $metadata
+}
+
+function New-ObservedRoleUsageMetric {
+    param(
+        [Parameter(Mandatory)] [object] $Metadata,
+        [Parameter(Mandatory)] [string] $Role
+    )
+
+    $sessions = @((Get-PropertyValue $Metadata 'sessions') | Where-Object { [string] (Get-PropertyValue $_ 'role') -ceq $Role })
+    $measured = @($sessions | Where-Object { [string] (Get-PropertyValue $_ 'state') -ceq 'measured' })
+    $partial = @($sessions | Where-Object { [string] (Get-PropertyValue $_ 'state') -ceq 'partial' })
+    $unavailable = @($sessions | Where-Object { [string] (Get-PropertyValue $_ 'state') -eq 'unavailable' })
+    $totals = Get-PropertyValue (Get-PropertyValue $Metadata 'roleTotals') $Role
+    if ($null -eq $totals -or $measured.Count -eq 0) {
+        $state = if ($partial.Count -gt 0 -or $unavailable.Count -gt 0) { 'partial' } else { 'unavailable' }
+        $missing = if ($unavailable.Count -gt 0) { "$($unavailable.Count) bound session(s) had no attributable boundary delta" } else { 'complete attributable cumulative counter boundaries were not available for this role' }
+        $metric = New-Metric -State $state -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract one story-start boundary counter from one confirmed-PR boundary counter per bound session' -Coverage ([string] (Get-PropertyValue $Metadata 'coverage')) -MissingData $missing
+    }
+    else {
+        $counters = [ordered]@{}
+        foreach ($name in @('inputTokens', 'cachedInputTokens', 'outputTokens', 'reasoningTokens')) { $counters[$name] = [long] (Get-PropertyValue $totals $name) }
+        $counters.uncachedInputTokens = [long] $counters.inputTokens - [long] $counters.cachedInputTokens
+        $counters.totalTokens = [long] $counters.inputTokens + [long] $counters.outputTokens
+        $incompleteCount = $partial.Count + $unavailable.Count
+        $state = if ($incompleteCount -gt 0) { 'partial' } else { 'measured' }
+        $missingData = if ($partial.Count -gt 0 -and $unavailable.Count -gt 0) { "$($partial.Count) partial and $($unavailable.Count) unavailable bound session(s) remain outside the complete role total" } elseif ($partial.Count -gt 0) { "$($partial.Count) bound session(s) used nearest complete-line boundaries" } elseif ($unavailable.Count -gt 0) { "$($unavailable.Count) bound session(s) had no attributable boundary delta" } else { $null }
+        $value = if ($state -eq 'measured') { [long] $counters.totalTokens } else { $null }
+        $metric = New-Metric -State $state -Value $value -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at one story-start boundary from one confirmed-PR boundary per bound session' -Coverage ([string] (Get-PropertyValue $Metadata 'coverage')) -MissingData $missingData
+        $metric | Add-Member -NotePropertyName counters -NotePropertyValue $counters -Force
+    }
+    $metric | Add-Member -NotePropertyName role -NotePropertyValue $Role -Force
+    $metric | Add-Member -NotePropertyName sessionCount -NotePropertyValue $sessions.Count -Force
+    return $metric
+}
+
+function New-ObservedTotalUsageMetric {
+    param([Parameter(Mandatory)] [object[]] $RoleMetrics)
+    $measured = @($RoleMetrics | Where-Object { $_.state -eq 'measured' })
+    $partial = @($RoleMetrics | Where-Object { $_.state -eq 'partial' })
+    if ($measured.Count -eq 0) {
+        $state = if ($partial.Count -gt 0) { 'partial' } else { 'unavailable' }
+        return New-Metric -State $state -Value $null -Unit 'tokens' -Source 'observed role token totals' -Calculation 'sum disjoint bound-session deltas without summing cumulative notifications' -Coverage 'no complete observed role total is available' -MissingData 'observed role token metadata is unavailable or incomplete'
+    }
+    if ($measured.Count -ne $RoleMetrics.Count) {
+        return New-Metric -State 'partial' -Value $null -Unit 'tokens' -Source 'observed role token totals' -Calculation 'sum disjoint bound-session deltas without summing cumulative notifications' -Coverage "$($measured.Count) of $($RoleMetrics.Count) observed role totals are measured" -MissingData 'unavailable role totals are not treated as zero'
+    }
+    $value = [long] ($measured | ForEach-Object { [long] $_.value } | Measure-Object -Sum).Sum
+    return New-Metric -State 'measured' -Value $value -Unit 'tokens' -Source 'observed role token totals' -Calculation 'sum disjoint bound-session deltas without summing cumulative notifications' -Coverage 'all observed role totals are measured' -MissingData $null
 }
 
 function New-CountMetric {
@@ -1995,7 +2241,7 @@ if ($effectiveReviewMode -notin @('per_task', 'story_end_only')) {
     $effectiveReviewMode = $null
 }
 
-$recordsByEventId = @{}
+$recordsByEventId = New-OrdinalHashtable
 foreach ($record in @($records)) {
     $recordsByEventId[[string] $record.EventId] = $record
 }
@@ -2004,20 +2250,20 @@ $storyStarts = @($records | Where-Object { $_.EventType -eq 'story_started' -and
 $prReady = @($records | Where-Object { $_.EventType -eq 'pr_ready' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
 $timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Identity 'story|time_to_pr' -Kind 'story_to_pr' -Anomalies $anomalies
 
-$implementationStarts = @{}
-$implementationEnds = @{}
+$implementationStarts = New-OrdinalHashtable
+$implementationEnds = New-OrdinalHashtable
 $implementationKeyOrder = [System.Collections.Generic.List[string]]::new()
 $implementationKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-$correctionStarts = @{}
-$correctionEnds = @{}
+$correctionStarts = New-OrdinalHashtable
+$correctionEnds = New-OrdinalHashtable
 $correctionKeyOrder = [System.Collections.Generic.List[string]]::new()
 $correctionKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-$waitStarts = @{}
-$waitEnds = @{}
+$waitStarts = New-OrdinalHashtable
+$waitEnds = New-OrdinalHashtable
 $waitKeyOrder = [System.Collections.Generic.List[string]]::new()
 $waitKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-$reviewStarts = @{}
-$reviewEnds = @{}
+$reviewStarts = New-OrdinalHashtable
+$reviewEnds = New-OrdinalHashtable
 $reviewEndKeyOrder = [System.Collections.Generic.List[string]]::new()
 $reviewEndKeySeen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 
@@ -2044,10 +2290,10 @@ foreach ($record in $records) {
 # A second observation of the same review attempt is diagnostic-only. It is
 # never a second review count, even when it arrived under another eventId.
 # Immutable payload differences are conflicts, not stale duplicates.
-$reviewStartByAttempt = @{}
-$reviewAttemptBindingById = @{}
-$reviewRequestBindingById = @{}
-$reviewStartConflicts = @{}
+$reviewStartByAttempt = New-OrdinalHashtable
+$reviewAttemptBindingById = New-OrdinalHashtable
+$reviewRequestBindingById = New-OrdinalHashtable
+$reviewStartConflicts = New-OrdinalHashtable
 $dedupedReviewStarts = [System.Collections.Generic.List[object]]::new()
 foreach ($record in (Sort-RecordsByLineLinear -Records @($records | Where-Object { $_.EventType -in $script:ReviewStartEvents }))) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
@@ -2099,7 +2345,7 @@ foreach ($record in (Sort-RecordsByLineLinear -Records @($records | Where-Object
 
 # Keep one immutable closure per attempt. Distinct closure kinds or times are
 # conflicting evidence, not a reason to choose whichever event was read first.
-$reviewEndsByAttempt = @{}
+$reviewEndsByAttempt = New-OrdinalHashtable
 $reviewEndsByAttemptKeyOrder = [System.Collections.Generic.List[string]]::new()
 foreach ($key in $reviewEndKeyOrder) {
     foreach ($record in @($reviewEnds[$key])) {
@@ -2116,8 +2362,8 @@ $reviewIntervals = [System.Collections.Generic.List[object]]::new()
 foreach ($record in (Sort-RecordsByTimeLinear -Records @($dedupedReviewStarts))) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
     $closures = if ($reviewEndsByAttempt.ContainsKey($attemptKey)) { @($reviewEndsByAttempt[$attemptKey]) } else { @() }
-    $matchingClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -eq (Get-ReviewIdentity $record.Event) })
-    $mismatchedClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -ne (Get-ReviewIdentity $record.Event) })
+    $matchingClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -ceq (Get-ReviewIdentity $record.Event) })
+    $mismatchedClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -cne (Get-ReviewIdentity $record.Event) })
     $closureConflict = $false
     if ($mismatchedClosures.Count -gt 0) {
         $closureConflict = $true
@@ -2269,13 +2515,13 @@ function Get-UsageSampleKey {
         [Parameter(Mandatory)] [string] $Source
     )
 
-    return "$Role|$StreamId|$Source"
+    return ConvertTo-IdentityTupleKey $Role $StreamId $Source
 }
 
 function New-UsageSampleIndex {
     param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Records)
 
-    $index = @{}
+    $index = New-OrdinalHashtable
     foreach ($record in $Records) {
         $usage = Get-PropertyValue $record.Event 'usage'
         $counters = if ($null -ne $usage) { Get-PropertyValue $usage 'counters' } else { $null }
@@ -2440,7 +2686,7 @@ function New-UsageRangePlan {
         [Parameter(Mandatory)] [hashtable] $UsageIndex
     )
 
-    $itemsByKey = @{}
+    $itemsByKey = New-OrdinalHashtable
     for ($intervalIndex = 0; $intervalIndex -lt $Intervals.Count; $intervalIndex++) {
         $interval = $Intervals[$intervalIndex]
         $startRecord = if ($null -ne $interval.startEventId -and $RecordsByEventId.ContainsKey([string] $interval.startEventId)) { $RecordsByEventId[[string] $interval.startEventId] } else { $null }
@@ -2468,13 +2714,13 @@ function New-UsageRangePlan {
         }
     }
 
-    $plan = @{}
+    $plan = New-OrdinalHashtable
     foreach ($key in @($itemsByKey.Keys)) {
         $bucket = $UsageIndex[$key]
         $samples = @($bucket.samples)
         $items = @($itemsByKey[$key])
-        $firstIndexes = @{}
-        $lastExclusiveIndexes = @{}
+        $firstIndexes = New-OrdinalHashtable
+        $lastExclusiveIndexes = New-OrdinalHashtable
 
         $startCursor = 0
         foreach ($item in (Sort-UsageRangeItemsLinear -Items $items -TimeProperty 'startTime')) {
@@ -2869,19 +3115,15 @@ function Get-UsageBoundaryResult {
 function Get-UsageAttributionKey {
     param([Parameter(Mandatory)] [object] $Evidence)
 
-    return @(
-        [string] $Evidence.role
-        [string] $Evidence.workerId
-        [string] $Evidence.sessionId
-    ) -join '|'
+    return ConvertTo-IdentityTupleKey ([string] $Evidence.role) ([string] $Evidence.workerId) ([string] $Evidence.sessionId)
 }
 
 function Get-UsageEvidenceWindowKey {
     param([Parameter(Mandatory)] [object] $Evidence)
 
-    return @(
-        [string] $Evidence.startUtc
-        [string] $Evidence.endUtc
+    return ConvertTo-IdentityTupleKey `
+        ([string] $Evidence.startUtc) `
+        ([string] $Evidence.endUtc) `
         (ConvertTo-CanonicalJson -Value ([ordered]@{
                 source = $Evidence.source
                 streamId = $Evidence.streamId
@@ -2889,7 +3131,6 @@ function Get-UsageEvidenceWindowKey {
                 components = $Evidence.components
                 counterSemantics = $Evidence.counterSemantics
             }))
-    ) -join '|'
 }
 
 function Set-UsageEvidenceConflict {
@@ -3241,7 +3482,7 @@ $initialEvidencePartial = @($initialAttempts | Where-Object { $_.state -ne 'meas
 $correctionEvidencePartial = @($correctionAttempts | Where-Object { $_.state -ne 'measured' }).Count -gt 0
 $finalEvidencePartial = @($finalAttempts | Where-Object { $_.state -ne 'measured' }).Count -gt 0
 $initialTaskRefs = @(Get-UniqueValuesLinear -Values @($initialAttempts | Where-Object { $null -ne $_.taskRef } | ForEach-Object { [string] $_.taskRef }))
-$recordsByTaskRef = @{}
+$recordsByTaskRef = New-OrdinalHashtable
 foreach ($record in @($records)) {
     $taskRefValue = Get-PropertyValue $record.Event 'taskRef'
     if ($null -eq $taskRefValue) { continue }
@@ -3254,7 +3495,7 @@ foreach ($record in @($records)) {
 foreach ($taskRefKey in @($recordsByTaskRef.Keys)) {
     $recordsByTaskRef[$taskRefKey] = @(Sort-RecordsByTimeLinear -Records @($recordsByTaskRef[$taskRefKey]))
 }
-$initialAttemptsByTaskRef = @{}
+$initialAttemptsByTaskRef = New-OrdinalHashtable
 foreach ($attempt in @($initialAttempts)) {
     $taskRefKey = [string] $attempt.taskRef
     if (-not $initialAttemptsByTaskRef.ContainsKey($taskRefKey)) {
@@ -3360,6 +3601,9 @@ $metadataStoryId = if ($storyIds.Count -eq 1) { [int] $storyIds[0] } else { $nul
 if (-not [string]::IsNullOrWhiteSpace($MetadataPath) -and ($null -eq $metadataRunId -or $null -eq $metadataProjectId -or $null -eq $metadataStoryId)) {
     throw [System.ArgumentException]::new('setup_metadata_conflict: metadata requires one unambiguous run/project/story binding')
 }
+if (-not [string]::IsNullOrWhiteSpace($UsageMetadataPath) -and ($null -eq $metadataRunId -or $null -eq $metadataProjectId -or $null -eq $metadataStoryId)) {
+    throw [System.ArgumentException]::new('usage_metadata_conflict: observed role token metadata requires one unambiguous run/project/story binding')
+}
 $setupMetadata = if ([string]::IsNullOrWhiteSpace($MetadataPath)) {
     Get-SetupMetadata -Path $null -RunId ([string] $metadataRunId) -ProjectId ([int] $metadataProjectId) -StoryId ([int] $metadataStoryId)
 }
@@ -3367,6 +3611,11 @@ else {
     Get-SetupMetadata -Path $MetadataPath -RunId $metadataRunId -ProjectId $metadataProjectId -StoryId $metadataStoryId
 }
 $modelsAndReasoningMetric = New-SetupMetadataMetric -SetupMetadata $setupMetadata
+$observedUsageMetadata = Get-ObservedRoleUsageMetadata -Path $UsageMetadataPath -RunId ([string] $metadataRunId) -ProjectId ([int] $metadataProjectId) -StoryId ([int] $metadataStoryId)
+$observedImplementerTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'implementer' }
+$observedReviewerTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'reviewer' }
+$observedCoordinatorTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'coordinator' }
+$observedTotalTokenMetric = New-ObservedTotalUsageMetric -RoleMetrics @($observedImplementerTokenMetric, $observedReviewerTokenMetric, $observedCoordinatorTokenMetric)
 $tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals)
 
 $eventReviewedHeadCandidates = @(Get-UniqueValuesLinear -Values @($prReady | ForEach-Object { [string] (Get-PropertyValue $_.Event.pullRequest 'reviewedHead') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))
@@ -3405,6 +3654,7 @@ $reportLimitations = @(
     'Unknown values remain null; unavailable evidence is never treated as zero.'
     if ([string] $setupMetadata.state -eq 'unavailable') { 'Role model and reasoning-effort profiles are unavailable because no validated setup metadata input was supplied.' }
     if ($comparisonMetrics.changedFiles.state -eq 'unavailable' -or $comparisonMetrics.linesAdded.state -eq 'unavailable' -or $comparisonMetrics.linesDeleted.state -eq 'unavailable') { 'Git comparison metrics require an explicit valid base revision, reviewed HEAD, and repository path.' }
+    if ($null -eq $observedUsageMetadata) { 'Observed role token totals require the incremental collector output; event-level usage remains separately reported.' }
 )
 
 $report = [ordered]@{
@@ -3427,6 +3677,10 @@ $report = [ordered]@{
         reviewTokens = $reviewTokenMetric
         coordinationTokens = $coordinationTokenMetric
         totalTokens = $totalTokenMetric
+        observedImplementerTokens = $observedImplementerTokenMetric
+        observedReviewerTokens = $observedReviewerTokenMetric
+        observedCoordinatorTokens = $observedCoordinatorTokenMetric
+        observedTotalTokens = $observedTotalTokenMetric
         tasksCompleted = $tasksCompletedMetric
         initialTaskReviews = $initialMetric
         correctionReReviews = $correctionMetric
@@ -3468,12 +3722,13 @@ $report = [ordered]@{
     provenance = [ordered]@{
         eventSchemaVersion = 1
         sourceCoverage = $sourceCoverage
-        sources = @('version-1 story performance event ledger', 'Git revision comparison when an explicit valid base and reviewed HEAD are supplied') + $(if ([string] $setupMetadata.state -ne 'unavailable') { @('validated setup assignment metadata') } else { @() })
+        sources = @('versioned story performance event ledger', 'Git revision comparison when an explicit valid base and reviewed HEAD are supplied') + $(if ([string] $setupMetadata.state -ne 'unavailable') { @('validated setup assignment metadata') } else { @() }) + $(if ($null -ne $observedUsageMetadata) { @('incremental observed role token metadata') } else { @() })
         setupMetadata = [ordered]@{
             state = [string] $setupMetadata.state
             recordCount = @($setupMetadata.records).Count
             coverage = [string] $setupMetadata.coverage
         }
+        observedRoleTokenUsage = if ($null -eq $observedUsageMetadata) { [ordered]@{ state = 'unavailable'; coverage = 'collector output was not supplied' } } else { [ordered]@{ state = [string] $observedUsageMetadata.coverage; boundary = $observedUsageMetadata.boundary; source = [string] $observedUsageMetadata.source } }
         limitations = @($reportLimitations)
     }
 }

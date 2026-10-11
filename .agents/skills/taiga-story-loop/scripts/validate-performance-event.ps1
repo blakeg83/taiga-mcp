@@ -93,7 +93,13 @@ function Wait-ForFiles {
 function Convert-EventToJson {
     param([Parameter(Mandatory)] [object] $Event)
 
-    return ($Event | ConvertTo-Json -Compress -Depth 20)
+    $payload = if ([int] $Event.schemaVersion -eq 2 -and [string] $Event.kind -ceq 'story_performance_event_frame') {
+        $Event.event
+    }
+    else {
+        $Event
+    }
+    return ($payload | ConvertTo-Json -Compress -Depth 20)
 }
 
 function Get-BloomBitPositionsForTest {
@@ -195,7 +201,7 @@ try {
     $first = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $externalRoot -RunId $runId -EventJson $validJson
     $firstResult = Get-RecorderResult -Invocation $first -Context 'valid event append'
     Assert-True ($first.ExitCode -eq 0) ("valid event append exits zero; exit=$($first.ExitCode); output=$($first.Output -join ' | ')")
-    $expectedFirstLedgerRead = [Text.UTF8Encoding]::new($false).GetByteCount($validJson + [Environment]::NewLine)
+    $expectedFirstLedgerRead = [IO.FileInfo]::new($ledgerPath).Length
     Assert-True ([long]$firstResult.scannedBytes -eq $expectedFirstLedgerRead -and [long]$firstResult.ledgerReadBytes -eq $expectedFirstLedgerRead) 'ordinary append must report the actual post-write ledger bytes read'
     Assert-True (Test-Path -LiteralPath $ledgerPath -PathType Leaf) 'valid append creates the external ledger'
 
@@ -253,9 +259,11 @@ try {
             transitionId = "bloom-saturation-new-$saturationIndex"
         }
         $saturationJson = Convert-EventToJson -Event $saturationEvent
+        $saturationLedgerPath = Join-Path (Join-Path $bloomSaturationRoot $bloomSaturationRunId) 'events.jsonl'
+        $saturationBeforeLength = if (Test-Path -LiteralPath $saturationLedgerPath -PathType Leaf) { [IO.FileInfo]::new($saturationLedgerPath).Length } else { 0L }
         $saturationAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomSaturationRoot -RunId $bloomSaturationRunId -EventJson $saturationJson
         $saturationResult = Get-RecorderResult -Invocation $saturationAppend -Context "Bloom false-positive append $saturationIndex"
-        $expectedSaturationRead = [Text.UTF8Encoding]::new($false).GetByteCount($saturationJson + [Environment]::NewLine)
+        $expectedSaturationRead = [IO.FileInfo]::new($saturationLedgerPath).Length - $saturationBeforeLength
         Assert-True ($saturationAppend.ExitCode -eq 0 -and $saturationResult.status -ceq 'appended' -and [bool]$saturationResult.bloomMayContainEvent -and [string]$saturationResult.scanMode -ceq 'incremental' -and [long]$saturationResult.scannedBytes -eq $expectedSaturationRead) "Bloom false-positive append $saturationIndex must remain ordinary bounded work"
     }
 
@@ -693,7 +701,10 @@ try {
         runId = $recoveryRunId
         transitionId = 'stale-checkpoint-catchup'
     }
-    [IO.File]::AppendAllText($recoveryLedgerPath, (Convert-EventToJson $staleLedgerEvent) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $staleCheckpointBytes = [IO.File]::ReadAllBytes($checkpointPath)
+    $staleAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $staleLedgerEvent)
+    Assert-True ($staleAppend.ExitCode -eq 0) 'stale checkpoint fixture appends through the active ledger format'
+    [IO.File]::WriteAllBytes($checkpointPath, $staleCheckpointBytes)
     $catchUpEvent = New-EventVariant -Base $validEvent -Changes @{
         eventId = 'synthetic-after-stale-checkpoint'
         runId = $recoveryRunId
@@ -702,7 +713,7 @@ try {
     $catchUp = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $catchUpEvent)
     $catchUpResult = Get-RecorderResult -Invocation $catchUp -Context 'stale checkpoint catch-up'
     Assert-True ($catchUp.ExitCode -eq 0 -and $catchUpResult.status -ceq 'appended') 'stale checkpoint catch-up appends safely'
-    Assert-True ([string] $catchUpResult.scanMode -ceq 'incremental' -and [long] $catchUpResult.scannedBytes -gt 0) 'stale checkpoint catch-up scans only the uncheckpointed suffix'
+    Assert-True ([string] $catchUpResult.scanMode -in @('incremental', 'cold_rebuild') -and [long] $catchUpResult.scannedBytes -gt 0) 'stale checkpoint catch-up scans the uncheckpointed suffix or safely rebuilds from the authoritative v2 head'
     $catchUpReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $staleLedgerEvent)
     $catchUpReplayResult = Get-RecorderResult -Invocation $catchUpReplay -Context 'stale checkpoint replay'
     Assert-True ($catchUpReplay.ExitCode -eq 0 -and $catchUpReplayResult.status -ceq 'noop') 'stale checkpoint catch-up preserves replay idempotency'
@@ -757,13 +768,13 @@ try {
     [IO.File]::Delete($individualIndexFiles[0].FullName)
     $missingIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
     $missingIndividualIndexReplayResult = Get-RecorderResult -Invocation $missingIndividualIndexReplay -Context 'missing individual index replay'
-    Assert-True ($missingIndividualIndexReplay.ExitCode -eq 0 -and $missingIndividualIndexReplayResult.status -ceq 'noop' -and [string] $missingIndividualIndexReplayResult.scanMode -ceq 'cold_rebuild') 'missing individual index replay rebuilds from the ledger and remains idempotent'
+    Assert-True ($missingIndividualIndexReplay.ExitCode -eq 0 -and $missingIndividualIndexReplayResult.status -ceq 'noop' -and [string] $missingIndividualIndexReplayResult.scanMode -ceq 'incremental') 'missing individual index replay repairs from bounded identity state and remains idempotent'
     Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing individual index replay does not duplicate the ledger record'
     $restoredIndividualIndexFile = @(Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0]
     [IO.File]::WriteAllText($restoredIndividualIndexFile.FullName, '{broken-index', [Text.UTF8Encoding]::new($false))
     $corruptIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
     $corruptIndividualIndexReplayResult = Get-RecorderResult -Invocation $corruptIndividualIndexReplay -Context 'corrupt individual index replay'
-    Assert-True ($corruptIndividualIndexReplay.ExitCode -eq 0 -and $corruptIndividualIndexReplayResult.status -ceq 'noop' -and [string] $corruptIndividualIndexReplayResult.scanMode -ceq 'cold_rebuild') 'corrupt individual index replay rebuilds from the ledger and remains idempotent'
+    Assert-True ($corruptIndividualIndexReplay.ExitCode -eq 0 -and $corruptIndividualIndexReplayResult.status -ceq 'noop' -and [string] $corruptIndividualIndexReplayResult.scanMode -ceq 'incremental') 'corrupt individual index replay repairs from bounded identity state and remains idempotent'
     $changedIndividualIndexEvent = New-EventVariant -Base $individualIndexEvent -Changes @{
         transitionId = 'individual-index-conflict'
     }
@@ -779,7 +790,7 @@ try {
     [IO.File]::WriteAllText($membershipFiles[0].FullName, '{invalid-membership', [Text.UTF8Encoding]::new($false))
     $missingIndexCorruptMembershipReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
     $missingIndexCorruptMembershipReplayResult = Get-RecorderResult -Invocation $missingIndexCorruptMembershipReplay -Context 'missing index corrupt membership replay'
-    Assert-True ($missingIndexCorruptMembershipReplay.ExitCode -eq 0 -and $missingIndexCorruptMembershipReplayResult.status -ceq 'noop' -and [string] $missingIndexCorruptMembershipReplayResult.scanMode -ceq 'cold_rebuild') 'missing index plus corrupt membership replay rebuilds before deciding idempotency'
+    Assert-True ($missingIndexCorruptMembershipReplay.ExitCode -eq 0 -and $missingIndexCorruptMembershipReplayResult.status -ceq 'noop' -and [string] $missingIndexCorruptMembershipReplayResult.scanMode -ceq 'incremental') 'missing index plus corrupt membership replay repairs from bounded identity state before deciding idempotency'
     Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing index plus corrupt membership replay never duplicates the ledger record'
 
     [IO.File]::Delete((Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0].FullName)
@@ -791,7 +802,7 @@ try {
     }
     $missingIndexCorruptMembershipConflict = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $missingIndexCorruptMembershipConflictEvent)
     $missingIndexCorruptMembershipConflictResult = Get-RecorderResult -Invocation $missingIndexCorruptMembershipConflict -Context 'missing index corrupt membership conflict'
-    Assert-True ($missingIndexCorruptMembershipConflict.ExitCode -eq 3 -and $missingIndexCorruptMembershipConflictResult.errorCategory -ceq 'conflicting_duplicate' -and [string] $missingIndexCorruptMembershipConflictResult.scanMode -ceq 'cold_rebuild') 'missing index plus corrupt membership conflict rebuilds before rejecting a conflicting replay'
+    Assert-True ($missingIndexCorruptMembershipConflict.ExitCode -eq 3 -and $missingIndexCorruptMembershipConflictResult.errorCategory -ceq 'conflicting_duplicate' -and [string] $missingIndexCorruptMembershipConflictResult.scanMode -ceq 'incremental') 'missing index plus corrupt membership conflict repairs from bounded identity state before rejecting a conflicting replay'
     Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing index plus corrupt membership conflict does not mutate the ledger'
 
     $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
@@ -898,7 +909,11 @@ try {
         }
         $concurrentLedgerPath = Join-Path $concurrentDirectory 'events.jsonl'
         $concurrentLines = @(Get-Content -LiteralPath $concurrentLedgerPath)
-        $concurrentIds = @($concurrentLines | ForEach-Object { ([string] (($_ | ConvertFrom-Json -DateKind String).eventId)) })
+        $concurrentIds = @($concurrentLines | ForEach-Object {
+                $parsed = $_ | ConvertFrom-Json -Depth 50 -DateKind String
+                if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') { $parsed = $parsed.event }
+                [string] $parsed.eventId
+            })
         Assert-True ($concurrentLines.Count -eq 2) 'concurrent distinct events persist as exactly two lines'
         Assert-True (@($concurrentIds | Sort-Object -Unique).Count -eq 2) 'concurrent distinct events persist once each'
         Assert-True ($concurrentIds -contains [string] $concurrentEventA.eventId) 'concurrent event A is present'
@@ -930,7 +945,11 @@ try {
         Assert-True (@($sameIdStatuses | Where-Object { $_ -ceq 'appended' }).Count -eq 1) 'concurrent identical replay has one append'
         Assert-True (@($sameIdStatuses | Where-Object { $_ -ceq 'noop' }).Count -eq 1) 'concurrent identical replay has one no-op'
         $finalConcurrentLines = @(Get-Content -LiteralPath $concurrentLedgerPath)
-        $finalConcurrentIds = @($finalConcurrentLines | ForEach-Object { ([string] (($_ | ConvertFrom-Json -DateKind String).eventId)) })
+        $finalConcurrentIds = @($finalConcurrentLines | ForEach-Object {
+                $parsed = $_ | ConvertFrom-Json -Depth 50 -DateKind String
+                if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') { $parsed = $parsed.event }
+                [string] $parsed.eventId
+            })
         Assert-True ($finalConcurrentLines.Count -eq 3) 'concurrent identical replay persists one additional line'
         Assert-True (@($finalConcurrentIds | Where-Object { $_ -ceq [string] $sameIdEvent.eventId }).Count -eq 1) 'concurrent identical replay persists exactly one event'
     }

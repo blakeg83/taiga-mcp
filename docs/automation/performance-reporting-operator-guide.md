@@ -1,6 +1,6 @@
 # Story performance reporting operator guide
 
-This guide turns the version-1 performance contract into a safe operator
+This guide turns the versioned performance contract into a safe operator
 runbook. It is the Task #160 documentation artifact for epic #140 and story
 #145. The examples are sanitized synthetic fixtures; they are not live Taiga,
 GitHub, Codex, provider, token, or release evidence.
@@ -33,16 +33,18 @@ numeric value.
 
 | Source | Evidence it can support | Important limitation |
 | --- | --- | --- |
-| Version-1 event ledger at `events.jsonl` | Authoritative lifecycle identities, UTC transition boundaries, review attempts, explicit usage samples, and provenance. | It records only what the caller supplied; it does not discover worker counters or infer missing transitions. |
+| Version-2 event ledger at `events.jsonl` (version-1 remains cold-only) | Authoritative lifecycle identities, UTC transition boundaries, review attempts, explicit usage samples, and provenance. | It records only what the caller supplied; host-counter discovery is a separate incremental metadata collector. |
+| Observed-role token usage metadata | Attributable cumulative Codex session counters sampled at story boundaries. | It requires bound session evidence, complete-line coverage, known counter semantics, and reset-free deltas; account limits are never a substitute. |
 | Validated setup metadata | Role, worker/session identity, model, reasoning effort, effective time bounds, and profile changes. | Setup provenance is not usage telemetry. Missing setup metadata remains unavailable. |
 | Git base-to-reviewed-HEAD comparison | Changed files and line counts for an exact base and full reviewed HEAD. | A missing or invalid base/HEAD makes the comparison metric unavailable; no complexity score is inferred. |
 | Current Codex App/tool metadata | Capability and identity/status observations such as supported profiles or a bounded thread listing. | The inspected account-limit schema is shared-account data, not worker attribution; the bounded thread and goal probes did not expose per-worker token counters. |
 
-The current capability discovery is recorded in the reference linked above.
-The observed host metadata is labeled as identity/status metadata, and the
-synthetic unavailable and partial examples remain explicitly synthetic. Do
-not claim a live per-worker counter unless a later authorized probe supplies a
-source-backed, attributable stream and exact counter semantics.
+The dated capability discovery is recorded in the reference linked above. Its
+API probes did not expose per-worker counters, while the separate observed
+session collector can use authorized local JSONL evidence when role/session
+binding, counter semantics, and boundary coverage are explicit. The observed
+host metadata and synthetic unavailable/partial examples remain labeled by
+their evidence class; do not promote either into live usage telemetry.
 
 ## External storage, recovery, and cleanup
 
@@ -56,6 +58,10 @@ The recorder owns one run directory outside the source worktree:
   events.jsonl.bloom
   events.jsonl.index/       # one hashed event-index entry per event identity
   events.jsonl.membership/  # event-membership markers
+  events.jsonl.identity/    # committed identity claims with ledger ranges
+  events.jsonl.authority/   # bounded authoritative ledger-range claims
+  events.jsonl.catalog/     # integrity-checked exact event-ID witnesses
+  events.jsonl.integrity/   # authenticated event-ID trie and v2 content-chain digest
 ```
 
 The lock is transient and is also owned by the run directory. Reports are
@@ -66,19 +72,60 @@ gets a new retained report instead of overwriting the previous one.
 Recovery rules are deliberately conservative:
 
 - Complete JSONL lines are authoritative and are never rewritten to repair a
-  tail or sidecar.
+  tail or sidecar. The authority claim records the first complete ledger range;
+  index, membership, and identity entries are repairable projections. A
+  committed claim is used only after its stored line/start/end range is read
+  directly from the complete ledger and its event ID, binding, and canonical
+  payload match.
+- New runs use v2 frames: the canonical v1 event is wrapped with an acyclic
+  commit anchor binding the previous anchor, orphan suffix digest, canonical
+  event digest, content-chain digest, exact frame byte length, record ordinal,
+  and trie root. The durable frame is published before derived projections.
+  The current committed head is found from a bounded tail read, not from a
+  historical checkpoint offset.
+- Version-1 raw ledgers are readable but cold-only. They are not implicitly
+  migrated or reset; the recorder preserves their legacy append format.
 - An interrupted tail, invalid record, foreign binding, duplicate, or
   conflicting event is surfaced through safe diagnostics containing identity,
   line/offset, length, and digest information rather than raw payload text.
 - Replaying the same event ID with the same canonical payload is a no-op. A
   changed payload is a conflict; the first complete record remains
   authoritative.
-- Missing, stale, truncated, or corrupt checkpoint/index/membership/Bloom
-  state causes a cold reconstruction from the existing ledger. That recovery
-  path is bounded by the existing ledger bytes and valid records, then pays
-  its comparison-based grouping, line/start-offset ordering,
-  canonical-payload deduplication, and index/membership/Bloom rebuild costs.
-  Normal append paths do not repeat that full reconstruction.
+- Missing, stale, truncated, or corrupt checkpoint/index/membership/identity/
+  authority/catalog/integrity/Bloom state causes a cold reconstruction from
+  the existing ledger when the affected state cannot be repaired from a
+  validated complete range. The catalog remains an integrity-checked,
+  hash-addressed exact event-ID witness. The checkpoint-anchored integrity
+  trie is the exact bounded membership/absence proof: if it knows an event but
+  all mutable per-event projections are absent or renamed, the recorder
+  cold-rebuilds instead of treating the event as unseen; a missing or corrupt
+  trie node also forces cold recovery. A valid absence proof leaves an unseen
+  Bloom-positive event eligible for the ordinary incremental append path.
+  Pending identity claims are reconciled with complete authority before replay
+  decisions. That recovery path is bounded by the existing ledger bytes and
+  valid records, then pays its ordinal identity grouping, line/start-offset
+  ordering, canonical-payload deduplication, and
+  index/membership/identity/authority/catalog/integrity-trie/Bloom rebuild
+  costs. Normal append paths do not repeat that full ledger reconstruction.
+- A Bloom positive is only a hint. A valid authenticated trie absence proof
+  permits the unseen event to append through the ordinary incremental path;
+  healthy Bloom collisions must not make recording unavailable. A missing or
+  corrupt proof path is recovery evidence, not proof of absence, and causes a
+  cold rebuild. A malformed or range-unverifiable committed claim is likewise
+  repaired from the ledger or returned as a safe error.
+  `ledgerReadBytes` includes successful and partially consumed failed bounded
+  range validations, including the identity/index reads on exact replay and the
+  extra validation performed during cold recovery.
+- The v2 checkpoint and authenticated trie root bind the committed content-chain
+  digest and record count. Physical length remains a frame/offset fact rather
+  than trie content. A stale/intermediate/alternate root, malformed or
+  incomplete suffix, or later complete suffix growth is recovery evidence and
+  cannot authorize incremental catch-up; orphan bytes may be bound into the
+  next committed frame. Synthetic validator results also report
+  `integrityNodeReadCount`, `integrityNodeReadBytes`,
+  `integrityNodeWriteCount`, and `integrityNodeWriteBytes`; retain those values
+  as implementation-cost evidence rather than treating them as a production
+  SLA.
 - A measurement or report I/O failure does not invalidate a successfully
   completed implementation, review, or PR-readiness transition. Reconcile
   before considering any retry; never blindly replay an ambiguous write.
@@ -163,6 +210,31 @@ metadata. Keep the report paths outside the repository:
   -OutputPath (Join-Path $reportDirectory 'story-report.json') `
   -MarkdownPath (Join-Path $reportDirectory 'story-report.md')
 ```
+
+When the observed-role evidence file names local Codex session JSONL sources,
+update the collector cursor and report its metadata alongside the story report:
+
+```powershell
+& pwsh -NoProfile -File (Join-Path $repoRoot 'scripts/collect-role-token-usage.ps1') `
+  -ObservedEvidencePath '<external-observed-role-token-usage.json>' `
+  -EventsPath $eventsPath `
+  -StatePath '<external-role-usage-cursor.json>' `
+  -OutputPath '<external-role-usage.json>' `
+  -Scope '<story-or-run-scope>'
+
+& pwsh -NoProfile -File (Join-Path $repoRoot 'scripts/get-story-performance.ps1') `
+  -EventsPath $eventsPath -UsageMetadataPath '<external-role-usage.json>' `
+  -OutputPath (Join-Path $reportDirectory 'story-report.json')
+```
+
+The collector reads only new complete lines after the saved byte cursor on
+subsequent runs. It verifies each real local source with its
+`session_meta.payload.id`, reads cumulative counters from `event_msg` records
+whose `payload.type` is `token_count` and whose counter is
+`payload.info.total_token_usage`, detects file or counter resets, subtracts
+boundary snapshots once per disjoint session, and
+marks nearest-line or incomplete boundaries as partial. It never sums
+cumulative notifications, uses account-limit windows, or exports prompt text.
 
 Run the deterministic checks from the repository root:
 
@@ -289,7 +361,7 @@ retain the full metric set and the exact source/coverage/calculation fields.
 | Same event ID and canonical payload replayed | Idempotent re-observation | Continue; do not increment counts or write a second event. |
 | Same event ID with changed payload | Immutable identity conflict | Preserve the first record, retain the diagnostic, reconcile the source; do not overwrite or blindly replay. |
 | Missing/reversed/ambiguous boundary | The affected interval cannot be calculated safely | Mark that metric partial or unavailable; do not subtract other phases to estimate it. |
-| Missing, stale, or corrupt sidecar | Derived recovery state is not trustworthy | Allow the next recorder operation to cold-rebuild from complete ledger records; inspect safe diagnostics if it fails. |
+| Missing, stale, or corrupt sidecar | Derived recovery state may not describe the complete ledger | The recorder first validates authority/index/identity claims by bounded direct ledger range; it repairs mutable sidecars from that record, reconciles pending claims, cold-rebuilds when required, or returns a safe error. An exact sidecar miss for an unseen Bloom-positive ID remains an ordinary append. |
 | Foreign run/story binding | The ledger belongs to another scope | Stop that append, choose the correct run root, and keep the existing ledger untouched. |
 | Report artifact already exists for the same identity | Immutable artifact collision | Compare/reconcile the exact identity; never overwrite a retained report. |
 | Recorder or renderer I/O failure | Measurement path failed, workflow authority did not | Preserve the transition outcome, surface the limitation, and retry only after reconciliation. |

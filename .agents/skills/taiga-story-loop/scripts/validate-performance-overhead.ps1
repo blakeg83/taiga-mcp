@@ -422,6 +422,14 @@ function Get-SourceBoundAnalysis {
     $recorderIncrementalLine = @($recorderLines | Select-String -Pattern 'Read-FileByteRange -LedgerPath \$LedgerPath -StartOffset' | Select-Object -First 1)
     $recorderColdLine = @($recorderLines | Select-String -Pattern 'Write-IndexFromFullLedger -IndexDirectory' | Select-Object -First 1)
     $recorderCheckpointLine = @($recorderLines | Select-String -Pattern 'Read-LedgerCheckpoint' | Select-Object -First 1)
+    $recorderRangeValidationLine = @($recorderLines | Select-String -Pattern 'function Read-LedgerRecordAtOffsets' | Select-Object -First 1)
+    $recorderAuthorityLine = @($recorderLines | Select-String -Pattern 'function Get-LedgerAuthorityDirectory' | Select-Object -First 1)
+    $recorderCatalogLine = @($recorderLines | Select-String -Pattern 'function Get-LedgerCatalogDirectory' | Select-Object -First 1)
+    $recorderCatalogReadLine = @($recorderLines | Select-String -Pattern 'Read-CatalogEntry -CatalogDirectory \$catalogDirectory' | Select-Object -First 1)
+    $recorderCatalogWriteLine = @($recorderLines | Select-String -Pattern 'Write-CatalogEntry -CatalogDirectory \$catalogDirectory' | Select-Object -First 1)
+    $recorderIntegrityLine = @($recorderLines | Select-String -Pattern 'function Get-LedgerIntegrityDirectory' | Select-Object -First 1)
+    $recorderIntegrityReadLine = @($recorderLines | Select-String -Pattern 'Read-IntegrityMembership -IntegrityDirectory' | Select-Object -First 1)
+    $recorderIntegrityWriteLine = @($recorderLines | Select-String -Pattern '\$integrityRootHash = Update-IntegrityFromRecords' | Select-Object -First 1)
     $aggregateReadLine = @($aggregatorLines | Select-String -Pattern 'Read-EventLedger -Path \$resolvedEventsPath' | Select-Object -First 1)
     $aggregateOverlapLine = @($aggregatorLines | Select-String -Pattern 'Add-OverlapAnomalies -Intervals' | Select-Object -First 1)
     $aggregateUsageIndexLine = @($aggregatorLines | Select-String -Pattern 'New-UsageSampleIndex -Records' | Select-Object -First 1)
@@ -436,7 +444,7 @@ function Get-SourceBoundAnalysis {
     $aggregateGrowingTaskMembershipLines = @($aggregatorLines | Select-String -Pattern '\$declaredTaskRefs\.Contains|\$observedTaskRefs\.Contains|-notin \$observedTaskRefs|-notin \$declaredTaskRefs|-in \$declaredTaskRefs|-notin \$acceptedTaskRefs|-notin \$initialTaskRefValues')
     $aggregateTaskSetLines = @($aggregatorLines | Select-String -Pattern 'HashSet\[int\]')
     $aggregateKeySeenLines = @($aggregatorLines | Select-String -Pattern 'KeySeen|HashSet\[string\]')
-    Assert-True ($recorderIncrementalLine.Count -eq 1 -and $recorderColdLine.Count -eq 1 -and $recorderCheckpointLine.Count -eq 1) 'source analysis must find the recorder incremental/checkpoint and cold-rebuild paths'
+    Assert-True ($recorderIncrementalLine.Count -eq 1 -and $recorderColdLine.Count -eq 1 -and $recorderCheckpointLine.Count -eq 1 -and $recorderRangeValidationLine.Count -eq 1 -and $recorderAuthorityLine.Count -eq 1 -and $recorderCatalogLine.Count -eq 1 -and $recorderCatalogReadLine.Count -eq 1 -and $recorderCatalogWriteLine.Count -eq 1 -and $recorderIntegrityLine.Count -eq 1 -and $recorderIntegrityReadLine.Count -ge 1 -and $recorderIntegrityWriteLine.Count -ge 1) 'source analysis must find the recorder incremental/checkpoint, cold-rebuild, bounded-range-validation, authority, exact-catalog, and checkpoint-anchored integrity-trie paths'
     Assert-True ($aggregateReadLine.Count -eq 1 -and $aggregateOverlapLine.Count -eq 1 -and $aggregateUsageIndexLine.Count -eq 1 -and $aggregateUsageResolveLine.Count -eq 1 -and $aggregateLinearOrderLine.Count -eq 1 -and $aggregateRangePlanLine.Count -eq 1 -and $aggregateBinaryUsageSearchLines.Count -eq 0 -and $aggregateInputComparisonSortLines.Count -eq 0 -and $aggregateLinearIssueQueryLines.Count -ge 5 -and $aggregateHiddenGroupLines.Count -eq 0 -and $aggregateLinearGroupLines.Count -ge 3 -and $aggregateGrowingTaskMembershipLines.Count -eq 0 -and $aggregateTaskSetLines.Count -ge 4 -and $aggregateKeySeenLines.Count -ge 4) 'source analysis must find linear aggregator ordering/grouping/range-sweep/issue-query/task-membership paths without input-sized comparison sorts, hidden group ordering, growing-list membership scans, or binary usage searches'
     $keyOrderProbe = @(Invoke-ProductionKeyOrderBoundProbe -AggregatorPath $AggregatorPath)
     return [ordered]@{
@@ -447,13 +455,21 @@ function Get-SourceBoundAnalysis {
             normalPath = [ordered]@{
                 checkpointLine = [int]$recorderCheckpointLine[0].LineNumber
                 incrementalReadLine = [int]$recorderIncrementalLine[0].LineNumber
-                complexity = 'O(appended bytes + one event-index marker + one exact membership marker + one fixed-size Bloom membership filter + one checkpoint replacement) per ordinary append; no prior-ledger scan'
-                ledgerRead = 'incremental byte range from the complete-record checkpoint offset'
+                rangeValidationLine = [int]$recorderRangeValidationLine[0].LineNumber
+                authorityLine = [int]$recorderAuthorityLine[0].LineNumber
+                catalogLine = [int]$recorderCatalogLine[0].LineNumber
+                catalogReadLine = [int]$recorderCatalogReadLine[0].LineNumber
+                catalogWriteLine = [int]$recorderCatalogWriteLine[0].LineNumber
+                integrityLine = [int]$recorderIntegrityLine[0].LineNumber
+                integrityReadLine = [int]$recorderIntegrityReadLine[0].LineNumber
+                integrityWriteLine = [int]$recorderIntegrityWriteLine[0].LineNumber
+                complexity = 'O(appended bytes + one event-index marker + one exact membership marker + one committed identity marker + one committed authority marker + one hash-addressed exact-catalog marker + one fixed-depth authenticated integrity-trie proof/path update + one fixed-size Bloom membership filter + one fixed-size checkpoint replacement) per ordinary append; the trie read/write node counts and bytes are reported as measured synthetic cost evidence; no prior-ledger scan or growing-catalog/directory traversal'
+                ledgerRead = 'incremental byte range from the complete-record checkpoint offset, plus bounded validation of any claimed identity/index/authority ranges'
             }
             recoveryPath = [ordered]@{
                 coldRebuildLine = [int]$recorderColdLine[0].LineNumber
-                complexity = 'O(existing ledger bytes + valid records) for the cold ledger read/reconstruction, plus input-sized comparison grouping, line/start-offset ordering and canonical-payload deduplication, followed by index/membership rebuild; only this recovery path performs that work when checkpoint/index/membership/Bloom state is missing, stale, truncated, or corrupt'
-                costComponents = @('linear existing-ledger byte/valid-record read', 'comparison-based recovered-record grouping and line/start-offset ordering', 'comparison-based canonical-payload deduplication', 'index/membership/Bloom/checkpoint reconstruction')
+                complexity = 'O(existing ledger bytes + valid records) for the cold ledger read/reconstruction, plus input-sized ordinal grouping, line/start-offset ordering and canonical-payload deduplication, followed by index/membership/identity/authority/catalog/integrity-trie/Bloom rebuild and bounded range validation; trie node reads/writes and bytes are measured separately; only this recovery path performs that work when checkpoint/index/membership/identity/authority/catalog/integrity/Bloom state is missing, stale, truncated, or corrupt'
+                costComponents = @('linear existing-ledger byte/valid-record read', 'ordinal recovered-record grouping and line/start-offset ordering', 'ordinal canonical-payload deduplication', 'index/membership/identity/authority/catalog/integrity-trie/Bloom/checkpoint reconstruction', 'bounded recovered-event range validation')
                 ledgerAuthoritative = $true
             }
             constantHookWorkClaim = 'ordinary append bounded; cold rebuild separately disclosed'
@@ -470,7 +486,7 @@ function Get-SourceBoundAnalysis {
             keyOrderProbe = $keyOrderProbe
         }
         productionThreshold = 'unavailable_without an authorized production workload and environment-controlled benchmark'
-        limitation = 'normal recorder appends are bounded by appended event/index/membership/checkpoint bytes; cold catch-up remains separate recovery work with its input-sized comparison grouping/ordering/deduplication costs explicitly disclosed, while aggregation ordering and usage-boundary work is linear in its input records, samples, and intervals'
+            limitation = 'normal recorder appends are bounded by appended event/index/membership/identity/authority/checkpoint bytes plus bounded claimed-range validation; cold catch-up remains separate recovery work with its input-sized ordinal grouping/ordering/deduplication costs explicitly disclosed, while aggregation ordering and usage-boundary work is linear in its input records, samples, and intervals'
     }
 }
 
@@ -711,6 +727,14 @@ function Invoke-ProcessingScalingEvidence {
         $ledgerBytes = [IO.FileInfo]::new($ledgerPath).Length
         $ledgerLines = @([IO.File]::ReadAllLines($ledgerPath)).Count
         Assert-True ($ledgerLines -eq $size) "scaling ledger $runId must contain exactly $size complete records"
+        $checkpointPath = Join-Path (Join-Path $ExternalRoot $runId) 'events.jsonl.checkpoint.json'
+        $catalogDirectory = Join-Path (Join-Path $ExternalRoot $runId) 'events.jsonl.catalog'
+        $catalogEntries = @(Get-ChildItem -LiteralPath $catalogDirectory -Filter '*.json' -File)
+        $catalogBytes = if ($catalogEntries.Count -gt 0) { [long](($catalogEntries | Measure-Object -Property Length -Sum).Sum) } else { 0L }
+        $integrityNodeDirectory = Join-Path (Join-Path (Join-Path $ExternalRoot $runId) 'events.jsonl.integrity') 'nodes'
+        $integrityNodes = @(Get-ChildItem -LiteralPath $integrityNodeDirectory -Filter '*.json' -File)
+        $integrityBytes = if ($integrityNodes.Count -gt 0) { [long](($integrityNodes | Measure-Object -Property Length -Sum).Sum) } else { 0L }
+        Assert-True ($catalogEntries.Count -eq $size -and $integrityNodes.Count -ge $size -and [IO.FileInfo]::new($checkpointPath).Length -lt 512) "scaling recorder $runId must retain one exact catalog entry per event, a bounded authenticated integrity trie, and a fixed-size checkpoint"
         $timer = [Diagnostics.Stopwatch]::StartNew()
         $aggregateOutput = & pwsh -NoProfile -File $AggregatorPath -EventsPath $ledgerPath -ReviewMode per_task 2>&1
         $aggregateExitCode = [int]$LASTEXITCODE
@@ -725,6 +749,15 @@ function Invoke-ProcessingScalingEvidence {
                 recorderLastScanBytes = [long]$lastRecorder.scannedBytes
                 recorderLastScanMode = [string]$lastRecorder.scanMode
                 recorderCheckpointPath = [string]$lastRecorder.checkpointPath
+                recorderCheckpointBytes = [long][IO.FileInfo]::new($checkpointPath).Length
+                recorderCatalogEntryCount = [int]$catalogEntries.Count
+                recorderCatalogBytes = $catalogBytes
+                recorderIntegrityNodeCount = [int]$integrityNodes.Count
+                recorderIntegrityBytes = $integrityBytes
+                recorderIntegrityNodeReadCount = [long]$lastRecorder.integrityNodeReadCount
+                recorderIntegrityNodeReadBytes = [long]$lastRecorder.integrityNodeReadBytes
+                recorderIntegrityNodeWriteCount = [long]$lastRecorder.integrityNodeWriteCount
+                recorderIntegrityNodeWriteBytes = [long]$lastRecorder.integrityNodeWriteBytes
                 aggregatorDurationMilliseconds = [math]::Round($timer.Elapsed.TotalMilliseconds, 3)
                 validEventCount = [int]$report.coverage.validEventCount
             })
@@ -736,6 +769,11 @@ function Invoke-ProcessingScalingEvidence {
     foreach ($result in @($results | Where-Object { [int]$_.size -gt 1 })) {
         Assert-True ([string]$result.recorderLastScanMode -ceq 'incremental') "scaling recorder $($result.size) append must use the incremental path"
     }
+    foreach ($result in @($results)) {
+        Assert-True ([long]$result.recorderIntegrityNodeReadCount -gt 0 -and [long]$result.recorderIntegrityNodeReadBytes -gt 0 -and [long]$result.recorderIntegrityNodeWriteCount -gt 0 -and [long]$result.recorderIntegrityNodeWriteBytes -gt 0) "scaling recorder $($result.size) append must report measured authenticated-trie node reads/writes and bytes"
+    }
+    $checkpointSizes = @($results | ForEach-Object { [long]$_.recorderCheckpointBytes })
+    Assert-True ((($checkpointSizes | Measure-Object -Maximum).Maximum - ($checkpointSizes | Measure-Object -Minimum).Minimum) -lt 64) 'scaling checkpoints must remain fixed-size rather than serializing a growing event catalog'
     return @($results)
 }
 
@@ -790,7 +828,7 @@ try {
     $scalingEvidence = Invoke-ProcessingScalingEvidence -ExternalRoot $externalRoot -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
     $denseScalingEvidence = Invoke-DenseProcessingScalingEvidence -ExternalRoot $externalRoot -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
     $sourceBounds = Get-SourceBoundAnalysis -RecorderPath $recorderPath -AggregatorPath $aggregatorPath
-    Assert-True ([string]$sourceBounds.recorder.constantHookWorkClaim -ceq 'ordinary append bounded; cold rebuild separately disclosed' -and [string]$sourceBounds.recorder.recoveryPath.complexity -match 'comparison.*deduplication.*index/membership' -and [string]$sourceBounds.aggregator.processingClaim -ceq 'linear_ledger_scan_with_linear_index_and_usage_sweeps' -and [string]$sourceBounds.state -ceq 'bounded') 'source bounds must prove bounded normal recording, disclose cold-recovery comparison costs, and prove linear ledger aggregation'
+    Assert-True ([string]$sourceBounds.recorder.constantHookWorkClaim -ceq 'ordinary append bounded; cold rebuild separately disclosed' -and [string]$sourceBounds.recorder.recoveryPath.complexity -match 'ordinal.*deduplication.*index/membership/identity.*integrity-trie' -and [string]$sourceBounds.aggregator.processingClaim -ceq 'linear_ledger_scan_with_linear_index_and_usage_sweeps' -and [string]$sourceBounds.state -ceq 'bounded') 'source bounds must prove bounded normal recording, disclose cold-recovery ordinal and integrity-trie costs, and prove linear ledger aggregation'
 
     $negativeControls = @()
     $changedOutcomeTrace = Copy-JsonObject -Value $candidateSamples[0].trace
@@ -820,7 +858,7 @@ try {
         [ordered]@{ scenario = 'validator-suite'; setup = 'all checked-in validate-*.ps1 files except this orchestrator'; action = 'run from repository root in fresh PowerShell processes'; expected = 'every validator exits 0'; observed = "$($validatorResults.Count) validators exited 0"; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'matched workflow controls'; setup = 'same automatic-review state machine, three disabled and three enabled cold samples'; action = 'derive transitions/messages/agents/polling/measurement-only counts from actual traces'; expected = 'same outcome and operation counts; only declared instrumentation helpers appear'; observed = 'observed traces matched; enabled recorder/aggregator calls and bytes recorded'; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'helper duration'; setup = 'local monotonic Stopwatch, three samples per control, no sleeps'; action = 'measure control and enabled helper durations'; expected = 'actual samples with conditions, not a fixed-clock percentage'; observed = 'baseline/candidate control durations and candidate helper samples recorded'; evidence = 'automated_assertion'; status = 'passed' },
-        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection plus recorder/aggregator runs at ledger sizes 1, 8, and 32 and dense task/usage runs at 4, 16, and 32 tasks'; action = 'report normal/recovery/ordering costs separately and exercise hash-backed grouping/membership plus overlapping usage paths'; expected = 'ordinary append uses incremental checkpoint/index work; cold recovery comparison costs are disclosed separately; aggregation has no pairwise or per-interval full-ledger scan'; observed = "scaling sizes=$((@($scalingEvidence | ForEach-Object { $_.size }) -join ',')); last recorder scans=$((@($scalingEvidence | ForEach-Object { $_.recorderLastScanBytes }) -join ',')); dense tasks=$((@($denseScalingEvidence | ForEach-Object { $_.taskCount }) -join ',')); dense aggregator samples=$((@($denseScalingEvidence | ForEach-Object { $_.aggregatorDurationMilliseconds }) -join ',')); key-order hash bound, explicit task-membership/grouping guards and cold-recovery comparison-cost disclosure passed; normal recorder path, cold rebuild, hash-backed grouping and dense usage overlap are distinguished"; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'processing bounds'; setup = 'source inspection plus recorder/aggregator runs at ledger sizes 1, 8, and 32 and dense task/usage runs at 4, 16, and 32 tasks'; action = 'report normal/recovery/ordering costs separately and exercise hash-backed grouping/membership plus overlapping usage paths'; expected = 'ordinary append uses incremental checkpoint/index/catalog work with one hash-addressed exact-catalog lookup/update and one fixed-depth authenticated integrity proof/path update; checkpoint size stays fixed; cold recovery comparison costs are disclosed separately; aggregation has no pairwise or per-interval full-ledger scan'; observed = "scaling sizes=$((@($scalingEvidence | ForEach-Object { $_.size }) -join ',')); last recorder scans=$((@($scalingEvidence | ForEach-Object { $_.recorderLastScanBytes }) -join ',')); checkpoint bytes=$((@($scalingEvidence | ForEach-Object { $_.recorderCheckpointBytes }) -join ',')); catalog entries=$((@($scalingEvidence | ForEach-Object { $_.recorderCatalogEntryCount }) -join ',')); integrity nodes=$((@($scalingEvidence | ForEach-Object { $_.recorderIntegrityNodeCount }) -join ',')); trie reads=$((@($scalingEvidence | ForEach-Object { $_.recorderIntegrityNodeReadCount }) -join ',')); trie read bytes=$((@($scalingEvidence | ForEach-Object { $_.recorderIntegrityNodeReadBytes }) -join ',')); trie writes=$((@($scalingEvidence | ForEach-Object { $_.recorderIntegrityNodeWriteCount }) -join ',')); trie write bytes=$((@($scalingEvidence | ForEach-Object { $_.recorderIntegrityNodeWriteBytes }) -join ',')); dense tasks=$((@($denseScalingEvidence | ForEach-Object { $_.taskCount }) -join ',')); dense aggregator samples=$((@($denseScalingEvidence | ForEach-Object { $_.aggregatorDurationMilliseconds }) -join ',')); source-checked one-entry catalog visits, fixed-depth integrity proof/update, fixed checkpoints, measured trie I/O counts/bytes, key-order hash bound, explicit task-membership/grouping guards and cold-recovery comparison-cost disclosure passed"; evidence = 'automated_assertion'; status = 'passed' },
         [ordered]@{ scenario = 'attributable usage'; setup = 'current host capability matrix'; action = 'retain explicit unavailable state'; expected = 'no token estimate from account limits, text length, file size, event count, or timing'; observed = 'baseline/candidate usageState=unavailable'; evidence = 'unavailable'; status = 'not_run' },
         [ordered]@{ scenario = 'negative controls'; setup = 'bypassed trace, extra message/agent/event, and missing baseline mutations'; action = 'evaluate observed-evidence contract'; expected = 'unsafe or incomparable evidence never passes'; observed = "all $($negativeControls.Count) controls rejected"; evidence = 'automated_assertion'; status = 'passed' }
     )

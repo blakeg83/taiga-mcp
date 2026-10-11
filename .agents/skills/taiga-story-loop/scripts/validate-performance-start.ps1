@@ -186,7 +186,11 @@ function Resolve-ResumeBinding {
     $events = [System.Collections.Generic.List[object]]::new()
     foreach ($line in $lines) {
         try {
-            [void]$events.Add(($line | ConvertFrom-Json -DateKind String))
+            $parsed = $line | ConvertFrom-Json -Depth 50 -DateKind String
+            if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') {
+                $parsed = $parsed.event
+            }
+            [void]$events.Add($parsed)
         }
         catch {
             return [pscustomobject]@{ State = 'unavailable'; Reason = 'ledger_event_invalid'; OccurredAtUtc = 'unavailable'; Authorization = 'unchanged' }

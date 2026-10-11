@@ -18,6 +18,17 @@ function Assert-True {
     if (-not $Condition) { throw "ASSERTION FAILED: $Message" }
 }
 
+function Test-BoundedLedgerRead {
+    param(
+        [Parameter(Mandatory)] [object] $Result,
+        [Parameter(Mandatory)] [long] $LedgerLength
+    )
+
+    $prefixBound = [long] [Math]::Min($LedgerLength, 128KB)
+    $upperBound = (3L * $prefixBound) + 8192L
+    return [long]$Result.ledgerReadBytes -gt 0 -and [long]$Result.ledgerReadBytes -le $upperBound
+}
+
 function Get-NullableText {
     param([AllowNull()] [object] $Value)
 
@@ -184,6 +195,26 @@ function Invoke-RecorderEvent {
     }
 }
 
+function Remove-RecorderEventProjections {
+    param(
+        [Parameter(Mandatory)] [string[]] $Directories,
+        [Parameter(Mandatory)] [string] $EventId
+    )
+
+    foreach ($directory in $Directories) {
+        $matches = @(Get-ChildItem -LiteralPath $directory -Filter '*.json' -File | Where-Object {
+                try {
+                    ([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json -Depth 30 -DateKind String).eventId -ceq $EventId
+                }
+                catch {
+                    $false
+                }
+            })
+        Assert-True ($matches.Count -eq 1) "event projection removal should find exactly one '$EventId' entry in $directory"
+        Remove-Item -LiteralPath $matches[0].FullName -Force
+    }
+}
+
 function Invoke-AutomaticReviewMeasurementScenario {
     param(
         [Parameter(Mandatory)] [string] $Path,
@@ -279,6 +310,8 @@ $usageSafetyLedger = Join-Path $root 'usage-safety-cases.jsonl'
 $scriptPath = Join-Path $PSScriptRoot 'get-story-performance.ps1'
 $recorderPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts\write-performance-event.ps1'))
 $recorderRoot = Join-Path $root 'external-ledgers'
+$recorderSource = [IO.File]::ReadAllText($recorderPath)
+Assert-True (-not $recorderSource.Contains('Get-JsonSidecarCount')) 'ordinary recording must not enumerate all JSON sidecars for a count-based integrity check'
 
 try {
     $revisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
@@ -301,6 +334,16 @@ try {
     )
     $events[-1].pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 143; reviewedHead = $revisionB }
     $ledger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId 'synthetic-task-152' -Events $events -RecorderPath $recorderPath
+    # This aggregation fixture intentionally exercises the legacy v1 reader
+    # with raw duplicate, foreign, and invalid lines. Recorder-created runs
+    # are v2, so unwrap its committed frames into a complete v1 ledger before
+    # appending those legacy fixture records.
+    $legacyEvents = @(Get-Content -LiteralPath $ledger | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object {
+            $record = $_ | ConvertFrom-Json -Depth 50 -DateKind String
+            if ([int]$record.schemaVersion -eq 2 -and [string]$record.kind -ceq 'story_performance_event_frame') { $record.event } else { $record }
+        })
+    $legacyText = (($legacyEvents | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 }) -join [Environment]::NewLine) + [Environment]::NewLine
+    [IO.File]::WriteAllText($ledger, $legacyText, [Text.UTF8Encoding]::new($false))
     $reviewReplay = New-Event -EventId 'review-start-replay' -EventType 'review_started' -OccurredAtUtc '2026-10-09T10:20:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'task-152-review' -ReviewRequestId 'task-152-request-1' -ReviewAttemptId 'task-152-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'
     $reviewReplay.transitionId = 'review-start'
     [void] (Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId 'synthetic-task-152' -Events @($reviewReplay) -RecorderPath $recorderPath)
@@ -1074,6 +1117,486 @@ try {
     Assert-True ([int64]$recoveryReport.metrics.timeToPr.value -eq 420000 -and [int64]$recoveryReport.metrics.implementationElapsed.value -eq 60000 -and [int64]$recoveryReport.metrics.reviewElapsed.value -eq 60000 -and [int64]$recoveryReport.metrics.waitingElapsed.value -eq 60000) 'recovered report must preserve exact elapsed values'
     Assert-True ([int]$recoveryReport.metrics.initialTaskReviews.value -eq 1 -and [int]$recoveryReport.metrics.tasksCompleted.value -eq 1 -and [int]$recoveryReport.coverage.validEventCount -eq 8) 'recovered report must not double-count complete or recovered boundaries'
     Assert-True (@($recoveryReport.reviewAttempts).Count -eq 1 -and @($recoveryReport.anomalies | Where-Object { $_.code -eq 'malformed_event' }).Count -ge 1) 'recovered report must retain one review attempt and disclose the quarantined interrupted fragment'
+
+    # Remove both derived sidecars for a retained complete event. The bounded
+    # identity sidecar must repair them directly and preserve exact
+    # replay/conflict semantics without a full ledger scan.
+    $sidecarLossRunId = 'synthetic-integrated-sidecar-loss'
+    $sidecarLossEvent = New-Event -EventId 'integrated-sidecar-loss-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:00:00Z' -Scope 'story' -Role 'coordinator'
+    $sidecarLossEvent.runId = $sidecarLossRunId
+    $sidecarLossAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $sidecarLossRunId -Event $sidecarLossEvent
+    Assert-True ($sidecarLossAppend.ExitCode -eq 0 -and [string]$sidecarLossAppend.Result.status -ceq 'appended') 'sidecar-loss setup event should append'
+    $sidecarLossLedger = [string]$sidecarLossAppend.Result.ledgerPath
+    $sidecarLossIndexDirectory = [string]$sidecarLossAppend.Result.indexPath
+    $sidecarLossMembershipDirectory = "$sidecarLossLedger.membership"
+    $sidecarLossBeforeReplay = [IO.File]::ReadAllBytes($sidecarLossLedger)
+    $removeSidecarLossEntries = {
+        foreach ($directory in @($sidecarLossIndexDirectory, $sidecarLossMembershipDirectory)) {
+            $entries = @(Get-ChildItem -LiteralPath $directory -Filter '*.json' -File)
+            Assert-True ($entries.Count -eq 1) "sidecar-loss fixture should have one entry in $directory before removal"
+            Remove-Item -LiteralPath $entries[0].FullName -Force
+        }
+    }
+    & $removeSidecarLossEntries
+    $sidecarLossExactReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $sidecarLossRunId -Event $sidecarLossEvent
+    Assert-True ($sidecarLossExactReplay.ExitCode -eq 0 -and [string]$sidecarLossExactReplay.Result.status -ceq 'noop' -and [string]$sidecarLossExactReplay.Result.scanMode -ceq 'incremental' -and [bool]$sidecarLossExactReplay.Result.bloomMayContainEvent -and (Test-BoundedLedgerRead -Result $sidecarLossExactReplay.Result -LedgerLength $sidecarLossBeforeReplay.Length)) 'exact replay after losing both derived sidecars must repair and remain a bounded no-op'
+    Assert-True ([IO.File]::ReadAllBytes($sidecarLossLedger).Length -eq $sidecarLossBeforeReplay.Length) 'exact sidecar-loss replay must not grow the ledger'
+
+    & $removeSidecarLossEntries
+    $sidecarLossConflictEvent = $sidecarLossEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $sidecarLossConflictEvent.occurredAtUtc = '2026-10-10T11:01:00Z'
+    $sidecarLossConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $sidecarLossRunId -Event $sidecarLossConflictEvent
+    Assert-True ($sidecarLossConflict.ExitCode -eq 3 -and [string]$sidecarLossConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$sidecarLossConflict.Result.scanMode -ceq 'incremental' -and [bool]$sidecarLossConflict.Result.bloomMayContainEvent -and (Test-BoundedLedgerRead -Result $sidecarLossConflict.Result -LedgerLength $sidecarLossBeforeReplay.Length)) 'changed replay after losing both derived sidecars must repair and reject the conflict within bounded work'
+    Assert-True ([IO.File]::ReadAllBytes($sidecarLossLedger).Length -eq $sidecarLossBeforeReplay.Length) 'conflicting sidecar-loss replay must not grow the ledger'
+    Assert-True (Test-Path -LiteralPath ([string]$sidecarLossConflict.Result.diagnosticPath) -PathType Leaf) 'sidecar-loss conflict must retain safe diagnostic evidence'
+
+    $staleSidecarRunId = 'synthetic-integrated-stale-sidecars'
+    $staleSidecarEvent = New-Event -EventId 'integrated-stale-sidecar-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:05:00Z' -Scope 'story' -Role 'coordinator'
+    $staleSidecarEvent.runId = $staleSidecarRunId
+    $staleSidecarAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $staleSidecarRunId -Event $staleSidecarEvent
+    Assert-True ($staleSidecarAppend.ExitCode -eq 0 -and [string]$staleSidecarAppend.Result.status -ceq 'appended') 'same-cardinality stale-sidecar setup event should append'
+    $staleSidecarLedger = [string]$staleSidecarAppend.Result.ledgerPath
+    $staleSidecarIndexDirectory = [string]$staleSidecarAppend.Result.indexPath
+    $staleSidecarMembershipDirectory = "$staleSidecarLedger.membership"
+    $staleSidecarBeforeReplay = [IO.File]::ReadAllBytes($staleSidecarLedger)
+    $staleIndexPath = @(Get-ChildItem -LiteralPath $staleSidecarIndexDirectory -Filter '*.json' -File)[0].FullName
+    $staleMembershipPath = @(Get-ChildItem -LiteralPath $staleSidecarMembershipDirectory -Filter '*.json' -File)[0].FullName
+    Move-Item -LiteralPath $staleIndexPath -Destination (Join-Path $staleSidecarIndexDirectory 'stale-index.json')
+    Move-Item -LiteralPath $staleMembershipPath -Destination (Join-Path $staleSidecarMembershipDirectory 'stale-membership.json')
+    $staleSidecarExactReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $staleSidecarRunId -Event $staleSidecarEvent
+    Assert-True ($staleSidecarExactReplay.ExitCode -eq 0 -and [string]$staleSidecarExactReplay.Result.status -ceq 'noop' -and [string]$staleSidecarExactReplay.Result.scanMode -ceq 'incremental' -and [bool]$staleSidecarExactReplay.Result.bloomMayContainEvent -and (Test-BoundedLedgerRead -Result $staleSidecarExactReplay.Result -LedgerLength $staleSidecarBeforeReplay.Length)) 'same-cardinality renamed sidecars must be repaired by exact identity without a full scan'
+    Assert-True ([IO.File]::ReadAllBytes($staleSidecarLedger).Length -eq $staleSidecarBeforeReplay.Length) 'same-cardinality stale-sidecar replay must not grow the ledger'
+    $staleIndexPath = @(Get-ChildItem -LiteralPath $staleSidecarIndexDirectory -Filter '*.json' -File | Where-Object { $_.Name -cne 'stale-index.json' })[0].FullName
+    $staleMembershipPath = @(Get-ChildItem -LiteralPath $staleSidecarMembershipDirectory -Filter '*.json' -File | Where-Object { $_.Name -cne 'stale-membership.json' })[0].FullName
+    Move-Item -LiteralPath $staleIndexPath -Destination (Join-Path $staleSidecarIndexDirectory 'stale-index-replay.json')
+    Move-Item -LiteralPath $staleMembershipPath -Destination (Join-Path $staleSidecarMembershipDirectory 'stale-membership-replay.json')
+    $staleSidecarConflictEvent = $staleSidecarEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $staleSidecarConflictEvent.occurredAtUtc = '2026-10-10T11:06:00Z'
+    $staleSidecarConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $staleSidecarRunId -Event $staleSidecarConflictEvent
+    Assert-True ($staleSidecarConflict.ExitCode -eq 3 -and [string]$staleSidecarConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$staleSidecarConflict.Result.scanMode -ceq 'incremental' -and [bool]$staleSidecarConflict.Result.bloomMayContainEvent -and (Test-BoundedLedgerRead -Result $staleSidecarConflict.Result -LedgerLength $staleSidecarBeforeReplay.Length)) 'same-cardinality stale-sidecar changed replay must reject the conflict without appending'
+    Assert-True ([IO.File]::ReadAllBytes($staleSidecarLedger).Length -eq $staleSidecarBeforeReplay.Length) 'same-cardinality stale-sidecar conflict must not grow the ledger'
+
+    # Losing every mutable per-event projection for a known event is not safely
+    # repairable from any one mutable sidecar. The checkpoint-anchored
+    # authenticated integrity proof must force a cold rebuild before deciding
+    # replay status, even when index, membership, identity, authority, and
+    # catalog entries are all gone.
+    $allEntriesLossRunId = 'synthetic-integrated-all-entries-loss'
+    $allEntriesLossEvent = New-Event -EventId 'integrated-all-entries-loss-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:15:00Z' -Scope 'story' -Role 'coordinator'
+    $allEntriesLossEvent.runId = $allEntriesLossRunId
+    $allEntriesLossAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $allEntriesLossRunId -Event $allEntriesLossEvent
+    Assert-True ($allEntriesLossAppend.ExitCode -eq 0 -and [string]$allEntriesLossAppend.Result.status -ceq 'appended' -and (Test-Path -LiteralPath ([string]$allEntriesLossAppend.Result.authorityPath) -PathType Container)) 'all-entry-loss setup must append and retain an authority sidecar directory'
+    $allEntriesLossLedger = [string]$allEntriesLossAppend.Result.ledgerPath
+    $allEntriesLossBeforeReplay = [IO.File]::ReadAllBytes($allEntriesLossLedger)
+    $allEntriesLossDirectories = @(
+        [string]$allEntriesLossAppend.Result.indexPath,
+        "$allEntriesLossLedger.membership",
+        [string]$allEntriesLossAppend.Result.identityPath,
+        [string]$allEntriesLossAppend.Result.authorityPath,
+        "$allEntriesLossLedger.catalog"
+    )
+    $removeAllEntriesLoss = {
+        foreach ($directory in $allEntriesLossDirectories) {
+            $entries = @(Get-ChildItem -LiteralPath $directory -Filter '*.json' -File)
+            Assert-True ($entries.Count -eq 1) "all-entry-loss fixture should have one entry in $directory before removal"
+            Remove-Item -LiteralPath $entries[0].FullName -Force
+        }
+    }
+    & $removeAllEntriesLoss
+    $allEntriesLossExactReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $allEntriesLossRunId -Event $allEntriesLossEvent
+    Assert-True ($allEntriesLossExactReplay.ExitCode -eq 0 -and [string]$allEntriesLossExactReplay.Result.status -ceq 'noop' -and [string]$allEntriesLossExactReplay.Result.scanMode -ceq 'cold_rebuild' -and [bool]$allEntriesLossExactReplay.Result.bloomMayContainEvent -and [long]$allEntriesLossExactReplay.Result.ledgerReadBytes -gt $allEntriesLossBeforeReplay.Length) 'exact replay after losing all mutable entries must cold-rebuild from the authoritative ledger without appending'
+    Assert-True ([IO.File]::ReadAllBytes($allEntriesLossLedger).Length -eq $allEntriesLossBeforeReplay.Length) 'all-entry-loss exact replay must preserve ledger bytes'
+    & $removeAllEntriesLoss
+    $allEntriesLossConflictEvent = $allEntriesLossEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $allEntriesLossConflictEvent.occurredAtUtc = '2026-10-10T11:16:00Z'
+    $allEntriesLossConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $allEntriesLossRunId -Event $allEntriesLossConflictEvent
+    Assert-True ($allEntriesLossConflict.ExitCode -eq 3 -and [string]$allEntriesLossConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$allEntriesLossConflict.Result.scanMode -ceq 'cold_rebuild' -and [long]$allEntriesLossConflict.Result.ledgerReadBytes -gt $allEntriesLossBeforeReplay.Length) 'changed replay after losing all mutable entries must reject after a cold authoritative rebuild without appending'
+    Assert-True ([IO.File]::ReadAllBytes($allEntriesLossLedger).Length -eq $allEntriesLossBeforeReplay.Length) 'all-entry-loss conflict must preserve ledger bytes'
+
+    $allEntriesRenameRunId = 'synthetic-integrated-all-entries-rename'
+    $allEntriesRenameEvent = New-Event -EventId 'integrated-all-entries-rename-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:18:00Z' -Scope 'story' -Role 'coordinator'
+    $allEntriesRenameEvent.runId = $allEntriesRenameRunId
+    $allEntriesRenameAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $allEntriesRenameRunId -Event $allEntriesRenameEvent
+    Assert-True ($allEntriesRenameAppend.ExitCode -eq 0 -and [string]$allEntriesRenameAppend.Result.status -ceq 'appended') 'all-entry-rename setup must append'
+    $allEntriesRenameLedger = [string]$allEntriesRenameAppend.Result.ledgerPath
+    $allEntriesRenameBeforeReplay = [IO.File]::ReadAllBytes($allEntriesRenameLedger)
+    $allEntriesRenameDirectories = @(
+        [string]$allEntriesRenameAppend.Result.indexPath,
+        "$allEntriesRenameLedger.membership",
+        [string]$allEntriesRenameAppend.Result.identityPath,
+        [string]$allEntriesRenameAppend.Result.authorityPath,
+        "$allEntriesRenameLedger.catalog"
+    )
+    $renameAllEntries = {
+        foreach ($directory in $allEntriesRenameDirectories) {
+            $entries = @(Get-ChildItem -LiteralPath $directory -Filter '*.json' -File | Where-Object { $_.Name -cne 'stale.json' })
+            Assert-True ($entries.Count -eq 1) "all-entry-rename fixture should have one live entry in $directory"
+            Move-Item -LiteralPath $entries[0].FullName -Destination (Join-Path $directory 'stale.json')
+        }
+    }
+    & $renameAllEntries
+    $allEntriesRenameExactReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $allEntriesRenameRunId -Event $allEntriesRenameEvent
+    Assert-True ($allEntriesRenameExactReplay.ExitCode -eq 0 -and [string]$allEntriesRenameExactReplay.Result.status -ceq 'noop' -and [string]$allEntriesRenameExactReplay.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($allEntriesRenameLedger).Length -eq $allEntriesRenameBeforeReplay.Length) 'exact replay after renaming all mutable entries must cold-rebuild without appending'
+    & $renameAllEntries
+    $allEntriesRenameConflictEvent = $allEntriesRenameEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $allEntriesRenameConflictEvent.occurredAtUtc = '2026-10-10T11:19:00Z'
+    $allEntriesRenameConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $allEntriesRenameRunId -Event $allEntriesRenameConflictEvent
+    Assert-True ($allEntriesRenameConflict.ExitCode -eq 3 -and [string]$allEntriesRenameConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$allEntriesRenameConflict.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($allEntriesRenameLedger).Length -eq $allEntriesRenameBeforeReplay.Length) 'changed replay after renaming all mutable entries must reject after a cold rebuild without appending'
+
+    $catalogIntegrityRunId = 'synthetic-integrated-catalog-integrity'
+    $catalogIntegrityEvent = New-Event -EventId 'integrated-catalog-digest-a' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:16:30Z' -Scope 'story' -Role 'coordinator'
+    $catalogIntegrityEvent.runId = $catalogIntegrityRunId
+    $catalogIntegrityAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $catalogIntegrityRunId -Event $catalogIntegrityEvent
+    $catalogIntegrityOther = New-Event -EventId 'integrated-catalog-digest-b' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:16:31Z' -Scope 'story' -Role 'coordinator'
+    $catalogIntegrityOther.runId = $catalogIntegrityRunId
+    $catalogIntegrityOtherAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $catalogIntegrityRunId -Event $catalogIntegrityOther
+    Assert-True ($catalogIntegrityAppend.ExitCode -eq 0 -and $catalogIntegrityOtherAppend.ExitCode -eq 0) 'catalog-integrity setup events should append'
+    $catalogIntegrityLedger = [string]$catalogIntegrityAppend.Result.ledgerPath
+    $catalogIntegrityBeforeReplay = [IO.File]::ReadAllBytes($catalogIntegrityLedger)
+    $catalogIntegrityDirectory = "$catalogIntegrityLedger.catalog"
+    $catalogIntegrityPath = @(Get-ChildItem -LiteralPath $catalogIntegrityDirectory -Filter '*.json' -File | Where-Object { ([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json -DateKind String).eventId -ceq $catalogIntegrityEvent.eventId })[0].FullName
+    $catalogIntegrityEntry = Get-Content -LiteralPath $catalogIntegrityPath -Raw | ConvertFrom-Json -Depth 20 -DateKind String
+    $catalogIntegrityDigest = [string]$catalogIntegrityEntry.eventIdDigest
+    $catalogIntegrityEntry.eventId = "$($catalogIntegrityEvent.eventId)`n$($catalogIntegrityOther.eventId)"
+    [IO.File]::WriteAllText($catalogIntegrityPath, ($catalogIntegrityEntry | ConvertTo-Json -Compress -Depth 20), [Text.UTF8Encoding]::new($false))
+    foreach ($directory in @([string]$catalogIntegrityAppend.Result.indexPath, "$catalogIntegrityLedger.membership", [string]$catalogIntegrityAppend.Result.identityPath, [string]$catalogIntegrityAppend.Result.authorityPath)) {
+        $entryPath = @(Get-ChildItem -LiteralPath $directory -Filter '*.json' -File | Where-Object { ([IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json -DateKind String).eventId -ceq $catalogIntegrityEvent.eventId })[0].FullName
+        Remove-Item -LiteralPath $entryPath -Force
+    }
+    $catalogIntegrityConflictEvent = $catalogIntegrityEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $catalogIntegrityConflictEvent.occurredAtUtc = '2026-10-10T11:17:00Z'
+    $catalogIntegrityConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $catalogIntegrityRunId -Event $catalogIntegrityConflictEvent
+    $catalogIntegrityRepaired = Get-Content -LiteralPath $catalogIntegrityPath -Raw | ConvertFrom-Json -Depth 20 -DateKind String
+    Assert-True ($catalogIntegrityConflict.ExitCode -eq 3 -and [string]$catalogIntegrityConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$catalogIntegrityConflict.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($catalogIntegrityLedger).Length -eq $catalogIntegrityBeforeReplay.Length -and [string]$catalogIntegrityRepaired.eventId -ceq $catalogIntegrityEvent.eventId -and [string]$catalogIntegrityEntry.eventIdDigest -ceq $catalogIntegrityDigest) 'corrupted exact catalog must force a ledger-preserving cold rebuild even when its digest bytes are unchanged'
+
+    $caseDistinctRunId = 'synthetic-integrated-case-distinct-catalog'
+    $caseDistinctEvent = New-Event -EventId 'integrated-case-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:17:30Z' -Scope 'story' -Role 'coordinator'
+    $caseDistinctEvent.runId = $caseDistinctRunId
+    $caseDistinctAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $caseDistinctRunId -Event $caseDistinctEvent
+    $caseDistinctBefore = [IO.FileInfo]::new([string]$caseDistinctAppend.Result.ledgerPath).Length
+    $caseDistinctNew = $caseDistinctEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $caseDistinctNew.eventId = 'INTEGRATED-CASE-EVENT'
+    $caseDistinctReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $caseDistinctRunId -Event $caseDistinctNew
+    $caseDistinctAfter = [IO.FileInfo]::new([string]$caseDistinctAppend.Result.ledgerPath).Length
+    Assert-True ($caseDistinctAppend.ExitCode -eq 0 -and $caseDistinctReplay.ExitCode -eq 0 -and [string]$caseDistinctReplay.Result.status -ceq 'appended' -and [string]$caseDistinctReplay.Result.scanMode -ceq 'incremental' -and (Test-BoundedLedgerRead -Result $caseDistinctReplay.Result -LedgerLength $caseDistinctBefore)) 'case-distinct event IDs must remain distinct and use bounded incremental append'
+
+    $integrityRootRunId = 'synthetic-integrated-integrity-root-anchor'
+    $integrityRootFirstEvent = New-Event -EventId 'integrated-integrity-root-a' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:18:30Z' -Scope 'story' -Role 'coordinator'
+    $integrityRootFirstEvent.runId = $integrityRootRunId
+    $integrityRootFirstAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityRootRunId -Event $integrityRootFirstEvent
+    $integrityRootCheckpoint = Get-Content -LiteralPath ([string]$integrityRootFirstAppend.Result.checkpointPath) -Raw | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityRootFirstHash = [string]$integrityRootCheckpoint.integrityRootHash
+    $integrityRootSecondEvent = $integrityRootFirstEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityRootSecondEvent.eventId = 'integrated-integrity-root-b'
+    $integrityRootSecondEvent.transitionId = 'integrated-integrity-root-b-transition'
+    $integrityRootSecondEvent.occurredAtUtc = '2026-10-10T11:18:31Z'
+    $integrityRootSecondAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityRootRunId -Event $integrityRootSecondEvent
+    $integrityRootLedger = [string]$integrityRootFirstAppend.Result.ledgerPath
+    $integrityRootBeforeReplay = [IO.File]::ReadAllBytes($integrityRootLedger)
+    $integrityRootCheckpointPath = [string]$integrityRootSecondAppend.Result.checkpointPath
+    $integrityRootCheckpoint = Get-Content -LiteralPath $integrityRootCheckpointPath -Raw | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityRootCheckpoint.integrityRootHash = $integrityRootFirstHash
+    [IO.File]::WriteAllText($integrityRootCheckpointPath, ($integrityRootCheckpoint | ConvertTo-Json -Compress -Depth 20), [Text.UTF8Encoding]::new($false))
+    $integrityRootReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityRootRunId -Event $integrityRootSecondEvent
+    Assert-True ($integrityRootFirstAppend.ExitCode -eq 0 -and $integrityRootSecondAppend.ExitCode -eq 0 -and $integrityRootReplay.ExitCode -eq 0 -and [string]$integrityRootReplay.Result.status -ceq 'noop' -and [string]$integrityRootReplay.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($integrityRootLedger).Length -eq $integrityRootBeforeReplay.Length) 'checkpoint roots must remain ledger-bound: an older authenticated root must force a ledger-preserving cold rebuild'
+
+    $integrityGrowthRunId = 'synthetic-integrated-integrity-root-growth'
+    $integrityGrowthA = New-Event -EventId 'integrated-integrity-growth-a' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:18:40Z' -Scope 'story' -Role 'coordinator'
+    $integrityGrowthA.runId = $integrityGrowthRunId
+    $integrityGrowthB = $integrityGrowthA | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityGrowthB.eventId = 'integrated-integrity-growth-b'
+    $integrityGrowthB.transitionId = 'integrated-integrity-growth-b-transition'
+    $integrityGrowthB.occurredAtUtc = '2026-10-10T11:18:41Z'
+    $integrityGrowthC = $integrityGrowthB | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityGrowthC.eventId = 'integrated-integrity-growth-c'
+    $integrityGrowthC.transitionId = 'integrated-integrity-growth-c-transition'
+    $integrityGrowthC.occurredAtUtc = '2026-10-10T11:18:42Z'
+    $integrityGrowthAAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityGrowthRunId -Event $integrityGrowthA
+    $integrityGrowthBAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityGrowthRunId -Event $integrityGrowthB
+    $integrityGrowthLedger = [string]$integrityGrowthAAppend.Result.ledgerPath
+    $integrityGrowthCheckpointPath = [string]$integrityGrowthBAppend.Result.checkpointPath
+    $integrityGrowthCheckpoint = Get-Content -LiteralPath $integrityGrowthCheckpointPath -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    $integrityGrowthRootA = [string]$integrityGrowthCheckpoint.integrityRootHash
+    [IO.File]::AppendAllText($integrityGrowthLedger, (($integrityGrowthC | ConvertTo-Json -Compress -Depth 20) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+    $integrityGrowthBeforeReplay = [IO.File]::ReadAllBytes($integrityGrowthLedger)
+    $integrityGrowthCheckpoint.integrityRootHash = $integrityGrowthRootA
+    [IO.File]::WriteAllText($integrityGrowthCheckpointPath, ($integrityGrowthCheckpoint | ConvertTo-Json -Compress -Depth 30), [Text.UTF8Encoding]::new($false))
+    Remove-RecorderEventProjections -Directories @(
+        [string]$integrityGrowthBAppend.Result.indexPath,
+        "$integrityGrowthLedger.membership",
+        [string]$integrityGrowthBAppend.Result.identityPath,
+        [string]$integrityGrowthBAppend.Result.authorityPath,
+        "$integrityGrowthLedger.catalog"
+    ) -EventId ([string]$integrityGrowthB.eventId)
+    $integrityGrowthChangedB = $integrityGrowthB | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityGrowthChangedB.occurredAtUtc = '2026-10-10T11:19:42Z'
+    $integrityGrowthReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityGrowthRunId -Event $integrityGrowthChangedB
+    Assert-True ($integrityGrowthAAppend.ExitCode -eq 0 -and $integrityGrowthBAppend.ExitCode -eq 0 -and $integrityGrowthReplay.ExitCode -eq 3 -and [string]$integrityGrowthReplay.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$integrityGrowthReplay.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($integrityGrowthLedger).Length -eq $integrityGrowthBeforeReplay.Length) 'a rolled-back root must not authorize suffix catch-up after later complete ledger growth'
+
+    $integrityIncompleteGrowthRunId = 'synthetic-integrated-integrity-incomplete-growth'
+    $integrityIncompleteA = New-Event -EventId 'integrated-integrity-incomplete-a' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:19:50Z' -Scope 'story' -Role 'coordinator'
+    $integrityIncompleteA.runId = $integrityIncompleteGrowthRunId
+    $integrityIncompleteB = $integrityIncompleteA | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityIncompleteB.eventId = 'integrated-integrity-incomplete-b'
+    $integrityIncompleteB.transitionId = 'integrated-integrity-incomplete-b-transition'
+    $integrityIncompleteB.occurredAtUtc = '2026-10-10T11:19:51Z'
+    $integrityIncompleteAAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityIncompleteGrowthRunId -Event $integrityIncompleteA
+    $integrityIncompleteACheckpoint = Get-Content -LiteralPath ([string]$integrityIncompleteAAppend.Result.checkpointPath) -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    $integrityIncompleteBAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityIncompleteGrowthRunId -Event $integrityIncompleteB
+    $integrityIncompleteLedger = [string]$integrityIncompleteAAppend.Result.ledgerPath
+    $integrityIncompleteCheckpointPath = [string]$integrityIncompleteBAppend.Result.checkpointPath
+    $integrityIncompleteCheckpoint = Get-Content -LiteralPath $integrityIncompleteCheckpointPath -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    $integrityIncompleteCheckpoint.integrityRootHash = [string]$integrityIncompleteACheckpoint.integrityRootHash
+    [IO.File]::AppendAllText($integrityIncompleteLedger, '{"eventId":"incomplete-growth-tail"', [Text.UTF8Encoding]::new($false))
+    $integrityIncompleteBeforeReplay = [IO.File]::ReadAllBytes($integrityIncompleteLedger)
+    [IO.File]::WriteAllText($integrityIncompleteCheckpointPath, ($integrityIncompleteCheckpoint | ConvertTo-Json -Compress -Depth 30), [Text.UTF8Encoding]::new($false))
+    Remove-RecorderEventProjections -Directories @(
+        [string]$integrityIncompleteBAppend.Result.indexPath,
+        "$integrityIncompleteLedger.membership",
+        [string]$integrityIncompleteBAppend.Result.identityPath,
+        [string]$integrityIncompleteBAppend.Result.authorityPath,
+        "$integrityIncompleteLedger.catalog"
+    ) -EventId ([string]$integrityIncompleteB.eventId)
+    $integrityIncompleteChangedB = $integrityIncompleteB | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityIncompleteChangedB.occurredAtUtc = '2026-10-10T11:20:51Z'
+    $integrityIncompleteReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityIncompleteGrowthRunId -Event $integrityIncompleteChangedB
+    Assert-True ($integrityIncompleteAAppend.ExitCode -eq 0 -and $integrityIncompleteBAppend.ExitCode -eq 0 -and $integrityIncompleteReplay.ExitCode -eq 3 -and [string]$integrityIncompleteReplay.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$integrityIncompleteReplay.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($integrityIncompleteLedger).Length -eq $integrityIncompleteBeforeReplay.Length) 'a rolled-back root must not authorize suffix catch-up after later incomplete ledger growth'
+
+    $integrityIntermediateRunId = 'synthetic-integrated-integrity-intermediate-root'
+    $integrityIntermediateA = New-Event -EventId 'integrated-integrity-intermediate-a' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:21:00Z' -Scope 'story' -Role 'coordinator'
+    $integrityIntermediateA.runId = $integrityIntermediateRunId
+    $integrityIntermediateB = $integrityIntermediateA | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityIntermediateB.eventId = 'integrated-integrity-intermediate-b'
+    $integrityIntermediateB.transitionId = 'integrated-integrity-intermediate-b-transition'
+    $integrityIntermediateB.occurredAtUtc = '2026-10-10T11:21:01Z'
+    $integrityIntermediateAAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityIntermediateRunId -Event $integrityIntermediateA
+    $integrityIntermediateBAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityIntermediateRunId -Event $integrityIntermediateB
+    $integrityIntermediateLedger = [string]$integrityIntermediateAAppend.Result.ledgerPath
+    $integrityIntermediateNodes = Join-Path "$integrityIntermediateLedger.integrity" 'nodes'
+    $integrityIntermediateRootA = @(Get-ChildItem -LiteralPath $integrityIntermediateNodes -Filter '*.json' -File | ForEach-Object {
+            try { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json -Depth 30 -DateKind String } catch { $null }
+        } | Where-Object { [string]$_.nodeType -ceq 'root' -and [long]$_.recordCount -eq 1 })[0]
+    Assert-True ($null -ne $integrityIntermediateRootA) 'cold rebuild must leave an authenticated intermediate root for the one-record prefix'
+    $integrityIntermediateCheckpointPath = [string]$integrityIntermediateBAppend.Result.checkpointPath
+    $integrityIntermediateCheckpoint = Get-Content -LiteralPath $integrityIntermediateCheckpointPath -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    $integrityIntermediateCheckpoint.integrityRootHash = [string]$integrityIntermediateRootA.nodeHash
+    [IO.File]::WriteAllText($integrityIntermediateCheckpointPath, ($integrityIntermediateCheckpoint | ConvertTo-Json -Compress -Depth 30), [Text.UTF8Encoding]::new($false))
+    $integrityIntermediateBeforeReplay = [IO.File]::ReadAllBytes($integrityIntermediateLedger)
+    Remove-RecorderEventProjections -Directories @(
+        [string]$integrityIntermediateBAppend.Result.indexPath,
+        "$integrityIntermediateLedger.membership",
+        [string]$integrityIntermediateBAppend.Result.identityPath,
+        [string]$integrityIntermediateBAppend.Result.authorityPath,
+        "$integrityIntermediateLedger.catalog"
+    ) -EventId ([string]$integrityIntermediateB.eventId)
+    $integrityIntermediateChangedB = $integrityIntermediateB | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $integrityIntermediateChangedB.occurredAtUtc = '2026-10-10T11:22:01Z'
+    $integrityIntermediateReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $integrityIntermediateRunId -Event $integrityIntermediateChangedB
+    Assert-True ($integrityIntermediateReplay.ExitCode -eq 3 -and [string]$integrityIntermediateReplay.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$integrityIntermediateReplay.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($integrityIntermediateLedger).Length -eq $integrityIntermediateBeforeReplay.Length) 'a same-ledger intermediate root must not authorize append when the checkpoint names the complete ledger'
+
+    $alternateSourceRoot = Join-Path $root 'alternate-history-source'
+    $alternateTargetRoot = Join-Path $root 'alternate-history-target'
+    $alternateRunId = 'synthetic-integrated-alternate-history'
+    $alternateSourceEvent = New-Event -EventId 'integrated-alternate-event-a' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:23:00Z' -Scope 'story' -Role 'coordinator'
+    $alternateSourceEvent.runId = $alternateRunId
+    $alternateTargetEvent = $alternateSourceEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $alternateTargetEvent.eventId = 'integrated-alternate-event-b'
+    $alternateTargetEvent.transitionId = 'integrated-alternate-event-b'
+    $alternateSourceAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $alternateSourceRoot -RunId $alternateRunId -Event $alternateSourceEvent
+    $alternateTargetAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $alternateTargetRoot -RunId $alternateRunId -Event $alternateTargetEvent
+    $alternateSourceLedger = [string]$alternateSourceAppend.Result.ledgerPath
+    $alternateTargetLedger = [string]$alternateTargetAppend.Result.ledgerPath
+    Assert-True ([IO.FileInfo]::new($alternateSourceLedger).Length -eq [IO.FileInfo]::new($alternateTargetLedger).Length) 'alternate-history roots must use same-count, same-length ledger histories'
+    $alternateSourceIntegrity = "$alternateSourceLedger.integrity"
+    $alternateTargetIntegrity = "$alternateTargetLedger.integrity"
+    Remove-Item -LiteralPath $alternateTargetIntegrity -Recurse -Force
+    Copy-Item -LiteralPath $alternateSourceIntegrity -Destination $alternateTargetIntegrity -Recurse -Force
+    $alternateTargetCheckpointPath = [string]$alternateTargetAppend.Result.checkpointPath
+    $alternateTargetCheckpoint = Get-Content -LiteralPath $alternateTargetCheckpointPath -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    $alternateSourceCheckpoint = Get-Content -LiteralPath ([string]$alternateSourceAppend.Result.checkpointPath) -Raw | ConvertFrom-Json -Depth 30 -DateKind String
+    $alternateTargetCheckpoint.integrityRootHash = [string]$alternateSourceCheckpoint.integrityRootHash
+    [IO.File]::WriteAllText($alternateTargetCheckpointPath, ($alternateTargetCheckpoint | ConvertTo-Json -Compress -Depth 30), [Text.UTF8Encoding]::new($false))
+    $alternateBeforeReplay = [IO.File]::ReadAllBytes($alternateTargetLedger)
+    Remove-RecorderEventProjections -Directories @(
+        [string]$alternateTargetAppend.Result.indexPath,
+        "$alternateTargetLedger.membership",
+        [string]$alternateTargetAppend.Result.identityPath,
+        [string]$alternateTargetAppend.Result.authorityPath,
+        "$alternateTargetLedger.catalog"
+    ) -EventId ([string]$alternateTargetEvent.eventId)
+    $alternateChangedEvent = $alternateTargetEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $alternateChangedEvent.occurredAtUtc = '2026-10-10T11:24:00Z'
+    $alternateReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $alternateTargetRoot -RunId $alternateRunId -Event $alternateChangedEvent
+    Assert-True ($alternateReplay.ExitCode -eq 3 -and [string]$alternateReplay.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$alternateReplay.Result.scanMode -ceq 'cold_rebuild' -and [IO.File]::ReadAllBytes($alternateTargetLedger).Length -eq $alternateBeforeReplay.Length) 'an alternate same-count, same-length authenticated root must not authorize append to a different ledger history'
+
+    $pendingClaimRunId = 'synthetic-integrated-stale-pending-claim'
+    $pendingClaimEvent = New-Event -EventId 'integrated-stale-pending-claim-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:17:00Z' -Scope 'story' -Role 'coordinator'
+    $pendingClaimEvent.runId = $pendingClaimRunId
+    $pendingClaimAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $pendingClaimRunId -Event $pendingClaimEvent
+    Assert-True ($pendingClaimAppend.ExitCode -eq 0 -and [string]$pendingClaimAppend.Result.status -ceq 'appended') 'stale-pending setup must append'
+    $pendingClaimLedger = [string]$pendingClaimAppend.Result.ledgerPath
+    $pendingClaimBeforeReplay = [IO.File]::ReadAllBytes($pendingClaimLedger)
+    Remove-Item -LiteralPath (Get-ChildItem -LiteralPath ([string]$pendingClaimAppend.Result.indexPath) -Filter '*.json' -File)[0].FullName -Force
+    Remove-Item -LiteralPath (Get-ChildItem -LiteralPath "$pendingClaimLedger.membership" -Filter '*.json' -File)[0].FullName -Force
+    $pendingClaimIdentityPath = (Get-ChildItem -LiteralPath ([string]$pendingClaimAppend.Result.identityPath) -Filter '*.json' -File)[0].FullName
+    $pendingClaimIdentity = Get-Content -LiteralPath $pendingClaimIdentityPath -Raw | ConvertFrom-Json -Depth 50 -DateKind String
+    $pendingClaimIdentity.state = 'pending'
+    $pendingClaimIdentity.canonicalJson = ([string]$pendingClaimIdentity.canonicalJson).Replace('2026-10-10T11:17:00Z', '2026-10-10T11:18:00Z')
+    $pendingClaimIdentity.lineNumber = $null
+    $pendingClaimIdentity.startOffset = $null
+    $pendingClaimIdentity.endOffset = $null
+    [IO.File]::WriteAllText($pendingClaimIdentityPath, ($pendingClaimIdentity | ConvertTo-Json -Compress -Depth 20), [Text.UTF8Encoding]::new($false))
+    $pendingClaimConflictEvent = $pendingClaimEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $pendingClaimConflictEvent.occurredAtUtc = '2026-10-10T11:18:00Z'
+    $pendingClaimConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $pendingClaimRunId -Event $pendingClaimConflictEvent
+    Assert-True ($pendingClaimConflict.ExitCode -eq 3 -and [string]$pendingClaimConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$pendingClaimConflict.Result.scanMode -ceq 'incremental' -and (Test-BoundedLedgerRead -Result $pendingClaimConflict.Result -LedgerLength $pendingClaimBeforeReplay.Length)) 'stale pending identity claims must reconcile from authoritative complete data before rejecting a changed replay'
+    Assert-True ([IO.File]::ReadAllBytes($pendingClaimLedger).Length -eq $pendingClaimBeforeReplay.Length) 'stale-pending conflict must preserve ledger bytes'
+
+    $rangeMetricRunId = 'synthetic-integrated-range-metric'
+    $rangeMetricEvent = New-Event -EventId 'integrated-range-metric-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:19:00Z' -Scope 'story' -Role 'coordinator'
+    $rangeMetricEvent.runId = $rangeMetricRunId
+    $rangeMetricAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $rangeMetricRunId -Event $rangeMetricEvent
+    Assert-True ($rangeMetricAppend.ExitCode -eq 0 -and [string]$rangeMetricAppend.Result.status -ceq 'appended') 'range-metric setup must append'
+    $rangeMetricLedger = [string]$rangeMetricAppend.Result.ledgerPath
+    $rangeMetricRecordBytes = [IO.FileInfo]::new($rangeMetricLedger).Length
+    $rangeMetricReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $rangeMetricRunId -Event $rangeMetricEvent
+    Assert-True ($rangeMetricReplay.ExitCode -eq 0 -and [string]$rangeMetricReplay.Result.status -ceq 'noop' -and [long]$rangeMetricReplay.Result.ledgerReadBytes -ge ($rangeMetricRecordBytes * 2) -and (Test-BoundedLedgerRead -Result $rangeMetricReplay.Result -LedgerLength $rangeMetricRecordBytes)) 'healthy exact replay must report both bounded identity/index ledger range reads'
+
+    $identityCorruptionRunId = 'synthetic-integrated-identity-corruption'
+    $identityCorruptionEvent = New-Event -EventId 'integrated-identity-corruption-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:20:00Z' -Scope 'story' -Role 'coordinator'
+    $identityCorruptionEvent.runId = $identityCorruptionRunId
+    $identityCorruptionAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $identityCorruptionRunId -Event $identityCorruptionEvent
+    Assert-True ($identityCorruptionAppend.ExitCode -eq 0 -and [string]$identityCorruptionAppend.Result.status -ceq 'appended') 'well-formed identity-corruption setup event should append'
+    $identityCorruptionLedger = [string]$identityCorruptionAppend.Result.ledgerPath
+    $identityCorruptionBeforeReplay = [IO.File]::ReadAllBytes($identityCorruptionLedger)
+    $identityCorruptionIdentityDirectory = [string]$identityCorruptionAppend.Result.identityPath
+    $identityCorruptionIndexDirectory = [string]$identityCorruptionAppend.Result.indexPath
+    $identityCorruptionMembershipDirectory = "$identityCorruptionLedger.membership"
+    Remove-Item -LiteralPath (Get-ChildItem -LiteralPath $identityCorruptionIndexDirectory -Filter '*.json' -File)[0].FullName -Force
+    Remove-Item -LiteralPath (Get-ChildItem -LiteralPath $identityCorruptionMembershipDirectory -Filter '*.json' -File)[0].FullName -Force
+    $identityCorruptionPath = (Get-ChildItem -LiteralPath $identityCorruptionIdentityDirectory -Filter '*.json' -File)[0].FullName
+    $identityCorruptionEntry = Get-Content -LiteralPath $identityCorruptionPath -Raw | ConvertFrom-Json -Depth 50 -DateKind String
+    $identityCorruptionEntry.canonicalJson = ([string]$identityCorruptionEntry.canonicalJson).Replace('2026-10-10T11:20:00Z', '2026-10-10T11:21:00Z')
+    [IO.File]::WriteAllText($identityCorruptionPath, ($identityCorruptionEntry | ConvertTo-Json -Compress -Depth 20), [Text.UTF8Encoding]::new($false))
+    $identityCorruptionReplayEvent = $identityCorruptionEvent | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $identityCorruptionReplayEvent.occurredAtUtc = '2026-10-10T11:21:00Z'
+    $identityCorruptionReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $identityCorruptionRunId -Event $identityCorruptionReplayEvent
+    Assert-True ($identityCorruptionReplay.ExitCode -eq 3 -and [string]$identityCorruptionReplay.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$identityCorruptionReplay.Result.scanMode -ceq 'incremental' -and (Test-BoundedLedgerRead -Result $identityCorruptionReplay.Result -LedgerLength $identityCorruptionBeforeReplay.Length)) 'well-formed stale identity claims must be corrected from the complete ledger before rejecting a changed replay'
+    Assert-True ([IO.File]::ReadAllBytes($identityCorruptionLedger).Length -eq $identityCorruptionBeforeReplay.Length -and (Test-Path -LiteralPath ([string]$identityCorruptionReplay.Result.diagnosticPath) -PathType Leaf)) 'identity corruption replay must preserve the ledger and safe conflict diagnostic'
+    $identityCorruptionRepairedIndex = Get-ChildItem -LiteralPath $identityCorruptionIndexDirectory -Filter '*.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw } | Out-String
+    Assert-True ($identityCorruptionRepairedIndex -notmatch '2026-10-10T11:21:00Z') 'repaired index must retain the complete ledger payload rather than stale identity payload'
+
+    $saturatedBloomRunId = 'synthetic-integrated-saturated-bloom'
+    $saturatedBloomBaseline = New-Event -EventId 'saturated-bloom-baseline' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:10:00Z' -Scope 'story' -Role 'coordinator'
+    $saturatedBloomBaseline.runId = $saturatedBloomRunId
+    $saturatedBloomAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $saturatedBloomRunId -Event $saturatedBloomBaseline
+    Assert-True ($saturatedBloomAppend.ExitCode -eq 0 -and [string]$saturatedBloomAppend.Result.status -ceq 'appended') 'saturated-Bloom baseline should append'
+    $saturatedBloomLedger = [string]$saturatedBloomAppend.Result.ledgerPath
+    $saturatedBloomBytes = [byte[]]::new(8 + 4096)
+    [Array]::Copy([byte[]]@(0x54, 0x4D, 0x42, 0x4C, 0x4F, 0x4F, 0x4D, 0x31), $saturatedBloomBytes, 8)
+    for ($bloomIndex = 8; $bloomIndex -lt $saturatedBloomBytes.Length; $bloomIndex++) {
+        $saturatedBloomBytes[$bloomIndex] = 0xFF
+    }
+    [IO.File]::WriteAllBytes("$saturatedBloomLedger.bloom", $saturatedBloomBytes)
+    $saturatedBloomNext = New-Event -EventId 'saturated-bloom-new-event' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:11:00Z' -Scope 'story' -Role 'coordinator'
+    $saturatedBloomNext.runId = $saturatedBloomRunId
+    $saturatedBloomAppendNext = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $saturatedBloomRunId -Event $saturatedBloomNext
+    $saturatedBloomLedgerLength = [IO.FileInfo]::new($saturatedBloomLedger).Length
+    Assert-True ($saturatedBloomAppendNext.ExitCode -eq 0 -and [string]$saturatedBloomAppendNext.Result.status -ceq 'appended' -and [string]$saturatedBloomAppendNext.Result.scanMode -ceq 'incremental' -and [bool]$saturatedBloomAppendNext.Result.bloomMayContainEvent -and (Test-BoundedLedgerRead -Result $saturatedBloomAppendNext.Result -LedgerLength $saturatedBloomLedgerLength)) 'a saturated Bloom false positive must retain bounded incremental ordinary work and append the unseen event'
+
+    $naturalBloomRunId = 'synthetic-integrated-natural-bloom-collision'
+    $naturalBloomSeedIds = @('healthy-seed-1325', 'healthy-seed-6070', 'healthy-seed-7299', 'healthy-seed-12986')
+    $naturalBloomBase = New-Event -EventId 'natural-bloom-seed-base' -EventType 'story_started' -OccurredAtUtc '2026-10-10T11:30:00Z' -Scope 'story' -Role 'coordinator'
+    $naturalBloomBase.runId = $naturalBloomRunId
+    foreach ($naturalBloomSeedId in $naturalBloomSeedIds) {
+        $naturalBloomSeed = $naturalBloomBase | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+        $naturalBloomSeed.eventId = $naturalBloomSeedId
+        $naturalBloomSeed.transitionId = "$naturalBloomSeedId-transition"
+        $naturalBloomSeedResult = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $naturalBloomRunId -Event $naturalBloomSeed
+        Assert-True ($naturalBloomSeedResult.ExitCode -eq 0 -and [string]$naturalBloomSeedResult.Result.status -ceq 'appended') "natural Bloom seed $naturalBloomSeedId should append through the production recorder"
+    }
+    $naturalBloomTarget = $naturalBloomBase | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $naturalBloomTarget.eventId = 'fresh-valid-event'
+    $naturalBloomTarget.transitionId = 'fresh-transition'
+    $naturalBloomLedger = Join-Path (Join-Path $recorderRoot $naturalBloomRunId) 'events.jsonl'
+    $naturalBloomBeforeTargetLength = [IO.FileInfo]::new($naturalBloomLedger).Length
+    $naturalBloomTargetResult = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $naturalBloomRunId -Event $naturalBloomTarget
+    Assert-True ($naturalBloomTargetResult.ExitCode -eq 0 -and [string]$naturalBloomTargetResult.Result.status -ceq 'appended' -and [bool]$naturalBloomTargetResult.Result.bloomMayContainEvent -and [string]$naturalBloomTargetResult.Result.scanMode -ceq 'incremental' -and (Test-BoundedLedgerRead -Result $naturalBloomTargetResult.Result -LedgerLength $naturalBloomBeforeTargetLength) -and @([IO.File]::ReadAllLines($naturalBloomLedger)).Count -eq 5) 'natural unmodified-filter Bloom collision must append a valid unseen event with bounded ordinary work'
+
+    # Production recorder -> aggregator controls for opaque identity casing
+    # and delimiter-bearing composite components. Both cases must preserve
+    # distinct identities instead of inventing a paired interval.
+    $caseIdentityRunId = 'synthetic-integrated-case-identities'
+    $caseIdentityEvents = @(
+        (New-Event -EventId 'Boundary-A' -EventType 'story_started' -OccurredAtUtc '2026-10-10T12:00:00Z' -Scope 'story' -Role 'coordinator'),
+        (New-Event -EventId 'boundary-a' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T12:01:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'case-identity-phase' -Role 'implementer'),
+        (New-Event -EventId 'implementation-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T12:02:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'case-identity-phase' -Revision $revisionA -Role 'implementer')
+    )
+    foreach ($caseIdentityEvent in $caseIdentityEvents) {
+        $caseIdentityEvent.runId = $caseIdentityRunId
+    }
+    $caseIdentityLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $caseIdentityRunId -Events $caseIdentityEvents -RecorderPath $recorderPath
+    $caseIdentityJson = & $scriptPath -EventsPath $caseIdentityLedger -ReviewMode per_task -TaskRefs @(301)
+    Assert-True ($LASTEXITCODE -eq 0) 'case-sensitive event identity control should aggregate successfully'
+    $caseIdentityReport = $caseIdentityJson | ConvertFrom-Json -Depth 100
+    Assert-True ([int]$caseIdentityReport.coverage.validEventCount -eq 3 -and [string]$caseIdentityReport.metrics.implementationElapsed.state -ceq 'measured' -and [int64]$caseIdentityReport.metrics.implementationElapsed.value -eq 60000) 'case-variant event IDs must remain distinct and retain the measured implementation interval'
+    Assert-True (@($caseIdentityReport.anomalies | Where-Object { $_.code -eq 'event_identity_conflict' }).Count -eq 0) 'case-variant event IDs must not produce an identity conflict'
+    $caseIdentityCheckpointPath = "$caseIdentityLedger.checkpoint.json"
+    $caseIdentityLedgerBeforeCold = [IO.File]::ReadAllBytes($caseIdentityLedger)
+    Remove-Item -LiteralPath $caseIdentityCheckpointPath -Force
+    $caseColdReplay = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $caseIdentityRunId -Event $caseIdentityEvents[0]
+    Assert-True ($caseColdReplay.ExitCode -eq 0 -and [string]$caseColdReplay.Result.status -ceq 'noop' -and [string]$caseColdReplay.Result.scanMode -ceq 'cold_rebuild' -and [long]$caseColdReplay.Result.ledgerReadBytes -gt $caseIdentityLedgerBeforeCold.Length) 'case-distinct IDs must remain separate during cold exact replay recovery with bounded range validation'
+    Assert-True ([IO.File]::ReadAllBytes($caseIdentityLedger).Length -eq $caseIdentityLedgerBeforeCold.Length) 'case-distinct cold exact replay must not grow the ledger'
+    Remove-Item -LiteralPath $caseIdentityCheckpointPath -Force
+    $caseColdConflictEvent = $caseIdentityEvents[0] | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $caseColdConflictEvent.occurredAtUtc = '2026-10-10T12:00:01Z'
+    $caseColdConflict = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $caseIdentityRunId -Event $caseColdConflictEvent
+    Assert-True ($caseColdConflict.ExitCode -eq 3 -and [string]$caseColdConflict.Result.errorCategory -ceq 'conflicting_duplicate' -and [string]$caseColdConflict.Result.scanMode -ceq 'cold_rebuild' -and [long]$caseColdConflict.Result.ledgerReadBytes -gt $caseIdentityLedgerBeforeCold.Length) 'case-only payload changes must remain conflicting during cold recovery with bounded range validation'
+    Assert-True ([IO.File]::ReadAllBytes($caseIdentityLedger).Length -eq $caseIdentityLedgerBeforeCold.Length) 'case-only cold conflict must not grow the ledger'
+
+    $tupleIdentityRunId = 'synthetic-integrated-tuple-identities'
+    $tupleIdentityEvents = @(
+        (New-Event -EventId 'tuple-correction-start' -EventType 'correction_started' -OccurredAtUtc '2026-10-10T13:00:00Z' -Scope 'task' -TaskRef 302 -PhaseId 'a|b' -CorrectionId 'c' -SupersedesReviewAttemptId 'tuple-attempt|1' -Role 'implementer'),
+        (New-Event -EventId 'tuple-correction-ready' -EventType 'correction_ready' -OccurredAtUtc '2026-10-10T13:01:00Z' -Scope 'task' -TaskRef 302 -PhaseId 'a' -CorrectionId 'b|c' -SupersedesReviewAttemptId 'tuple-attempt|1' -Revision $revisionA -Role 'implementer')
+    )
+    foreach ($tupleIdentityEvent in $tupleIdentityEvents) {
+        $tupleIdentityEvent.runId = $tupleIdentityRunId
+    }
+    $tupleIdentityLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $tupleIdentityRunId -Events $tupleIdentityEvents -RecorderPath $recorderPath
+    $tupleIdentityJson = & $scriptPath -EventsPath $tupleIdentityLedger -ReviewMode per_task -TaskRefs @(302)
+    Assert-True ($LASTEXITCODE -eq 0) 'delimiter-bearing identity control should aggregate successfully'
+    $tupleIdentityReport = $tupleIdentityJson | ConvertFrom-Json -Depth 100
+    Assert-True ([int]$tupleIdentityReport.coverage.validEventCount -eq 2 -and [string]$tupleIdentityReport.metrics.implementationElapsed.state -ceq 'partial' -and $null -eq $tupleIdentityReport.metrics.implementationElapsed.value) 'delimiter-bearing phase/correction tuples must remain unmatched and partial'
+    Assert-True (@($tupleIdentityReport.phases | Where-Object { $_.state -eq 'measured' }).Count -eq 0 -and @($tupleIdentityReport.anomalies | Where-Object { $_.code -eq 'missing_boundary' }).Count -ge 2) 'delimiter-bearing tuples must not invent a measured interval from mismatched boundaries'
+
+    $matchingReviewRunId = 'synthetic-integrated-review-case-matching'
+    $matchingReviewEvents = @(
+        (New-Event -EventId 'matching-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T13:10:00Z' -Scope 'task' -TaskRef 303 -PhaseId 'Review-Phase' -ReviewRequestId 'review-request-303' -ReviewAttemptId 'review-attempt-303' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'matching-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T13:11:00Z' -Scope 'task' -TaskRef 303 -PhaseId 'Review-Phase' -ReviewRequestId 'review-request-303' -ReviewAttemptId 'review-attempt-303' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer')
+    )
+    foreach ($matchingReviewEvent in $matchingReviewEvents) {
+        $matchingReviewEvent.runId = $matchingReviewRunId
+    }
+    $matchingReviewLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $matchingReviewRunId -Events $matchingReviewEvents -RecorderPath $recorderPath
+    $matchingReviewJson = & $scriptPath -EventsPath $matchingReviewLedger -ReviewMode per_task -TaskRefs @(303)
+    Assert-True ($LASTEXITCODE -eq 0) 'matching case-sensitive review closure control should aggregate successfully'
+    $matchingReviewReport = $matchingReviewJson | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$matchingReviewReport.metrics.reviewElapsed.state -ceq 'measured' -and [int64]$matchingReviewReport.metrics.reviewElapsed.value -eq 60000 -and [int]$matchingReviewReport.metrics.tasksCompleted.value -eq 1 -and [string]$matchingReviewReport.metrics.firstPassAcceptanceRate.state -ceq 'measured') 'exactly matching review identities must measure elapsed, completion, and first-pass metrics'
+
+    $mismatchedReviewRunId = 'synthetic-integrated-review-case-mismatch'
+    $mismatchedReviewEvents = @(
+        (New-Event -EventId 'mismatched-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T13:20:00Z' -Scope 'task' -TaskRef 303 -PhaseId 'Review-Phase' -ReviewRequestId 'review-request-303' -ReviewAttemptId 'review-attempt-303' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'mismatched-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T13:21:00Z' -Scope 'task' -TaskRef 303 -PhaseId 'review-phase' -ReviewRequestId 'review-request-303' -ReviewAttemptId 'review-attempt-303' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer')
+    )
+    foreach ($mismatchedReviewEvent in $mismatchedReviewEvents) {
+        $mismatchedReviewEvent.runId = $mismatchedReviewRunId
+    }
+    $mismatchedReviewLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $mismatchedReviewRunId -Events $mismatchedReviewEvents -RecorderPath $recorderPath
+    $mismatchedReviewJson = & $scriptPath -EventsPath $mismatchedReviewLedger -ReviewMode per_task -TaskRefs @(303)
+    Assert-True ($LASTEXITCODE -eq 0) 'mismatched case-sensitive review closure control should aggregate successfully'
+    $mismatchedReviewReport = $mismatchedReviewJson | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$mismatchedReviewReport.metrics.reviewElapsed.state -ceq 'partial' -and $null -eq $mismatchedReviewReport.metrics.reviewElapsed.value -and [string]$mismatchedReviewReport.metrics.tasksCompleted.state -cne 'measured' -and $null -eq $mismatchedReviewReport.metrics.tasksCompleted.value -and [string]$mismatchedReviewReport.metrics.firstPassAcceptanceRate.state -cne 'measured' -and $null -eq $mismatchedReviewReport.metrics.firstPassAcceptanceRate.value) 'case-variant review identities must not close, complete, or first-pass count the attempt'
+    Assert-True (@($mismatchedReviewReport.anomalies | Where-Object { $_.code -ceq 'conflicting_review_identity' }).Count -ge 1) 'case-variant review identities must disclose the mismatched closure'
 
     # Pair a healthy ready-turn control with the same transition under a real
     # recorder fault. The child fixture invokes the existing

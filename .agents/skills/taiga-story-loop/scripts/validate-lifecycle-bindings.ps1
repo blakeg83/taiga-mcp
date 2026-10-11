@@ -231,7 +231,11 @@ function Read-LedgerEvents {
 
     return @(Get-Content -LiteralPath $LedgerPath |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
-        ForEach-Object { $_ | ConvertFrom-Json -Depth 100 })
+        ForEach-Object {
+                $parsed = $_ | ConvertFrom-Json -Depth 100
+                if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') { $parsed = $parsed.event }
+                $parsed
+            })
 }
 
 $skillRoot = Split-Path -Parent $PSScriptRoot

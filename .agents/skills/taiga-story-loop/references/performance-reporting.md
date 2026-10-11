@@ -2,16 +2,19 @@
 
 This reference records the task #146 capability discovery for story #141. It
 is a read-only discovery result, not a provider-specific collector or a claim
-that the Codex App exposes worker token counters.
+that the Codex App API exposes worker token counters. A later authorized local
+session-file collector may provide separately attributable observed counters;
+that evidence is bound to explicit session IDs and does not change this dated
+API capability result.
 
 Discovery date: 2026-10-09 (client date)
 
 The operator-facing storage, recovery, cleanup, command, sample-report, and
 epic-acceptance runbook is
 [`docs/automation/performance-reporting-operator-guide.md`](../../../../docs/automation/performance-reporting-operator-guide.md).
-This reference remains the authoritative version-1 contract and capability
-discovery record; the guide does not expand the contract or claim live host
-telemetry.
+This reference remains the authoritative versioned contract and dated
+capability discovery record; the guide does not expand the contract or claim
+live host telemetry.
 
 ## Evidence boundary
 
@@ -65,7 +68,8 @@ assignment, not from token telemetry:
 | Implementer/reviewer point-in-time status | The assigned worker/reviewer records were not returned by the authorized `list_threads` page. | `unavailable` for this probe | Do not infer idle, active, completed, or failed from absence. Preserve the assignment identity and leave runtime status unknown. |
 | Per-worker input, cached-input, output, or reasoning counters | No current host schema or probe exposed counters bound to these worker identities. | `unavailable` | Token fields remain unknown, not zero. The later recorder/report must preserve `usage.state = unavailable` and its source/coverage reason. |
 | Account usage-limit windows | `get_usage_limits` schema exposes shared account usage percentages and reset times. | `unavailable` for story attribution | Account limits may describe the account, but cannot be assigned to this story, worker, role, or review. Do not use them as token totals or cost. |
-| Local CLI/session exports for App workers | No export was selected or read. The epic explicitly warns that CLI records must not be assumed to cover App worker chats. | `unverified` | A future authorized export would need an explicit worker/session binding, stream identity, counter semantics, and boundary coverage before use. |
+| Local CLI/session exports for App workers | This dated discovery did not select or read an export. The epic explicitly warns that CLI records must not be assumed to cover App worker chats. | `unverified` for this probe | A later authorized collector may use an explicit role/session binding, stream identity, counter semantics, and boundary coverage; absent those controls, usage remains unknown. |
+| Observed local Codex session counters | `scripts/collect-role-token-usage.ps1` reads only complete JSONL lines after a persisted byte cursor and subtracts one bound cumulative counter at each story boundary per session. | `partial` when nearest-line boundaries or reset segments are present; `measured` only with complete bound coverage | This is source-backed local session evidence, not account-limit telemetry. Prompt/transcript text, cumulative notification sums, and unbound sessions are excluded. |
 | Exact transition timestamps | The story/epic contract names UTC transition boundaries, but this discovery run did not execute a recorder or workflow transition. | `unverified` | Later workflow work must record actual UTC boundaries at the transition. Retrospective estimates and elapsed-time subtraction are not valid substitutes. |
 | Synthetic validation of the unavailable and partial paths | `validate-performance-reporting.ps1` reads the checked-in contract and exercises labeled in-memory fixtures only. | `available` as deterministic validation | This proves contract shape and honest fallback behavior. It is not a host observation, browser run, live provider result, or token measurement. |
 
@@ -189,8 +193,10 @@ do not write tracked repository state.
   with PowerShell 7. The validator creates its own unique external run root,
   invokes the recorder in child processes, exercises same-run restart/replay,
   separate run/story isolation, interrupted-tail recovery, deterministic
-  file-as-directory and read-only I/O failures, malformed-middle diagnostics,
-  and historical-report retention, then removes only that disposable root.
+  authority-backed loss and pending-claim repair, bounded range-read
+  accounting, file-as-directory and read-only I/O failures, malformed-middle
+  diagnostics, and historical-report retention, then removes only that
+  disposable root.
   It has no service start, live data, Git/Taiga/workflow-state write, or
   transcript export.
 - Limitations: no per-worker App token counters, no attributable account
@@ -339,7 +345,53 @@ tail may be quarantined or reported as incomplete, but earlier complete lines
 remain authoritative and are never rewritten. Duplicate IDs are no-ops;
 conflicting IDs remain visible as conflicts.
 
-Reports are immutable siblings of the ledger and are keyed by a canonical
+The recorder maintains hashed index, membership, committed identity,
+committed authority, integrity-checked exact-catalog sidecars, and an
+authenticated integrity trie beside the ledger. New runs use ledger format v2:
+each line is one event frame containing the canonical v1 event plus a commit
+anchor. The anchor binds the previous commit, any orphan suffix bytes, the
+canonical event digest, content-chain digest, record ordinal, exact frame byte
+length, and resulting trie root. The digest order is acyclic: prior anchor +
+canonical event -> content chain -> trie root -> final anchor commit. The
+recorder publishes the complete frame before derived sidecars and writes trie
+nodes only after the frame is durable. The
+authority sidecar is the bounded witness for the first complete ledger record
+for an event ID; the mutable index, membership, identity, and catalog entries
+are repairable projections. The catalog is a bounded hash-addressed event-ID
+witness, while the fixed-depth trie is the exact bounded membership/absence
+ proof that detects loss of every mutable per-event projection without a
+ whole-catalog traversal. The v2 checkpoint and trie root carry the
+ content-chain digest and record count; v2 trie metadata intentionally does not
+ depend on physical ledger length. A bounded tail read locates the current
+ committed frame independently of a historical checkpoint offset. Malformed,
+ incomplete, or unknown suffix bytes remain orphan evidence and may be bound
+ into the next frame, subject to the bounded orphan limit. This binds the
+ authenticated root to committed content: stale roots, intermediate roots,
+ alternate same-size histories, and later complete or incomplete suffix growth
+ cannot be used for incremental catch-up. Synthetic recorder results expose measured trie
+node read/write counts and bytes; these are evidence of the fixed-depth
+implementation cost, not a production performance threshold.
+A committed sidecar claim is not authoritative by itself: before a no-op,
+conflict, or repair decision, the recorder reads its stored complete line range
+directly from `events.jsonl` and verifies the event ID, run/story binding, and
+canonical payload. If all mutable entries are absent and the authenticated
+trie proves the event exists, the recorder cold-rebuilds from the ledger
+rather than using the authority range as a first-record claim. A missing or
+corrupt trie node is recovery evidence and never means unseen. Pending claims never authorize an append
+decision and are reconciled with complete authority first. A valid trie
+absence proof is the bounded negative lookup for an unseen ID, so a
+Bloom-positive collision still follows the ordinary append path; malformed or
+unverifiable claims are repaired from the ledger or surfaced as a safe error.
+Cold reconstruction is reserved for missing/corrupt checkpoint or derived
+state that cannot be repaired locally, and its event grouping is
+ordinal/case-sensitive. Reported `ledgerReadBytes` includes successful and
+partially consumed failed bounded range validation in addition to incremental
+or cold ledger scans.
+
+Version-1 raw event ledgers remain readable but are cold-only: the recorder does
+not silently migrate their history or reset their identity. A v1 append keeps
+the legacy line format and uses full reconstruction when required; new runs
+start in v2. Reports are immutable siblings of the ledger and are keyed by a canonical
 report identity:
 
 `runId + projectId + storyId + PR provider/owner/repository/number + exact reviewed HEAD`
@@ -402,6 +454,30 @@ added to input or output a second time. If the source does not state whether
 reasoning is included in output, that component is partial/unavailable rather
 than estimated. Unknown is never zero, and raw tokens are never converted to
 subscription allowance or monetary cost.
+
+#### Observed Codex session usage metadata
+
+When local session evidence is available, `scripts/collect-role-token-usage.ps1`
+produces `story_performance_role_token_usage` metadata for one story. It uses
+the observed-role evidence rows to bind role/session IDs and source paths, reads
+only complete JSONL lines after a persisted per-source byte cursor, and retains
+no prompt or transcript content. The collector samples the `story_started` and
+confirmed `pr_ready` UTC boundaries, verifies the `session_meta.payload.id`
+identity, and subtracts one cumulative `event_msg`/`token_count`
+`payload.info.total_token_usage` counter at each boundary per disjoint session.
+The synthetic `token_usage_record` / `payload.thread_token_usage` shape remains
+accepted for controlled fixtures; the collector never sums cumulative
+notifications. File truncation, counter decreases, missing
+session binding, and nearest-line boundary selection are explicit reset or
+partial coverage states. When one evidence file contains several story scopes,
+pass its exact `scope` value so rows from other stories cannot enter the total.
+
+Pass the resulting file to `get-story-performance.ps1` with
+`-UsageMetadataPath`. The report exposes
+`observedImplementerTokens`, `observedReviewerTokens`,
+`observedCoordinatorTokens`, and `observedTotalTokens` separately from the
+event-level interval metrics. Account-limit windows are never accepted as a
+replacement for attributable session counters.
 
 The numeric role-total formula is defined only for these explicit source
 semantics:
