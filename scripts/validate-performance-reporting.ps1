@@ -61,6 +61,11 @@ function New-Event {
         [string] $Role = 'coordinator'
     )
 
+    $correctionEvents = @('correction_started', 'correction_ready')
+    if ($EventType -notin $correctionEvents -and -not [string]::IsNullOrWhiteSpace([string] $SupersedesReviewAttemptId)) {
+        throw "Integrated fixture event construction failed: non-correction event '$EventType' must emit supersedesReviewAttemptId=null"
+    }
+
     $event = [ordered]@{
         schemaVersion = 1
         kind = 'story_performance_event'

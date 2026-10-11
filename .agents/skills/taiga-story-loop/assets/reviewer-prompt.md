@@ -92,6 +92,10 @@ duplicate handoff: stable attempt identity and exact revision make it a
 no-op/reconciliation case. Explicit coordinator waits use a stable `waitId`;
 copy known model/effort and attributable usage snapshots when available; keep
 unavailable usage null and never estimate it.
+Set `supersedesReviewAttemptId` explicitly to JSON `null` on every
+reviewer-owned start or outcome event, including correction re-reviews and
+final-story re-reviews. That field is carried only by the implementer's paired
+`correction_started` and `correction_ready` events.
 These observations are silent workflow side effects—no polling or
 telemetry-only/measurement-only message. In `story_end_only`, do not emit
 task-scoped review or correction events; final-story findings, corrections, and

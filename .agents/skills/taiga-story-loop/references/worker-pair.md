@@ -86,17 +86,20 @@ event's `eventId`/`transitionId` and `phaseId`, `correctionId`,
 `reviewRequestId`/`reviewAttemptId`, or `waitId` identity are stable across
 retries. Replaying a handoff or
 observing an old revision is a duplicate/stale observation, not a new attempt.
+Review event construction must explicitly set `supersedesReviewAttemptId` to
+JSON `null`; it is not inherited from the finding that caused a correction.
+Only the paired correction events carry that finding identity.
 
 | Existing boundary | Event owner and event | Identity/boundary rule |
 | --- | --- | --- |
 | Confirmed `Start` and story-run initialization | coordinator: `story_started` | story scope; use the actual UTC start and setup provenance |
 | First concrete work on a current task | implementer: `implementation_started` | task ref + phase ID; revision may be null before a commit |
 | Frozen task-ready packet before direct delivery | implementer: `task_ready_for_review` | same phase ID + full revision; this does not prove delivery or review |
-| Reviewer begins the exact request/attempt | reviewer: `review_started` | request ID + attempt ID + ordinal + review kind + exact revision |
-| Reviewer records a current finding or exact acceptance | reviewer: `review_findings` or `review_accepted` | same phase/request/attempt identity and revision |
+| Reviewer begins the exact request/attempt | reviewer: `review_started` | request ID + attempt ID + ordinal + review kind + exact revision; `supersedesReviewAttemptId=null` |
+| Reviewer records a current finding or exact acceptance | reviewer: `review_findings` or `review_accepted` | same phase/request/attempt identity and revision; `supersedesReviewAttemptId=null` |
 | Implementer begins a current correction | implementer: `correction_started` | new correction ID/phase ID; link the finding with `supersedesReviewAttemptId` |
-| Corrected packet is frozen before direct re-review | implementer: `correction_ready` | same correction/phase identity + new full revision |
-| Reviewer begins or closes the whole-story review | reviewer: `final_review_started`, `review_findings`, `final_review_accepted` | final-story request/attempt identity; exact reviewed HEAD |
+| Corrected packet is frozen before direct re-review | implementer: `correction_ready` | same correction/phase identity + new full revision; retain `supersedesReviewAttemptId` |
+| Reviewer begins or closes the whole-story review | reviewer: `final_review_started`, `review_findings`, `final_review_accepted` | final-story request/attempt identity; exact reviewed HEAD; `supersedesReviewAttemptId=null` |
 | An existing explicit coordinator/recovery wait opens or closes | coordinator: `wait_started`/`wait_ended` | stable wait ID and wait kind; never infer a wait from polling or elapsed time |
 | Confirmed reviewed PR creation or reuse | coordinator: `pr_ready` | story scope + PR identity + exact reviewed HEAD; owned by task #157 |
 
