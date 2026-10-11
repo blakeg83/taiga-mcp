@@ -538,6 +538,10 @@ function Assert-Event {
     $correctionEvents = @('correction_started', 'correction_ready')
     $waitEvents = @('wait_started', 'wait_ended')
 
+    if ($eventType -notin $correctionEvents -and $null -ne $Event.supersedesReviewAttemptId) {
+        Fail-Recorder 'supersedesReviewAttemptId is only valid on correction events'
+    }
+
     if ($scope -ceq 'task' -and $null -eq $Event.taskRef) {
         Fail-Recorder "task-scoped events require a positive taskRef"
     }

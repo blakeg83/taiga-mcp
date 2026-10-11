@@ -344,6 +344,8 @@ try {
         eventType = 'correction_ready'
         revision = $revisionB
     }
+    Assert-True ($null -eq $reviewStarted.supersedesReviewAttemptId -and $null -eq $reviewAccepted.supersedesReviewAttemptId) 'properly formed review events must emit a null superseded-attempt identity'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$correctionStarted.supersedesReviewAttemptId) -and [string]$correctionStarted.supersedesReviewAttemptId -ceq [string]$correctionReady.supersedesReviewAttemptId) 'properly formed correction events must retain the superseded-attempt identity'
     $finalReviewStarted = New-EventVariant -Base $validEvent -Changes @{
         eventId = 'synthetic-final-review-started'
         transitionId = 'final-review-started'
@@ -450,6 +452,33 @@ try {
         eventId = 'invalid-review-revision'
         revision = $null
     }
+    $invalidReviewStartedSuperseded = New-EventVariant -Base $reviewStarted -Changes @{
+        eventId = 'invalid-correction-rereview-start-superseded'
+        transitionId = 'invalid-correction-rereview-start-superseded'
+        phaseId = 'task-149-review-2'
+        reviewRequestId = 'task-149-request-2'
+        reviewAttemptId = 'task-149-attempt-2'
+        reviewKind = 'correction_rereview'
+        reviewAttemptOrdinal = 1
+        revision = $revisionB
+        supersedesReviewAttemptId = 'task-149-attempt-1'
+    }
+    $invalidReviewAcceptedSuperseded = New-EventVariant -Base $reviewAccepted -Changes @{
+        eventId = 'invalid-correction-rereview-accepted-superseded'
+        transitionId = 'invalid-correction-rereview-accepted-superseded'
+        phaseId = 'task-149-review-2'
+        reviewRequestId = 'task-149-request-2'
+        reviewAttemptId = 'task-149-attempt-2'
+        reviewKind = 'correction_rereview'
+        reviewAttemptOrdinal = 1
+        revision = $revisionB
+        supersedesReviewAttemptId = 'task-149-attempt-1'
+    }
+    $invalidFinalReviewStartedSuperseded = New-EventVariant -Base $finalReviewStarted -Changes @{
+        eventId = 'invalid-final-review-start-superseded'
+        transitionId = 'invalid-final-review-start-superseded'
+        supersedesReviewAttemptId = 'story-142-final-attempt-0'
+    }
     $missingPullRequest = New-EventVariant -Base $prReady -Changes @{
         eventId = 'invalid-pr-identity'
         pullRequest = $null
@@ -505,6 +534,9 @@ try {
         [pscustomobject]@{ Name = 'invalid event vocabulary'; Json = (Convert-EventToJson (Copy-Event $validEvent) | ForEach-Object { $_ -replace '"story_started"', '"not_a_transition"' }); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'story role identity'; Json = (Convert-EventToJson $wrongStoryRole); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'review revision identity'; Json = (Convert-EventToJson $missingReviewRevision); Root = $externalRoot; Run = $runId },
+        [pscustomobject]@{ Name = 'correction re-review start superseded-attempt identity'; Json = (Convert-EventToJson $invalidReviewStartedSuperseded); Root = $externalRoot; Run = $runId; ExpectedMessage = 'supersedesReviewAttemptId is only valid on correction events' },
+        [pscustomobject]@{ Name = 'correction re-review outcome superseded-attempt identity'; Json = (Convert-EventToJson $invalidReviewAcceptedSuperseded); Root = $externalRoot; Run = $runId; ExpectedMessage = 'supersedesReviewAttemptId is only valid on correction events' },
+        [pscustomobject]@{ Name = 'final review superseded-attempt identity'; Json = (Convert-EventToJson $invalidFinalReviewStartedSuperseded); Root = $externalRoot; Run = $runId; ExpectedMessage = 'supersedesReviewAttemptId is only valid on correction events' },
         [pscustomobject]@{ Name = 'PR identity'; Json = (Convert-EventToJson $missingPullRequest); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'wait identity'; Json = (Convert-EventToJson $missingWaitIdentity); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'non-PR nested payload'; Json = (Convert-EventToJson $forbiddenNestedPullRequest); Root = $externalRoot; Run = $runId },
@@ -516,6 +548,10 @@ try {
     foreach ($case in $invalidCases) {
         $result = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $case.Root -RunId $case.Run -EventJson $case.Json
         Assert-True ($result.ExitCode -ne 0) "$($case.Name) is rejected"
+        $expectedMessageProperty = $case.PSObject.Properties['ExpectedMessage']
+        if ($null -ne $expectedMessageProperty -and -not [string]::IsNullOrWhiteSpace([string]$expectedMessageProperty.Value)) {
+            Assert-True (($result.Output -join ' ') -match [regex]::Escape([string]$expectedMessageProperty.Value)) "$($case.Name) reports the matching validation reason"
+        }
         Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) "$($case.Name) leaves the ledger unchanged"
     }
 
