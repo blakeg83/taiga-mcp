@@ -144,6 +144,13 @@ fixture are recorded in [issue #93 validation](issue-93-validation.md).
 Reviewer acceptance is evidence for the implementer; current-version task and
 parent-story writes must both be confirmed before ordered advancement.
 
+The current coordinator-idle story is recorded in
+[story #208 validation](story-208-validation.md). It reconciles the confirmed
+dispatch/end-turn boundary for story and integrated epic pairs, direct routine
+worker routing, bounded quiet heartbeat recovery, coordinator-owned
+integration-ready corrections, and the exact offline command matrix. Its
+synthetic results do not claim live host adherence or provider behavior.
+
 The delivered local helpers include compact coordination, worker-owned
 verification, timing/usage/cost measurement, and sanitized acceptance replay.
 See [measurement reporting](measurement-reporting.md), the

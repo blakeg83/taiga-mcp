@@ -54,3 +54,8 @@ git diff --check                   passed
 No live worker trial was separately authorized or run for this issue. Offline
 fixtures therefore provide implementation evidence only; live chat turn
 termination and message-driven resume remain pending separate authorization.
+
+The story #208 follow-up adds the coordinator-side terminal action trace and
+persisted continuation checks for both story review modes and the integrated
+epic pair; see [story #208 validation](story-208-validation.md) for the
+combined command matrix and evidence limits.
