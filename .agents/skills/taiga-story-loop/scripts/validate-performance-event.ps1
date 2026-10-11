@@ -96,6 +96,21 @@ function Convert-EventToJson {
     return ($Event | ConvertTo-Json -Compress -Depth 20)
 }
 
+function Get-BloomBitPositionsForTest {
+    param([Parameter(Mandatory)] [string] $EventId)
+
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $digest = $sha.ComputeHash([Text.UTF8Encoding]::new($false).GetBytes($EventId))
+        return @(0..3 | ForEach-Object {
+                [BitConverter]::ToUInt32($digest, $_ * 4) % 32768
+            })
+    }
+    finally {
+        $sha.Dispose()
+    }
+}
+
 function Copy-Event {
     param([Parameter(Mandatory)] [object] $Event)
 
@@ -178,7 +193,10 @@ $validEvent = [ordered]@{
 try {
     $validJson = Convert-EventToJson -Event $validEvent
     $first = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $externalRoot -RunId $runId -EventJson $validJson
+    $firstResult = Get-RecorderResult -Invocation $first -Context 'valid event append'
     Assert-True ($first.ExitCode -eq 0) ("valid event append exits zero; exit=$($first.ExitCode); output=$($first.Output -join ' | ')")
+    $expectedFirstLedgerRead = [Text.UTF8Encoding]::new($false).GetByteCount($validJson + [Environment]::NewLine)
+    Assert-True ([long]$firstResult.scannedBytes -eq $expectedFirstLedgerRead -and [long]$firstResult.ledgerReadBytes -eq $expectedFirstLedgerRead) 'ordinary append must report the actual post-write ledger bytes read'
     Assert-True (Test-Path -LiteralPath $ledgerPath -PathType Leaf) 'valid append creates the external ledger'
 
     $lines = @(Get-Content -LiteralPath $ledgerPath)
@@ -186,6 +204,60 @@ try {
     $roundTrip = $lines[0] | ConvertFrom-Json -DateKind String
     $roundTripJson = Convert-EventToJson -Event $roundTrip
     Assert-True ($roundTripJson -ceq $validJson) 'valid event round-trips unchanged'
+
+    $bloomEdgeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-bloom-edge-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $bloomEdgeRoot
+    $bloomEdgeRunId = 'synthetic-run-bloom-edge'
+    $bloomEdge32766 = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'bloom-edge-673'
+        runId = $bloomEdgeRunId
+        transitionId = 'bloom-edge-32766'
+    }
+    $bloomEdge32767 = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'bloom-edge-8904'
+        runId = $bloomEdgeRunId
+        transitionId = 'bloom-edge-32767'
+    }
+    Assert-True ((Get-BloomBitPositionsForTest -EventId ([string]$bloomEdge32766.eventId)) -contains 32766) 'Bloom lower edge fixture must hash to bit 32766'
+    Assert-True ((Get-BloomBitPositionsForTest -EventId ([string]$bloomEdge32767.eventId)) -contains 32767) 'Bloom upper edge fixture must hash to bit 32767'
+    $bloomEdgeFirst = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomEdgeRoot -RunId $bloomEdgeRunId -EventJson (Convert-EventToJson $bloomEdge32766)
+    $bloomEdgeFirstResult = Get-RecorderResult -Invocation $bloomEdgeFirst -Context 'Bloom lower bit boundary append'
+    Assert-True ($bloomEdgeFirst.ExitCode -eq 0 -and $bloomEdgeFirstResult.status -ceq 'appended') 'Bloom bit 32766 recorder append must succeed'
+    $bloomBytes = [IO.File]::ReadAllBytes([string]$bloomEdgeFirstResult.bloomPath)
+    Assert-True ($bloomBytes.Length -eq 4104 -and (($bloomBytes[8 + 4095] -band [byte](1 -shl 6)) -ne 0)) 'Bloom bit 32766 must be stored in the final filter byte'
+    $bloomEdgeSecond = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomEdgeRoot -RunId $bloomEdgeRunId -EventJson (Convert-EventToJson $bloomEdge32767)
+    $bloomEdgeSecondResult = Get-RecorderResult -Invocation $bloomEdgeSecond -Context 'Bloom upper bit boundary append'
+    Assert-True ($bloomEdgeSecond.ExitCode -eq 0 -and $bloomEdgeSecondResult.status -ceq 'appended') 'Bloom bit 32767 recorder append must succeed'
+    $bloomBytes = [IO.File]::ReadAllBytes([string]$bloomEdgeSecondResult.bloomPath)
+    Assert-True (($bloomBytes[8 + 4095] -band [byte](1 -shl 7)) -ne 0) 'Bloom bit 32767 must be stored in the final filter byte'
+
+    $bloomSaturationRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-bloom-saturation-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $bloomSaturationRoot
+    $bloomSaturationRunId = 'synthetic-run-bloom-saturation'
+    $bloomSaturationBase = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'bloom-saturation-base'
+        runId = $bloomSaturationRunId
+        transitionId = 'bloom-saturation-base'
+    }
+    $bloomSaturationBaseAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomSaturationRoot -RunId $bloomSaturationRunId -EventJson (Convert-EventToJson $bloomSaturationBase)
+    $bloomSaturationBaseResult = Get-RecorderResult -Invocation $bloomSaturationBaseAppend -Context 'Bloom saturation baseline append'
+    Assert-True ($bloomSaturationBaseAppend.ExitCode -eq 0 -and $bloomSaturationBaseResult.status -ceq 'appended') 'Bloom saturation baseline must append'
+    $saturatedBloom = [IO.File]::ReadAllBytes([string]$bloomSaturationBaseResult.bloomPath)
+    for ($byteIndex = 8; $byteIndex -lt $saturatedBloom.Length; $byteIndex++) {
+        $saturatedBloom[$byteIndex] = 0xFF
+    }
+    [IO.File]::WriteAllBytes([string]$bloomSaturationBaseResult.bloomPath, $saturatedBloom)
+    for ($saturationIndex = 1; $saturationIndex -le 4; $saturationIndex++) {
+        $saturationEvent = New-EventVariant -Base $bloomSaturationBase -Changes @{
+            eventId = "bloom-saturation-new-$saturationIndex"
+            transitionId = "bloom-saturation-new-$saturationIndex"
+        }
+        $saturationJson = Convert-EventToJson -Event $saturationEvent
+        $saturationAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $bloomSaturationRoot -RunId $bloomSaturationRunId -EventJson $saturationJson
+        $saturationResult = Get-RecorderResult -Invocation $saturationAppend -Context "Bloom false-positive append $saturationIndex"
+        $expectedSaturationRead = [Text.UTF8Encoding]::new($false).GetByteCount($saturationJson + [Environment]::NewLine)
+        Assert-True ($saturationAppend.ExitCode -eq 0 -and $saturationResult.status -ceq 'appended' -and [bool]$saturationResult.bloomMayContainEvent -and [string]$saturationResult.scanMode -ceq 'incremental' -and [long]$saturationResult.scannedBytes -eq $expectedSaturationRead) "Bloom false-positive append $saturationIndex must remain ordinary bounded work"
+    }
 
     $revisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $revisionB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
@@ -487,6 +559,33 @@ try {
     Assert-True ([IO.File]::ReadAllText([string] $conflictingResult.diagnosticPath) -match '"diagnosticType":"conflicting_duplicate"') 'conflict sidecar records the conflict type'
     Assert-True ([IO.File]::ReadAllText($idempotencyLedgerPath) -ceq $beforeNoop) 'conflicting replay does not mutate the event ledger'
 
+    $foreignBindingRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-foreign-binding-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $foreignBindingRoot
+    $foreignBindingRunId = 'synthetic-run-150-foreign-binding'
+    $foreignSeedEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-foreign-binding-seed'
+        runId = $foreignBindingRunId
+        storyId = 730
+        transitionId = 'foreign-binding-seed'
+    }
+    $foreignSeed = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $foreignBindingRoot -RunId $foreignBindingRunId -EventJson (Convert-EventToJson $foreignSeedEvent)
+    Assert-True ($foreignSeed.ExitCode -eq 0) 'foreign-binding seed appends to its own story ledger'
+    $foreignAttemptEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-foreign-binding-attempt'
+        runId = $foreignBindingRunId
+        storyId = 729
+        transitionId = 'foreign-binding-attempt'
+    }
+    $foreignLedgerPath = Join-Path (Join-Path $foreignBindingRoot $foreignBindingRunId) 'events.jsonl'
+    $foreignBefore = [IO.File]::ReadAllText($foreignLedgerPath)
+    $foreignAttempt = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $foreignBindingRoot -RunId $foreignBindingRunId -EventJson (Convert-EventToJson $foreignAttemptEvent)
+    $foreignAttemptResult = Get-RecorderResult -Invocation $foreignAttempt -Context 'foreign binding rejection'
+    Assert-True ($foreignAttempt.ExitCode -eq 3 -and $foreignAttemptResult.errorCategory -ceq 'run_binding_conflict') 'foreign binding is rejected before append'
+    $foreignRetry = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $foreignBindingRoot -RunId $foreignBindingRunId -EventJson (Convert-EventToJson $foreignAttemptEvent)
+    $foreignRetryResult = Get-RecorderResult -Invocation $foreignRetry -Context 'foreign binding repeated rejection'
+    Assert-True ($foreignRetry.ExitCode -eq 3 -and $foreignRetryResult.errorCategory -ceq 'run_binding_conflict') 'foreign binding remains rejected after retry'
+    Assert-True ([IO.File]::ReadAllText($foreignLedgerPath) -ceq $foreignBefore) 'foreign binding rejection never advances or mutates the ledger'
+
     $lockRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-lock-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $lockRoot
     $lockRunId = 'synthetic-run-150-lock'
@@ -584,6 +683,116 @@ try {
     $recoveryLedgerText = [IO.File]::ReadAllText($recoveryLedgerPath)
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $confirmedEvent.eventId)) 'recovery preserves the confirmed complete event'
     Assert-True ($recoveryLedgerText -match [regex]::Escape([string] $recoveredEvent.eventId)) 'recovery appends the new complete event'
+
+    $checkpointPath = [string] $recoveredResult.checkpointPath
+    $indexPath = [string] $recoveredResult.indexPath
+    Assert-True (Test-Path -LiteralPath $checkpointPath -PathType Leaf) 'normal recovery writes an external checkpoint'
+    Assert-True (Test-Path -LiteralPath $indexPath -PathType Container) 'normal recovery writes an external event index'
+    $staleLedgerEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-stale-checkpoint-catchup'
+        runId = $recoveryRunId
+        transitionId = 'stale-checkpoint-catchup'
+    }
+    [IO.File]::AppendAllText($recoveryLedgerPath, (Convert-EventToJson $staleLedgerEvent) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $catchUpEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-after-stale-checkpoint'
+        runId = $recoveryRunId
+        transitionId = 'after-stale-checkpoint'
+    }
+    $catchUp = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $catchUpEvent)
+    $catchUpResult = Get-RecorderResult -Invocation $catchUp -Context 'stale checkpoint catch-up'
+    Assert-True ($catchUp.ExitCode -eq 0 -and $catchUpResult.status -ceq 'appended') 'stale checkpoint catch-up appends safely'
+    Assert-True ([string] $catchUpResult.scanMode -ceq 'incremental' -and [long] $catchUpResult.scannedBytes -gt 0) 'stale checkpoint catch-up scans only the uncheckpointed suffix'
+    $catchUpReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $staleLedgerEvent)
+    $catchUpReplayResult = Get-RecorderResult -Invocation $catchUpReplay -Context 'stale checkpoint replay'
+    Assert-True ($catchUpReplay.ExitCode -eq 0 -and $catchUpReplayResult.status -ceq 'noop') 'stale checkpoint catch-up preserves replay idempotency'
+
+    [IO.File]::Delete($checkpointPath)
+    $missingCheckpointEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-missing-checkpoint-rebuild'
+        runId = $recoveryRunId
+        transitionId = 'missing-checkpoint-rebuild'
+    }
+    $missingCheckpoint = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $missingCheckpointEvent)
+    $missingCheckpointResult = Get-RecorderResult -Invocation $missingCheckpoint -Context 'missing checkpoint recovery'
+    Assert-True ($missingCheckpoint.ExitCode -eq 0 -and $missingCheckpointResult.status -ceq 'appended') 'missing checkpoint recovery appends safely'
+    Assert-True ([string] $missingCheckpointResult.scanMode -ceq 'cold_rebuild') 'missing checkpoint recovery discloses a cold rebuild'
+
+    [IO.File]::WriteAllText($checkpointPath, '{corrupt-checkpoint', [Text.UTF8Encoding]::new($false))
+    $corruptCheckpointEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-corrupt-checkpoint-rebuild'
+        runId = $recoveryRunId
+        transitionId = 'corrupt-checkpoint-rebuild'
+    }
+    $corruptCheckpoint = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $corruptCheckpointEvent)
+    $corruptCheckpointResult = Get-RecorderResult -Invocation $corruptCheckpoint -Context 'corrupt checkpoint recovery'
+    Assert-True ($corruptCheckpoint.ExitCode -eq 0 -and $corruptCheckpointResult.status -ceq 'appended') 'corrupt checkpoint recovery appends safely'
+    Assert-True ([string] $corruptCheckpointResult.scanMode -ceq 'cold_rebuild') 'corrupt checkpoint recovery discloses a cold rebuild'
+
+    [IO.Directory]::Delete($indexPath, $true)
+    $missingIndexEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-missing-index-rebuild'
+        runId = $recoveryRunId
+        transitionId = 'missing-index-rebuild'
+    }
+    $missingIndex = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $recoveryRoot -RunId $recoveryRunId -EventJson (Convert-EventToJson $missingIndexEvent)
+    $missingIndexResult = Get-RecorderResult -Invocation $missingIndex -Context 'missing index recovery'
+    Assert-True ($missingIndex.ExitCode -eq 0 -and $missingIndexResult.status -ceq 'appended') 'missing index recovery appends safely'
+    Assert-True ([string] $missingIndexResult.scanMode -ceq 'cold_rebuild') 'missing index recovery discloses a cold rebuild'
+
+    $individualIndexRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-individual-index-' + [guid]::NewGuid().ToString('N'))
+    $disposableRoots += $individualIndexRoot
+    $individualIndexRunId = 'synthetic-run-150-individual-index'
+    $individualIndexEvent = New-EventVariant -Base $validEvent -Changes @{
+        eventId = 'synthetic-individual-index-replay'
+        runId = $individualIndexRunId
+        transitionId = 'individual-index-replay'
+    }
+    $individualIndexAppend = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $individualIndexAppendResult = Get-RecorderResult -Invocation $individualIndexAppend -Context 'individual index append'
+    $individualIndexDirectory = [string] $individualIndexAppendResult.indexPath
+    $individualIndexLedger = [string] $individualIndexAppendResult.ledgerPath
+    $individualIndexFiles = @(Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)
+    Assert-True ($individualIndexFiles.Count -eq 1) 'individual index fixture creates one event marker'
+    [IO.File]::Delete($individualIndexFiles[0].FullName)
+    $missingIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $missingIndividualIndexReplayResult = Get-RecorderResult -Invocation $missingIndividualIndexReplay -Context 'missing individual index replay'
+    Assert-True ($missingIndividualIndexReplay.ExitCode -eq 0 -and $missingIndividualIndexReplayResult.status -ceq 'noop' -and [string] $missingIndividualIndexReplayResult.scanMode -ceq 'cold_rebuild') 'missing individual index replay rebuilds from the ledger and remains idempotent'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing individual index replay does not duplicate the ledger record'
+    $restoredIndividualIndexFile = @(Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0]
+    [IO.File]::WriteAllText($restoredIndividualIndexFile.FullName, '{broken-index', [Text.UTF8Encoding]::new($false))
+    $corruptIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $corruptIndividualIndexReplayResult = Get-RecorderResult -Invocation $corruptIndividualIndexReplay -Context 'corrupt individual index replay'
+    Assert-True ($corruptIndividualIndexReplay.ExitCode -eq 0 -and $corruptIndividualIndexReplayResult.status -ceq 'noop' -and [string] $corruptIndividualIndexReplayResult.scanMode -ceq 'cold_rebuild') 'corrupt individual index replay rebuilds from the ledger and remains idempotent'
+    $changedIndividualIndexEvent = New-EventVariant -Base $individualIndexEvent -Changes @{
+        transitionId = 'individual-index-conflict'
+    }
+    $changedIndividualIndexReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (ConvertTo-Json -InputObject $changedIndividualIndexEvent -Compress -Depth 20)
+    $changedIndividualIndexReplayResult = Get-RecorderResult -Invocation $changedIndividualIndexReplay -Context 'corrupt individual index conflict'
+    Assert-True ($changedIndividualIndexReplay.ExitCode -eq 3 -and $changedIndividualIndexReplayResult.errorCategory -ceq 'conflicting_duplicate') 'corrupt individual index replay preserves conflict detection'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'corrupt individual index conflict does not mutate the ledger'
+
+    $membershipDirectory = "$individualIndexLedger.membership"
+    $membershipFiles = @(Get-ChildItem -LiteralPath $membershipDirectory -Filter '*.json' -File)
+    Assert-True ($membershipFiles.Count -eq 1) 'individual membership fixture creates one exact membership marker'
+    [IO.File]::Delete((Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0].FullName)
+    [IO.File]::WriteAllText($membershipFiles[0].FullName, '{invalid-membership', [Text.UTF8Encoding]::new($false))
+    $missingIndexCorruptMembershipReplay = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $individualIndexEvent)
+    $missingIndexCorruptMembershipReplayResult = Get-RecorderResult -Invocation $missingIndexCorruptMembershipReplay -Context 'missing index corrupt membership replay'
+    Assert-True ($missingIndexCorruptMembershipReplay.ExitCode -eq 0 -and $missingIndexCorruptMembershipReplayResult.status -ceq 'noop' -and [string] $missingIndexCorruptMembershipReplayResult.scanMode -ceq 'cold_rebuild') 'missing index plus corrupt membership replay rebuilds before deciding idempotency'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing index plus corrupt membership replay never duplicates the ledger record'
+
+    [IO.File]::Delete((Get-ChildItem -LiteralPath $individualIndexDirectory -Filter '*.json' -File)[0].FullName)
+    $membershipFiles = @(Get-ChildItem -LiteralPath $membershipDirectory -Filter '*.json' -File)
+    Assert-True ($membershipFiles.Count -eq 1) 'recovery restores one exact membership marker'
+    [IO.File]::WriteAllText($membershipFiles[0].FullName, '{invalid-membership-again', [Text.UTF8Encoding]::new($false))
+    $missingIndexCorruptMembershipConflictEvent = New-EventVariant -Base $individualIndexEvent -Changes @{
+        transitionId = 'missing-index-corrupt-membership-conflict'
+    }
+    $missingIndexCorruptMembershipConflict = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $individualIndexRoot -RunId $individualIndexRunId -EventJson (Convert-EventToJson $missingIndexCorruptMembershipConflictEvent)
+    $missingIndexCorruptMembershipConflictResult = Get-RecorderResult -Invocation $missingIndexCorruptMembershipConflict -Context 'missing index corrupt membership conflict'
+    Assert-True ($missingIndexCorruptMembershipConflict.ExitCode -eq 3 -and $missingIndexCorruptMembershipConflictResult.errorCategory -ceq 'conflicting_duplicate' -and [string] $missingIndexCorruptMembershipConflictResult.scanMode -ceq 'cold_rebuild') 'missing index plus corrupt membership conflict rebuilds before rejecting a conflicting replay'
+    Assert-True (@([IO.File]::ReadAllLines($individualIndexLedger)).Count -eq 1) 'missing index plus corrupt membership conflict does not mutate the ledger'
 
     $unicodeRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-unicode-tail-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $unicodeRoot

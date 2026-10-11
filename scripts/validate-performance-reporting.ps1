@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run deterministic task #152 aggregation and task #154 artifact fixtures.
+    Run deterministic integrated story-loop reporting and recovery fixtures.
 
 The fixture is synthetic evidence only. It uses fixed UTC timestamps and a
 unique disposable external directory; it does not call Taiga, start a service,
@@ -129,6 +129,93 @@ function Write-EventsThroughRecorder {
     return Join-Path (Join-Path $ExternalRoot $RunId) 'events.jsonl'
 }
 
+function Invoke-WorkflowFixture {
+    param(
+        [Parameter(Mandatory)] [string] $Name,
+        [Parameter(Mandatory)] [string] $Path
+    )
+
+    Assert-True (Test-Path -LiteralPath $Path -PathType Leaf) "missing workflow fixture '$Name'"
+    $output = & pwsh -NoProfile -File $Path 2>&1
+    $exitCode = $LASTEXITCODE
+    $diagnostic = [string]($output -join [Environment]::NewLine)
+    Assert-True ($exitCode -eq 0) "workflow fixture '$Name' failed with exit ${exitCode}: $diagnostic"
+    return [pscustomobject]@{
+        name = $Name
+        path = $Path
+        exitCode = $exitCode
+        output = $diagnostic
+    }
+}
+
+function Invoke-RecorderEvent {
+    param(
+        [Parameter(Mandatory)] [string] $RecorderPath,
+        [Parameter(Mandatory)] [string] $ExternalRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [object] $Event,
+        [int] $FaultAfterBytes = -1
+    )
+
+    $arguments = @(
+        '-NoProfile',
+        '-File', $RecorderPath,
+        '-ExternalRunRoot', $ExternalRoot,
+        '-RunId', $RunId,
+        '-EventJson', ($Event | ConvertTo-Json -Compress -Depth 20)
+    )
+    if ($FaultAfterBytes -ge 0) {
+        $arguments += @('-FaultAfterBytes', [string] $FaultAfterBytes)
+    }
+    $output = & pwsh @arguments 2>&1
+    $jsonLines = @($output | ForEach-Object { [string] $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    Assert-True ($jsonLines.Count -gt 0) "recorder invocation for $($Event.eventId) must return a JSON result"
+    $result = $null
+    try {
+        $result = $jsonLines[-1] | ConvertFrom-Json -Depth 50 -DateKind String
+    }
+    catch {
+        throw "recorder invocation for $($Event.eventId) returned non-JSON output '$($jsonLines[-1])'"
+    }
+    return [pscustomobject]@{
+        ExitCode = [int] $LASTEXITCODE
+        Result = $result
+        Output = $jsonLines
+    }
+}
+
+function Invoke-AutomaticReviewMeasurementScenario {
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [Parameter(Mandatory)] [string] $ExternalRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [Parameter(Mandatory)] [string] $TracePath,
+        [int] $FaultAfterBytes = -1
+    )
+
+    $arguments = @(
+        '-NoProfile',
+        '-File', $Path,
+        '-MeasurementExternalRunRoot', $ExternalRoot,
+        '-MeasurementRunId', $RunId,
+        '-MeasurementTracePath', $TracePath
+    )
+    if ($FaultAfterBytes -ge 0) {
+        $arguments += @('-MeasurementFaultAfterBytes', [string]$FaultAfterBytes)
+    }
+    $output = & pwsh @arguments 2>&1
+    $exitCode = [int]$LASTEXITCODE
+    $diagnostic = [string]($output -join [Environment]::NewLine)
+    Assert-True ($exitCode -eq 0) "automatic review measurement fixture '$RunId' failed with exit ${exitCode}: $diagnostic"
+    Assert-True (Test-Path -LiteralPath $TracePath -PathType Leaf) "automatic review measurement fixture '$RunId' must write a trace"
+    try {
+        return [IO.File]::ReadAllText($TracePath) | ConvertFrom-Json -Depth 50 -DateKind String
+    }
+    catch {
+        throw "automatic review measurement fixture '$RunId' wrote invalid trace JSON: $($_.Exception.Message)"
+    }
+}
+
 function New-UsageWindowEvents {
     param(
         [Parameter(Mandatory)] [int] $TaskRef,
@@ -177,7 +264,7 @@ function Invoke-UsageSafetyReport {
     return ($json | ConvertFrom-Json -Depth 100)
 }
 
-$root = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-task152-' + [Guid]::NewGuid().ToString('N'))
+$root = Join-Path ([IO.Path]::GetTempPath()) ('taiga-mcp-story145-' + [Guid]::NewGuid().ToString('N'))
 [IO.Directory]::CreateDirectory($root) | Out-Null
 $ledger = Join-Path $root 'per-task.jsonl'
 $storyEndLedger = Join-Path $root 'story-end-only.jsonl'
@@ -457,6 +544,38 @@ try {
     Assert-True ([string]$resetReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $resetReport.metrics.implementationTokens.value) 'an intermediate reset followed by recovery must make the whole usage window partial'
     Assert-True (@($resetReport.anomalies | Where-Object { $_.code -eq 'usage_counter_reset' }).Count -ge 1) 'intermediate reset must be disclosed'
 
+    $outsideResetAStart = New-UsageSample -StreamId 'safety-before-edge-stream' -Role 'implementer' -SessionId 'safety-before-edge-session' -Source 'safety-before-edge-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $outsideResetAEnd = New-UsageSample -StreamId 'safety-before-edge-stream' -Role 'implementer' -SessionId 'safety-before-edge-session' -Source 'safety-before-edge-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 110; outputTokens = 20 })
+    $outsideResetBStart = New-UsageSample -StreamId 'safety-before-edge-stream' -Role 'implementer' -SessionId 'safety-before-edge-session' -Source 'safety-before-edge-source' -SampledAtUtc '2026-10-09T10:03:00Z' -BaselineAtUtc '2026-10-09T10:03:00Z' -Counters ([ordered]@{ inputTokens = 10; outputTokens = 20 })
+    $outsideResetBEnd = New-UsageSample -StreamId 'safety-before-edge-stream' -Role 'implementer' -SessionId 'safety-before-edge-session' -Source 'safety-before-edge-source' -SampledAtUtc '2026-10-09T10:04:00Z' -BaselineAtUtc '2026-10-09T10:03:00Z' -Counters ([ordered]@{ inputTokens = 20; outputTokens = 30 })
+    $outsideResetReport = Invoke-UsageSafetyReport -TaskRefs @(220, 221) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 220 -PhaseId 'safety-before-edge-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $outsideResetAStart -EndUsage $outsideResetAEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 221 -PhaseId 'safety-before-edge-b' -StartUtc '2026-10-09T10:03:00Z' -EndUtc '2026-10-09T10:04:00Z' -StartUsage $outsideResetBStart -EndUsage $outsideResetBEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$outsideResetReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$outsideResetReport.metrics.implementationTokens.value -eq 40) 'a reset before the second window opening boundary must not poison either disjoint usage interval'
+    Assert-True (@($outsideResetReport.anomalies | Where-Object { $_.code -eq 'usage_counter_reset' }).Count -eq 0) 'a reset edge outside both measured windows must not be reported as an intermediate reset'
+
+    $outsideSemanticsAStart = New-UsageSample -StreamId 'safety-before-semantics-stream' -Role 'implementer' -SessionId 'safety-before-semantics-session' -Source 'safety-before-semantics-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $outsideSemanticsAEnd = New-UsageSample -StreamId 'safety-before-semantics-stream' -Role 'implementer' -SessionId 'safety-before-semantics-session' -Source 'safety-before-semantics-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 110; outputTokens = 20 })
+    $outsideSemanticsBStart = New-UsageSample -StreamId 'safety-before-semantics-stream' -Role 'implementer' -SessionId 'safety-before-semantics-session' -Source 'safety-before-semantics-source' -SampledAtUtc '2026-10-09T10:03:00Z' -BaselineAtUtc '2026-10-09T10:03:00Z' -Counters ([ordered]@{ inputTokens = 10; cachedInputTokens = 5; outputTokens = 20; reasoningTokens = 2 }) -CounterSemantics $disjointSemantics
+    $outsideSemanticsBEnd = New-UsageSample -StreamId 'safety-before-semantics-stream' -Role 'implementer' -SessionId 'safety-before-semantics-session' -Source 'safety-before-semantics-source' -SampledAtUtc '2026-10-09T10:04:00Z' -BaselineAtUtc '2026-10-09T10:03:00Z' -Counters ([ordered]@{ inputTokens = 20; cachedInputTokens = 7; outputTokens = 30; reasoningTokens = 4 }) -CounterSemantics $disjointSemantics
+    $outsideSemanticsReport = Invoke-UsageSafetyReport -TaskRefs @(222, 223) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 222 -PhaseId 'safety-before-semantics-a' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $outsideSemanticsAStart -EndUsage $outsideSemanticsAEnd -Revision $revisionA),
+        (New-UsageWindowEvents -TaskRef 223 -PhaseId 'safety-before-semantics-b' -StartUtc '2026-10-09T10:03:00Z' -EndUtc '2026-10-09T10:04:00Z' -StartUsage $outsideSemanticsBStart -EndUsage $outsideSemanticsBEnd -Revision $revisionA)
+    )
+    Assert-True ([string]$outsideSemanticsReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$outsideSemanticsReport.metrics.implementationTokens.value -eq 44) 'semantics changes before a second window opening boundary must not poison disjoint usage attribution'
+    Assert-True (@($outsideSemanticsReport.anomalies | Where-Object { $_.code -eq 'usage_intermediate_conflict' -or $_.code -eq 'usage_semantics_conflict' }).Count -eq 0) 'semantics changes outside measured windows must not be reported as intermediate conflicts'
+
+    $insideSemanticsStart = New-UsageSample -StreamId 'safety-inside-semantics-stream' -Role 'implementer' -SessionId 'safety-inside-semantics-session' -Source 'safety-inside-semantics-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $insideSemanticsMiddle = New-UsageSample -StreamId 'safety-inside-semantics-stream' -Role 'implementer' -SessionId 'safety-inside-semantics-session' -Source 'safety-inside-semantics-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 120; cachedInputTokens = 5; outputTokens = 12; reasoningTokens = 2 }) -CounterSemantics $disjointSemantics
+    $insideSemanticsEnd = New-UsageSample -StreamId 'safety-inside-semantics-stream' -Role 'implementer' -SessionId 'safety-inside-semantics-session' -Source 'safety-inside-semantics-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 150; outputTokens = 20 })
+    $insideSemanticsReport = Invoke-UsageSafetyReport -TaskRefs @(224) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 224 -PhaseId 'safety-inside-semantics' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:00Z' -StartUsage $insideSemanticsStart -EndUsage $insideSemanticsEnd -Revision $revisionA),
+        (New-Event -EventId 'usage-safety-inside-semantics-middle' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 224 -WaitId 'usage-safety-inside-semantics-middle' -WaitKind 'synthetic' -Role 'implementer' -Usage $insideSemanticsMiddle)
+    )
+    Assert-True ([string]$insideSemanticsReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $insideSemanticsReport.metrics.implementationTokens.value) 'semantics changes inside a measured window must remain partial'
+    Assert-True (@($insideSemanticsReport.anomalies | Where-Object { $_.code -eq 'usage_intermediate_conflict' }).Count -ge 1) 'semantics changes inside a measured window must be disclosed'
+
     $conflictStart = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
     $conflictMiddleA = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 120; outputTokens = 12 })
     $conflictMiddleB = New-UsageSample -StreamId 'safety-conflict-stream' -Role 'implementer' -SessionId 'safety-conflict-session' -Source 'safety-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 121; outputTokens = 12 })
@@ -499,6 +618,17 @@ try {
     Assert-True ([string]$windowReport.metrics.implementationTokens.state -eq 'partial' -and $null -eq $windowReport.metrics.implementationTokens.value) 'usage intervals before or after the measured story run must remain partial'
     Assert-True (@($windowReport.anomalies | Where-Object { $_.code -eq 'usage_interval_outside_run' }).Count -eq 2) 'before-start and post-PR straddling intervals must disclose run-window violations'
     Assert-True (@($windowReport.anomalies | Where-Object { $_.code -eq 'usage_sample_after_run' }).Count -eq 1) 'post-PR samples must be disclosed'
+
+    $boundaryStart = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:01:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 100; outputTokens = 10 })
+    $boundaryMiddleA = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:01:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 110; outputTokens = 12 })
+    $boundaryMiddleB = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:02:00Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 120; outputTokens = 14 })
+    $boundaryEnd = New-UsageSample -StreamId 'safety-boundary-even' -Role 'implementer' -SessionId 'safety-boundary-session' -Source 'safety-boundary-source' -SampledAtUtc '2026-10-09T10:02:30Z' -BaselineAtUtc '2026-10-09T10:01:00Z' -Counters ([ordered]@{ inputTokens = 160; outputTokens = 22 })
+    $boundaryReport = Invoke-UsageSafetyReport -TaskRefs @(219) -WindowEvents @(
+        (New-UsageWindowEvents -TaskRef 219 -PhaseId 'safety-boundary-even' -StartUtc '2026-10-09T10:01:00Z' -EndUtc '2026-10-09T10:02:30Z' -StartUsage $boundaryStart -EndUsage $boundaryEnd -Revision $revisionA),
+        (New-Event -EventId 'usage-safety-boundary-middle-a' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:01:30Z' -Scope 'task' -TaskRef 219 -WaitId 'usage-safety-boundary-a' -WaitKind 'synthetic' -Role 'implementer' -Usage $boundaryMiddleA),
+        (New-Event -EventId 'usage-safety-boundary-middle-b' -EventType 'wait_started' -OccurredAtUtc '2026-10-09T10:02:00Z' -Scope 'task' -TaskRef 219 -WaitId 'usage-safety-boundary-b' -WaitKind 'synthetic' -Role 'implementer' -Usage $boundaryMiddleB)
+    )
+    Assert-True ([string]$boundaryReport.metrics.implementationTokens.state -eq 'measured' -and [int64]$boundaryReport.metrics.implementationTokens.value -eq 72) 'even-sized usage index exact first/interior/last boundaries remain measured'
 
     $finalRetryPerTaskEvents = @(
         (New-Event -EventId 'per-task-final-story-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-09T11:30:00Z' -Scope 'final_story' -PhaseId 'per-task-final-1' -ReviewRequestId 'per-task-final-request' -ReviewAttemptId 'per-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $revisionB -ReviewMode 'per_task' -Role 'reviewer'),
@@ -622,7 +752,7 @@ try {
     Assert-True ([string]$edge.metrics.waitingElapsed.state -eq 'partial' -and [int64]$edge.metrics.waitingElapsed.value -eq 60000) 'valid wait overlap should be retained while the reversed wait remains partial'
     Assert-True ([string]$edge.metrics.coordinationElapsed.state -eq 'partial' -and [int64]$edge.metrics.coordinationElapsed.value -eq 60000) 'coordinationElapsed should remain partial when coordinator wait attribution is incomplete'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'missing_boundary' }).Count -ge 1) 'missing boundary should be diagnosed'
-    Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' }).Count -ge 6) 'cross-category overlap should be disclosed rather than subtracted'
+    Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' }).Count -ge 1) 'cross-category overlap clusters should be disclosed rather than subtracted'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'negative_interval' }).Count -ge 2) 'impossible reversed review and wait sequences should be diagnosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_start' }).Count -eq 1) 'changed review-start payload should be disclosed'
     Assert-True (@($edge.anomalies | Where-Object { $_.code -eq 'conflicting_review_closure' }).Count -eq 1) 'changed review-closure payload should be disclosed'
@@ -655,7 +785,7 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) 'exact overlap fixture should aggregate successfully'
     $overlap = $overlapJson | ConvertFrom-Json -Depth 100
     $overlapDiagnostics = @($overlap.anomalies | Where-Object { $_.code -eq 'overlapping_intervals' })
-    Assert-True ($overlapDiagnostics.Count -eq 3) 'only nesting and genuine cross-category intersections should be disclosed; disjoint, touching, and zero-duration intervals should not'
+    Assert-True ($overlapDiagnostics.Count -eq 1) 'one connected overlap cluster should be disclosed; disjoint, touching, and zero-duration intervals should not'
 
     $artifactRoot = Join-Path $root 'published-reports'
     $artifactJsonA = Join-Path $artifactRoot 'report-a.json'
@@ -896,7 +1026,115 @@ try {
     $repeatJson = & $scriptPath -EventsPath $ledger -ReviewMode per_task -TaskRefs @(152, 153)
     Assert-True ($LASTEXITCODE -eq 0 -and $repeatJson -ceq $jsonText) 'repeating aggregation over the same ledger should be byte stable'
 
-    Write-Output 'PASS: task #152 deterministic aggregation and task #154 revision-bound artifact fixtures (per_task and story_end_only)'
+    # Integrate recorder recovery with aggregation. The interrupted write is
+    # followed by a fresh-process replay of a complete boundary, a recovery
+    # append for the interrupted identity, and a second stable-ID replay. The
+    # report is read from this exact recovered ledger, so a recorder bug that
+    # duplicates a complete event changes the asserted counts or durations.
+    $recoveryRunId = 'synthetic-integrated-recovery'
+    $recoveryEvents = @(
+        (New-Event -EventId 'integrated-recovery-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-10T10:00:00Z' -Scope 'story' -Role 'coordinator'),
+        (New-Event -EventId 'integrated-recovery-implementation-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T10:01:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-implementation' -Role 'implementer'),
+        (New-Event -EventId 'integrated-recovery-implementation-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T10:02:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-implementation' -Revision $revisionA -Role 'implementer'),
+        (New-Event -EventId 'integrated-recovery-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:03:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-review' -ReviewRequestId 'integrated-recovery-request' -ReviewAttemptId 'integrated-recovery-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'integrated-recovery-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T10:04:00Z' -Scope 'task' -TaskRef 301 -PhaseId 'integrated-recovery-review' -ReviewRequestId 'integrated-recovery-request' -ReviewAttemptId 'integrated-recovery-attempt' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $revisionA -Role 'reviewer'),
+        (New-Event -EventId 'integrated-recovery-wait-start' -EventType 'wait_started' -OccurredAtUtc '2026-10-10T10:05:00Z' -Scope 'story' -WaitId 'integrated-recovery-wait' -WaitKind 'reviewer' -Role 'coordinator')
+    )
+    foreach ($recoveryEvent in $recoveryEvents) {
+        $recoveryEvent.runId = $recoveryRunId
+        $recoveryAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryEvent
+        Assert-True ($recoveryAppend.ExitCode -eq 0 -and [string]$recoveryAppend.Result.status -ceq 'appended') "recovery setup event $($recoveryEvent.eventId) should append"
+    }
+    $recoveryWaitEnd = New-Event -EventId 'integrated-recovery-wait-end' -EventType 'wait_ended' -OccurredAtUtc '2026-10-10T10:06:00Z' -Scope 'story' -WaitId 'integrated-recovery-wait' -WaitKind 'reviewer' -Role 'coordinator'
+    $recoveryWaitEnd.runId = $recoveryRunId
+    $faultedRecoveryWrite = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryWaitEnd -FaultAfterBytes 11
+    Assert-True ($faultedRecoveryWrite.ExitCode -eq 2 -and [string]$faultedRecoveryWrite.Result.status -ceq 'error' -and [string]$faultedRecoveryWrite.Result.errorCategory -ceq 'write_failed') 'integrated recovery fault must leave a safe write failure'
+    $recoveryLedger = Join-Path (Join-Path $recorderRoot $recoveryRunId) 'events.jsonl'
+    $faultedRecoveryBytes = [IO.File]::ReadAllBytes($recoveryLedger)
+    Assert-True ($faultedRecoveryBytes.Length -gt 0 -and $faultedRecoveryBytes[$faultedRecoveryBytes.Length - 1] -ne [byte]0x0A) 'integrated recovery fault must leave a detectable incomplete tail'
+
+    $replayedCompleteBoundary = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryEvents[3]
+    Assert-True ($replayedCompleteBoundary.ExitCode -eq 0 -and [string]$replayedCompleteBoundary.Result.status -ceq 'noop') 'fresh-process replay of a complete boundary must not append a duplicate'
+    $recoveredRecoveryWrite = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryWaitEnd
+    Assert-True ($recoveredRecoveryWrite.ExitCode -eq 0 -and [string]$recoveredRecoveryWrite.Result.status -ceq 'appended' -and [bool]$recoveredRecoveryWrite.Result.recoveredIncompleteTail) 'fresh-process recovery append must retain the interrupted tail diagnostic'
+    Assert-True (Test-Path -LiteralPath ([string]$recoveredRecoveryWrite.Result.diagnosticPath) -PathType Leaf) 'integrated recovery must persist a diagnostic sidecar'
+    $recoveryDiagnosticText = [IO.File]::ReadAllText([string]$recoveredRecoveryWrite.Result.diagnosticPath)
+    Assert-True ($recoveryDiagnosticText -match '"diagnosticType":"incomplete_tail"') 'integrated recovery diagnostic must identify the interrupted tail'
+    $replayedRecoveredBoundary = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryWaitEnd
+    Assert-True ($replayedRecoveredBoundary.ExitCode -eq 0 -and [string]$replayedRecoveredBoundary.Result.status -ceq 'noop') 'replaying the recovered boundary must remain a no-op'
+
+    $recoveryPrReady = New-Event -EventId 'integrated-recovery-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-10T10:07:00Z' -Scope 'story' -Revision $revisionA -Role 'coordinator'
+    $recoveryPrReady.runId = $recoveryRunId
+    $recoveryPrReady.pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 145; reviewedHead = $revisionA }
+    $recoveryPrAppend = Invoke-RecorderEvent -RecorderPath $recorderPath -ExternalRoot $recorderRoot -RunId $recoveryRunId -Event $recoveryPrReady
+    Assert-True ($recoveryPrAppend.ExitCode -eq 0 -and [string]$recoveryPrAppend.Result.status -ceq 'appended') 'integrated recovery PR boundary should append'
+    $recoveryReportJson = & $scriptPath -EventsPath $recoveryLedger -ReviewMode per_task -TaskRefs @(301)
+    Assert-True ($LASTEXITCODE -eq 0) 'recovered ledger should aggregate successfully'
+    $recoveryReport = $recoveryReportJson | ConvertFrom-Json -Depth 100
+    Assert-True ([int64]$recoveryReport.metrics.timeToPr.value -eq 420000 -and [int64]$recoveryReport.metrics.implementationElapsed.value -eq 60000 -and [int64]$recoveryReport.metrics.reviewElapsed.value -eq 60000 -and [int64]$recoveryReport.metrics.waitingElapsed.value -eq 60000) 'recovered report must preserve exact elapsed values'
+    Assert-True ([int]$recoveryReport.metrics.initialTaskReviews.value -eq 1 -and [int]$recoveryReport.metrics.tasksCompleted.value -eq 1 -and [int]$recoveryReport.coverage.validEventCount -eq 8) 'recovered report must not double-count complete or recovered boundaries'
+    Assert-True (@($recoveryReport.reviewAttempts).Count -eq 1 -and @($recoveryReport.anomalies | Where-Object { $_.code -eq 'malformed_event' }).Count -ge 1) 'recovered report must retain one review attempt and disclose the quarantined interrupted fragment'
+
+    # Pair a healthy ready-turn control with the same transition under a real
+    # recorder fault. The child fixture invokes the existing
+    # Complete-ReviewHandoff -> Apply-Event -> End-ImplementerReviewTurn path;
+    # this wrapper only supplies the recorder fault and inspects the resulting
+    # workflow trace.
+    $automaticReviewFixturePath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts\validate-automatic-review-flow.ps1'))
+    $measurementRoot = Join-Path $root 'automatic-review-measurement'
+    $healthyTrace = Invoke-AutomaticReviewMeasurementScenario -Path $automaticReviewFixturePath -ExternalRoot $measurementRoot -RunId 'synthetic-measurement-healthy' -TracePath (Join-Path $measurementRoot 'healthy-trace.json')
+    $faultedTrace = Invoke-AutomaticReviewMeasurementScenario -Path $automaticReviewFixturePath -ExternalRoot $measurementRoot -RunId 'synthetic-measurement-fault' -TracePath (Join-Path $measurementRoot 'faulted-trace.json') -FaultAfterBytes 9
+    foreach ($workflowField in @('decision', 'authorization', 'reviewerId', 'workflowRevision', 'taskState', 'reviewGate', 'pendingReview', 'pendingRevision', 'currentTaskIndex', 'nextTaskState', 'reviewActionCount', 'reviewDestination', 'reviewActionRevision', 'turnCount', 'turnRevision')) {
+        Assert-True ([string]$healthyTrace.workflow.$workflowField -ceq [string]$faultedTrace.workflow.$workflowField) "measurement failure must not change actual workflow trace field $workflowField"
+    }
+    Assert-True ([string]$healthyTrace.measurement.state -ceq 'recorded' -and [string]$faultedTrace.measurement.state -ceq 'unavailable' -and [int]$faultedTrace.measurement.recorderExitCode -ne 0) 'measurement failure must change only measurement coverage and retain a nonzero recorder failure'
+    foreach ($trace in @($healthyTrace, $faultedTrace)) {
+        Assert-True ([string]$trace.workflow.decision -ceq 'dispatch_review' -and [string]$trace.workflow.taskState -ceq 'awaiting_review' -and [string]$trace.workflow.reviewGate -ceq 'awaiting_review') 'actual ready transition must dispatch and end in awaiting_review'
+        Assert-True ([bool]$trace.workflow.pendingReview -and [string]$trace.workflow.pendingRevision -ceq ('e' * 40) -and [string]$trace.workflow.workflowRevision -ceq ('e' * 40)) 'actual review must retain the supplied exact revision'
+        Assert-True ([int]$trace.workflow.currentTaskIndex -eq 0 -and [string]$trace.workflow.nextTaskState -ceq 'not_started') 'actual ready transition must hold the next ordered task'
+        Assert-True ([int]$trace.workflow.reviewActionCount -eq 1 -and [string]$trace.workflow.reviewDestination -ceq 'reviewer-story-87' -and [string]$trace.workflow.reviewActionRevision -ceq ('e' * 40)) 'actual dispatch trace must target the assigned reviewer once'
+        Assert-True ([int]$trace.workflow.turnCount -eq 1 -and [string]$trace.workflow.turnRevision -ceq ('e' * 40)) 'actual dispatch must end exactly one implementer turn'
+        $terminalKinds = @($trace.workflow.terminalActionKinds)
+        Assert-True ($terminalKinds.Count -eq 2 -and [string]$terminalKinds[0] -ceq 'send_review_handoff' -and [string]$terminalKinds[1] -ceq 'final_response') 'actual terminal action trace must be the review handoff and final response'
+        Assert-True ([bool]$trace.invalidAuthorization.rejected -and [int]$trace.invalidAuthorization.actionCount -eq 0 -and [int]$trace.invalidAuthorization.turnCount -eq 0 -and [string]$trace.invalidAuthorization.taskState -ceq 'in_progress' -and -not [bool]$trace.invalidAuthorization.pendingReview -and [string]$trace.invalidAuthorization.error -match 'stale') 'invalid authorization must be rejected without workflow mutation'
+    }
+
+    # Run the workflow-owned contract fixtures as part of this integrated
+    # matrix. They invoke the production recorder (and, where applicable,
+    # continuation writer) against disposable external roots, so this check
+    # covers restart, concurrent writes, interrupted tails, injected recorder
+    # failure, both review modes, and ordered-task/re-review guards without
+    # changing workflow authority.
+    $workflowFixtureRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.agents\skills\taiga-story-loop\scripts'))
+    $workflowFixtures = @(
+        [ordered]@{ name = 'performance-event recorder lifecycle'; file = 'validate-performance-event.ps1' },
+        [ordered]@{ name = 'lifecycle boundary ownership'; file = 'validate-lifecycle-bindings.ps1' },
+        [ordered]@{ name = 'post-Start resume and measurement failure'; file = 'validate-performance-start.ps1' },
+        [ordered]@{ name = 'automatic review and ordered-task flow'; file = 'validate-automatic-review-flow.ps1' }
+    )
+    $workflowFixtureResults = foreach ($fixture in $workflowFixtures) {
+        Invoke-WorkflowFixture -Name ([string]$fixture.name) -Path (Join-Path $workflowFixtureRoot ([string]$fixture.file))
+    }
+
+    $scenarioEvidence = @(
+        [ordered]@{ scenario = 'normal per-task operation'; setup = 'fixed UTC lifecycle events'; action = 'record then aggregate'; expected = 'measured elapsed/review metrics'; observed = 'report assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'correction and final re-review'; setup = 'finding, correction, and new full revision'; action = 'record both review attempts'; expected = 'distinct attributable attempts'; observed = 'per_task and final retry assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'story_end_only mode'; setup = 'implementation plus final-story events'; action = 'reject task review events'; expected = 'no task reviews, final review countable'; observed = 'mode assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'duplicate and stale observations'; setup = 'stable IDs plus stale revision'; action = 'replay and reject'; expected = 'no double-count or mutation'; observed = 'recorder/aggregator/lifecycle assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'restart and interrupted tail'; setup = 'confirmed line plus injected incomplete write'; action = 'start a fresh recorder process'; expected = 'preserve complete line and diagnose tail'; observed = 'recovery assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'concurrent writes'; setup = 'two recorder processes and same-ID replay'; action = 'append under the ledger lock'; expected = 'one line per distinct event'; observed = 'concurrency assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'unknown or partial telemetry'; setup = 'missing source-backed counters'; action = 'aggregate usage windows'; expected = 'null unavailable/partial state, no estimate'; observed = 'usage fallback assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'usage counter reset'; setup = 'synthetic cumulative stream with an intermediate decrease'; action = 'aggregate the reset window'; expected = 'partial null total with reset anomaly'; observed = 'usage_counter_reset assertion passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'PR reuse and new reviewed HEAD'; setup = 'same PR identity with changed full HEAD'; action = 'publish artifacts'; expected = 'reuse identical bytes, retain new sibling'; observed = 'artifact identity assertions passed'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'measurement failure'; setup = 'paired healthy/faulted ready-turn control through Complete-ReviewHandoff and Apply-Event with real recorder fault'; action = 'continue workflow without telemetry'; expected = 'actual dispatch trace, awaiting-review terminal state, next-task hold, and stale-authorization rejection unchanged'; observed = 'workflow-owned traces matched; only measurement became unavailable'; evidence = 'automated_assertion'; status = 'passed' },
+        [ordered]@{ scenario = 'attributable host token counters'; setup = '.agents/skills/taiga-story-loop/references/performance-reporting.md discovery dated 2026-10-09; probes: create_thread schema, get_usage_limits schema, list_threads({limit:50}), get_goal({}), repository search'; action = 'not_run by this validator; retain prior bounded discovery'; expected = 'measure only when worker/session counters are attributable'; observed = 'no fresh host probe claimed; prior discovery records per-worker counters unavailable'; evidence = 'unavailable'; status = 'not_run' }
+    )
+    Write-Output 'Scenario evidence (synthetic unless explicitly marked unavailable):'
+    foreach ($scenario in $scenarioEvidence) {
+        Write-Output (($scenario.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' | ')
+    }
+
+    Write-Output ('PASS: integrated reporting/recovery matrix; workflow fixtures: ' + (($workflowFixtureResults | ForEach-Object { "$($_.name)=exit$($_.exitCode)" }) -join ', '))
 }
 finally {
     if (Test-Path -LiteralPath $root) {

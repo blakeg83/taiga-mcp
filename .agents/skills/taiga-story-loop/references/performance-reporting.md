@@ -6,6 +6,13 @@ that the Codex App exposes worker token counters.
 
 Discovery date: 2026-10-09 (client date)
 
+The operator-facing storage, recovery, cleanup, command, sample-report, and
+epic-acceptance runbook is
+[`docs/automation/performance-reporting-operator-guide.md`](../../../../docs/automation/performance-reporting-operator-guide.md).
+This reference remains the authoritative version-1 contract and capability
+discovery record; the guide does not expand the contract or claim live host
+telemetry.
+
 ## Evidence boundary
 
 Every row below names its evidence class. An observed host result is not the

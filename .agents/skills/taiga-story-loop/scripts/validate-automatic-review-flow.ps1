@@ -1,5 +1,11 @@
 [CmdletBinding()]
-param()
+param(
+    [string] $MeasurementExternalRunRoot,
+    [string] $MeasurementRunId,
+    [int] $MeasurementFaultAfterBytes = -1,
+    [string] $MeasurementTracePath,
+    [ValidateSet('disabled', 'enabled')] [string] $MeasurementMode = 'enabled'
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -1343,6 +1349,205 @@ function Copy-ReconciliationEvent {
     return $copy
 }
 
+function Invoke-MeasurementReadyScenario {
+    param(
+        [Parameter(Mandatory)] [string] $ExternalRunRoot,
+        [Parameter(Mandatory)] [string] $RunId,
+        [int] $FaultAfterBytes = -1,
+        [Parameter(Mandatory)] [string] $TracePath,
+        [ValidateSet('disabled', 'enabled')] [string] $MeasurementMode = 'enabled'
+    )
+
+    $revision = ('e' * 40)
+    $state = New-StoryState 'per_task'
+    $workflowEvent = [ordered]@{
+        eventId = "measurement-ready-$RunId"
+        kind = 'ready_for_review'
+        taskId = 65
+        revision = $revision
+        reviewerId = [string]$state.reviewer
+        authorization = [string]$state.authorization
+    }
+
+    $performanceEvent = [ordered]@{
+        schemaVersion = 1
+        kind = 'story_performance_event'
+        eventId = "measurement-ready-$RunId"
+        runId = $RunId
+        projectId = 12
+        storyId = 729
+        storyRef = 145
+        taskRef = 65
+        role = 'implementer'
+        sessionId = "measurement-session-$RunId"
+        workerId = 'measurement-worker-story-145'
+        transitionId = "measurement-ready-$RunId"
+        scope = 'task'
+        phaseId = 'measurement-ready'
+        correctionId = $null
+        reviewRequestId = $null
+        reviewAttemptId = $null
+        reviewKind = $null
+        reviewAttemptOrdinal = $null
+        supersedesReviewAttemptId = $null
+        eventType = 'task_ready_for_review'
+        occurredAtUtc = '2026-10-10T11:00:00Z'
+        revision = $revision
+        reviewMode = 'per_task'
+        provenance = [ordered]@{
+            source = 'synthetic_fixture'
+            observedBy = 'validate-automatic-review-flow.ps1'
+            coverage = 'fixed UTC measurement boundary'
+            synthetic = $true
+        }
+        usage = $null
+        waitId = $null
+        waitKind = $null
+        pullRequest = $null
+    }
+
+    $recorderInvocationCount = 0
+    $recorderExitCode = $null
+    $recorderStatus = 'not_run'
+    $measurementState = 'not_run'
+    $recorderDurationMilliseconds = $null
+    if ($MeasurementMode -eq 'enabled') {
+        $recorderArguments = @(
+            '-NoProfile',
+            '-File', (Join-Path $PSScriptRoot 'write-performance-event.ps1'),
+            '-ExternalRunRoot', $ExternalRunRoot,
+            '-RunId', $RunId,
+            '-EventJson', ($performanceEvent | ConvertTo-Json -Compress -Depth 20)
+        )
+        if ($FaultAfterBytes -ge 0) {
+            $recorderArguments += @('-FaultAfterBytes', [string]$FaultAfterBytes)
+        }
+        $recorderInvocationCount++
+        $recorderTimer = [Diagnostics.Stopwatch]::StartNew()
+        $recorderOutput = & pwsh @recorderArguments 2>&1
+        $recorderTimer.Stop()
+        $recorderDurationMilliseconds = [math]::Round($recorderTimer.Elapsed.TotalMilliseconds, 3)
+        $recorderExitCode = [int]$LASTEXITCODE
+        $recorderLines = @($recorderOutput | ForEach-Object { [string]$_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        Assert-True ($recorderLines.Count -gt 0) 'measurement recorder must return a JSON result'
+        $recorderResult = $recorderLines[-1] | ConvertFrom-Json -Depth 50 -DateKind String
+        $recorderStatus = [string]$recorderResult.status
+        $measurementState = if ($recorderExitCode -eq 0 -and $recorderStatus -ceq 'appended') { 'recorded' } else { 'unavailable' }
+        if ($FaultAfterBytes -ge 0) {
+            Assert-True ($recorderExitCode -ne 0 -and $measurementState -ceq 'unavailable') 'faulted measurement must be unavailable with a recorder failure'
+        } else {
+            Assert-True ($recorderExitCode -eq 0 -and $measurementState -ceq 'recorded') 'healthy measurement must be recorded'
+        }
+    } else {
+        Assert-True ($FaultAfterBytes -lt 0) 'disabled measurement control cannot inject a recorder fault'
+    }
+
+    $workflowResult = Complete-ReviewHandoff $state $workflowEvent
+    $reviewActions = @($state.actions | Where-Object { [string]$_.kind -ceq 'review' })
+    $currentTurnTrace = @($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$state.currentTurnId })
+    Assert-True ([string]$workflowResult.decision -ceq 'dispatch_review') 'actual ready transition must dispatch review'
+    Assert-True ([string]$state.tasks[0].state -ceq 'awaiting_review' -and $null -ne $state.pendingReview) 'actual ready transition must hold the task in awaiting_review'
+    Assert-True ([string]$state.turnStatus -ceq 'awaiting_review' -and @($state.turns).Count -eq 1) 'actual ready transition must end the implementer turn awaiting review'
+    Assert-True ($reviewActions.Count -eq 1 -and [string]$reviewActions[0].destination -ceq [string]$state.reviewer) 'actual ready transition must create one direct reviewer dispatch'
+    Assert-True ([string]$reviewActions[0].revision -ceq $revision -and [string]$state.pendingReview.revision -ceq $revision) 'actual ready transition must preserve the supplied exact revision'
+    Assert-True ($currentTurnTrace.Count -eq 2 -and [string]$currentTurnTrace[0].kind -ceq 'send_review_handoff' -and [string]$currentTurnTrace[1].kind -ceq 'final_response') 'actual ready transition must derive terminal actions from the real trace'
+
+    $invalidState = New-StoryState 'per_task'
+    $invalidEvent = Copy-ReconciliationEvent $workflowEvent
+    $invalidEvent.eventId = "measurement-ready-stale-$RunId"
+    $invalidEvent.authorization = 'stale-start-87'
+    $invalidRejected = $false
+    $invalidError = $null
+    try {
+        Complete-ReviewHandoff $invalidState $invalidEvent | Out-Null
+    }
+    catch {
+        $invalidRejected = $true
+        $invalidError = [string]$_.Exception.Message
+    }
+    Assert-True ($invalidRejected -and @($invalidState.actions).Count -eq 0 -and @($invalidState.turns).Count -eq 0 -and
+        [string]$invalidState.tasks[0].state -ceq 'in_progress' -and $null -eq $invalidState.pendingReview) 'stale authorization must reject before mutating workflow state'
+
+    $workflowActions = @($state.actions)
+    $normalMessageKinds = @('review', 'correction', 'acceptance', 'taiga_reconcile', 'advance_next_task', 'story_review', 'story_correction')
+    $normalMessageCount = @($workflowActions | Where-Object { [string]$_.kind -in $normalMessageKinds }).Count
+    $actorIds = @($workflowActions | ForEach-Object { [string]$_.sender; [string]$_.destination } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    $pollingKinds = @('wait_threads', 'read_reviewer_chat', 'review_monitor', 'keep_alive')
+    $pollingEventCount = @($state.implementerActions | Where-Object { [string]$_.kind -in $pollingKinds }).Count
+    $measurementOnlyMessageCount = @($workflowActions | Where-Object { [string]$_.kind -eq 'measurement_only' }).Count
+    $transitionCount = @($state.consumedEvents).Count
+    $workflowFingerprint = [ordered]@{
+        decision = [string]$workflowResult.decision
+        taskState = [string]$state.tasks[0].state
+        reviewGate = [string]$state.turnStatus
+        pendingReview = ($null -ne $state.pendingReview)
+        revision = [string]$state.pendingReview.revision
+        transitionCount = $transitionCount
+        normalMessageCount = $normalMessageCount
+        agentCount = $actorIds.Count
+        pollingEventCount = $pollingEventCount
+        measurementOnlyMessageCount = $measurementOnlyMessageCount
+    }
+
+    $trace = [ordered]@{
+        schemaVersion = 1
+        kind = 'synthetic_automatic_review_measurement_trace'
+        measurement = [ordered]@{
+            mode = $MeasurementMode
+            state = $measurementState
+            recorderExitCode = $recorderExitCode
+            recorderStatus = $recorderStatus
+            recorderInvocationCount = $recorderInvocationCount
+            recorderDurationMilliseconds = $recorderDurationMilliseconds
+        }
+        workflow = [ordered]@{
+            decision = [string]$workflowResult.decision
+            authorization = [string]$state.authorization
+            reviewerId = [string]$state.pendingReview.reviewerId
+            workflowRevision = [string]$state.pendingReview.revision
+            taskState = [string]$state.tasks[0].state
+            reviewGate = [string]$state.turnStatus
+            pendingReview = ($null -ne $state.pendingReview)
+            pendingRevision = [string]$state.pendingReview.revision
+            currentTaskIndex = [int]$state.currentTaskIndex
+            nextTaskState = [string]$state.tasks[1].state
+            reviewActionCount = $reviewActions.Count
+            reviewDestination = [string]$reviewActions[0].destination
+            reviewActionRevision = [string]$reviewActions[0].revision
+            turnCount = @($state.turns).Count
+            turnRevision = [string]@($state.turns)[0].revision
+            terminalActionKinds = @($currentTurnTrace | ForEach-Object { [string]$_.kind })
+            actionKinds = @($workflowActions | ForEach-Object { [string]$_.kind })
+            actorIds = @($actorIds)
+            consumedEventIds = @($state.consumedEvents | ForEach-Object { [string]$_ })
+            implementerActionKinds = @($state.implementerActions | ForEach-Object { [string]$_.kind })
+            transitionCount = $transitionCount
+            normalMessageCount = $normalMessageCount
+            agentCount = $actorIds.Count
+            pollingEventCount = $pollingEventCount
+            measurementOnlyMessageCount = $measurementOnlyMessageCount
+            recorderInvocationCount = $recorderInvocationCount
+            recorderDurationMilliseconds = $recorderDurationMilliseconds
+            outcomeFingerprint = ($workflowFingerprint | ConvertTo-Json -Compress -Depth 20)
+        }
+        invalidAuthorization = [ordered]@{
+            rejected = $invalidRejected
+            error = $invalidError
+            actionCount = @($invalidState.actions).Count
+            turnCount = @($invalidState.turns).Count
+            taskState = [string]$invalidState.tasks[0].state
+            pendingReview = ($null -ne $invalidState.pendingReview)
+        }
+    }
+    $traceParent = Split-Path -Parent $TracePath
+    if (-not [string]::IsNullOrWhiteSpace($traceParent)) {
+        [IO.Directory]::CreateDirectory($traceParent) | Out-Null
+    }
+    $traceJson = $trace | ConvertTo-Json -Depth 30
+    [IO.File]::WriteAllText($TracePath, $traceJson, [Text.UTF8Encoding]::new($false))
+    return $trace
+}
+
 $preDispatchState = New-StoryState 'per_task'
 $preDispatchActionCount = @($preDispatchState.implementerActions).Count
 $preDispatchRejected = $false
@@ -1814,5 +2019,11 @@ Assert-True ($findingState.finalReviewStatus -eq 'awaiting_review' -and $finding
 $findingApproval = New-StoryAcceptanceEvent $findingState 'finding-corrected-approval' $findingCorrectedSha
 $findingApproved = Resume-ImplementerOnReviewerMessage $findingState $findingApproval
 Assert-True ($findingApproved.decision -eq 'final_story_reconciled' -and $findingState.finalStoryApproval.revision -eq $findingCorrectedSha) 'corrected final HEAD must be the only approvable story revision'
+
+if (-not [string]::IsNullOrWhiteSpace($MeasurementExternalRunRoot) -and
+    -not [string]::IsNullOrWhiteSpace($MeasurementRunId) -and
+    -not [string]::IsNullOrWhiteSpace($MeasurementTracePath)) {
+    Invoke-MeasurementReadyScenario -ExternalRunRoot $MeasurementExternalRunRoot -RunId $MeasurementRunId -FaultAfterBytes $MeasurementFaultAfterBytes -TracePath $MeasurementTracePath -MeasurementMode $MeasurementMode | Out-Null
+}
 
 Write-Output 'Passed automatic review-flow fixture: trace-derived end-of-turn initial/correction handoffs with post-termination action rejection, reviewer-message resume, no implementer polling/monitor/keep-alive/unchanged acknowledgement, healthy-versus-unresolved-delivery recovery, implementer-owned version-safe Taiga reconciliation with checklist/comment idempotency, human/version/response-loss/interruption barriers, direct acceptance/advancement, final-task and final-story gates, both review modes, duplicate/stale/idle guards, coordinator escalation, and scope gating.'
