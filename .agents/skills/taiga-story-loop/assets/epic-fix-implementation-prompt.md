@@ -50,9 +50,31 @@ are optional and do not require another correction by themselves.
 
 Before returning the correction, verify the expected repository, branch,
 worktree, clean tracked-source state, exact new full HEAD, and correction delta
-from the reviewed HEAD. Send the correction evidence to the coordinator, who
-owns integration into the feature branch and the next review dispatch. Do not
-poll the reviewer and do not create another chat for a routine correction.
+from the reviewed HEAD. Send exactly one integration-ready event to the
+coordinator with the bound finding and review request, the reviewed and
+corrected full revisions, correction branch/worktree, clean-source result,
+correction delta, verification commands/results, and the next action. A
+correction receipt is not epic acceptance: the coordinator owns the reviewed
+integration into the feature branch, captures the resulting exact feature HEAD,
+persists continuation, and dispatches the same epic pair for exact-HEAD
+re-review. Do not poll the reviewer or create another chat for a routine
+correction.
+
+Use this correction-ready result shape:
+
+```text
+Epic #<ref> correction ready for integration
+Destination: coordinator
+Finding/review request: <bound finding and request ID>
+Reviewed HEAD: <exact full 40-character SHA>
+Corrected HEAD: <exact full 40-character SHA>
+Correction branch/worktree: <branch> / <absolute worktree>
+Source state: clean tracked source
+Correction delta: <reviewed HEAD>..<corrected HEAD>; paths: <correction paths>
+Checks: `<command>` — exit <code>; <result>
+Acceptance: not yet; coordinator must integrate and dispatch exact-HEAD re-review
+Next: coordinator, follow the reviewed integration path and return the resulting exact feature HEAD to this same pair.
+```
 
 The coordinator may reuse this fresh epic-fix implementer chat for later
 findings in the same integrated review phase. A changed scope, repository,

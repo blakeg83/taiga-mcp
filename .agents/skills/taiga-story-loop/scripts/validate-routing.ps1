@@ -54,6 +54,8 @@ function Send-Message {
         missing_destination = $coordinator
         unknown_delivery = $coordinator
         revision_conflict = $coordinator
+        epic_finding = $implementer
+        epic_approval = $coordinator
     }
     if ($directDestination.ContainsKey($Kind)) {
         Assert-True ($Destination -eq $directDestination[$Kind]) "$Kind must use its contract destination"
@@ -67,6 +69,38 @@ function Send-Message {
         next = $Next
     }
     if ($Reason) { $message.reason = $Reason }
+    [void]$messages.Add([pscustomobject]$message)
+}
+
+function Send-Epic-Integration-Ready {
+    param(
+        [string] $Sender,
+        [string] $Destination,
+        [string] $ReviewRequest,
+        [string] $ReviewedHead,
+        [string] $CorrectedHead
+    )
+
+    Assert-True ($Sender -eq $implementer) 'integration-ready correction must come from the epic-fix implementer'
+    Assert-True ($Destination -eq $coordinator) 'integration-ready correction must route to the coordinator'
+    Assert-True (-not [string]::IsNullOrWhiteSpace($ReviewRequest)) 'integration-ready correction must bind its review request'
+    Assert-True (-not [string]::IsNullOrWhiteSpace($ReviewedHead) -and -not [string]::IsNullOrWhiteSpace($CorrectedHead)) 'integration-ready correction must name both full revisions'
+    $message = [ordered]@{
+        sender = $Sender
+        destination = $Destination
+        kind = 'epic_integration_ready'
+        task = 'epic-45'
+        reviewRequest = $ReviewRequest
+        reviewedHead = $ReviewedHead
+        correctedHead = $CorrectedHead
+        correctionBranch = 'codex/integration-fix-run1'
+        correctionWorktree = 'C:\Temp\integration-fix-run1'
+        sourceState = 'clean tracked source'
+        delta = "$ReviewedHead..$CorrectedHead; paths: focused correction"
+        checks = @('validate-final-epic-review.ps1 — exit 0')
+        next = 'coordinator integrates and dispatches exact-head re-review'
+        accepted = $false
+    }
     [void]$messages.Add([pscustomobject]$message)
 }
 
@@ -128,6 +162,12 @@ Send-Message $reviewer $coordinator 'missing_destination' '#68' '' 'resolve work
 Send-Message $reviewer $coordinator 'unknown_delivery' '#68' 'c2' 'reconcile before retry' 'reviewer delivery result is unknown'
 Send-Message $implementer $coordinator 'revision_conflict' '#68' 'c2' 'reconcile current review binding' 'branch HEAD conflicts with the pending reviewed revision'
 
+# Integrated epic review: routine findings stay direct; integration-ready and
+# final approval events are actionable coordinator destinations.
+Send-Message $reviewer $implementer 'epic_finding' 'epic-45' 'feature-a' 'correct exact integrated HEAD' 'routine correctable epic finding'
+Send-Epic-Integration-Ready $implementer $coordinator 'epic-review-45-attempt-1' 'feature-a' 'feature-b'
+Send-Message $reviewer $coordinator 'epic_approval' 'epic-45' 'feature-b' 'prepare final delivery' 'final exact-head epic acceptance'
+
 # Routine milestone copies to the coordinator are forbidden.
 Assert-Throws { Send-Message $implementer $coordinator 'ready' '#65' 'a1' 'review exact revision' 'routine ready copy' } 'task-ready must not be copied to the coordinator'
 Assert-Throws { Send-Message $reviewer $coordinator 'finding' '#65' 'a1' 'correct same branch' 'routine finding copy' } 'routine finding must not be copied to the coordinator'
@@ -150,6 +190,13 @@ Assert-True (@($messages | Where-Object { $_.PSObject.Properties.Name -contains 
 Assert-True ($staleApprovals.Count -eq 1 -and $staleApprovals[0].next -eq 're-review changed HEAD') 'stale approval must return to review'
 Assert-True ((Get-Messages 'unknown_delivery' '#68').Count -eq 1) 'unknown delivery must escalate once'
 Assert-True ((Get-Messages 'revision_conflict' '#68').Count -eq 1) 'revision conflict must escalate once'
-Assert-True ($messages.Count -eq 15) 'fixture should cover the complete controlled route set'
+$epicFindings = @(Get-Messages 'epic_finding' 'epic-45')
+$epicIntegration = @(Get-Messages 'epic_integration_ready' 'epic-45')
+$epicApprovals = @(Get-Messages 'epic_approval' 'epic-45')
+Assert-True ($epicFindings.Count -eq 1 -and $epicFindings[0].destination -eq $implementer) 'routine epic findings must go directly to the same epic-fix implementer'
+Assert-True ($epicIntegration.Count -eq 1 -and $epicIntegration[0].destination -eq $coordinator) 'integration-ready epic corrections must reach the coordinator'
+Assert-True ($epicIntegration[0].reviewRequest -and $epicIntegration[0].reviewedHead -and $epicIntegration[0].correctedHead -and $epicIntegration[0].correctionBranch -and $epicIntegration[0].correctionWorktree -and $epicIntegration[0].sourceState -eq 'clean tracked source' -and $epicIntegration[0].delta -and @($epicIntegration[0].checks).Count -gt 0 -and $epicIntegration[0].next -and -not $epicIntegration[0].accepted) 'integration-ready correction must carry evidence and must not be treated as acceptance'
+Assert-True ($epicApprovals.Count -eq 1 -and $epicApprovals[0].destination -eq $coordinator) 'final exact-head epic approval must route to coordinator'
+Assert-True ($messages.Count -eq 18) 'fixture should cover the complete controlled route set'
 
 Write-Output "Passed routing fixture: two ordered tasks, direct readiness/acceptance and correction rounds, stable pair, no routine coordinator relay, concise context, and coordinator escalation paths. No time or correction-count cutoff is used."

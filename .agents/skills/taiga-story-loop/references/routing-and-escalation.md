@@ -1,10 +1,35 @@
 # Routing and substantive escalation
 
-The pair remains stable across at least two task reviews and any ordinary
-correction. Routine findings go directly from reviewer to implementer, and
-correction-ready handoffs go directly from implementer to the same reviewer.
-The coordinator observes durable workflow state and routes only assignments or
-exceptional escalations; it does not relay or restate routine findings.
+The story pair remains stable across at least two task reviews and any ordinary
+correction. Story-worker routine findings go directly from reviewer to
+implementer, and story correction-ready handoffs go directly from implementer
+to the same reviewer. The coordinator observes durable workflow state and
+routes only assignments or exceptional escalations; it does not relay or
+restate routine findings. The integrated epic pair uses the distinct routes
+below.
+
+## Integrated epic-review destinations
+
+The fresh integrated epic-review pair uses a distinct destination boundary:
+
+| Event | Sender | Destination | Meaning |
+| --- | --- | --- | --- |
+| Correctable finding / changes requested | epic reviewer | same epic-fix implementer | Routine correction request; no coordinator copy or relay. |
+| Correction ready for integration | epic-fix implementer | coordinator | Actionable integration request, not acceptance; it must bind the finding/review request, reviewed and corrected full revisions, correction branch/worktree, clean source, delta, checks, and next action. |
+| Final exact-HEAD approval | epic reviewer | coordinator | Acceptance of the exact integrated feature HEAD after all required re-reviews. |
+| Exceptional escalation | epic reviewer or epic-fix implementer | coordinator | Blocked verification, unknown delivery, stale/conflicting revision, missing destination, or scope/authorization decision. |
+
+The coordinator owns the existing reviewed integration path after an
+integration-ready event: verify the packet, incorporate the correction into the
+feature branch, capture the resulting exact feature HEAD, persist continuation,
+and dispatch exact-HEAD re-review to the same fresh pair. A correction receipt
+alone never becomes epic acceptance. Ordinary correction and re-review rounds
+reuse the pair; they do not create a new chat.
+
+Use destination-bearing result templates. A `changes requested` result names
+the same epic-fix implementer and the correction request. An `accepted` or
+exceptional result names the coordinator and the exact approval or escalation
+action. Story-worker routing remains unchanged.
 
 ## Controlled scenarios
 

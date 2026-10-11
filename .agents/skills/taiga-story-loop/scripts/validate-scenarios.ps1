@@ -633,6 +633,10 @@ foreach ($marker in @(
         'fresh, read-only reviewer'
         'gpt-6.1-sol` with `high`'
         'fresh epic-review pair'
+        'Send routine correctable findings directly to the same fresh epic-fix implementer'
+        'Do not copy or restate those findings to the coordinator'
+        'Destination: fresh epic-fix implementer'
+        'Destination: coordinator'
         'Do not reuse or ask to reuse a story reviewer chat'
         'Re-review through this same fresh epic-review pair')) {
     if (-not $normalizedEpicReviewerPrompt.Contains($marker)) {
@@ -645,6 +649,10 @@ foreach ($marker in @(
         'distinct from every story implementer chat'
         'Wait for a finding delivered directly by the assigned epic reviewer'
         'Verify the sender, scope, and exact reviewed HEAD'
+        'exactly one integration-ready event to the coordinator'
+        'bound finding and review request'
+        'Correction delta:'
+        'Acceptance: not yet'
         'reuse this fresh epic-fix implementer chat')) {
     if (-not $normalizedEpicFixPrompt.Contains($marker)) {
         throw "Epic-fix prompt assertion failed: $marker"
@@ -659,10 +667,13 @@ if (-not $normalizedAcceptance.Contains('The task-acceptance route is reviewer-t
     throw 'Acceptance assertion failed: direct task acceptance and implementer ownership must remain explicit'
 }
 if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
-    -not $normalizedRouting.Contains('fixed correction-count cutoff')) {
+    -not $normalizedRouting.Contains('fixed correction-count cutoff') -or
+    -not $normalizedRouting.Contains('Integrated epic-review destinations') -or
+    -not $normalizedRouting.Contains('Correction ready for integration') -or
+    -not $normalizedRouting.Contains('Story-worker routing remains unchanged')) {
     throw 'Routing assertion failed: no arbitrary cutoff policy'
 }
-foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied')) {
+foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied', 'epic_finding', 'Send-Epic-Integration-Ready', 'epic_integration_ready', 'integration-ready correction must carry evidence')) {
     if (-not (Get-Content $routingScriptPath -Raw).Contains($marker)) {
         throw "Routing assertion failed: $marker"
     }
@@ -934,19 +945,28 @@ foreach ($marker in @(
         'every linked story in authoritative order'
         'combined behavior across stories'
         'cross-story state transitions'
-        'sends it directly to the fresh epic-fix implementer on an isolated integration-correction branch'
-        'The coordinator does not relay findings'
-        'resulting exact feature HEAD again'
+        'sends it directly to the same fresh epic-fix implementer'
+        'The coordinator is not copied or used as a routine finding relay'
+        'dispatches the same fresh Sol 6.1 high reviewer for exact-HEAD re-review'
         'Confirmed dispatch and redispatch terminal boundary'
         'both full scoped assignments have successful delivery results'
         'coordinator ends its foreground turn immediately'
-        'integration-ready correction')) {
+        'integration-ready correction'
+        'returns one integration-ready event to the coordinator'
+        'bound finding/review request'
+        'not epic acceptance'
+        'Destination: coordinator')) {
     if (-not $normalizedFinalEpicReview.Contains($marker)) {
         throw "Final epic review assertion failed: $marker"
     }
 }
 if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains('Passed offline final epic review fixture')) {
     throw 'Final epic review assertion failed: offline fixture coverage'
+}
+foreach ($marker in @('Route-IntegrationReadyCorrection', 'Route-FinalEpicApproval', 'integration-ready corrections must reach the coordinator', 'not be treated as epic acceptance')) {
+    if (-not (Get-Content $finalEpicReviewScriptPath -Raw).Contains($marker)) {
+        throw "Final epic review assertion failed: actionable route marker $marker"
+    }
 }
 foreach ($marker in @(
         'This contract applies to an epic or to an active legacy standalone run'

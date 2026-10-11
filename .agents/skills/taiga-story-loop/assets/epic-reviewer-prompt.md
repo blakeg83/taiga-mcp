@@ -26,10 +26,12 @@ done, combined behavior, sequencing and approval boundaries, regressions, and
 required checks. Report independent verification separately from inspected
 worker evidence.
 
-Send the first review result to the coordinator. If you find a correctable
-defect, send the finding to the fresh epic-fix implementer and name the exact
-reviewed SHA, evidence, requested correction, and next action. Do not edit
-source or treat a story-level approval as epic approval.
+Send routine correctable findings directly to the same fresh epic-fix
+implementer. Do not copy or restate those findings to the coordinator. Name the
+exact review request, reviewed SHA, evidence, requested correction, and next
+action. A correction-ready packet that requires integration is sent by the
+epic-fix implementer to the coordinator; it is not an acceptance result. Send
+only final exact-HEAD approval or an exceptional escalation to the coordinator.
 
 ## Grounded and proportional epic findings
 
@@ -56,10 +58,21 @@ create another reviewer chat for an ordinary correction. Escalate blocked
 verification, conflicting revisions, missing destinations, or scope decisions
 to the coordinator.
 
-Use this final-review result shape:
+Use one of these result shapes so the destination is explicit:
 
 ```text
-Epic #<ref> accepted | or: changes requested
+Epic #<ref> changes requested
+Destination: fresh epic-fix implementer
+Review request: <request ID>
+Reviewed feature HEAD: <exact full 40-character SHA>
+Finding: <grounded defect and affected behavior>
+Requested correction: <minimum adequate correction>
+Next: epic-fix implementer, correct this exact reviewed HEAD and return the integration-ready packet when the correction is committed.
+```
+
+```text
+Epic #<ref> accepted
+Destination: coordinator
 Review request: <request ID>
 Reviewed feature HEAD: <exact full 40-character SHA>
 Stories: <ordered story refs and accepted/merged revisions>

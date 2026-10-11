@@ -98,18 +98,24 @@ contradictory evidence.
 
 Before inspecting or accepting, the reviewer verifies the expected worktree,
 branch, exact full HEAD, diff range, and clean tracked-source state. If the
-review finds a defect, the reviewer records the finding against the exact
-feature HEAD and sends it directly to the fresh epic-fix implementer on an isolated
-integration-correction branch. The implementer verifies the assigned reviewer,
-scope, and exact reviewed HEAD, then resumes correction work in the same chat.
-The coordinator does not relay findings. The implementer returns a focused commit and
-integration checks; the correction is incorporated into the feature branch
-only through the normal reviewed path. The same fresh Sol 6.1 high reviewer
-then reviews the resulting exact feature HEAD again. Prior approval is
-superseded by any source, HEAD, branch, or requirement change; preserve
-conflicts and never reset, clean, stash, force-push, or silently substitute a
-revision. Ordinary corrections reuse both epic-review chats; they do not create
-a second correction pair.
+review finds a correctable defect, the reviewer records the finding against the
+exact feature HEAD and sends it directly to the same fresh epic-fix implementer
+on an isolated integration-correction branch. The coordinator is not copied or
+used as a routine finding relay. The implementer verifies the assigned reviewer,
+scope, and exact reviewed HEAD, then returns one integration-ready event to the
+coordinator after the correction is committed.
+
+That event must include the bound finding/review request, reviewed and corrected
+full revisions, correction branch/worktree, clean tracked-source evidence,
+correction delta, verification commands/results, and next action. It is a
+request for coordinator-owned integration, not epic acceptance. The coordinator
+verifies the packet, incorporates the correction into the feature branch,
+captures the resulting exact feature HEAD, persists continuation, and dispatches
+the same fresh Sol 6.1 high reviewer for exact-HEAD re-review. Prior approval is
+superseded by any source, HEAD, branch, or requirement change; preserve conflicts
+and never reset, clean, stash, force-push, or silently substitute a revision.
+Ordinary corrections reuse both epic-review chats; they do not create a second
+correction pair.
 
 Do not open the final feature-to-master PR while findings are unresolved. Do
 not turn a passing task review, all-story merge, or a stale final approval into
@@ -123,6 +129,7 @@ An accepted review records:
 
 ```text
 Epic #<ref> accepted
+Destination: coordinator
 Reviewer: gpt-6.1-sol / high
 Repository: <absolute repository path>
 Integration worktree: <absolute worktree>

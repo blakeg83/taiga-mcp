@@ -93,6 +93,39 @@ function Route-ReviewFinding {
     }
 }
 
+function Route-IntegrationReadyCorrection {
+    param(
+        [string] $ReviewedHead,
+        [string] $CorrectedHead
+    )
+    [ordered]@{
+        sender = 'fresh-epic-fix-implementer'
+        destination = 'coordinator'
+        event = 'integration_ready'
+        reviewRequest = 'epic-review-45-attempt-1'
+        reviewedHead = $ReviewedHead
+        correctedHead = $CorrectedHead
+        correctionBranch = 'codex/integration-fix-run1'
+        correctionWorktree = 'C:\Temp\integration-fix-run1'
+        sourceState = 'clean tracked source'
+        correctionDelta = "$ReviewedHead..$CorrectedHead; paths: focused correction"
+        checks = @('validate-final-epic-review.ps1 — exit 0')
+        next = 'coordinator integrates and dispatches exact-head re-review'
+        acceptance = 'not_yet'
+    }
+}
+
+function Route-FinalEpicApproval {
+    param([string] $ReviewedHead)
+    [ordered]@{
+        sender = 'epic-reviewer'
+        destination = 'coordinator'
+        event = 'final_approval'
+        reviewedHead = $ReviewedHead
+        next = 'prepare final feature-to-master delivery'
+    }
+}
+
 $ready = New-ReviewRequest
 $pair = New-EpicReviewPair
 Assert-True ((Test-ReviewRequest $ready) -eq 'ready') 'complete merged story set at current HEAD should be reviewable'
@@ -117,5 +150,13 @@ $finding = Route-ReviewFinding $ready.currentHead
 Assert-True ($finding.sender -eq 'epic-reviewer' -and -not $finding.coordinatorRelay) 'the reviewer must deliver findings directly without a coordinator relay'
 Assert-True ($finding.destination -eq 'fresh-epic-fix-implementer' -and $finding.isolated -and $finding.correctionBranch -like 'codex/integration-fix-*') 'findings must route to the fresh implementer on an isolated integration correction branch'
 Assert-True ($finding.rereviewProfile -eq 'gpt-6.1-sol/high' -and $finding.sameFreshPair -and $finding.priorApprovalSuperseded) 'corrections must reuse the fresh pair for exact-head high re-review'
+
+$integrationReady = Route-IntegrationReadyCorrection $ready.currentHead 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+Assert-True ($integrationReady.destination -eq 'coordinator' -and $integrationReady.event -eq 'integration_ready') 'integration-ready corrections must reach the coordinator as an actionable event'
+Assert-True ($integrationReady.reviewRequest -and $integrationReady.reviewedHead -and $integrationReady.correctedHead -and $integrationReady.correctionBranch -and $integrationReady.correctionWorktree -and $integrationReady.sourceState -eq 'clean tracked source' -and $integrationReady.correctionDelta -and @($integrationReady.checks).Count -gt 0 -and $integrationReady.next) 'integration-ready corrections must carry the bound revisions, source, delta, checks, and next action'
+Assert-True ($integrationReady.acceptance -eq 'not_yet') 'an integration-ready correction receipt must not be treated as epic acceptance'
+
+$approval = Route-FinalEpicApproval $integrationReady.correctedHead
+Assert-True ($approval.destination -eq 'coordinator' -and $approval.event -eq 'final_approval' -and $approval.reviewedHead -eq $integrationReady.correctedHead) 'final exact-head approval must route to the coordinator'
 
 Write-Output 'Passed offline final epic review fixture: fresh coordinator-created Luna 5.6 xhigh/Sol 6.1 high pair, reviewer-first dispatch, ordered merged-story scope, integrated coverage, stale-head guard, isolated correction routing, pair reuse, and exact-head re-review.'
