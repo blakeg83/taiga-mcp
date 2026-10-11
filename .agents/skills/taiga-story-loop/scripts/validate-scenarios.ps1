@@ -1237,12 +1237,42 @@ $roleContractScenarios = @(
     @{ Name = 'worker-consensus'; Outcome = '`scope_decision_to_user`; worker agreement is not authorization.'; Basis = 'agree that the expanded design would be useful'; Limit = 'coordinator/user routing is synthetic' }
 )
 
-$roleContractResults = foreach ($scenario in $roleContractScenarios) {
-    foreach ($marker in @($scenario.Name, $scenario.Outcome, $scenario.Basis, $scenario.Limit)) {
-        if (-not $normalizedWalkthrough.Contains($marker)) {
-            throw "Walkthrough static-content assertion failed for '$($scenario.Name)': $marker"
+function Get-RoleContractScenarioRow {
+    param(
+        [Parameter(Mandatory)] [string] $Walkthrough,
+        [Parameter(Mandatory)] [hashtable] $Scenario
+    )
+
+    $nameMarker = '`' + $Scenario.Name + '`'
+    $rows = @($Walkthrough -split '\r?\n' | Where-Object {
+            $trimmed = $_.TrimStart()
+            $trimmed.StartsWith('|') -and $trimmed.Contains($nameMarker)
+        })
+    if ($rows.Count -ne 1) {
+        throw "Walkthrough must contain exactly one table row for '$($Scenario.Name)'; found $($rows.Count)."
+    }
+
+    return [regex]::Replace([string] $rows[0], '\s+', ' ')
+}
+
+function Assert-RoleContractScenarioRow {
+    param(
+        [Parameter(Mandatory)] [string] $Walkthrough,
+        [Parameter(Mandatory)] [hashtable] $Scenario
+    )
+
+    $row = Get-RoleContractScenarioRow -Walkthrough $Walkthrough -Scenario $Scenario
+    foreach ($marker in @($Scenario.Name, $Scenario.Outcome, $Scenario.Basis, $Scenario.Limit)) {
+        if (-not $row.Contains($marker)) {
+            throw "Walkthrough row assertion failed for '$($Scenario.Name)': $marker"
         }
     }
+
+    return $row
+}
+
+$roleContractResults = foreach ($scenario in $roleContractScenarios) {
+    Assert-RoleContractScenarioRow -Walkthrough $walkthroughText -Scenario $scenario | Out-Null
 
     [pscustomobject]@{
         Name = $scenario.Name
@@ -1250,6 +1280,26 @@ $roleContractResults = foreach ($scenario in $roleContractScenarios) {
         Evidence = 'static_content_check'
     }
 }
+
+$negativeScenario = $roleContractScenarios | Where-Object { $_.Name -eq 'adequate-simple' }
+$negativeWalkthrough = $walkthroughText.Replace(
+    $negativeScenario.Outcome,
+    '`blocking`; request the minimum adequate correction.'
+) + "`n| appendix | `accepted`; no blocker or extra approval gate. | retained text | unrelated appendix text |"
+$negativeRejected = $false
+try {
+    Assert-RoleContractScenarioRow -Walkthrough $negativeWalkthrough -Scenario $negativeScenario | Out-Null
+}
+catch {
+    if ($_.Exception.Message -notmatch "Walkthrough row assertion failed for 'adequate-simple'") {
+        throw
+    }
+    $negativeRejected = $true
+}
+if (-not $negativeRejected) {
+    throw 'Role-contract row negative control unexpectedly accepted an altered outcome.'
+}
+Write-Output 'Passed role-contract negative control: an altered row outcome was rejected despite the expected text appearing elsewhere.'
 
 $roleContractResults | Format-Table Name, Outcome, Evidence -AutoSize | Out-String | Write-Output
 $acceptanceOutput = @(& pwsh -NoProfile -File $acceptanceEvidenceScriptPath 2>&1 | ForEach-Object { [string]$_ })
