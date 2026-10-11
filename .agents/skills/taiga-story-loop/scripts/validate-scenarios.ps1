@@ -137,6 +137,7 @@ $branchText = Get-Content $branchPath -Raw
 $normalizedBranch = [regex]::Replace($branchText, '\s+', ' ')
 $continuationText = Get-Content $continuationPath -Raw
 $normalizedContinuation = [regex]::Replace($continuationText, '\s+', ' ')
+$continuationScriptText = Get-Content $continuationScriptPath -Raw
 $branchScenarioText = Get-Content $branchScenarioPath -Raw
 $normalizedBranchScenario = [regex]::Replace($branchScenarioText, '\s+', ' ')
 $walkthroughText = Get-Content $walkthroughPath -Raw
@@ -392,6 +393,11 @@ Assert-DocumentContains 'confirmed dispatch continuation gate' 'a replaced conti
 Assert-DocumentContains 'confirmed dispatch heartbeat gate' 'provider-confirmed `ACTIVE` recovery schedule'
 Assert-DocumentContains 'terminal coordinator boundary' 'ends its turn immediately'
 Assert-DocumentContains 'actionable resume boundary' 'integration-ready epic correction'
+Assert-DocumentContains 'heartbeat snapshot-first rule' 'read the current continuation snapshot first'
+Assert-DocumentContains 'heartbeat one-wait rule' 'at most one `wait_threads(timeoutMs: 0)` snapshot per tick'
+Assert-DocumentContains 'heartbeat cursor persistence' 'Persist changed cursors by replacing the snapshot'
+Assert-DocumentContains 'heartbeat awaiting-review exclusion' 'exclude a confirmed `awaiting_review` implementer'
+Assert-DocumentContains 'heartbeat reconciliation guard' 'never guesses, replays, reminds, or redispatches'
 Assert-DocumentContains 'standalone topology setup' 'standalone-story-direct-master'
 Assert-DocumentContains 'epic topology setup' 'epic-shared-feature'
 Assert-DocumentContains 'legacy topology setup' 'legacy-standalone-feature'
@@ -474,6 +480,15 @@ Assert-ContinuationContains 'merge confirmation' 'provider reports the PR merged
 Assert-ContinuationContains 'snapshot ownership' 'The coordinator owns this compact snapshot'
 Assert-ContinuationContains 'worker evidence ownership' 'The implementer owns current-version Taiga task and story progress writes'
 Assert-ContinuationContains 'quiet review wait' 'implementer in `awaiting_review` after a confirmed'
+Assert-ContinuationContains 'heartbeat snapshot first' 'Read the current continuation snapshot first and use its confirmed'
+Assert-ContinuationContains 'heartbeat active gate' '`ACTIVE` is required before any worker wait'
+Assert-ContinuationContains 'heartbeat identity reconciliation' 'missing/corrupt `threadId` or `hostId`'
+Assert-ContinuationContains 'heartbeat awaiting review exclusion' 'A confirmed implementer in `awaiting_review` is deliberately excluded'
+Assert-ContinuationContains 'heartbeat running reviewer eligibility' 'a separate actively running reviewer remains eligible'
+Assert-ContinuationContains 'heartbeat cursor target' 'Each target carries its recorded `threadId`, `hostId`, and `afterCursor`'
+Assert-ContinuationContains 'heartbeat one compact wait' 'at most one compact `wait_threads(timeoutMs: 0)` snapshot for the tick'
+Assert-ContinuationContains 'heartbeat cursor replacement' 'do not create tick history'
+Assert-ContinuationContains 'heartbeat pending reconciliation' '`pending` or an unrecognized schedule state opens bounded schedule reconciliation'
 Assert-ContinuationContains 'stale feature guard' 'Do not create the next story branch from a stale local feature checkout'
 Assert-ContinuationContains 'epic migration classification' 'If the scope identifies an epic or multiple ordered stories'
 Assert-ContinuationContains 'standalone migration classification' 'If the scope identifies one standalone story'
@@ -481,6 +496,20 @@ Assert-ContinuationContains 'ambiguous migration guard' 'feature fields alone do
 Assert-ContinuationContains 'compact performance pointer' 'Performance pointer: <none before Start'
 Assert-ContinuationContains 'resume performance identity' 'Reuse the same run identity'
 Assert-ContinuationContains 'legacy measurement limitation' 'historical measurement coverage is explicitly unavailable'
+foreach ($marker in @(
+        'function New-HeartbeatPlannerState'
+        'function Invoke-HealthyHeartbeatTick'
+        'SnapshotReads'
+        'WaitInvocations'
+        'SnapshotReplacements'
+        'TickHistory'
+        'quiet_unchanged'
+        'cursor_persisted'
+        'reconcile_required')) {
+    if (-not $continuationScriptText.Contains($marker)) {
+        throw "Continuation heartbeat fixture assertion failed: $marker"
+    }
+}
 if (-not $normalizedSetup.Contains('invoke the actual recorder at')) {
     throw 'Setup assertion failed: post-Start recorder hook'
 }

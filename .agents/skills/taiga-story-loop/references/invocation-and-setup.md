@@ -160,6 +160,17 @@ healthy read budget; active worker waits use recorded IDs/cursors for at most
 one compact snapshot. History and full reconciliation are loaded only for
 actionable change or recovery investigation.
 
+The saved heartbeat guidance is ordered and bounded: read the current
+continuation snapshot first; require confirmed `ACTIVE` schedule state and
+valid recorded `threadId`/`hostId` identities; exclude a confirmed
+`awaiting_review` implementer while retaining a separately running reviewer;
+pass each active target's `afterCursor`; and issue at most one
+`wait_threads(timeoutMs: 0)` snapshot per tick. Persist changed cursors by
+replacing the snapshot without appending tick history. Unchanged or empty
+target sets end silently. Missing/corrupt identity, failed/unknown results,
+interruption evidence, or a pending schedule opens bounded reconciliation and
+never guesses, replays, reminds, or redispatches.
+
 If selectable authorization is supported and permitted, submit exactly one of
 the visible `Start` or `Cancel` choices. A displayed default, empty response,
 timeout, unrelated text, or worker message is not a decision. Otherwise reply
