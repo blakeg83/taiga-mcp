@@ -271,7 +271,7 @@ are:
 | `reviewRequestId` / `reviewAttemptId` | nullable outside review events | A request identifies the handoff; an attempt identifies one actual review. They are separate from `revision` and from `eventId`. |
 | `reviewKind` | `initial_task`, `correction_rereview`, `final_story`, or `final_story_rereview` on review events; otherwise `null` | Classification derived from the ordered lifecycle, not from the SHA. It makes first reviews, correction re-reviews, final reviews, and later final attempts countable. |
 | `reviewAttemptOrdinal` | positive integer on review events; otherwise `null` | One-based attempt number within a `reviewRequestId`. A retry of the same request increments it; a duplicate observation does not. |
-| `supersedesReviewAttemptId` | nullable outside correction events | Links a correction or final-story correction to the finding that caused it without rewriting the prior attempt. |
+| `supersedesReviewAttemptId` | `null` on every non-correction event; non-null and required on `correction_started`/`correction_ready` | Links a correction or final-story correction to the finding that caused it without rewriting the prior attempt. |
 | `eventType` | one event vocabulary value below | No free-form event type is accepted by the contract. |
 | `occurredAtUtc` | UTC ISO 8601 timestamp ending in `Z` | Generated at the actual transition. It is not an LLM estimate or a local-time conversion. |
 | `revision` | full Git SHA or `null` before a revision exists | Exact reviewed/changed revision. A shortened SHA is invalid. |
@@ -300,13 +300,13 @@ phase ends; a generic `phase_ended` event is unnecessary and prohibited.
 | `story_started` | `scope=story`, story identity; coordinator role | `pr_ready` with `scope=story` | `phaseId` is `null`; missing start makes time-to-PR unknown. |
 | `implementation_started` | `scope=task`, `taskRef`, `phaseId`; implementer role | `task_ready_for_review` with the same `phaseId` | `revision` may be `null` before a commit exists; missing end leaves the interval uncovered. |
 | `task_ready_for_review` | `scope=task`, `taskRef`, same `phaseId`, full `revision`; implementer role | next `review_started` for the same request | It is an implementation boundary, not proof that delivery or review occurred. |
-| `review_started` | scope, `phaseId`, `reviewRequestId`, `reviewAttemptId`, `reviewKind`, `reviewAttemptOrdinal`, `revision`; reviewer role | `review_findings` or `review_accepted` with the same phase/attempt identity | Missing end leaves review duration unknown. |
-| `review_findings` | same phase/request/attempt and revision | `correction_started` for a task or final-story correction | Findings close the current review phase; they do not count as acceptance. This also closes a final review when `scope=final_story`. |
-| `review_accepted` | same review request/attempt and revision | acceptance of that task revision | Acceptance is evidence, not a provider write receipt or merge. |
+| `review_started` | scope, `phaseId`, `reviewRequestId`, `reviewAttemptId`, `reviewKind`, `reviewAttemptOrdinal`, `revision`, `supersedesReviewAttemptId=null`; reviewer role | `review_findings` or `review_accepted` with the same phase/attempt identity | Missing end leaves review duration unknown. |
+| `review_findings` | same phase/request/attempt and revision, `supersedesReviewAttemptId=null` | `correction_started` for a task or final-story correction | Findings close the current review phase; they do not count as acceptance. This also closes a final review when `scope=final_story`. |
+| `review_accepted` | same review request/attempt and revision, `supersedesReviewAttemptId=null` | acceptance of that task revision | Acceptance is evidence, not a provider write receipt or merge. |
 | `correction_started` | `scope`, `phaseId`, `correctionId`; `taskRef` for task scope; implementer role | `correction_ready` with the same phase/correction ID | Missing end leaves the correction interval uncovered. For final-story correction, `taskRef` is `null` and `supersedesReviewAttemptId` names the final finding. |
 | `correction_ready` | same scope/phase/correction ID; new full `revision`; implementer role | a new `review_started` request, or `final_review_started` when `scope=final_story` | The new revision supersedes the prior review input; it does not mutate history. |
-| `final_review_started` | `scope=final_story`, final `phaseId`, `reviewRequestId`, `reviewAttemptId`, `reviewKind`, `reviewAttemptOrdinal`, exact HEAD; reviewer role | `final_review_accepted` or `review_findings` with the same phase/attempt identity | Both acceptance and findings close the final review duration. |
-| `final_review_accepted` | same final request/attempt and exact HEAD | final-story approval | Does not authorize PR creation or merge by itself. |
+| `final_review_started` | `scope=final_story`, final `phaseId`, `reviewRequestId`, `reviewAttemptId`, `reviewKind`, `reviewAttemptOrdinal`, exact HEAD, `supersedesReviewAttemptId=null`; reviewer role | `final_review_accepted` or `review_findings` with the same phase/attempt identity | Both acceptance and findings close the final review duration. |
+| `final_review_accepted` | same final request/attempt and exact HEAD, `supersedesReviewAttemptId=null` | final-story approval | Does not authorize PR creation or merge by itself. |
 | `pr_ready` | `scope=story`, PR identity and exact reviewed HEAD; coordinator role | report identity | `phaseId` is `null`; missing PR readiness prevents a confirmed PR report. Unknown provider delivery is not readiness. |
 | `wait_started` | stable `waitId`, wait kind, affected scope | `wait_ended` with the same `waitId` | `phaseId` is `null`; an open wait is reported as uncovered/unknown, never inferred from elapsed wall time. |
 | `wait_ended` | same `waitId` and scope | closes the explicit wait interval | `phaseId` is `null`; an end without a start is an anomaly and contributes no duration. |
@@ -330,6 +330,14 @@ final-story finding closes the current `scope=final_story` review phase. Its
 correction uses `taskRef: null`, a new correction/phase ID, and
 `supersedesReviewAttemptId`; the next final review is a new request/attempt and
 phase, even when it reviews the same SHA again.
+
+`supersedesReviewAttemptId` is a strict event-type field, not a carry-forward
+context value. Every `review_started`, `review_findings`, `review_accepted`,
+`final_review_started`, and `final_review_accepted` event must explicitly emit
+JSON `null`, including correction re-reviews and final-story re-reviews. Only
+`correction_started` and `correction_ready` carry the non-null identity of the
+finding they supersede. Each new review keeps its own request, attempt, ordinal,
+phase, and revision identities.
 
 ### Persistence and recovery pointer
 
@@ -599,6 +607,7 @@ number, and token values are fixtures, not observations from this run.
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "3333333333333333333333333333333333333333",
       "occurredAtUtc": "2026-10-09T10:40:00Z"
     },
@@ -610,6 +619,7 @@ number, and token values are fixtures, not observations from this run.
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "3333333333333333333333333333333333333333",
       "occurredAtUtc": "2026-10-09T10:50:00Z"
     }
@@ -895,6 +905,7 @@ payloads by themselves.
       "reviewRequestId": "task-146-request-1",
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "occurredAtUtc": "2026-10-09T11:00:00Z"
     },
@@ -907,6 +918,7 @@ payloads by themselves.
       "reviewRequestId": "task-146-request-1",
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "occurredAtUtc": "2026-10-09T11:05:00Z"
     },
@@ -919,6 +931,7 @@ payloads by themselves.
       "reviewRequestId": "task-147-request-1",
       "reviewAttemptId": "task-147-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "occurredAtUtc": "2026-10-09T11:10:00Z"
     },
@@ -931,6 +944,7 @@ payloads by themselves.
       "reviewRequestId": "task-147-request-1",
       "reviewAttemptId": "task-147-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "occurredAtUtc": "2026-10-09T11:15:00Z"
     },
@@ -941,6 +955,7 @@ payloads by themselves.
       "taskRef": 147,
       "phaseId": "task-147-correction-1",
       "correctionId": "task-147-correction-1",
+      "supersedesReviewAttemptId": "task-147-attempt-1",
       "revision": "cccccccccccccccccccccccccccccccccccccccc",
       "occurredAtUtc": "2026-10-09T11:22:00Z"
     },
@@ -953,6 +968,7 @@ payloads by themselves.
       "reviewRequestId": "task-147-correction-request-1",
       "reviewAttemptId": "task-147-correction-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "cccccccccccccccccccccccccccccccccccccccc",
       "occurredAtUtc": "2026-10-09T11:25:00Z"
     },
@@ -964,6 +980,7 @@ payloads by themselves.
       "reviewRequestId": "task-147-correction-request-1",
       "reviewAttemptId": "task-147-correction-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "cccccccccccccccccccccccccccccccccccccccc",
       "occurredAtUtc": "2026-10-09T11:30:00Z"
     }
@@ -978,6 +995,7 @@ payloads by themselves.
       "reviewRequestId": "task-146-request-1",
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "occurredAtUtc": "2026-10-09T11:00:00Z",
       "observedAtUtc": "2026-10-09T11:20:00Z"
@@ -991,6 +1009,7 @@ payloads by themselves.
       "reviewRequestId": "task-146-request-1",
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "occurredAtUtc": "2026-10-09T11:00:00Z"
     },
@@ -1003,6 +1022,7 @@ payloads by themselves.
       "reviewRequestId": "task-146-request-1",
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "ffffffffffffffffffffffffffffffffffffffff",
       "occurredAtUtc": "2026-10-09T11:00:00Z",
       "observedAtUtc": "2026-10-09T11:20:00Z"
@@ -1016,6 +1036,7 @@ payloads by themselves.
       "reviewRequestId": "task-147-request-1",
       "reviewAttemptId": "task-147-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "occurredAtUtc": "2026-10-09T11:10:00Z",
       "observedAtUtc": "2026-10-09T11:20:00Z"
@@ -1029,6 +1050,7 @@ payloads by themselves.
       "reviewRequestId": "task-147-request-1",
       "reviewAttemptId": "task-147-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "ffffffffffffffffffffffffffffffffffffffff",
       "occurredAtUtc": "2026-10-09T11:10:00Z",
       "observedAtUtc": "2026-10-09T11:20:00Z"
@@ -1044,6 +1066,7 @@ payloads by themselves.
       "reviewRequestId": "unrelated-request",
       "reviewAttemptId": "task-147-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "ffffffffffffffffffffffffffffffffffffffff",
       "occurredAtUtc": "2026-10-09T11:15:00Z"
     },
@@ -1056,6 +1079,7 @@ payloads by themselves.
       "reviewRequestId": "task-146-request-1",
       "reviewAttemptId": "task-146-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "occurredAtUtc": "2026-10-09T10:59:00Z"
     }
@@ -1092,6 +1116,7 @@ payloads by themselves.
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "dddddddddddddddddddddddddddddddddddddddd",
       "occurredAtUtc": "2026-10-09T12:00:00Z"
     },
@@ -1103,6 +1128,7 @@ payloads by themselves.
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "dddddddddddddddddddddddddddddddddddddddd",
       "occurredAtUtc": "2026-10-09T12:10:00Z"
     }
@@ -1146,6 +1172,7 @@ payloads by themselves.
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "occurredAtUtc": "2026-10-09T13:00:00Z"
     },
@@ -1157,6 +1184,7 @@ payloads by themselves.
       "reviewRequestId": "story-141-final-request-1",
       "reviewAttemptId": "story-141-final-attempt-1",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "occurredAtUtc": "2026-10-09T13:05:00Z"
     },
@@ -1168,6 +1196,7 @@ payloads by themselves.
       "reviewRequestId": "story-141-final-request-2",
       "reviewAttemptId": "story-141-final-attempt-2",
       "reviewAttemptOrdinal": 1,
+      "supersedesReviewAttemptId": null,
       "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "occurredAtUtc": "2026-10-09T13:10:00Z"
     },
@@ -1179,6 +1208,7 @@ payloads by themselves.
       "reviewRequestId": "story-141-final-request-2",
       "reviewAttemptId": "story-141-final-attempt-2-retry",
       "reviewAttemptOrdinal": 2,
+      "supersedesReviewAttemptId": null,
       "revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       "occurredAtUtc": "2026-10-09T13:15:00Z"
     }

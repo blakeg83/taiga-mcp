@@ -46,6 +46,10 @@ request/attempt identity, and owns `final_review_started` plus its finding or
 acceptance. The coordinator records `story_started`, explicit
 `wait_started`/`wait_ended`, and the confirmed `pr_ready` boundary owned by
 task #157.
+Every reviewer-owned review start or outcome, including correction re-reviews
+and final-story re-reviews, explicitly emits `supersedesReviewAttemptId: null`.
+The implementer emits a non-null superseded-attempt identity only on the paired
+`correction_started` and `correction_ready` events.
 
 Every observation uses the actual
 `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` helper

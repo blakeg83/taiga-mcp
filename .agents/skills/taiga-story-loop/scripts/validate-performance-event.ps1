@@ -344,6 +344,8 @@ try {
         eventType = 'correction_ready'
         revision = $revisionB
     }
+    Assert-True ($null -eq $reviewStarted.supersedesReviewAttemptId -and $null -eq $reviewAccepted.supersedesReviewAttemptId) 'properly formed review events must emit a null superseded-attempt identity'
+    Assert-True (-not [string]::IsNullOrWhiteSpace([string]$correctionStarted.supersedesReviewAttemptId) -and [string]$correctionStarted.supersedesReviewAttemptId -ceq [string]$correctionReady.supersedesReviewAttemptId) 'properly formed correction events must retain the superseded-attempt identity'
     $finalReviewStarted = New-EventVariant -Base $validEvent -Changes @{
         eventId = 'synthetic-final-review-started'
         transitionId = 'final-review-started'
@@ -440,7 +442,7 @@ try {
     $allLines = @(Get-Content -LiteralPath $ledgerPath)
     Assert-True ($allLines.Count -eq 15) 'documented event families append one complete record each'
 
-    $beforeInvalid = [IO.File]::ReadAllText($ledgerPath)
+    $beforeInvalidBytes = [IO.File]::ReadAllBytes($ledgerPath)
 
     $wrongStoryRole = New-EventVariant -Base $validEvent -Changes @{
         eventId = 'invalid-story-role'
@@ -449,6 +451,33 @@ try {
     $missingReviewRevision = New-EventVariant -Base $reviewStarted -Changes @{
         eventId = 'invalid-review-revision'
         revision = $null
+    }
+    $invalidReviewStartedSuperseded = New-EventVariant -Base $reviewStarted -Changes @{
+        eventId = 'invalid-correction-rereview-start-superseded'
+        transitionId = 'invalid-correction-rereview-start-superseded'
+        phaseId = 'task-149-review-2'
+        reviewRequestId = 'task-149-request-2'
+        reviewAttemptId = 'task-149-attempt-2'
+        reviewKind = 'correction_rereview'
+        reviewAttemptOrdinal = 1
+        revision = $revisionB
+        supersedesReviewAttemptId = 'task-149-attempt-1'
+    }
+    $invalidReviewAcceptedSuperseded = New-EventVariant -Base $reviewAccepted -Changes @{
+        eventId = 'invalid-correction-rereview-accepted-superseded'
+        transitionId = 'invalid-correction-rereview-accepted-superseded'
+        phaseId = 'task-149-review-2'
+        reviewRequestId = 'task-149-request-2'
+        reviewAttemptId = 'task-149-attempt-2'
+        reviewKind = 'correction_rereview'
+        reviewAttemptOrdinal = 1
+        revision = $revisionB
+        supersedesReviewAttemptId = 'task-149-attempt-1'
+    }
+    $invalidFinalReviewStartedSuperseded = New-EventVariant -Base $finalReviewStarted -Changes @{
+        eventId = 'invalid-final-review-start-superseded'
+        transitionId = 'invalid-final-review-start-superseded'
+        supersedesReviewAttemptId = 'story-142-final-attempt-0'
     }
     $missingPullRequest = New-EventVariant -Base $prReady -Changes @{
         eventId = 'invalid-pr-identity'
@@ -505,6 +534,9 @@ try {
         [pscustomobject]@{ Name = 'invalid event vocabulary'; Json = (Convert-EventToJson (Copy-Event $validEvent) | ForEach-Object { $_ -replace '"story_started"', '"not_a_transition"' }); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'story role identity'; Json = (Convert-EventToJson $wrongStoryRole); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'review revision identity'; Json = (Convert-EventToJson $missingReviewRevision); Root = $externalRoot; Run = $runId },
+        [pscustomobject]@{ Name = 'correction re-review start superseded-attempt identity'; Json = (Convert-EventToJson $invalidReviewStartedSuperseded); Root = $externalRoot; Run = $runId; ExpectedMessage = 'supersedesReviewAttemptId is only valid on correction events' },
+        [pscustomobject]@{ Name = 'correction re-review outcome superseded-attempt identity'; Json = (Convert-EventToJson $invalidReviewAcceptedSuperseded); Root = $externalRoot; Run = $runId; ExpectedMessage = 'supersedesReviewAttemptId is only valid on correction events' },
+        [pscustomobject]@{ Name = 'final review superseded-attempt identity'; Json = (Convert-EventToJson $invalidFinalReviewStartedSuperseded); Root = $externalRoot; Run = $runId; ExpectedMessage = 'supersedesReviewAttemptId is only valid on correction events' },
         [pscustomobject]@{ Name = 'PR identity'; Json = (Convert-EventToJson $missingPullRequest); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'wait identity'; Json = (Convert-EventToJson $missingWaitIdentity); Root = $externalRoot; Run = $runId },
         [pscustomobject]@{ Name = 'non-PR nested payload'; Json = (Convert-EventToJson $forbiddenNestedPullRequest); Root = $externalRoot; Run = $runId },
@@ -516,7 +548,21 @@ try {
     foreach ($case in $invalidCases) {
         $result = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $case.Root -RunId $case.Run -EventJson $case.Json
         Assert-True ($result.ExitCode -ne 0) "$($case.Name) is rejected"
-        Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) "$($case.Name) leaves the ledger unchanged"
+        $expectedMessageProperty = $case.PSObject.Properties['ExpectedMessage']
+        if ($null -ne $expectedMessageProperty -and -not [string]::IsNullOrWhiteSpace([string]$expectedMessageProperty.Value)) {
+            Assert-True (($result.Output -join ' ') -match [regex]::Escape([string]$expectedMessageProperty.Value)) "$($case.Name) reports the matching validation reason"
+        }
+        $afterInvalidBytes = [IO.File]::ReadAllBytes($ledgerPath)
+        $ledgerUnchanged = $afterInvalidBytes.Length -eq $beforeInvalidBytes.Length
+        if ($ledgerUnchanged) {
+            for ($byteIndex = 0; $byteIndex -lt $beforeInvalidBytes.Length; $byteIndex++) {
+                if ($afterInvalidBytes[$byteIndex] -ne $beforeInvalidBytes[$byteIndex]) {
+                    $ledgerUnchanged = $false
+                    break
+                }
+            }
+        }
+        Assert-True $ledgerUnchanged "$($case.Name) leaves the ledger byte-for-byte unchanged"
     }
 
     $sourceBoundRoot = Join-Path $repoRoot '.agents\skills\taiga-story-loop\synthetic-ledger'
@@ -528,7 +574,17 @@ try {
     $nestedPrivacy.provenance | Add-Member -NotePropertyName transcript -NotePropertyValue 'never persist'
     $privacy = Invoke-Recorder -Recorder $recorder -ExternalRunRoot $externalRoot -RunId $runId -EventJson (Convert-EventToJson $nestedPrivacy)
     Assert-True ($privacy.ExitCode -ne 0) 'nested prompt/transcript metadata is rejected'
-    Assert-True ([IO.File]::ReadAllText($ledgerPath) -ceq $beforeInvalid) 'nested privacy rejection leaves the ledger unchanged'
+    $afterPrivacyBytes = [IO.File]::ReadAllBytes($ledgerPath)
+    $privacyLedgerUnchanged = $afterPrivacyBytes.Length -eq $beforeInvalidBytes.Length
+    if ($privacyLedgerUnchanged) {
+        for ($byteIndex = 0; $byteIndex -lt $beforeInvalidBytes.Length; $byteIndex++) {
+            if ($afterPrivacyBytes[$byteIndex] -ne $beforeInvalidBytes[$byteIndex]) {
+                $privacyLedgerUnchanged = $false
+                break
+            }
+        }
+    }
+    Assert-True $privacyLedgerUnchanged 'nested privacy rejection leaves the ledger byte-for-byte unchanged'
 
     $idempotencyRoot = Join-Path ([IO.Path]::GetTempPath()) ('TaigaMCP-performance-event-idempotency-' + [guid]::NewGuid().ToString('N'))
     $disposableRoots += $idempotencyRoot

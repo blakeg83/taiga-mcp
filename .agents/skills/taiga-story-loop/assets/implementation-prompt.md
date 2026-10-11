@@ -247,6 +247,8 @@ that review. The implementer owns task and final-story
 `correction_started`/`correction_ready`; the reviewer owns
 `review_started`, `review_findings`, `review_accepted`,
 `final_review_started`, `final_review_accepted`, and final-story re-reviews.
+The reviewer-owned events explicitly emit `supersedesReviewAttemptId: null`;
+only the paired correction events retain the non-null finding identity.
 Preserve the stable `phaseId`, `correctionId`,
 `reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
 from `references/worker-handoffs.md`. Copy the selected `per_task` or

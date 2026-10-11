@@ -44,6 +44,9 @@ model/effort and an attributable usage snapshot when available; preserve
 `unavailable`/null when it is not. Do not estimate usage or emit a routine
 telemetry-only summary/message. Recording failures leave the handoff and its
 ownership gates unchanged and disclose the affected measurement coverage.
+For each reviewer-owned review event, explicitly emit
+`supersedesReviewAttemptId: null`; only `correction_started` and
+`correction_ready` retain the non-null finding identity.
 
 `per_task` records the task review/correction events above. `story_end_only`
 does not create task-scoped review or correction events, but it still records

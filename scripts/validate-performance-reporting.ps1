@@ -61,6 +61,11 @@ function New-Event {
         [string] $Role = 'coordinator'
     )
 
+    $correctionEvents = @('correction_started', 'correction_ready')
+    if ($EventType -notin $correctionEvents -and -not [string]::IsNullOrWhiteSpace([string] $SupersedesReviewAttemptId)) {
+        throw "Integrated fixture event construction failed: non-correction event '$EventType' must emit supersedesReviewAttemptId=null"
+    }
+
     $event = [ordered]@{
         schemaVersion = 1
         kind = 'story_performance_event'
@@ -1597,6 +1602,96 @@ try {
     $mismatchedReviewReport = $mismatchedReviewJson | ConvertFrom-Json -Depth 100
     Assert-True ([string]$mismatchedReviewReport.metrics.reviewElapsed.state -ceq 'partial' -and $null -eq $mismatchedReviewReport.metrics.reviewElapsed.value -and [string]$mismatchedReviewReport.metrics.tasksCompleted.state -cne 'measured' -and $null -eq $mismatchedReviewReport.metrics.tasksCompleted.value -and [string]$mismatchedReviewReport.metrics.firstPassAcceptanceRate.state -cne 'measured' -and $null -eq $mismatchedReviewReport.metrics.firstPassAcceptanceRate.value) 'case-variant review identities must not close, complete, or first-pass count the attempt'
     Assert-True (@($mismatchedReviewReport.anomalies | Where-Object { $_.code -ceq 'conflicting_review_identity' }).Count -ge 1) 'case-variant review identities must disclose the mismatched closure'
+
+    # Deterministic #206 regression: one task receives findings, two linked
+    # corrections, two correction re-reviews, and a final-story acceptance.
+    # The same sequence is then embedded in a four-task story so completion,
+    # review counts, first-pass rate, and exact interval totals are asserted
+    # through the production recorder and reporter together.
+    $singleCorrectionRunId = 'synthetic-integrated-two-corrections'
+    $singleCorrectionRevisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $singleCorrectionRevisionB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $singleCorrectionRevisionC = 'cccccccccccccccccccccccccccccccccccccccc'
+    $singleCorrectionEvents = @(
+        (New-Event -EventId 'two-correction-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-10T09:00:00Z' -Scope 'story' -Role 'coordinator'),
+        (New-Event -EventId 'two-correction-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T09:00:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-implementation' -Role 'implementer'),
+        (New-Event -EventId 'two-correction-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T09:10:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-implementation' -Revision $singleCorrectionRevisionA -Role 'implementer'),
+        (New-Event -EventId 'two-correction-review-1-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T09:11:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-review-1' -ReviewRequestId 'task-193-request-1' -ReviewAttemptId 'task-193-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-review-1-findings' -EventType 'review_findings' -OccurredAtUtc '2026-10-10T09:14:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-review-1' -ReviewRequestId 'task-193-request-1' -ReviewAttemptId 'task-193-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-correction-1-start' -EventType 'correction_started' -OccurredAtUtc '2026-10-10T09:15:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-correction-1' -CorrectionId 'task-193-correction-1' -SupersedesReviewAttemptId 'task-193-attempt-1' -Role 'implementer'),
+        (New-Event -EventId 'two-correction-correction-1-ready' -EventType 'correction_ready' -OccurredAtUtc '2026-10-10T09:20:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-correction-1' -CorrectionId 'task-193-correction-1' -SupersedesReviewAttemptId 'task-193-attempt-1' -Revision $singleCorrectionRevisionB -Role 'implementer'),
+        (New-Event -EventId 'two-correction-review-2-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T09:21:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-review-2' -ReviewRequestId 'task-193-request-2' -ReviewAttemptId 'task-193-attempt-2' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionB -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-review-2-findings' -EventType 'review_findings' -OccurredAtUtc '2026-10-10T09:24:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-review-2' -ReviewRequestId 'task-193-request-2' -ReviewAttemptId 'task-193-attempt-2' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionB -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-correction-2-start' -EventType 'correction_started' -OccurredAtUtc '2026-10-10T09:25:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-correction-2' -CorrectionId 'task-193-correction-2' -SupersedesReviewAttemptId 'task-193-attempt-2' -Role 'implementer'),
+        (New-Event -EventId 'two-correction-correction-2-ready' -EventType 'correction_ready' -OccurredAtUtc '2026-10-10T09:30:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-correction-2' -CorrectionId 'task-193-correction-2' -SupersedesReviewAttemptId 'task-193-attempt-2' -Revision $singleCorrectionRevisionC -Role 'implementer'),
+        (New-Event -EventId 'two-correction-review-3-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T09:31:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-review-3' -ReviewRequestId 'task-193-request-3' -ReviewAttemptId 'task-193-attempt-3' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-review-3-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T09:35:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-review-3' -ReviewRequestId 'task-193-request-3' -ReviewAttemptId 'task-193-attempt-3' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-final-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-10T09:36:00Z' -Scope 'final_story' -PhaseId 'story-206-final-review' -ReviewRequestId 'story-206-final-request-1' -ReviewAttemptId 'story-206-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-final-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-10T09:37:00Z' -Scope 'final_story' -PhaseId 'story-206-final-review' -ReviewRequestId 'story-206-final-request-1' -ReviewAttemptId 'story-206-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'two-correction-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-10T09:40:00Z' -Scope 'story' -Revision $singleCorrectionRevisionC -Role 'coordinator')
+    )
+    foreach ($singleCorrectionEvent in $singleCorrectionEvents) {
+        $singleCorrectionEvent.runId = $singleCorrectionRunId
+    }
+    $singleCorrectionEvents[-1].pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 206; reviewedHead = $singleCorrectionRevisionC }
+    $singleCorrectionLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $singleCorrectionRunId -Events $singleCorrectionEvents -RecorderPath $recorderPath
+    $singleCorrectionJson = & $scriptPath -EventsPath $singleCorrectionLedger -ReviewMode per_task -TaskRefs @(193)
+    Assert-True ($LASTEXITCODE -eq 0) 'single-task two-correction fixture should aggregate successfully'
+    $singleCorrectionReport = $singleCorrectionJson | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$singleCorrectionReport.metrics.reviewElapsed.state -ceq 'measured' -and [int64]$singleCorrectionReport.metrics.reviewElapsed.value -eq 660000) 'single-task reviewElapsed must sum the three task attempts and final-story review exactly once'
+    Assert-True ([string]$singleCorrectionReport.metrics.implementationElapsed.state -ceq 'measured' -and [int64]$singleCorrectionReport.metrics.implementationElapsed.value -eq 1200000) 'single-task implementationElapsed must keep both correction intervals separate and additive'
+    Assert-True ([int]$singleCorrectionReport.metrics.tasksCompleted.value -eq 1 -and [string]$singleCorrectionReport.metrics.tasksCompleted.state -ceq 'measured') 'single-task correction sequence must complete the corrected task'
+    Assert-True ([int]$singleCorrectionReport.metrics.initialTaskReviews.value -eq 1 -and [int]$singleCorrectionReport.metrics.correctionReReviews.value -eq 2 -and [int]$singleCorrectionReport.metrics.finalStoryReviews.value -eq 1) 'single-task correction sequence must count one initial, two correction, and one final review'
+    Assert-True ([int]$singleCorrectionReport.metrics.firstPassAcceptanceRate.numerator -eq 0 -and [int]$singleCorrectionReport.metrics.firstPassAcceptanceRate.denominator -eq 1 -and [double]$singleCorrectionReport.metrics.firstPassAcceptanceRate.value -eq 0) 'single-task findings sequence must measure zero first-pass acceptance over one task'
+    Assert-True (@($singleCorrectionReport.reviewAttempts).Count -eq 4 -and @($singleCorrectionReport.phases | Where-Object { [string]$_.kind -ceq 'correction' }).Count -eq 2) 'single-task report must retain four review attempts and two correction intervals'
+    Assert-True (@($singleCorrectionReport.anomalies | Where-Object { [string]$_.code -ceq 'invalid_event' }).Count -eq 0) 'valid single-task correction events must not create invalid_event anomalies'
+
+    $fourTaskRunId = 'synthetic-integrated-four-task-corrections'
+    $fourTaskEvents = @(
+        (New-Event -EventId 'four-task-story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-10T10:00:00Z' -Scope 'story' -Role 'coordinator'),
+        (New-Event -EventId 'four-task-190-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T10:01:00Z' -Scope 'task' -TaskRef 190 -PhaseId 'task-190-implementation' -Role 'implementer'),
+        (New-Event -EventId 'four-task-190-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T10:02:00Z' -Scope 'task' -TaskRef 190 -PhaseId 'task-190-implementation' -Revision $singleCorrectionRevisionA -Role 'implementer'),
+        (New-Event -EventId 'four-task-190-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:03:00Z' -Scope 'task' -TaskRef 190 -PhaseId 'task-190-review' -ReviewRequestId 'task-190-request-1' -ReviewAttemptId 'task-190-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-190-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T10:05:00Z' -Scope 'task' -TaskRef 190 -PhaseId 'task-190-review' -ReviewRequestId 'task-190-request-1' -ReviewAttemptId 'task-190-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-191-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T10:06:00Z' -Scope 'task' -TaskRef 191 -PhaseId 'task-191-implementation' -Role 'implementer'),
+        (New-Event -EventId 'four-task-191-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T10:07:00Z' -Scope 'task' -TaskRef 191 -PhaseId 'task-191-implementation' -Revision $singleCorrectionRevisionA -Role 'implementer'),
+        (New-Event -EventId 'four-task-191-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:08:00Z' -Scope 'task' -TaskRef 191 -PhaseId 'task-191-review' -ReviewRequestId 'task-191-request-1' -ReviewAttemptId 'task-191-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-191-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T10:10:00Z' -Scope 'task' -TaskRef 191 -PhaseId 'task-191-review' -ReviewRequestId 'task-191-request-1' -ReviewAttemptId 'task-191-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-192-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T10:11:00Z' -Scope 'task' -TaskRef 192 -PhaseId 'task-192-implementation' -Role 'implementer'),
+        (New-Event -EventId 'four-task-192-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T10:12:00Z' -Scope 'task' -TaskRef 192 -PhaseId 'task-192-implementation' -Revision $singleCorrectionRevisionA -Role 'implementer'),
+        (New-Event -EventId 'four-task-192-review-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:13:00Z' -Scope 'task' -TaskRef 192 -PhaseId 'task-192-review' -ReviewRequestId 'task-192-request-1' -ReviewAttemptId 'task-192-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-192-review-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T10:15:00Z' -Scope 'task' -TaskRef 192 -PhaseId 'task-192-review' -ReviewRequestId 'task-192-request-1' -ReviewAttemptId 'task-192-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-193-impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-10T10:16:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-implementation' -Role 'implementer'),
+        (New-Event -EventId 'four-task-193-impl-ready' -EventType 'task_ready_for_review' -OccurredAtUtc '2026-10-10T10:17:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-implementation' -Revision $singleCorrectionRevisionA -Role 'implementer'),
+        (New-Event -EventId 'four-task-193-review-1-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:18:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-review-1' -ReviewRequestId 'task-193-four-request-1' -ReviewAttemptId 'task-193-four-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-193-review-1-findings' -EventType 'review_findings' -OccurredAtUtc '2026-10-10T10:20:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-review-1' -ReviewRequestId 'task-193-four-request-1' -ReviewAttemptId 'task-193-four-attempt-1' -ReviewKind 'initial_task' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionA -Role 'reviewer'),
+        (New-Event -EventId 'four-task-193-correction-1-start' -EventType 'correction_started' -OccurredAtUtc '2026-10-10T10:21:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-correction-1' -CorrectionId 'task-193-four-correction-1' -SupersedesReviewAttemptId 'task-193-four-attempt-1' -Role 'implementer'),
+        (New-Event -EventId 'four-task-193-correction-1-ready' -EventType 'correction_ready' -OccurredAtUtc '2026-10-10T10:23:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-correction-1' -CorrectionId 'task-193-four-correction-1' -SupersedesReviewAttemptId 'task-193-four-attempt-1' -Revision $singleCorrectionRevisionB -Role 'implementer'),
+        (New-Event -EventId 'four-task-193-review-2-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:24:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-review-2' -ReviewRequestId 'task-193-four-request-2' -ReviewAttemptId 'task-193-four-attempt-2' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionB -Role 'reviewer'),
+        (New-Event -EventId 'four-task-193-review-2-findings' -EventType 'review_findings' -OccurredAtUtc '2026-10-10T10:26:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-review-2' -ReviewRequestId 'task-193-four-request-2' -ReviewAttemptId 'task-193-four-attempt-2' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionB -Role 'reviewer'),
+        (New-Event -EventId 'four-task-193-correction-2-start' -EventType 'correction_started' -OccurredAtUtc '2026-10-10T10:27:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-correction-2' -CorrectionId 'task-193-four-correction-2' -SupersedesReviewAttemptId 'task-193-four-attempt-2' -Role 'implementer'),
+        (New-Event -EventId 'four-task-193-correction-2-ready' -EventType 'correction_ready' -OccurredAtUtc '2026-10-10T10:29:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-correction-2' -CorrectionId 'task-193-four-correction-2' -SupersedesReviewAttemptId 'task-193-four-attempt-2' -Revision $singleCorrectionRevisionC -Role 'implementer'),
+        (New-Event -EventId 'four-task-193-review-3-start' -EventType 'review_started' -OccurredAtUtc '2026-10-10T10:30:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-review-3' -ReviewRequestId 'task-193-four-request-3' -ReviewAttemptId 'task-193-four-attempt-3' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'four-task-193-review-3-accepted' -EventType 'review_accepted' -OccurredAtUtc '2026-10-10T10:33:00Z' -Scope 'task' -TaskRef 193 -PhaseId 'task-193-four-review-3' -ReviewRequestId 'task-193-four-request-3' -ReviewAttemptId 'task-193-four-attempt-3' -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'four-task-final-start' -EventType 'final_review_started' -OccurredAtUtc '2026-10-10T10:34:00Z' -Scope 'final_story' -PhaseId 'four-task-final-review' -ReviewRequestId 'four-task-final-request-1' -ReviewAttemptId 'four-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'four-task-final-accepted' -EventType 'final_review_accepted' -OccurredAtUtc '2026-10-10T10:35:00Z' -Scope 'final_story' -PhaseId 'four-task-final-review' -ReviewRequestId 'four-task-final-request-1' -ReviewAttemptId 'four-task-final-attempt-1' -ReviewKind 'final_story' -ReviewAttemptOrdinal 1 -Revision $singleCorrectionRevisionC -Role 'reviewer'),
+        (New-Event -EventId 'four-task-pr-ready' -EventType 'pr_ready' -OccurredAtUtc '2026-10-10T10:36:00Z' -Scope 'story' -Revision $singleCorrectionRevisionC -Role 'coordinator')
+    )
+    foreach ($fourTaskEvent in $fourTaskEvents) {
+        $fourTaskEvent.runId = $fourTaskRunId
+    }
+    $fourTaskEvents[-1].pullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 206; reviewedHead = $singleCorrectionRevisionC }
+    $fourTaskLedger = Write-EventsThroughRecorder -ExternalRoot $recorderRoot -RunId $fourTaskRunId -Events $fourTaskEvents -RecorderPath $recorderPath
+    $fourTaskJson = & $scriptPath -EventsPath $fourTaskLedger -ReviewMode per_task -TaskRefs @(190, 191, 192, 193)
+    Assert-True ($LASTEXITCODE -eq 0) 'four-task two-correction fixture should aggregate successfully'
+    $fourTaskReport = $fourTaskJson | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$fourTaskReport.metrics.reviewElapsed.state -ceq 'measured' -and [int64]$fourTaskReport.metrics.reviewElapsed.value -eq 840000) 'four-task reviewElapsed must sum every distinct review interval exactly once'
+    Assert-True ([string]$fourTaskReport.metrics.implementationElapsed.state -ceq 'measured' -and [int64]$fourTaskReport.metrics.implementationElapsed.value -eq 480000) 'four-task implementationElapsed must keep correction implementation intervals separate'
+    Assert-True ([int]$fourTaskReport.metrics.tasksCompleted.value -eq 4 -and [string]$fourTaskReport.metrics.tasksCompleted.state -ceq 'measured') 'four-task correction sequence must complete all four declared tasks'
+    Assert-True ([int]$fourTaskReport.metrics.initialTaskReviews.value -eq 4 -and [int]$fourTaskReport.metrics.correctionReReviews.value -eq 2 -and [int]$fourTaskReport.metrics.finalStoryReviews.value -eq 1) 'four-task correction sequence must count four initial, two correction, and one final review'
+    Assert-True ([int]$fourTaskReport.metrics.firstPassAcceptanceRate.numerator -eq 3 -and [int]$fourTaskReport.metrics.firstPassAcceptanceRate.denominator -eq 4 -and [double]$fourTaskReport.metrics.firstPassAcceptanceRate.value -eq 0.75) 'four-task first-pass acceptance rate must be measured as 3 of 4'
+    Assert-True (@($fourTaskReport.reviewAttempts).Count -eq 7 -and @($fourTaskReport.phases | Where-Object { [string]$_.kind -ceq 'correction' -and [int64]$_.elapsedMilliseconds -eq 120000 }).Count -eq 2) 'four-task report must retain seven review attempts and two exact correction intervals'
+    Assert-True (@($fourTaskReport.anomalies | Where-Object { [string]$_.code -ceq 'invalid_event' }).Count -eq 0) 'valid four-task correction events must not create invalid_event anomalies'
 
     # Pair a healthy ready-turn control with the same transition under a real
     # recorder fault. The child fixture invokes the existing

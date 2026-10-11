@@ -452,6 +452,8 @@ foreach ($contractMarker in @(
         'phaseId'
         'correctionId'
         'supersedesReviewAttemptId'
+        'strict event-type field'
+        'must explicitly emit'
         '`revision` may be `null` before a commit exists'
         '`phaseId` is `null`'
         'explicit waits, which use `waitId` instead'

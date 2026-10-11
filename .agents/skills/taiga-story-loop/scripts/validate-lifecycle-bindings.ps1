@@ -171,6 +171,11 @@ function New-LifecycleEvent {
         [AllowNull()] [object] $PullRequest = $null
     )
 
+    $correctionEvents = @('correction_started', 'correction_ready')
+    if ($EventType -notin $correctionEvents -and -not [string]::IsNullOrWhiteSpace([string] $SupersedesReviewAttemptId)) {
+        throw "Lifecycle-event construction failed: non-correction event '$EventType' must emit supersedesReviewAttemptId=null"
+    }
+
     return [ordered]@{
         schemaVersion = 1
         kind = 'story_performance_event'
@@ -236,6 +241,22 @@ function Read-LedgerEvents {
                 if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') { $parsed = $parsed.event }
                 $parsed
             })
+}
+
+function Assert-SupersededAttemptRules {
+    param([Parameter(Mandatory)] [object[]] $Events)
+
+    $correctionEvents = @('correction_started', 'correction_ready')
+    $reviewEvents = @('review_started', 'review_findings', 'review_accepted', 'final_review_started', 'final_review_accepted')
+    foreach ($event in @($Events)) {
+        $eventType = [string] $event.eventType
+        if ($eventType -in $reviewEvents) {
+            Assert-True ($null -eq $event.supersedesReviewAttemptId) "review event '$($event.eventId)' must emit supersedesReviewAttemptId=null"
+        }
+        elseif ($eventType -in $correctionEvents) {
+            Assert-True (-not [string]::IsNullOrWhiteSpace([string] $event.supersedesReviewAttemptId)) "correction event '$($event.eventId)' must retain its superseded review attempt"
+        }
+    }
 }
 
 $skillRoot = Split-Path -Parent $PSScriptRoot
@@ -358,6 +379,7 @@ $storyEndEvents = @(
 try {
     $perTaskLedger = Write-EventsThroughRecorder -ExternalRoot $externalRoot -RunId $perTaskRunId -Events $perTaskEvents -RecorderPath $recorderPath
     $perTaskLedgerEvents = Read-LedgerEvents $perTaskLedger
+    Assert-SupersededAttemptRules -Events $perTaskLedgerEvents
     Assert-True ($perTaskLedgerEvents.Count -eq $perTaskEvents.Count) 'per_task recorder ledger should contain every lifecycle boundary'
     Assert-True (@($perTaskLedgerEvents | Where-Object eventType -eq 'implementation_started').Count -eq 1 -and
         @($perTaskLedgerEvents | Where-Object eventType -eq 'task_ready_for_review').Count -eq 1) 'per_task implementation boundaries should pair once'
@@ -377,6 +399,7 @@ try {
 
     $storyEndLedger = Write-EventsThroughRecorder -ExternalRoot $externalRoot -RunId $storyEndRunId -Events $storyEndEvents -RecorderPath $recorderPath
     $storyEndLedgerEvents = Read-LedgerEvents $storyEndLedger
+    Assert-SupersededAttemptRules -Events $storyEndLedgerEvents
     Assert-True ($storyEndLedgerEvents.Count -eq $storyEndEvents.Count) 'story_end_only recorder ledger should contain every lifecycle boundary'
     Assert-True (@($storyEndLedgerEvents | Where-Object eventType -eq 'implementation_started').Count -eq 1 -and
         @($storyEndLedgerEvents | Where-Object eventType -eq 'task_ready_for_review').Count -eq 1) 'story_end_only must record the implementation-ready end without task review dispatch'
