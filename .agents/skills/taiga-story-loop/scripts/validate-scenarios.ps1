@@ -35,6 +35,7 @@ $routingPath = Join-Path $skillRoot 'references/routing-and-escalation.md'
 $routingScriptPath = Join-Path $PSScriptRoot 'validate-routing.ps1'
 $automaticFlowPath = Join-Path $skillRoot 'references/automatic-review-flow.md'
 $automaticFlowScriptPath = Join-Path $PSScriptRoot 'validate-automatic-review-flow.ps1'
+$coordinatorLifecycleScriptPath = Join-Path $PSScriptRoot 'validate-coordinator-lifecycle.ps1'
 $prDeliveryPath = Join-Path $skillRoot 'references/pr-delivery.md'
 $prDeliveryScriptPath = Join-Path $PSScriptRoot 'validate-pr-delivery.ps1'
 $mergeApprovalPath = Join-Path $skillRoot 'references/merge-approval.md'
@@ -92,6 +93,9 @@ if (-not (Test-Path $routingPath) -or -not (Test-Path $routingScriptPath)) {
 }
 if (-not (Test-Path $automaticFlowPath) -or -not (Test-Path $automaticFlowScriptPath)) {
     throw 'Missing automatic review-flow contract or fixture.'
+}
+if (-not (Test-Path $coordinatorLifecycleScriptPath)) {
+    throw 'Missing coordinator lifecycle/action-trace fixture.'
 }
 if (-not (Test-Path $prDeliveryPath) -or -not (Test-Path $prDeliveryScriptPath)) {
     throw 'Missing reviewed story PR delivery contract or fixture.'
@@ -166,6 +170,7 @@ $routingText = Get-Content $routingPath -Raw
 $normalizedRouting = [regex]::Replace($routingText, '\s+', ' ')
 $automaticFlowText = Get-Content $automaticFlowPath -Raw
 $normalizedAutomaticFlow = [regex]::Replace($automaticFlowText, '\s+', ' ')
+$coordinatorLifecycleText = Get-Content $coordinatorLifecycleScriptPath -Raw
 $prDeliveryText = Get-Content $prDeliveryPath -Raw
 $normalizedPrDelivery = [regex]::Replace($prDeliveryText, '\s+', ' ')
 $mergeApprovalText = Get-Content $mergeApprovalPath -Raw
@@ -810,6 +815,27 @@ foreach ($marker in @(
     }
 }
 foreach ($marker in @(
+        'function New-LifecycleState'
+        'function Confirm-Dispatch'
+        'function Assert-DispatchTerminal'
+        'function Invoke-HeartbeatTick'
+        'function Advance-NextTask'
+        'function Apply-RoutineEpicFinding'
+        'function Apply-EpicIntegrationReady'
+        'function Integrate-EpicCorrection'
+        'function Open-ApprovalGate'
+        'story_end_only'
+        'exact_feature_head_rereview_dispatch'
+        'repeated heartbeat wait must be rejected'
+        'awaiting_review wake-up must be rejected'
+        'stale advancement event must be rejected'
+        'correction-ready evidence alone must not become acceptance'
+        'synthetic and non-live')) {
+    if (-not $coordinatorLifecycleText.Contains($marker)) {
+        throw "Coordinator lifecycle fixture assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
         'Acceptance reconciliation transaction'
         'reviewer message is not a Taiga write result'
         'marker-bearing parent-story progress comment'
@@ -1387,4 +1413,10 @@ if ($lifecycleExit -ne 0) {
     throw "Lifecycle-binding fixture exited ${lifecycleExit}: $($lifecycleOutput -join [Environment]::NewLine)"
 }
 $lifecycleOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract static-content checks, setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+$coordinatorLifecycleOutput = @(& pwsh -NoProfile -File $coordinatorLifecycleScriptPath 2>&1 | ForEach-Object { [string]$_ })
+$coordinatorLifecycleExit = $LASTEXITCODE
+if ($coordinatorLifecycleExit -ne 0) {
+    throw "Coordinator lifecycle fixture exited ${coordinatorLifecycleExit}: $($coordinatorLifecycleOutput -join [Environment]::NewLine)"
+}
+$coordinatorLifecycleOutput | Write-Output
+Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract static-content checks, setup-authorization, lifecycle-boundary, coordinator-lifecycle, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
