@@ -18,7 +18,7 @@ Use the state supplied by the source. Never turn an unknown value into zero.
 | State | Meaning | Operator action |
 | --- | --- | --- |
 | `measured` | The required boundaries or counters are source-backed, attributable, and complete for the stated coverage. | Keep the source, calculation, unit, and coverage with the value. |
-| `partial` | Some evidence exists, but a boundary, reset segment, semantic rule, task identity, or other required part is missing or ambiguous. | Keep the value `null` when the total is not complete and name the missing coverage. |
+| `partial` | Some evidence exists, but a boundary, reset segment, semantic rule, task identity, or other required part is missing or ambiguous. | Preserve a covered subtotal only when the report contract supports it (for example, valid elapsed intervals); keep incomplete token/task totals `null` and name the missing coverage. |
 | `unavailable` | No authoritative source was available for the metric. | Keep the value `null`, record the source and reason, and continue the workflow. |
 | `not_applicable` | The metric has no valid denominator or does not apply to the selected mode. | Do not convert it to zero or failure; retain the applicability explanation. |
 | `synthetic_fixture` | A deterministic test or example, not an observation. | Use it to prove contract behavior only. Never present it as a host run. |
@@ -231,7 +231,7 @@ retain the full metric set and the exact source/coverage/calculation fields.
 {
   "schemaVersion": 1,
   "kind": "story_performance_report",
-  "reportId": "synthetic-run-partial-pr-head-abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+  "reportId": null,
   "runId": "synthetic-run-partial",
   "projectId": 999,
   "storyId": 998,
@@ -240,6 +240,7 @@ retain the full metric set and the exact source/coverage/calculation fields.
   "pullRequest": null,
   "metrics": {
     "timeToPr": { "state": "partial", "value": null, "unit": "milliseconds", "source": "story_started -> pr_ready", "coverage": "start present; readiness boundary ambiguous", "missingData": "two candidate pr_ready observations" },
+    "implementationElapsed": { "state": "partial", "value": 420000, "unit": "milliseconds", "source": "implementation phase boundaries", "coverage": "1 of 2 intervals has valid paired boundaries", "missingData": "one implementation interval is missing its closing boundary" },
     "implementationTokens": { "state": "partial", "value": null, "unit": "tokens", "source": "one attributable worker stream", "coverage": "1 of 2 intervals has complete deltas", "missingData": "counter reset removed one interval" },
     "reviewTokens": { "state": "unavailable", "value": null, "unit": "tokens", "source": "reviewer stream", "coverage": "no complete source-backed delta", "missingData": "end sample was not available" },
     "totalTokens": { "state": "partial", "value": null, "unit": "tokens", "source": "role totals", "coverage": "not all included roles are measured", "missingData": "partial or unavailable role usage remains unknown" },
