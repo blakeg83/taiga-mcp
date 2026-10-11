@@ -140,6 +140,12 @@ recovery, not a ledger repair or migration:
 - Hash and size the authoritative `events.jsonl` before the audit, and repeat
   the check after reporting. A changed hash, length, or line count is a hard
   stop.
+- Preserve JSON string representations while building and comparing the view.
+  In PowerShell, parse with `ConvertFrom-Json -DateKind String` (or an
+  equivalent string-preserving parser) so timestamp text such as trailing
+  fractional-second zeroes is not silently reserialized. Compare all events in
+  order and all fields, allowing only the four explicitly authorized field
+  substitutions.
 - Validate every proposed record against its run/project/story/task identity,
   event type, phase, request and attempt identities, ordinal, correction link,
   UTC boundary, and revision. Require the matching correction boundaries and
