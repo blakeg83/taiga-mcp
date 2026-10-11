@@ -817,6 +817,7 @@ foreach ($marker in @(
 foreach ($marker in @(
         'function New-LifecycleState'
         'function Confirm-Dispatch'
+        'function Persist-Continuation'
         'function Assert-DispatchTerminal'
         'function Invoke-HeartbeatTick'
         'function Advance-NextTask'
@@ -825,6 +826,9 @@ foreach ($marker in @(
         'function Integrate-EpicCorrection'
         'function Open-ApprovalGate'
         'story_end_only'
+        'persisted_continuation'
+        'duplicate dispatch is not allowed'
+        'stale integration continuation must be rejected'
         'exact_feature_head_rereview_dispatch'
         'repeated heartbeat wait must be rejected'
         'awaiting_review wake-up must be rejected'

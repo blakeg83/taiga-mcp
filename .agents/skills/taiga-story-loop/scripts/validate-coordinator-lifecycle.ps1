@@ -41,6 +41,14 @@ function New-LifecycleState {
             TickConsumed = $false
             CursorSnapshot = 'implementer impl-cursor-a1 | reviewer review-cursor-a1'
         }
+        Continuation = [ordered]@{
+            CurrentHead = $null
+            Heartbeat = $null
+            IdentityConfirmed = $false
+            AssignmentConfirmed = $false
+            AssignmentDelivery = $null
+            Replacements = [System.Collections.Generic.List[object]]::new()
+        }
         Workers = @(
             [pscustomobject]@{ Role = 'implementer'; State = 'running'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
             [pscustomobject]@{ Role = 'reviewer'; State = 'running'; ThreadId = 'review-thread'; HostId = 'local'; Cursor = 'review-cursor-a1' }
@@ -66,11 +74,63 @@ function Add-CoordinatorAction {
     [void]$State.CoordinatorActions.Add([pscustomobject]@{ Kind = $Kind })
 }
 
+function Persist-Continuation {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
+        [Parameter(Mandatory)] [ValidateSet('initial_dispatch', 'integration_redispatch')] [string] $Boundary,
+        [Parameter(Mandatory)] [string] $Head,
+        [Parameter(Mandatory)] [string] $DeliveryReference
+    )
+
+    if (-not $State.Setup.IdentitiesConfirmed -or -not $State.Setup.AssignmentsConfirmed -or
+        -not $State.Setup.ContinuationConfirmed -or -not $State.Setup.HeartbeatConfirmed) {
+        throw 'continuation persistence requires confirmed identities, assignments, replacement, and ACTIVE heartbeat'
+    }
+    if ([string]::IsNullOrWhiteSpace($Head) -or [string]::IsNullOrWhiteSpace($DeliveryReference)) {
+        throw 'continuation persistence requires a resulting HEAD and confirmed assignment delivery'
+    }
+    if ([string]$State.Heartbeat.Schedule -cne 'ACTIVE') { throw 'continuation persistence requires an ACTIVE heartbeat' }
+
+    $replacement = [pscustomobject]@{
+        Boundary = $Boundary
+        Head = $Head
+        IdentityConfirmed = [bool]$State.Setup.IdentitiesConfirmed
+        AssignmentConfirmed = [bool]$State.Setup.AssignmentsConfirmed
+        AssignmentDelivery = $DeliveryReference
+        Heartbeat = 'ACTIVE'
+    }
+    [void]$State.Continuation.Replacements.Add($replacement)
+    $State.Continuation.CurrentHead = $Head
+    $State.Continuation.Heartbeat = 'ACTIVE'
+    $State.Continuation.IdentityConfirmed = $replacement.IdentityConfirmed
+    $State.Continuation.AssignmentConfirmed = $replacement.AssignmentConfirmed
+    $State.Continuation.AssignmentDelivery = $replacement.AssignmentDelivery
+    Add-CoordinatorAction -State $State -Kind 'persisted_continuation'
+}
+
 function Assert-DispatchTerminal {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
 
     $lastAction = if ($State.CoordinatorActions.Count -eq 0) { $null } else { [string]$State.CoordinatorActions[$State.CoordinatorActions.Count - 1].Kind }
     Assert-True ($State.DispatchConfirmed -and $State.CoordinatorTurn -eq 'ended' -and $lastAction -eq 'end_turn') 'confirmed dispatch must end the coordinator turn'
+    Assert-True ($State.Continuation.Replacements.Count -gt 0) 'terminal dispatch must have a persisted continuation replacement'
+    $latest = $State.Continuation.Replacements[$State.Continuation.Replacements.Count - 1]
+    $expectedHead = if ([string]::IsNullOrWhiteSpace([string]$State.IntegratedFeatureHead)) { [string]$State.CurrentRevision } else { [string]$State.IntegratedFeatureHead }
+    $expectedBoundary = if ([string]::IsNullOrWhiteSpace([string]$State.IntegratedFeatureHead)) { 'initial_dispatch' } else { 'integration_redispatch' }
+    Assert-True ([string]$latest.Boundary -ceq $expectedBoundary -and [string]$latest.Head -ceq $expectedHead) 'terminal dispatch continuation must bind the current feature HEAD and boundary'
+    Assert-True ($latest.IdentityConfirmed -and $latest.AssignmentConfirmed -and
+        -not [string]::IsNullOrWhiteSpace([string]$latest.AssignmentDelivery) -and
+        [string]$latest.Heartbeat -ceq 'ACTIVE') 'terminal dispatch continuation must retain confirmed delivery and ACTIVE heartbeat'
+    Assert-True ([string]$State.Continuation.CurrentHead -ceq $expectedHead -and
+        [string]$State.Continuation.Heartbeat -ceq 'ACTIVE' -and
+        [string]$State.Continuation.AssignmentDelivery -ceq [string]$latest.AssignmentDelivery) 'terminal dispatch must retain the latest continuation snapshot'
+    $confirmedIndex = -1
+    $persistedIndex = -1
+    for ($index = 0; $index -lt $State.CoordinatorActions.Count; $index++) {
+        if ([string]$State.CoordinatorActions[$index].Kind -ceq 'confirmed_dispatch') { $confirmedIndex = $index }
+        if ([string]$State.CoordinatorActions[$index].Kind -ceq 'persisted_continuation') { $persistedIndex = $index }
+    }
+    Assert-True ($confirmedIndex -ge 0 -and $confirmedIndex -lt $persistedIndex -and $persistedIndex -lt ($State.CoordinatorActions.Count - 1)) 'pair confirmation and continuation persistence must precede the terminal end_turn action'
 }
 
 function Confirm-Dispatch {
@@ -82,6 +142,7 @@ function Confirm-Dispatch {
     }
     $State.DispatchConfirmed = $true
     Add-CoordinatorAction -State $State -Kind 'confirmed_dispatch'
+    Persist-Continuation -State $State -Boundary initial_dispatch -Head ([string]$State.CurrentRevision) -DeliveryReference 'initial-assignment-delivery-confirmed'
     $State.CoordinatorTurn = 'ended'
     Add-CoordinatorAction -State $State -Kind 'end_turn'
     Assert-DispatchTerminal -State $State
@@ -218,6 +279,7 @@ function Integrate-EpicCorrection {
     Add-CoordinatorAction -State $State -Kind 'reviewed_integration'
     [void]$State.ExactHeadRereviews.Add([string]$State.IntegratedFeatureHead)
     Add-CoordinatorAction -State $State -Kind 'exact_feature_head_rereview_dispatch'
+    Persist-Continuation -State $State -Boundary integration_redispatch -Head ([string]$State.IntegratedFeatureHead) -DeliveryReference 'exact-head-rereview-delivery-confirmed'
     $State.PendingCoordinator = $null
     $State.CoordinatorTurn = 'ended'
     Add-CoordinatorAction -State $State -Kind 'end_turn'
@@ -259,6 +321,35 @@ foreach ($pairKind in @('story', 'epic')) {
         Assert-DispatchTerminal -State $dispatchState
     }
 }
+
+# Duplicate dispatch must leave the confirmed trace and persisted snapshot
+# unchanged; the second attempt is never a new assignment.
+$duplicateDispatch = New-LifecycleState -PairKind story -ReviewMode per_task
+Confirm-Dispatch -State $duplicateDispatch
+$duplicateActionTrace = @($duplicateDispatch.CoordinatorActions | ForEach-Object { [string]$_.Kind }) -join '|'
+$duplicateReplacementCount = $duplicateDispatch.Continuation.Replacements.Count
+$duplicateHead = [string]$duplicateDispatch.Continuation.CurrentHead
+$duplicateTurn = [string]$duplicateDispatch.CoordinatorTurn
+Assert-Throws { Confirm-Dispatch -State $duplicateDispatch } 'duplicate dispatch must be rejected'
+Assert-True ((@($duplicateDispatch.CoordinatorActions | ForEach-Object { [string]$_.Kind }) -join '|') -ceq $duplicateActionTrace -and
+    $duplicateDispatch.Continuation.Replacements.Count -eq $duplicateReplacementCount -and
+    [string]$duplicateDispatch.Continuation.CurrentHead -ceq $duplicateHead -and
+    [string]$duplicateDispatch.CoordinatorTurn -ceq $duplicateTurn) 'rejected duplicate dispatch must not mutate the accepted trace or continuation'
+
+# Setup and terminal continuation boundaries reject missing or stale persisted
+# snapshots instead of silently replaying the pair.
+$missingInitialContinuation = New-LifecycleState -PairKind story -ReviewMode per_task
+$missingInitialContinuation.Setup.ContinuationConfirmed = $false
+Assert-Throws { Confirm-Dispatch -State $missingInitialContinuation } 'missing initial continuation confirmation must be rejected'
+Assert-True (-not $missingInitialContinuation.DispatchConfirmed -and $missingInitialContinuation.CoordinatorActions.Count -eq 0) 'missing initial continuation must not confirm dispatch'
+$missingPersistedContinuation = New-LifecycleState -PairKind story -ReviewMode per_task
+Confirm-Dispatch -State $missingPersistedContinuation
+$missingPersistedContinuation.Continuation.Replacements.Clear()
+Assert-Throws { Assert-DispatchTerminal -State $missingPersistedContinuation } 'missing persisted continuation at the terminal boundary must be rejected'
+$staleInitialContinuation = New-LifecycleState -PairKind story -ReviewMode per_task
+Confirm-Dispatch -State $staleInitialContinuation
+$staleInitialContinuation.Continuation.CurrentHead = 'stale-initial-head'
+Assert-Throws { Assert-DispatchTerminal -State $staleInitialContinuation } 'stale initial continuation must be rejected'
 
 # Healthy heartbeat budget: no eligible workers means no wait; active workers
 # receive one timeoutMs:0 snapshot and a changed cursor is retained.
@@ -302,6 +393,25 @@ Assert-True ($integrationState.PendingCoordinator -eq 'epic_integration') 'integ
 Integrate-EpicCorrection -State $integrationState
 Assert-True ($integrationState.IntegratedFeatureHead -eq 'feature-head-b2' -and $integrationState.ExactHeadRereviews[0] -eq 'feature-head-b2' -and $integrationState.CoordinatorActions.Kind -contains 'exact_feature_head_rereview_dispatch') 'integration must dispatch exact feature-head re-review'
 Assert-Throws { Integrate-EpicCorrection -State $integrationState } 'duplicate epic integration must be rejected'
+$staleIntegrationContinuation = New-LifecycleState -PairKind epic -ReviewMode story_end_only
+Confirm-Dispatch -State $staleIntegrationContinuation
+Apply-EpicIntegrationReady -State $staleIntegrationContinuation -Event ([ordered]@{
+    FindingId = 'finding-stale'; ReviewRequestId = 'epic-review-stale'; ReviewedHead = 'integrated-head-a1'; CorrectedHead = 'feature-head-c3';
+    CorrectionBranch = 'epic-fix-stale-branch'; CorrectionWorktree = 'C:\synthetic\epic-fix-stale'; CleanSource = $true; Delta = 'reviewed..stale-corrected'; Checks = 'fixture exit 0'; NextAction = 'exact-head re-review'
+})
+Integrate-EpicCorrection -State $staleIntegrationContinuation
+$staleIntegrationContinuation.Continuation.CurrentHead = 'stale-integrated-head'
+$staleIntegrationContinuation.Continuation.Replacements[$staleIntegrationContinuation.Continuation.Replacements.Count - 1].Head = 'stale-integrated-head'
+Assert-Throws { Assert-DispatchTerminal -State $staleIntegrationContinuation } 'stale integration continuation must be rejected'
+$missingIntegrationContinuation = New-LifecycleState -PairKind epic -ReviewMode story_end_only
+Confirm-Dispatch -State $missingIntegrationContinuation
+Apply-EpicIntegrationReady -State $missingIntegrationContinuation -Event ([ordered]@{
+    FindingId = 'finding-missing'; ReviewRequestId = 'epic-review-missing'; ReviewedHead = 'integrated-head-a1'; CorrectedHead = 'feature-head-d4';
+    CorrectionBranch = 'epic-fix-missing-branch'; CorrectionWorktree = 'C:\synthetic\epic-fix-missing'; CleanSource = $true; Delta = 'reviewed..missing-corrected'; Checks = 'fixture exit 0'; NextAction = 'exact-head re-review'
+})
+Integrate-EpicCorrection -State $missingIntegrationContinuation
+$missingIntegrationContinuation.Continuation.Replacements.Clear()
+Assert-Throws { Assert-DispatchTerminal -State $missingIntegrationContinuation } 'missing integration continuation must be rejected'
 
 # Final approval, genuine blockers, failed/unknown dispatch, and approval waits
 # are bounded coordinator events rather than healthy worker progress.
