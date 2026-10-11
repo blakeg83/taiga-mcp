@@ -37,6 +37,19 @@ pointer resumes with unavailable historical coverage and never receives a
 reconstructed timestamp. Recorder failures are measurement limitations and do
 not change workflow authorization or advancement.
 
+Apply this shared engineering contract to every story and integrated-epic role:
+choose the simplest adequate design that satisfies the approved acceptance
+criteria and existing project contracts, reusing suitable project patterns.
+Preserve required correctness, security, cancellation, and compatibility
+behavior. Routine in-scope implementation choices remain with the implementer;
+they do not require a new approval gate. Before implementation, escalate any
+major architectural expansion—such as a new subsystem or persistent state,
+material cross-cutting or public-contract change, new dependency, or broad
+refactor beyond the approved work—with the requirement, simpler alternative,
+proposed approach, and tradeoff. The coordinator routes unresolved requirement
+or architectural decisions to the user: implementer/reviewer agreement is not
+authority to enlarge scope.
+
 Before showing the setup gate, read [setup authorization](references/setup-authorization.md).
 It defines capability intake, the selectable Start/Cancel decision, the
 explicit typed fallback, and the authorization record passed to assignments.
