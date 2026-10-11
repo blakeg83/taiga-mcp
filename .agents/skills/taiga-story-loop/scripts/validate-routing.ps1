@@ -169,6 +169,9 @@ Send-Epic-Integration-Ready $implementer $coordinator 'epic-review-45-attempt-1'
 Send-Message $reviewer $coordinator 'epic_approval' 'epic-45' 'feature-b' 'prepare final delivery' 'final exact-head epic acceptance'
 
 # Routine milestone copies to the coordinator are forbidden.
+$beforeEpicFindingCopy = $messages.Count
+Assert-Throws { Send-Message $reviewer $coordinator 'epic_finding' 'epic-45' 'feature-a' 'correct exact integrated HEAD' 'routine epic finding copy' } 'routine epic finding must not be copied to the coordinator'
+Assert-True ($messages.Count -eq $beforeEpicFindingCopy) 'rejected routine epic finding copy must not append a message'
 Assert-Throws { Send-Message $implementer $coordinator 'ready' '#65' 'a1' 'review exact revision' 'routine ready copy' } 'task-ready must not be copied to the coordinator'
 Assert-Throws { Send-Message $reviewer $coordinator 'finding' '#65' 'a1' 'correct same branch' 'routine finding copy' } 'routine finding must not be copied to the coordinator'
 Assert-Throws { Send-Message $implementer $coordinator 'correction' '#65' 'a2' 're-review exact revision' 'routine correction copy' } 'routine correction must not be copied to the coordinator'

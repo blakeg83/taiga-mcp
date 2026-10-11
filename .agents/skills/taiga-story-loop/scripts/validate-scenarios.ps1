@@ -673,7 +673,7 @@ if (-not $normalizedRouting.Contains('no arbitrary elapsed deadline') -or
     -not $normalizedRouting.Contains('Story-worker routing remains unchanged')) {
     throw 'Routing assertion failed: no arbitrary cutoff policy'
 }
-foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied', 'epic_finding', 'Send-Epic-Integration-Ready', 'epic_integration_ready', 'integration-ready correction must carry evidence')) {
+foreach ($marker in @('routine readiness, findings, corrections, and acceptance must not reach the coordinator', 'unknown delivery', 'revision conflict', 'routine finding must not be copied', 'epic_finding', 'Send-Epic-Integration-Ready', 'epic_integration_ready', 'integration-ready correction must carry evidence', 'routine epic finding must not be copied to the coordinator', 'rejected routine epic finding copy must not append a message')) {
     if (-not (Get-Content $routingScriptPath -Raw).Contains($marker)) {
         throw "Routing assertion failed: $marker"
     }
