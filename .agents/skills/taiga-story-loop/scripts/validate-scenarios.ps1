@@ -607,7 +607,8 @@ foreach ($marker in @(
 }
 foreach ($marker in @(
         'Right-sized design and review policy'
-        'offline synthetic assertions'
+        'documented synthetic examples'
+        'static content checks'
         'live model behavior'
         'token savings')) {
     if (-not $normalizedOperatorGuide.Contains($marker)) {
@@ -1227,68 +1228,30 @@ $results = foreach ($scenario in $scenarios) {
 
 $results | Format-Table Name, Input, Observed, Detail -AutoSize | Out-String | Write-Output
 
-function Resolve-RoleContractScenario {
-    param(
-        [Parameter(Mandatory)] [string] $Name
-    )
-
-    switch ($Name) {
-        'adequate-simple' {
-            return [pscustomobject]@{ Disposition = 'accepted'; Route = 'reviewer'; Blocking = $false }
-        }
-        'evidenced-defect' {
-            return [pscustomobject]@{ Disposition = 'blocking'; Route = 'reviewer'; Blocking = $true }
-        }
-        'speculative-hardening' {
-            return [pscustomobject]@{ Disposition = 'optional_nonblocking'; Route = 'reviewer'; Blocking = $false }
-        }
-        'unnecessary-complexity' {
-            return [pscustomobject]@{ Disposition = 'blocking_with_simpler_alternative'; Route = 'reviewer'; Blocking = $true }
-        }
-        'major-expansion' {
-            return [pscustomobject]@{ Disposition = 'escalated_before_implementation'; Route = 'coordinator'; Blocking = $false }
-        }
-        'worker-consensus' {
-            return [pscustomobject]@{ Disposition = 'scope_decision_to_user'; Route = 'coordinator'; Blocking = $false }
-        }
-        default {
-            throw "Unknown right-sized role-contract scenario: $Name"
-        }
-    }
-}
-
 $roleContractScenarios = @(
-    @{ Name = 'adequate-simple'; ExpectedDisposition = 'accepted'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $false }
-    @{ Name = 'evidenced-defect'; ExpectedDisposition = 'blocking'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $true }
-    @{ Name = 'speculative-hardening'; ExpectedDisposition = 'optional_nonblocking'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $false }
-    @{ Name = 'unnecessary-complexity'; ExpectedDisposition = 'blocking_with_simpler_alternative'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $true }
-    @{ Name = 'major-expansion'; ExpectedDisposition = 'escalated_before_implementation'; ExpectedRoute = 'coordinator'; ExpectedBlocking = $false }
-    @{ Name = 'worker-consensus'; ExpectedDisposition = 'scope_decision_to_user'; ExpectedRoute = 'coordinator'; ExpectedBlocking = $false }
+    @{ Name = 'adequate-simple'; Outcome = '`accepted`; no blocker or extra approval gate.'; Basis = 'smallest change that satisfies the approved criterion'; Limit = 'does not prove live model judgment' }
+    @{ Name = 'evidenced-defect'; Outcome = '`blocking`; request the minimum adequate correction.'; Basis = 'violates a stated acceptance criterion or existing project contract'; Limit = 'synthetic evidence only' }
+    @{ Name = 'speculative-hardening'; Outcome = '`optional_nonblocking`; omission does not require a correction cycle.'; Basis = 'unrequired future configuration'; Limit = 'no token or cost conclusion' }
+    @{ Name = 'unnecessary-complexity'; Outcome = '`blocking_with_simpler_alternative`'; Basis = 'violation of the approved scope/contract'; Limit = 'not a universal style rule' }
+    @{ Name = 'major-expansion'; Outcome = '`escalated_before_implementation`; include the requirement, simpler alternative, proposal, and tradeoff.'; Basis = 'new subsystem, persistent state'; Limit = 'no expansion is implemented' }
+    @{ Name = 'worker-consensus'; Outcome = '`scope_decision_to_user`; worker agreement is not authorization.'; Basis = 'agree that the expanded design would be useful'; Limit = 'coordinator/user routing is synthetic' }
 )
 
 $roleContractResults = foreach ($scenario in $roleContractScenarios) {
-    $observed = Resolve-RoleContractScenario -Name $scenario.Name
-    if ($observed.Disposition -cne $scenario.ExpectedDisposition -or
-        $observed.Route -cne $scenario.ExpectedRoute -or
-        [bool] $observed.Blocking -ne [bool] $scenario.ExpectedBlocking) {
-        throw "Right-sized scenario '$($scenario.Name)' produced an unexpected disposition or route."
-    }
-
-    if (-not $normalizedWalkthrough.Contains($scenario.Name) -or
-        -not $normalizedWalkthrough.Contains($scenario.ExpectedDisposition)) {
-        throw "Walkthrough assertion failed for right-sized scenario '$($scenario.Name)'."
+    foreach ($marker in @($scenario.Name, $scenario.Outcome, $scenario.Basis, $scenario.Limit)) {
+        if (-not $normalizedWalkthrough.Contains($marker)) {
+            throw "Walkthrough static-content assertion failed for '$($scenario.Name)': $marker"
+        }
     }
 
     [pscustomobject]@{
         Name = $scenario.Name
-        Disposition = $observed.Disposition
-        Route = $observed.Route
-        Blocking = $observed.Blocking
-        Evidence = 'automated_assertion'
+        Outcome = $scenario.Outcome
+        Evidence = 'static_content_check'
     }
 }
 
-$roleContractResults | Format-Table Name, Disposition, Route, Blocking, Evidence -AutoSize | Out-String | Write-Output
+$roleContractResults | Format-Table Name, Outcome, Evidence -AutoSize | Out-String | Write-Output
 $acceptanceOutput = @(& pwsh -NoProfile -File $acceptanceEvidenceScriptPath 2>&1 | ForEach-Object { [string]$_ })
 $acceptanceExit = $LASTEXITCODE
 if ($acceptanceExit -ne 0) {
@@ -1307,4 +1270,4 @@ if ($lifecycleExit -ne 0) {
     throw "Lifecycle-binding fixture exited ${lifecycleExit}: $($lifecycleOutput -join [Environment]::NewLine)"
 }
 $lifecycleOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract scenarios, setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract static-content checks, setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

@@ -87,11 +87,13 @@ speculative future requirements are nonblocking. Unnecessary complexity gets a
 concrete simpler alternative and is blocking only when that finding is
 evidence-grounded.
 
-The role-contract walkthroughs and validators are offline synthetic assertions.
-They demonstrate documented routing and classification cases, but do not prove
-live model behavior, visible UI behavior, provider writes, token savings, or
-cost improvements. Installation, live trials, publication, and benchmarking
-remain separately authorized work.
+The role-contract walkthroughs are documented synthetic examples, and the
+scenario validator performs static content checks for each row's setup, outcome,
+and evidence limit. Existing routing and automatic-review fixtures provide
+separate offline routing evidence. None of these checks proves live model
+behavior, visible UI behavior, provider writes, token savings, or cost
+improvements. Installation, live trials, publication, and benchmarking remain
+separately authorized work.
 
 Configure mappings per project and resource from discovered Taiga status
 metadata, for example `not_started`, `in_progress`, `awaiting_review`,
