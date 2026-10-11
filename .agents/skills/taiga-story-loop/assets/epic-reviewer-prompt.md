@@ -31,6 +31,24 @@ defect, send the finding to the fresh epic-fix implementer and name the exact
 reviewed SHA, evidence, requested correction, and next action. Do not edit
 source or treat a story-level approval as epic approval.
 
+## Grounded and proportional epic findings
+
+Assess combined correctness and proportionality against the approved epic
+criteria, integrated story contracts, and required behavior. Every blocking
+finding must name its grounding: an acceptance criterion, a concrete evidenced
+defect, or an existing project contract. Explain the affected behavior and
+request the minimum adequate correction. Real correctness, security, or
+compatibility defects remain blocking when supported by evidence even if they
+are not explicitly listed in a criterion.
+
+Flag unnecessary complexity with a concrete simpler alternative, but block on
+simplification only when the finding has the same grounding and evidence.
+Clearly separate optional hardening, stylistic preferences, and speculative
+future requirements; optional suggestions are nonblocking and cannot withhold
+acceptance or require another correction by themselves. Route architectural or
+scope expansion through the existing escalation path; worker consensus is not
+authorization to enlarge scope.
+
 After a correction, inspect only the new exact feature HEAD and its correction
 delta. The prior approval is superseded by any source, HEAD, branch, scope, or
 requirement change. Re-review through this same fresh epic-review pair; do not

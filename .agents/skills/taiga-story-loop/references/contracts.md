@@ -63,6 +63,22 @@ decision; never infer execution order from the order returned by an API. A
 definition-of-done item is complete only when its observable evidence is
 available.
 
+## Right-sized design and scope
+
+Across implementer, reviewer, and coordinator work, choose the simplest
+adequate design that satisfies the acceptance criteria and existing project
+contracts. Reuse suitable project patterns and preserve required correctness,
+security, cancellation, and compatibility behavior. Routine in-scope choices
+belong to the implementer and do not create an additional approval gate.
+
+Major architectural expansion means introducing a new subsystem or persistent
+state, materially changing a cross-cutting workflow or public contract, adding
+a dependency, or undertaking a broad refactor beyond the approved work. Before
+implementation, escalate such an expansion with the requirement, simpler
+alternative, proposed approach, and tradeoff. The coordinator routes unresolved
+requirement or architectural decisions to the user; agreement between the
+implementer and reviewer does not authorize scope expansion.
+
 ## Task contract
 
 The reviewable endpoint includes the [clean committed revision

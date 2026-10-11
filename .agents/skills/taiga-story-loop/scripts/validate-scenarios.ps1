@@ -54,10 +54,14 @@ $performanceRecorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
 $performanceStartScriptPath = Join-Path $PSScriptRoot 'validate-performance-start.ps1'
 $lifecycleBindingsScriptPath = Join-Path $PSScriptRoot 'validate-lifecycle-bindings.ps1'
 $repoRoot = (Resolve-Path (Join-Path $skillRoot '..\..\..')).Path
+$operatorGuidePath = Join-Path $repoRoot 'docs/automation/README.md'
 $performanceAggregationPath = Join-Path $repoRoot 'scripts/get-story-performance.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
+}
+if (-not (Test-Path $operatorGuidePath)) {
+    throw 'Missing story-loop operator guidance.'
 }
 if (-not (Test-Path $contractsPath)) {
     throw 'Missing story/task contract reference.'
@@ -183,6 +187,8 @@ $normalizedPerformance = [regex]::Replace($performanceText, '\s+', ' ')
 $performanceStartScriptText = Get-Content $performanceStartScriptPath -Raw
 $performanceRecorderText = Get-Content $performanceRecorderPath -Raw
 $performanceAggregationText = Get-Content $performanceAggregationPath -Raw
+$operatorGuideText = Get-Content $operatorGuidePath -Raw
+$normalizedOperatorGuide = [regex]::Replace($operatorGuideText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -537,6 +543,77 @@ if ($normalizedPrompt.Contains('correction-ready handoff to both reviewer and co
 }
 if (-not $normalizedReviewerPrompt.Contains('Do not copy or restate routine findings to the coordinator')) {
     throw 'Reviewer prompt assertion failed: routine findings must not be relayed'
+}
+foreach ($marker in @(
+        'Grounded and proportional findings'
+        'Every blocking finding must name its grounding'
+        'affected behavior'
+        'minimum adequate correction'
+        'optional suggestions are nonblocking'
+        'concrete simpler alternative'
+        'existing escalation path'
+        'not authorization to enlarge scope')) {
+    if (-not $normalizedReviewerPrompt.Contains($marker)) {
+        throw "Reviewer prompt proportionality assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Grounded and proportional epic findings'
+        'Every blocking finding must name its grounding'
+        'affected behavior'
+        'minimum adequate correction'
+        'optional suggestions are nonblocking'
+        'concrete simpler alternative'
+        'existing escalation path'
+        'worker consensus is not authorization to enlarge scope')) {
+    if (-not $normalizedEpicReviewerPrompt.Contains($marker)) {
+        throw "Epic reviewer prompt proportionality assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'smallest adequate change'
+        'Routine in-scope choices remain with the implementer'
+        'major architectural expansion'
+        'requirement, simpler alternative'
+        'suggestions explicitly identified as nonblocking')) {
+    if (-not $normalizedPrompt.Contains($marker)) {
+        throw "Implementation prompt consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'smallest adequate correction'
+        'Routine in-scope correction choices remain with the implementer'
+        'major architectural expansion'
+        'requirement, simpler alternative'
+        'Nonblocking reviewer suggestions are optional')) {
+    if (-not $normalizedEpicFixPrompt.Contains($marker)) {
+        throw "Epic-fix prompt consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Right-sized design and scope'
+        'simplest adequate design'
+        'does not authorize scope expansion')) {
+    if (-not $normalizedContracts.Contains($marker)) {
+        throw "Shared contract consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Proposed major architectural expansion before implementation'
+        'worker consensus as authorization')) {
+    if (-not $normalizedRouting.Contains($marker)) {
+        throw "Routing contract consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Right-sized design and review policy'
+        'documented synthetic examples'
+        'static content checks'
+        'live model behavior'
+        'token savings')) {
+    if (-not $normalizedOperatorGuide.Contains($marker)) {
+        throw "Operator guidance assertion failed: $marker"
+    }
 }
 foreach ($marker in @(
         'fresh, read-only reviewer'
@@ -1150,6 +1227,81 @@ $results = foreach ($scenario in $scenarios) {
 }
 
 $results | Format-Table Name, Input, Observed, Detail -AutoSize | Out-String | Write-Output
+
+$roleContractScenarios = @(
+    @{ Name = 'adequate-simple'; Outcome = '`accepted`; no blocker or extra approval gate.'; Basis = 'smallest change that satisfies the approved criterion'; Limit = 'does not prove live model judgment' }
+    @{ Name = 'evidenced-defect'; Outcome = '`blocking`; request the minimum adequate correction.'; Basis = 'violates a stated acceptance criterion or existing project contract'; Limit = 'synthetic evidence only' }
+    @{ Name = 'speculative-hardening'; Outcome = '`optional_nonblocking`; omission does not require a correction cycle.'; Basis = 'unrequired future configuration'; Limit = 'no token or cost conclusion' }
+    @{ Name = 'unnecessary-complexity'; Outcome = '`blocking_with_simpler_alternative`'; Basis = 'violation of the approved scope/contract'; Limit = 'not a universal style rule' }
+    @{ Name = 'major-expansion'; Outcome = '`escalated_before_implementation`; include the requirement, simpler alternative, proposal, and tradeoff.'; Basis = 'new subsystem, persistent state'; Limit = 'no expansion is implemented' }
+    @{ Name = 'worker-consensus'; Outcome = '`scope_decision_to_user`; worker agreement is not authorization.'; Basis = 'agree that the expanded design would be useful'; Limit = 'coordinator/user routing is synthetic' }
+)
+
+function Get-RoleContractScenarioRow {
+    param(
+        [Parameter(Mandatory)] [string] $Walkthrough,
+        [Parameter(Mandatory)] [hashtable] $Scenario
+    )
+
+    $nameMarker = '`' + $Scenario.Name + '`'
+    $rows = @($Walkthrough -split '\r?\n' | Where-Object {
+            $trimmed = $_.TrimStart()
+            $trimmed.StartsWith('|') -and $trimmed.Contains($nameMarker)
+        })
+    if ($rows.Count -ne 1) {
+        throw "Walkthrough must contain exactly one table row for '$($Scenario.Name)'; found $($rows.Count)."
+    }
+
+    return [regex]::Replace([string] $rows[0], '\s+', ' ')
+}
+
+function Assert-RoleContractScenarioRow {
+    param(
+        [Parameter(Mandatory)] [string] $Walkthrough,
+        [Parameter(Mandatory)] [hashtable] $Scenario
+    )
+
+    $row = Get-RoleContractScenarioRow -Walkthrough $Walkthrough -Scenario $Scenario
+    foreach ($marker in @($Scenario.Name, $Scenario.Outcome, $Scenario.Basis, $Scenario.Limit)) {
+        if (-not $row.Contains($marker)) {
+            throw "Walkthrough row assertion failed for '$($Scenario.Name)': $marker"
+        }
+    }
+
+    return $row
+}
+
+$roleContractResults = foreach ($scenario in $roleContractScenarios) {
+    Assert-RoleContractScenarioRow -Walkthrough $walkthroughText -Scenario $scenario | Out-Null
+
+    [pscustomobject]@{
+        Name = $scenario.Name
+        Outcome = $scenario.Outcome
+        Evidence = 'static_content_check'
+    }
+}
+
+$negativeScenario = $roleContractScenarios | Where-Object { $_.Name -eq 'adequate-simple' }
+$negativeWalkthrough = $walkthroughText.Replace(
+    $negativeScenario.Outcome,
+    '`blocking`; request the minimum adequate correction.'
+) + "`n| appendix | `accepted`; no blocker or extra approval gate. | retained text | unrelated appendix text |"
+$negativeRejected = $false
+try {
+    Assert-RoleContractScenarioRow -Walkthrough $negativeWalkthrough -Scenario $negativeScenario | Out-Null
+}
+catch {
+    if ($_.Exception.Message -notmatch "Walkthrough row assertion failed for 'adequate-simple'") {
+        throw
+    }
+    $negativeRejected = $true
+}
+if (-not $negativeRejected) {
+    throw 'Role-contract row negative control unexpectedly accepted an altered outcome.'
+}
+Write-Output 'Passed role-contract negative control: an altered row outcome was rejected despite the expected text appearing elsewhere.'
+
+$roleContractResults | Format-Table Name, Outcome, Evidence -AutoSize | Out-String | Write-Output
 $acceptanceOutput = @(& pwsh -NoProfile -File $acceptanceEvidenceScriptPath 2>&1 | ForEach-Object { [string]$_ })
 $acceptanceExit = $LASTEXITCODE
 if ($acceptanceExit -ne 0) {
@@ -1168,4 +1320,4 @@ if ($lifecycleExit -ne 0) {
     throw "Lifecycle-binding fixture exited ${lifecycleExit}: $($lifecycleOutput -join [Environment]::NewLine)"
 }
 $lifecycleOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract static-content checks, setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

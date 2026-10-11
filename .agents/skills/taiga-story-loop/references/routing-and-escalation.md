@@ -30,6 +30,8 @@ inspected.
 | --- | --- | --- |
 | Worker blocked or check cannot proceed | preserve evidence and ask for the specific decision/external change | silently retry, skip the task, or claim readiness |
 | Reviewer and implementer disagree on a substantive requirement | surface both concise positions and ask the user | choose a product decision from source code |
+| Proposed major architectural expansion before implementation | preserve the approved boundary and ask the user using the requirement, simpler alternative, proposed approach, and tradeoff | implement the expansion or add a new approval gate for routine choices |
+| Implementer and reviewer agree on expanding scope | route the unresolved requirement or architectural decision to the user | treat worker consensus as authorization to enlarge scope |
 | Message destination is missing, pending, or ambiguous | stop dispatch and report the unresolved worker identity | create a replacement chat automatically |
 | Message delivery outcome is unknown | reconcile the provider/thread state before retrying | send a duplicate or infer delivery from idle status |
 | Current revision conflicts with the pending review binding | reconcile the branch HEAD and review evidence, then re-review the correct revision | overwrite the binding or advance the task |

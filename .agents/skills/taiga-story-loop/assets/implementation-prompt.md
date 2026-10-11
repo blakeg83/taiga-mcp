@@ -41,6 +41,25 @@ validation, scenario classifications, metric conditions/baseline, and safe
 smoke setup/actions/cleanup. For a non-UI change, record that UI/browser
 evidence is not applicable.
 
+## Proportional implementation and scope
+
+Choose the smallest adequate change that satisfies the approved acceptance
+criteria and existing project contracts. Reuse suitable project patterns. Do
+not add speculative abstractions, frameworks, configuration or dependencies,
+unrelated refactors, or future-proofing without a demonstrated requirement.
+Preserve required correctness, security, cancellation, and compatibility
+behavior.
+
+Routine in-scope choices remain with the implementer and do not require an
+additional approval gate. Before implementing a major architectural expansion
+—such as a new subsystem or persistent state, material cross-cutting or
+public-contract change, new dependency, or broad refactor beyond the approved
+work—escalate through the coordinator with the requirement, simpler alternative,
+proposed approach, and tradeoff. Do not implement the expansion until the
+unresolved decision is routed to the user. Reviewer suggestions explicitly
+identified as nonblocking are optional and do not create mandatory follow-up or
+a correction cycle by themselves.
+
 Every review handoff uses `references/revision-freeze.md`. The review input is
 the expected repository, absolute worktree, branch, captured base SHA, full
 40-character SHA copied directly from `git rev-parse HEAD`, the relevant diff

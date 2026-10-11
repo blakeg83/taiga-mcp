@@ -41,6 +41,24 @@ Treat an unexpected/undeclared failure, a nonzero exit without named failure
 evidence, or missing regression/safety coverage as a finding; do not require
 downstream implementation merely to make an intentionally red task green.
 
+## Grounded and proportional findings
+
+Assess correctness and proportionality against the approved criteria and
+existing project contracts. Every blocking finding must name its grounding: an
+acceptance criterion, a concrete evidenced defect, or an existing project
+contract. Explain the affected behavior and request the minimum adequate
+correction. Real correctness, security, or compatibility defects remain
+blocking when supported by evidence even if they are not explicitly listed in
+a criterion.
+
+Flag unnecessary complexity with a concrete simpler alternative, but block on
+simplification only when the finding has the same grounding and evidence.
+Clearly separate optional hardening, stylistic preferences, and speculative
+future requirements; optional suggestions are nonblocking and cannot withhold
+approval or require another correction cycle by themselves. Route architectural
+or scope expansion through the existing escalation path; implementer/reviewer
+agreement is not authorization to enlarge scope.
+
 The implementer ends its turn after each per-task ready/correction handoff only
 when the persistent reviewer received a successful direct delivery for the
 exact task and revision. Your authorized findings or acceptance message wakes that same chat; include

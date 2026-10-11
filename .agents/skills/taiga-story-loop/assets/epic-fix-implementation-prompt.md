@@ -30,6 +30,24 @@ needed to resolve the finding, run the required verification, and commit the
 result. Do not modify Taiga status, create a pull request, merge, force-push,
 or widen the epic scope.
 
+## Proportional correction and scope
+
+Make the smallest adequate correction that resolves the evidenced finding and
+preserves the approved criteria and existing project contracts. Reuse suitable
+patterns. Do not add speculative abstractions, frameworks, configuration or
+dependencies, unrelated refactors, or future-proofing without a demonstrated
+requirement. Preserve required correctness, security, cancellation, and
+compatibility behavior.
+
+Routine in-scope correction choices remain with the implementer. If resolving
+the finding would require a major architectural expansion—such as a new
+subsystem or persistent state, material cross-cutting or public-contract
+change, new dependency, or broad refactor beyond the approved work—stop before
+implementing it and escalate through the coordinator with the requirement,
+simpler alternative, proposed approach, and tradeoff. Worker/reviewer
+agreement does not authorize widening scope. Nonblocking reviewer suggestions
+are optional and do not require another correction by themselves.
+
 Before returning the correction, verify the expected repository, branch,
 worktree, clean tracked-source state, exact new full HEAD, and correction delta
 from the reviewed HEAD. Send the correction evidence to the coordinator, who
