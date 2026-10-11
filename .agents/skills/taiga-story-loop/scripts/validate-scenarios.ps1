@@ -54,10 +54,14 @@ $performanceRecorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
 $performanceStartScriptPath = Join-Path $PSScriptRoot 'validate-performance-start.ps1'
 $lifecycleBindingsScriptPath = Join-Path $PSScriptRoot 'validate-lifecycle-bindings.ps1'
 $repoRoot = (Resolve-Path (Join-Path $skillRoot '..\..\..')).Path
+$operatorGuidePath = Join-Path $repoRoot 'docs/automation/README.md'
 $performanceAggregationPath = Join-Path $repoRoot 'scripts/get-story-performance.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
+}
+if (-not (Test-Path $operatorGuidePath)) {
+    throw 'Missing story-loop operator guidance.'
 }
 if (-not (Test-Path $contractsPath)) {
     throw 'Missing story/task contract reference.'
@@ -183,6 +187,8 @@ $normalizedPerformance = [regex]::Replace($performanceText, '\s+', ' ')
 $performanceStartScriptText = Get-Content $performanceStartScriptPath -Raw
 $performanceRecorderText = Get-Content $performanceRecorderPath -Raw
 $performanceAggregationText = Get-Content $performanceAggregationPath -Raw
+$operatorGuideText = Get-Content $operatorGuidePath -Raw
+$normalizedOperatorGuide = [regex]::Replace($operatorGuideText, '\s+', ' ')
 
 function Assert-DocumentContains {
     param(
@@ -537,6 +543,76 @@ if ($normalizedPrompt.Contains('correction-ready handoff to both reviewer and co
 }
 if (-not $normalizedReviewerPrompt.Contains('Do not copy or restate routine findings to the coordinator')) {
     throw 'Reviewer prompt assertion failed: routine findings must not be relayed'
+}
+foreach ($marker in @(
+        'Grounded and proportional findings'
+        'Every blocking finding must name its grounding'
+        'affected behavior'
+        'minimum adequate correction'
+        'optional suggestions are nonblocking'
+        'concrete simpler alternative'
+        'existing escalation path'
+        'not authorization to enlarge scope')) {
+    if (-not $normalizedReviewerPrompt.Contains($marker)) {
+        throw "Reviewer prompt proportionality assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Grounded and proportional epic findings'
+        'Every blocking finding must name its grounding'
+        'affected behavior'
+        'minimum adequate correction'
+        'optional suggestions are nonblocking'
+        'concrete simpler alternative'
+        'existing escalation path'
+        'worker consensus is not authorization to enlarge scope')) {
+    if (-not $normalizedEpicReviewerPrompt.Contains($marker)) {
+        throw "Epic reviewer prompt proportionality assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'smallest adequate change'
+        'Routine in-scope choices remain with the implementer'
+        'major architectural expansion'
+        'requirement, simpler alternative'
+        'suggestions explicitly identified as nonblocking')) {
+    if (-not $normalizedPrompt.Contains($marker)) {
+        throw "Implementation prompt consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'smallest adequate correction'
+        'Routine in-scope correction choices remain with the implementer'
+        'major architectural expansion'
+        'requirement, simpler alternative'
+        'Nonblocking reviewer suggestions are optional')) {
+    if (-not $normalizedEpicFixPrompt.Contains($marker)) {
+        throw "Epic-fix prompt consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Right-sized design and scope'
+        'simplest adequate design'
+        'does not authorize scope expansion')) {
+    if (-not $normalizedContracts.Contains($marker)) {
+        throw "Shared contract consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Proposed major architectural expansion before implementation'
+        'worker consensus as authorization')) {
+    if (-not $normalizedRouting.Contains($marker)) {
+        throw "Routing contract consistency assertion failed: $marker"
+    }
+}
+foreach ($marker in @(
+        'Right-sized design and review policy'
+        'offline synthetic assertions'
+        'live model behavior'
+        'token savings')) {
+    if (-not $normalizedOperatorGuide.Contains($marker)) {
+        throw "Operator guidance assertion failed: $marker"
+    }
 }
 foreach ($marker in @(
         'fresh, read-only reviewer'
@@ -1150,6 +1226,69 @@ $results = foreach ($scenario in $scenarios) {
 }
 
 $results | Format-Table Name, Input, Observed, Detail -AutoSize | Out-String | Write-Output
+
+function Resolve-RoleContractScenario {
+    param(
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    switch ($Name) {
+        'adequate-simple' {
+            return [pscustomobject]@{ Disposition = 'accepted'; Route = 'reviewer'; Blocking = $false }
+        }
+        'evidenced-defect' {
+            return [pscustomobject]@{ Disposition = 'blocking'; Route = 'reviewer'; Blocking = $true }
+        }
+        'speculative-hardening' {
+            return [pscustomobject]@{ Disposition = 'optional_nonblocking'; Route = 'reviewer'; Blocking = $false }
+        }
+        'unnecessary-complexity' {
+            return [pscustomobject]@{ Disposition = 'blocking_with_simpler_alternative'; Route = 'reviewer'; Blocking = $true }
+        }
+        'major-expansion' {
+            return [pscustomobject]@{ Disposition = 'escalated_before_implementation'; Route = 'coordinator'; Blocking = $false }
+        }
+        'worker-consensus' {
+            return [pscustomobject]@{ Disposition = 'scope_decision_to_user'; Route = 'coordinator'; Blocking = $false }
+        }
+        default {
+            throw "Unknown right-sized role-contract scenario: $Name"
+        }
+    }
+}
+
+$roleContractScenarios = @(
+    @{ Name = 'adequate-simple'; ExpectedDisposition = 'accepted'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $false }
+    @{ Name = 'evidenced-defect'; ExpectedDisposition = 'blocking'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $true }
+    @{ Name = 'speculative-hardening'; ExpectedDisposition = 'optional_nonblocking'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $false }
+    @{ Name = 'unnecessary-complexity'; ExpectedDisposition = 'blocking_with_simpler_alternative'; ExpectedRoute = 'reviewer'; ExpectedBlocking = $true }
+    @{ Name = 'major-expansion'; ExpectedDisposition = 'escalated_before_implementation'; ExpectedRoute = 'coordinator'; ExpectedBlocking = $false }
+    @{ Name = 'worker-consensus'; ExpectedDisposition = 'scope_decision_to_user'; ExpectedRoute = 'coordinator'; ExpectedBlocking = $false }
+)
+
+$roleContractResults = foreach ($scenario in $roleContractScenarios) {
+    $observed = Resolve-RoleContractScenario -Name $scenario.Name
+    if ($observed.Disposition -cne $scenario.ExpectedDisposition -or
+        $observed.Route -cne $scenario.ExpectedRoute -or
+        [bool] $observed.Blocking -ne [bool] $scenario.ExpectedBlocking) {
+        throw "Right-sized scenario '$($scenario.Name)' produced an unexpected disposition or route."
+    }
+
+    if (-not $normalizedWalkthrough.Contains($scenario.Name) -or
+        -not $normalizedWalkthrough.Contains($scenario.ExpectedDisposition)) {
+        throw "Walkthrough assertion failed for right-sized scenario '$($scenario.Name)'."
+    }
+
+    [pscustomobject]@{
+        Name = $scenario.Name
+        Disposition = $observed.Disposition
+        Route = $observed.Route
+        Blocking = $observed.Blocking
+        Evidence = 'automated_assertion'
+    }
+}
+
+$roleContractResults | Format-Table Name, Disposition, Route, Blocking, Evidence -AutoSize | Out-String | Write-Output
 $acceptanceOutput = @(& pwsh -NoProfile -File $acceptanceEvidenceScriptPath 2>&1 | ForEach-Object { [string]$_ })
 $acceptanceExit = $LASTEXITCODE
 if ($acceptanceExit -ne 0) {
@@ -1168,4 +1307,4 @@ if ($lifecycleExit -ne 0) {
     throw "Lifecycle-binding fixture exited ${lifecycleExit}: $($lifecycleOutput -join [Environment]::NewLine)"
 }
 $lifecycleOutput | Write-Output
-Write-Output "Passed $($results.Count) static setup scenarios plus setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."
+Write-Output "Passed $($results.Count) static setup scenarios plus $($roleContractResults.Count) right-sized role-contract scenarios, setup-authorization, lifecycle-boundary, contract, endpoint-walkthrough, recorded-walkthrough, and executable acceptance-evidence assertions; no live browser/provider evidence was claimed."

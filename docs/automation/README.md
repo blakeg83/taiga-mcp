@@ -70,6 +70,29 @@ cross-task references fail closed.
 
 ## Story operator guidance
 
+### Right-sized design and review policy
+
+Story-loop workers choose the smallest adequate change that satisfies the
+approved criteria and existing project contracts, reusing suitable patterns and
+preserving required correctness, security, cancellation, and compatibility.
+Routine in-scope choices remain with the implementer. A major architectural or
+scope expansion is escalated before implementation with its requirement,
+simpler alternative, proposed approach, and tradeoff; implementer/reviewer
+agreement does not authorize the coordinator to enlarge scope.
+
+Reviewers ground every blocker in an acceptance criterion, concrete evidenced
+defect, or existing project contract, identify the affected behavior, and ask
+for the minimum adequate correction. Optional hardening, preferences, and
+speculative future requirements are nonblocking. Unnecessary complexity gets a
+concrete simpler alternative and is blocking only when that finding is
+evidence-grounded.
+
+The role-contract walkthroughs and validators are offline synthetic assertions.
+They demonstrate documented routing and classification cases, but do not prove
+live model behavior, visible UI behavior, provider writes, token savings, or
+cost improvements. Installation, live trials, publication, and benchmarking
+remain separately authorized work.
+
 Configure mappings per project and resource from discovered Taiga status
 metadata, for example `not_started`, `in_progress`, `awaiting_review`,
 `accepted`, and optional `blocked` task status IDs. If a task resource has no

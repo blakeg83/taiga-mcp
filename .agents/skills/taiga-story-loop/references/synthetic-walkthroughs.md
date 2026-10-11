@@ -44,6 +44,37 @@ recorded feature/story branches, PR base, worker IDs, and recovery identity.
 | Cancelled setup | Emitted | `Cancel`; external systems unchanged | None |
 | Missing acceptance criteria | Not emitted | Clarification requested for acceptance criteria | None |
 
+## Right-sized role-contract scenarios
+
+These compact, synthetic scenarios extend the existing walkthrough matrix for
+the simplicity and scope contract. They exercise routing and review decisions
+only; they do not call Taiga, GitHub, Codex, a live model, or a real
+repository.
+
+| Scenario | Synthetic setup and action | Expected outcome | Evidence and limit |
+| --- | --- | --- | --- |
+| `adequate-simple` | The implementer reuses an existing project pattern and makes the smallest change that satisfies the approved criterion; the reviewer checks the exact revision. | `accepted`; no blocker or extra approval gate. | `automated_assertion`; does not prove live model judgment. |
+| `evidenced-defect` | The revision violates a stated acceptance criterion or existing project contract, and the reviewer records the affected behavior and evidence. | `blocking`; request the minimum adequate correction. | `automated_assertion`; synthetic evidence only. |
+| `speculative-hardening` | The reviewer suggests an unrequired future configuration, edge-case guard, or measurement improvement after the approved behavior passes. | `optional_nonblocking`; omission does not require a correction cycle. | `automated_assertion`; no token or cost conclusion. |
+| `unnecessary-complexity` | The revision adds an abstraction layer in violation of the approved scope/contract despite an adequate existing pattern; the reviewer names the evidence, concrete simpler alternative, and justified severity. | `blocking_with_simpler_alternative`; blocking is grounded in the demonstrated scope/contract defect, not style preference. | `automated_assertion`; not a universal style rule. |
+| `major-expansion` | The proposed solution needs a new subsystem, persistent state, material cross-cutting/public-contract change, dependency, or broad refactor beyond the approved work. | `escalated_before_implementation`; include the requirement, simpler alternative, proposal, and tradeoff. | `automated_assertion`; no expansion is implemented. |
+| `worker-consensus` | Implementer and reviewer agree that the expanded design would be useful, but it exceeds the approved scope. | `scope_decision_to_user`; worker agreement is not authorization. | `automated_assertion`; coordinator/user routing is synthetic. |
+
+Synthetic trace summary:
+
+```text
+adequate-simple       → reviewer: accept exact revision
+evidenced-defect      → reviewer: blocking finding with basis/evidence/minimum correction
+speculative-hardening → reviewer: optional suggestion; no correction cycle
+unnecessary-complexity → reviewer: blocking finding with simpler alternative + evidence-grounded severity
+major-expansion       → coordinator: escalate before implementation
+worker-consensus      → coordinator: route scope decision to the user
+```
+
+All six cases are automated assertions over the documented contract. They are
+not visible observations, browser execution, live-provider writes, live model
+behavior, or measured token/cost comparisons.
+
 ## 1. Single-repository story — Start
 
 Synthetic input:
