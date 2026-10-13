@@ -465,3 +465,134 @@ committed HEAD:
 The final whole-story reviewer decides whether the integrated evidence is
 acceptable. This guide does not pre-approve that review or authorize
 feature-to-master delivery.
+
+## Mandatory production finalization (issue #214)
+
+At the authorized story start and existing implementation/review/correction/wait
+transitions, invoke `scripts/record-story-performance-transition.ps1` with the
+existing recorder arguments (`ExternalRunRoot`, `RunId`, and `EventJson` or
+`EventPath`) plus authorized `TaskRefs`. At initialization, also pass known
+`MetadataPath` and `ObservedEvidencePath`. The wrapper records once through the
+existing recorder and returns immediate missing-boundary/linkage/setup/session
+diagnostics. Recording and diagnostic failures are limitations; they are not
+workflow authorization or advancement gates. Actual observed UTC timestamps
+are required. No historical boundary may be manufactured.
+
+After a confirmed exact-HEAD PR create/reuse, invoke the production finalizer:
+
+```powershell
+& ./scripts/finalize-story-performance.ps1 `
+  -DeliveryPath '<external confirmed delivery receipt.json>' `
+  -ExternalRunRoot '<existing external run root>' -RunId '<existing run id>' `
+  -ArtifactRoot '<external immutable artifacts directory>' `
+  -RepositoryPath '<story checkout>' -BaseRevision '<captured full base SHA>' `
+  -ReviewMode story_end_only -TaskRefs 155,156 `
+  -MetadataPath '<validated setup metadata.json>' `
+  -ObservedEvidencePath '<observed role source bindings.json>' `
+  -TaskOutcomePath '<authoritative task outcomes.json>'
+```
+
+For array parameters, invoke from PowerShell with `& ./scripts/finalize-story-performance.ps1`
+and a typed `int[]`, or use a parameter hashtable rather than passing a
+comma-delimited string through a native shell. Optional metadata/evidence paths
+are omitted only when unavailable. In-process callers may pass `-Delivery`
+instead of `-DeliveryPath`. The receipt uses the existing PR-delivery preflight
+fields: `providerConfirmed`, `state` (`created`/`reused`), `pr` (URL, number,
+repository, headBranch, base, head, state, isClosed), repository, storyBranch,
+prBase, reviewedHead, and `receipt` with the documented topology/clean-state,
+base/diff, branch/approved/checks/final-review exact-HEAD evidence. The production
+entry point validates this same receipt; a confirmed flag alone is insufficient.
+A telemetry command never confirms provider operations itself.
+
+The finalizer checks the run's selected `observed-role-token-usage.json` sibling
+when an explicit evidence path is absent. It invokes the existing collector
+when bindings exist, including the collector's existing selected-source handling.
+It records missing inputs, invalid/unavailable sources, partial coverage, and
+execution failures before immutable publication. No unrelated session search,
+quota polling, additional ledger, or telemetry-only agent turn is introduced.
+Valid collector output reaches `-UsageMetadataPath` automatically, and valid
+setup profiles reach `-MetadataPath`. Each revision uses a temporary collector
+cursor/reporting view; those files are removed after publication. The original
+ledger remains unchanged except for the normally confirmed `pr_ready` append.
+
+`provenance.collectionAttempt` distinguishes `measured`, `partial`,
+`source_unavailable`, `failed`, and `skipped`, with `discoveryAttempted`,
+`collectorInvoked`, and a reason. This is collection-attempt evidence, separate
+from metric states. Direct aggregation without finalization reports `skipped`.
+An existing exact-HEAD report is checksum-verified and returned without
+recollection/overwrite; historical reports lacking attempt evidence remain
+preserved and explicitly disclose that absence.
+
+Timing values have separate semantics:
+
+- `timeToPr`: story start to confirmed PR readiness wall-clock elapsed.
+- `implementationElapsed`/`reviewElapsed`: summed paired phase durations,
+  including overlap and inactivity.
+- `implementationWallClock`: union of paired implementation/correction windows
+  inside the story span, counting overlaps once; still includes inactivity.
+- `quotaBlockedElapsed`: union of confirmed `quota_blocked` wait pairs inside
+  the story span. Missing pairs or no observed quota evidence remain unknown.
+- `quotaAdjustedElapsed`: wall-clock elapsed minus confirmed quota overlap;
+  other idle time remains included.
+- `activeExecutionElapsed`: unavailable without independent activity evidence.
+
+Quota events use existing `wait_started`/`wait_ended` and a stable `waitId`;
+the quota window length is never a blocked-duration estimate. Correction events
+use `phaseId`, `correctionId`, `supersedesReviewAttemptId` and null review
+request/attempt/kind/ordinal fields. Recorder and aggregator now agree.
+
+Task completion preserves `acceptedTaskRefs` and separately reports
+`implementationReadyTaskRefs`. In `story_end_only`, missing per-task reviews do
+not prove tasks incomplete; authoritative individual acceptance/Done evidence
+is needed. Final-story approval is never substituted. Optional task outcomes
+use this envelope, tied to the exact reviewed HEAD:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "story_performance_task_outcomes",
+  "runId": "existing-run",
+  "projectId": 12,
+  "storyId": 728,
+  "reviewedHead": "<full reviewed SHA>",
+  "tasks": [
+    {
+      "taskRef": 155,
+      "accepted": false,
+      "isDone": true,
+      "source": "taiga_task_status",
+      "observedAtUtc": "2026-10-13T18:00:00Z",
+      "evidenceReference": "<authoritative task status record and project Done mapping>"
+    }
+  ]
+}
+```
+
+`source` is `taiga_task_status` or `task_acceptance`; capture explicit booleans
+from actual task records/acceptance, never derive them from whole-story approval.
+Duplicate, undeclared, or differently scoped outcome evidence is diagnosed and
+not counted. Current task outcomes supersede earlier task acceptance; when all
+outcomes are known, a known non-Done task contributes zero rather than unknown.
+
+Normal PR delivery must include the finalizer's publication status, concise
+coverage and limitations, PR and reviewed HEAD, and accessible JSON/Markdown
+references. Only use `-ArtifactsAccessibleToUser` for paths actually reachable
+on the user's host. Otherwise establish accessible references through the
+existing delivery surface and report the access limitation. Publication and
+measurement completeness are separate; confirmed PR delivery remains valid if
+finalization fails. At epic completion, use `get-epic-performance-index.ps1`
+with the ordered child story refs and a JSON array of selected delivered-HEAD
+finalizer receipts. Include its Markdown index in the normal final epic response,
+including missing/limited reports. This formatter adds no aggregate analytics.
+
+Run the focused production regression suite:
+
+```powershell
+pwsh -NoProfile -File scripts/validate-story-performance-finalization.ps1
+```
+
+It executes the existing PR-delivery cases and production transition/finalizer/
+index entry points using synthetic credentials-free data and temporary artifacts.
+It covers complete/partial/failed/skipped collection, unavailable session binding,
+correction parity, missing boundaries, task outcomes, quota/overlap semantics,
+normal response references, immutable reuse, and missing rows in epic delivery.

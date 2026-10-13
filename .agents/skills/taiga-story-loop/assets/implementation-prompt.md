@@ -238,8 +238,11 @@ The worker still does not poll, infer acceptance from idle status, or widen
 scope; duplicate, stale, unknown-delivery, and conflicting-revision events are
 no-ops or coordinator reconciliation cases.
 
-At the real workflow boundary, record the lifecycle observation with
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`: first
+At the real workflow boundary, use the repo-root
+`scripts/record-story-performance-transition.ps1` with the authorized ordered
+`TaskRefs` and existing run/event arguments. It records through
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` and returns
+immediate nonblocking completeness diagnostics. First
 concrete task work is `implementation_started`; a frozen implementation-ready
 packet in either mode is `task_ready_for_review`. In `per_task` it precedes the
 task review; in `story_end_only` it closes implementation without dispatching
@@ -249,11 +252,14 @@ that review. The implementer owns task and final-story
 `final_review_started`, `final_review_accepted`, and final-story re-reviews.
 The reviewer-owned events explicitly emit `supersedesReviewAttemptId: null`;
 only the paired correction events retain the non-null finding identity.
+Correction events must emit null review request/attempt/kind/ordinal fields;
+use `phaseId`, `correctionId`, and `supersedesReviewAttemptId` for linkage.
 Preserve the stable `phaseId`, `correctionId`,
 `reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
 from `references/worker-handoffs.md`. Copy the selected `per_task` or
-`story_end_only` mode from setup rather than inferring it. Include known
-model/effort and attributable usage only when source-backed; unavailable usage
+`story_end_only` mode from setup rather than inferring it. Preserve known
+model/effort and profile changes in the validated setup metadata; event-level
+usage is included only when source-backed. Unavailable usage
 stays null/unavailable. Recording is fail-open and must not create a polling
 loop or a telemetry-only message. A duplicate/stale handoff is not a new
 attempt and cannot advance the task pointer.

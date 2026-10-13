@@ -113,28 +113,39 @@ branch, topology-specific base, approved/branch HEAD, checks HEAD, and final
 story-review HEAD. Matching copies that disagree with the receipt are still
 reconciliation cases.
 
-After confirmed create or reuse:
+After confirmed create or reuse, run the mandatory production entry point
+`scripts/finalize-story-performance.ps1` once. Do not assemble recorder,
+collector, and aggregator steps manually. Supply the confirmed delivery/preflight
+receipt, existing external run root/runId, captured base, exact reviewed HEAD,
+repository path, selected review mode, and authorized ordered `TaskRefs`.
+Pass the validated setup `MetadataPath`, observed role/source binding
+`ObservedEvidencePath` (or the run's `observed-role-token-usage.json` sibling),
+and authoritative `TaskOutcomePath` when available. Missing inputs remain
+explicit limitations, never inferred values.
 
-1. Append one coordinator `pr_ready` event through
-   `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with
-   the exact PR identity and reviewed HEAD. The run ledger remains external to
-   the repository.
-2. Build a revision-bound aggregation view from that same append-only
-   external ledger: retain the story/setup history and select only the
-   confirmed `pr_ready` event for this reviewed HEAD. Invoke the read-only
-   `scripts/get-story-performance.ps1` aggregator with that view, the
-   selected review mode, the exact ordered task refs, validated sibling
-   `story_performance_setup` metadata path when available, exact reviewed
-   HEAD, captured base, repository path, and an external artifact directory.
-   Pass `-TaskRefs` from the authorized ordered task set and
-   `-MetadataPath` from the validated setup metadata; omit only genuinely
-   unavailable metadata. The view prevents an older reviewed HEAD from
-   causing an identity conflict; it does not mint a new run or rewrite the
-   ledger. The invocation is not another provider operation and does not
-   change PR or merge state.
-3. Include a concise report summary and the immutable JSON artifact reference
-   in the normal `pr_ready_for_approval` response. Retain the Markdown sibling
-   and manifest when the aggregator publishes the artifact set.
+The finalizer reuses the actual `write-performance-event.ps1` recorder for one
+confirmed `pr_ready`, selects a temporary revision-bound reporting view, then
+attempts existing role-token collection/source discovery before calling
+`scripts/get-story-performance.ps1`. Valid collector output is passed through
+`-UsageMetadataPath`; validated setup metadata through `-MetadataPath`.
+Collection attempt outcome (`measured`, `partial`, `source_unavailable`,
+`failed`, or `skipped`) is separate from each metric's measurement state.
+A missing binding file means discovery was attempted but no trustworthy source
+was selected, rather than a successful zero-token collection. Do not use thread
+IDs as local session bindings or scan unrelated transcripts to guess a source.
+
+Use the returned `response`, `reportState`, `metricCoverage`,
+`collectionAttempt`, and `limitations` in the normal `pr_ready_for_approval`
+response. Include PR identity, reviewed HEAD, concise coverage, and JSON and
+Markdown references. Only set `-ArtifactsAccessibleToUser` when those absolute
+paths are reachable on the user's host; otherwise establish accessible artifact
+references through the existing delivery surface and disclose the access
+limitation. A publication manifest means a valid artifact set, not full metrics.
+Telemetry failures keep the confirmed PR and merge-approval gate intact.
+
+The offline `validate-pr-delivery.ps1` fixture invokes this production entry
+point; `scripts/validate-story-performance-finalization.ps1` covers collection,
+lifecycle, correction, task-outcome, quota, and incomplete-evidence paths.
 
 The report identity is `runId + projectId + storyId + PR identity + reviewed
 HEAD`. Reobserving the same confirmed PR and HEAD reuses the existing report

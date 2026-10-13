@@ -239,13 +239,22 @@ evidenced recovery. Routine readiness, findings, corrections, task acceptance,
 and ordinary re-review remain within the worker pair.
 
 Immediately after the submitted `Start` is authoritative and before worker
-dispatch, initialize the optional performance run. Choose a path-safe `runId`
+dispatch, initialize and verify the required performance run. Choose a path-safe `runId`
 and coordinator-selected external run root outside the source worktree. Write
 the validated `story_performance_setup` metadata beside the ledger when
-assignment profiles are available, then invoke the actual recorder at
+assignment profiles are available, then invoke
+`scripts/record-story-performance-transition.ps1` with `MetadataPath`, the
+authorized ordered `TaskRefs`, and `ObservedEvidencePath` when known. It uses
+the actual recorder
 `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with one
 `story_started` event containing the resolved project/story identity, review
-mode, authorization-safe provenance, and the actual UTC boundary. Do not call
+mode, authorization-safe provenance, and the actual UTC boundary. Verify the
+returned recording result and diagnostics. Bind known coordinator/worker
+profiles and changes in the existing setup metadata; check each selected local
+source against its real `session_meta.payload.id` before token attribution.
+Missing session/source/profile evidence must be recorded immediately and may
+be supplied later at finalization; never substitute a chat ID for a session ID.
+Do not call
 the recorder before this point, for a cancelled gate, or to manufacture a
 historical start during resume. On success, persist only the compact
 `Performance pointer` from [the continuation contract](continuation-note.md).
