@@ -639,7 +639,7 @@ function Assert-Event {
         }
     }
 
-    if ($eventType -notin $reviewEvents -and $eventType -notin $correctionEvents) {
+    if ($eventType -notin $reviewEvents) {
         foreach ($name in @('reviewRequestId', 'reviewAttemptId', 'reviewKind', 'reviewAttemptOrdinal')) {
             $property = Get-Property -Object $Event -Name $name
             if ($null -ne $property -and $null -ne $property.Value) {

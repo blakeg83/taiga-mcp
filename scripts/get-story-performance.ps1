@@ -43,12 +43,17 @@ param(
 
     [string] $UsageMetadataPath,
 
+    [string] $CollectionAttemptPath,
+
+    [string] $TaskOutcomePath,
+
     [Alias('ReportDirectory', 'ArtifactRoot')]
     [string] $ArtifactDirectory
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'story-performance-metrics.ps1')
 
 $script:EventTypes = @(
     'story_started', 'implementation_started', 'task_ready_for_review',
@@ -1977,6 +1982,8 @@ function ConvertTo-Markdown {
     [void] $lines.Add('')
     [void] $lines.Add('## Provenance and limitations')
     [void] $lines.Add('')
+    [void] $lines.Add("- Token collection attempt: $(ConvertTo-MarkdownCell $Report.provenance.collectionAttempt.status); $(ConvertTo-MarkdownCell $Report.provenance.collectionAttempt.reason)")
+    [void] $lines.Add('')
     foreach ($source in @($Report.provenance.sources)) {
         [void] $lines.Add("- Source: $(ConvertTo-MarkdownCell $source)")
     }
@@ -2361,7 +2368,7 @@ foreach ($key in $reviewEndKeyOrder) {
 $reviewIntervals = [System.Collections.Generic.List[object]]::new()
 foreach ($record in (Sort-RecordsByTimeLinear -Records @($dedupedReviewStarts))) {
     $attemptKey = Get-ReviewAttemptIdentity -Event $record.Event
-    $closures = if ($reviewEndsByAttempt.ContainsKey($attemptKey)) { @($reviewEndsByAttempt[$attemptKey]) } else { @() }
+    $closures = @(if ($reviewEndsByAttempt.ContainsKey($attemptKey)) { @($reviewEndsByAttempt[$attemptKey]) })
     $matchingClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -ceq (Get-ReviewIdentity $record.Event) })
     $mismatchedClosures = @($closures | Where-Object { (Get-ReviewIdentity $_.Event) -cne (Get-ReviewIdentity $record.Event) })
     $closureConflict = $false
@@ -3347,7 +3354,10 @@ function New-SetupMetadataMetric {
 function Get-TasksCompletedMetric {
     param(
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[int]] $DeclaredTaskRefs,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $ReviewIntervals
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $ReviewIntervals,
+        [string] $Mode,
+        [AllowEmptyCollection()] [object[]] $ImplementationIntervals = @(),
+        [AllowEmptyCollection()] [object[]] $TaskOutcomes = @()
     )
 
     $acceptedTaskRefs = @(Get-UniqueValuesLinear -Values @($ReviewIntervals |
@@ -3358,6 +3368,10 @@ function Get-TasksCompletedMetric {
             $_.state -eq 'measured'
         } |
         ForEach-Object { [int] $_.taskRef }))
+    $outcomeTaskRefs = @($TaskOutcomes | ForEach-Object { [int] $_.taskRef })
+    $acceptedTaskRefs = @($acceptedTaskRefs | Where-Object { $_ -in $DeclaredTaskRefs -and $_ -notin $outcomeTaskRefs })
+    $acceptedTaskRefs = @(Get-UniqueValuesLinear -Values @($acceptedTaskRefs + @($TaskOutcomes | Where-Object { $_.accepted -or $_.isDone } | ForEach-Object { [int] $_.taskRef })))
+    $readyTaskRefs = @(Get-UniqueValuesLinear -Values @($ImplementationIntervals | Where-Object { $_.kind -eq 'implementation' -and $null -ne $_.endEventId -and $_.taskRef -in $DeclaredTaskRefs } | ForEach-Object { [int] $_.taskRef }))
     $acceptedTaskRefSet = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($acceptedTaskRef in $acceptedTaskRefs) {
         [void] $acceptedTaskRefSet.Add([int] $acceptedTaskRef)
@@ -3374,11 +3388,21 @@ function Get-TasksCompletedMetric {
         $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage 'no ordered task set was supplied' -MissingData 'task completion cannot be attributed without the declared ordered task set'
     }
     elseif ($acceptedTaskRefs.Count -eq $DeclaredTaskRefs.Count -and $acceptedTaskRefs.Count -gt 0 -and $allDeclaredTasksAccepted) {
-        $metric = New-Metric -State 'measured' -Value $acceptedTaskRefs.Count -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "all $($DeclaredTaskRefs.Count) declared task identities have measured review acceptance" -MissingData $null
+        $metric = New-Metric -State 'measured' -Value $acceptedTaskRefs.Count -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "all $($DeclaredTaskRefs.Count) declared task identities have authoritative acceptance/Done evidence" -MissingData $null
     }
     else {
-        $metric = New-Metric -State 'partial' -Value $null -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "$($acceptedTaskRefs.Count) of $($DeclaredTaskRefs.Count) declared task identities have measured review acceptance" -MissingData 'ordered task set or acceptance evidence is incomplete'
+        $metric = New-Metric -State 'partial' -Value $null -Unit 'tasks' -Source 'declared ordered task identities and authoritative acceptance events' -Calculation 'count accepted task identities in the declared ordered task set' -Coverage "$($acceptedTaskRefs.Count) of $($DeclaredTaskRefs.Count) declared task identities have authoritative acceptance/Done evidence" -MissingData 'ordered task set or acceptance evidence is incomplete'
     }
+    $knownTaskRefs = @($acceptedTaskRefs + $outcomeTaskRefs)
+    $unknownTaskRefs = @($DeclaredTaskRefs | Where-Object { $_ -notin $knownTaskRefs })
+    if ($DeclaredTaskRefs.Count -gt 0 -and $unknownTaskRefs.Count -eq 0) {
+        $metric = New-Metric -State 'measured' -Value $acceptedTaskRefs.Count -Unit 'tasks' -Source 'declared tasks and authoritative status/acceptance evidence' -Calculation 'count explicit accepted/Done tasks; current task outcomes supersede historical acceptance' -Coverage 'all declared task outcomes are known; a known non-Done task contributes zero' -MissingData $null
+    }
+    elseif ($Mode -eq 'story_end_only' -and $acceptedTaskRefs.Count -eq 0 -and $outcomeTaskRefs.Count -eq 0) {
+        $metric = New-Metric -State 'unavailable' -Value $null -Unit 'tasks' -Source 'authoritative task status/acceptance evidence' -Calculation 'count declared tasks with explicit accepted or Done evidence' -Coverage 'story_end_only has no task-scoped reviews; final-story approval does not imply individual task acceptance' -MissingData 'task outcomes were not observed; absence of per-task reviews does not establish incomplete tasks'
+    }
+    $metric | Add-Member -NotePropertyName implementationReadyTaskRefs -NotePropertyValue @($readyTaskRefs) -Force
+    $metric | Add-Member -NotePropertyName taskOutcomes -NotePropertyValue @($TaskOutcomes) -Force
     $metric | Add-Member -NotePropertyName acceptedTaskRefs -NotePropertyValue @($acceptedTaskRefs) -Force
     return $metric
 }
@@ -3616,7 +3640,7 @@ $observedImplementerTokenMetric = if ($null -eq $observedUsageMetadata) { New-Me
 $observedReviewerTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'reviewer' }
 $observedCoordinatorTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'coordinator' }
 $observedTotalTokenMetric = New-ObservedTotalUsageMetric -RoleMetrics @($observedImplementerTokenMetric, $observedReviewerTokenMetric, $observedCoordinatorTokenMetric)
-$tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals)
+
 
 $eventReviewedHeadCandidates = @(Get-UniqueValuesLinear -Values @($prReady | ForEach-Object { [string] (Get-PropertyValue $_.Event.pullRequest 'reviewedHead') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))
 if ($eventReviewedHeadCandidates.Count -gt 1) {
@@ -3640,6 +3664,16 @@ else {
     $null
 }
 $reviewedHeadForDiff = $frozenReviewedHead
+$taskOutcomes = @()
+try {
+    $taskOutcomes = @(Get-TaskOutcomeEvidence -Path $TaskOutcomePath -RunId $metadataRunId -ProjectId $metadataProjectId -StoryId $metadataStoryId -Head $reviewedHeadForDiff -TaskRefs @($declaredTaskRefs))
+}
+catch {
+    [void] $anomalies.Add((New-Anomaly -Code 'invalid_task_outcomes' -Message 'Task status/acceptance evidence is invalid and was not counted'))
+}
+$collectionAttempt = Get-CollectionAttempt -Path $CollectionAttemptPath -RunId $metadataRunId -ProjectId $metadataProjectId -StoryId $metadataStoryId -Head $reviewedHeadForDiff
+$elapsedSemantics = Get-ElapsedSemantics -StorySpan $timeToPrInterval -Implementation @($implementationIntervals + $correctionIntervals) -Waits @($waitIntervals)
+$tasksCompletedMetric = Get-TasksCompletedMetric -DeclaredTaskRefs $declaredTaskRefs -ReviewIntervals @($reviewIntervals) -Mode $effectiveReviewMode -ImplementationIntervals @($implementationIntervals) -TaskOutcomes $taskOutcomes
 $comparisonMetrics = Get-ComparisonMetrics -BaseRevision $BaseRevision -ReviewedHead $reviewedHeadForDiff -RepositoryPath $RepositoryPath
 $reportPullRequest = if ($prReady.Count -eq 1) { Get-SafePullRequest -PullRequest (Get-PropertyValue $prReady[0].Event 'pullRequest') } else { $null }
 $reportRunId = if ($runIds.Count -eq 1) { [string] $runIds[0] } else { $null }
@@ -3652,6 +3686,9 @@ $hasNonSyntheticEvidence = @($eventObjects | Where-Object { (Get-PropertyValue (
 $sourceCoverage = if ($hasSyntheticEvidence -and $hasNonSyntheticEvidence) { 'mixed synthetic and source-backed provenance' } elseif ($hasSyntheticEvidence) { 'synthetic provenance explicitly classified per event' } else { 'source provenance retained per event; numeric usage requires attributable authority' }
 $reportLimitations = @(
     'Unknown values remain null; unavailable evidence is never treated as zero.'
+    'Implementation/review elapsed are summed phase durations, including overlapping phases and inactivity; they are not wall-clock or active execution time.'
+    if ($collectionAttempt.status -notin @('measured')) { "Token collection outcome: $($collectionAttempt.status); $($collectionAttempt.reason)" }
+    if ($null -ne (Get-PropertyValue $collectionAttempt 'setupMetadataLimitation')) { [string] (Get-PropertyValue $collectionAttempt 'setupMetadataLimitation') }
     if ([string] $setupMetadata.state -eq 'unavailable') { 'Role model and reasoning-effort profiles are unavailable because no validated setup metadata input was supplied.' }
     if ($comparisonMetrics.changedFiles.state -eq 'unavailable' -or $comparisonMetrics.linesAdded.state -eq 'unavailable' -or $comparisonMetrics.linesDeleted.state -eq 'unavailable') { 'Git comparison metrics require an explicit valid base revision, reviewed HEAD, and repository path.' }
     if ($null -eq $observedUsageMetadata) { 'Observed role token totals require the incremental collector output; event-level usage remains separately reported.' }
@@ -3670,6 +3707,10 @@ $report = [ordered]@{
     metrics = [ordered]@{
         timeToPr = $timeToPrMetric
         implementationElapsed = $implementationMetric
+        implementationWallClock = $elapsedSemantics.implementationWallClock
+        quotaBlockedElapsed = $elapsedSemantics.quotaBlockedElapsed
+        quotaAdjustedElapsed = $elapsedSemantics.quotaAdjustedElapsed
+        activeExecutionElapsed = $elapsedSemantics.activeExecutionElapsed
         reviewElapsed = $reviewMetric
         coordinationElapsed = $coordinationMetric
         waitingElapsed = $waitMetric
@@ -3720,6 +3761,7 @@ $report = [ordered]@{
         note = 'Synthetic and source-backed evidence are aggregated only when their explicit identities and UTC boundaries are valid; unknown values remain null.'
     }
     provenance = [ordered]@{
+        collectionAttempt = $collectionAttempt
         eventSchemaVersion = 1
         sourceCoverage = $sourceCoverage
         sources = @('versioned story performance event ledger', 'Git revision comparison when an explicit valid base and reviewed HEAD are supplied') + $(if ([string] $setupMetadata.state -ne 'unavailable') { @('validated setup assignment metadata') } else { @() }) + $(if ($null -ne $observedUsageMetadata) { @('incremental observed role token metadata') } else { @() })

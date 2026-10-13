@@ -515,7 +515,7 @@ foreach ($marker in @(
         throw "Continuation heartbeat fixture assertion failed: $marker"
     }
 }
-if (-not $normalizedSetup.Contains('invoke the actual recorder at')) {
+if (-not $normalizedSetup.Contains('scripts/record-story-performance-transition.ps1')) {
     throw 'Setup assertion failed: post-Start recorder hook'
 }
 if (-not $normalizedSetup.Contains('Do not call the recorder before this point')) {
@@ -883,21 +883,26 @@ foreach ($marker in @(
         '## Performance report finalization'
         'confirmed create or reuse'
         'scripts/get-story-performance.ps1'
-        'revision-bound aggregation view'
-        'same append-only'
-        'does not mint a new'
+        'temporary revision-bound reporting view'
+        'existing external run root/runId'
+        'The report identity is'
         'exact preflight receipt is authoritative'
         'Matching copies that disagree with the receipt'
-        '-TaskRefs'
+        'TaskRefs'
         '-MetadataPath'
-        'validated sibling'
-        'genuinely unavailable metadata'
-        'concise report summary'
+        'validated setup'
+        'Missing inputs remain explicit limitations'
+        'concise coverage'
         'newly confirmed reviewed HEAD'
         'recorder, aggregator, or artifact publication fails')) {
     if (-not $normalizedPrDelivery.Contains($marker)) {
         throw "PR delivery assertion failed: $marker"
     }
+}
+$finalizationPath = Join-Path (Split-Path -Parent $performanceAggregationPath) 'finalize-story-performance.ps1'
+$finalizationText = Get-Content $finalizationPath -Raw
+foreach ($marker in @('New-RevisionBoundLedgerView', 'Resolve-PublishedReportArtifacts', 'CollectorPath', 'ObservedEvidencePath', 'UsageMetadataPath', 'CollectionAttemptPath', 'priorReports', 'Get-FileHash')) {
+    if (-not $finalizationText.Contains($marker)) { throw "Production finalization assertion failed: $marker" }
 }
 if (-not (Get-Content $prDeliveryScriptPath -Raw).Contains('Passed offline PR delivery fixture')) {
     throw 'PR delivery assertion failed: offline fixture coverage'
@@ -908,8 +913,7 @@ foreach ($marker in @(
         'should-not-create'
         'unknown-state reconciliation'
         'Invoke-ReportFinalization'
-        'New-RevisionBoundLedgerView'
-        'Resolve-PublishedReportArtifacts'
+        'scripts/finalize-story-performance.ps1'
         'New-SyntheticSetupMetadata'
         'New-SyntheticTaskReviewEvents'
         'complete-start/lifecycle/finalization'

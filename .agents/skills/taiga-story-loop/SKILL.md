@@ -26,8 +26,9 @@ templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
 
-After a submitted `Start`, initialize story measurement exactly once at the
-authorized story boundary using the existing versioned recorder described in
+After a submitted `Start`, initialize and verify story measurement exactly once at the
+authorized story boundary through `scripts/record-story-performance-transition.ps1`,
+which uses the existing versioned recorder described in
 [performance reporting](references/performance-reporting.md). The recorder is
 never called during discovery, while the Start/Cancel gate is open, or after
 `Cancel`. Keep only the compact performance pointer in the continuation note;
@@ -132,7 +133,9 @@ run.
 
 Use [reviewed story PR delivery](references/pr-delivery.md) when the complete
 story is approved. It defines the coordinator's exact-HEAD preflight, the
-topology-specific PR reuse/create identity, review evidence, Taiga/chat
+topology-specific PR reuse/create identity, mandatory
+`scripts/finalize-story-performance.ps1` collection/publication and normal
+response delivery, review evidence, Taiga/chat
 linkage, and the pending approval state. Run
 `scripts/validate-pr-delivery.ps1` for its offline fixture; it never performs
 provider writes.

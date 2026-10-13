@@ -121,7 +121,7 @@ function Resolve-Pr {
     param(
         [object[]] $Existing,
         [hashtable] $Receipt,
-        [string] $PrUrl = 'https://example.invalid/pr/50'
+        [string] $PrUrl = 'https://github.com/blakeg83/taiga-mcp/pull/157'
     )
     $identityMatches = @($Existing | Where-Object {
         $_.PSObject.Properties['repository'] -and
@@ -428,52 +428,6 @@ function New-SyntheticPerformanceRun {
     Join-Path (Join-Path $ExternalRunRoot $RunId) 'events.jsonl'
 }
 
-function New-RevisionBoundLedgerView {
-    param(
-        [Parameter(Mandatory)] [string] $LedgerPath,
-        [Parameter(Mandatory)] [string] $ReviewedHead,
-        [Parameter(Mandatory)] [string] $ViewRoot
-    )
-
-    $records = @(Get-Content -LiteralPath $LedgerPath | ForEach-Object {
-            $parsed = $_ | ConvertFrom-Json -Depth 100
-            if ([int] $parsed.schemaVersion -eq 2 -and [string] $parsed.kind -ceq 'story_performance_event_frame') { $parsed = $parsed.event }
-            $parsed
-        })
-    $selected = @($records | Where-Object {
-        [string]$_.eventType -ne 'pr_ready' -or
-        [string]$_.pullRequest.reviewedHead -eq $ReviewedHead
-    })
-    Assert-True (@($selected | Where-Object { [string]$_.eventType -eq 'pr_ready' }).Count -eq 1) "revision-bound view must select exactly one pr_ready event for $ReviewedHead"
-    [IO.Directory]::CreateDirectory($ViewRoot) | Out-Null
-    $viewPath = Join-Path $ViewRoot "events-$ReviewedHead.jsonl"
-    $lines = @($selected | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 100 })
-    [IO.File]::WriteAllLines($viewPath, $lines, [Text.UTF8Encoding]::new($false))
-    $viewPath
-}
-
-function Resolve-PublishedReportArtifacts {
-    param(
-        [Parameter(Mandatory)] [string] $ArtifactRoot,
-        [Parameter(Mandatory)] [string] $ReportId
-    )
-
-    $matches = @()
-    foreach ($manifestPath in @(Get-ChildItem -LiteralPath $ArtifactRoot -File -Filter '*.complete.json')) {
-        $manifest = Get-Content -Raw -LiteralPath $manifestPath.FullName | ConvertFrom-Json -Depth 100
-        if ([string]$manifest.reportId -eq $ReportId) {
-            $matches += [pscustomobject]@{ path = $manifestPath.FullName; manifest = $manifest }
-        }
-    }
-    Assert-True ($matches.Count -eq 1) "report identity must resolve to exactly one completion manifest: $ReportId"
-    $jsonEntries = @($matches[0].manifest.artifacts | Where-Object { [string]$_.kind -eq 'json' })
-    Assert-True ($jsonEntries.Count -eq 1 -and (Test-Path -LiteralPath $jsonEntries[0].path -PathType Leaf)) "report identity must resolve to one published JSON artifact: $ReportId"
-    [ordered]@{
-        jsonPath = [string]$jsonEntries[0].path
-        manifestPath = $matches[0].path
-    }
-}
-
 function Invoke-ReportFinalization {
     param(
         [Parameter(Mandatory)] [hashtable] $Delivery,
@@ -487,103 +441,15 @@ function Invoke-ReportFinalization {
         [ValidateSet('per_task','story_end_only')] [string] $ReviewMode = 'per_task',
         [string] $OccurredAtUtc = '2026-10-10T02:00:00Z',
         [AllowEmptyCollection()] [int[]] $TaskRefs = @(),
-        [string] $MetadataPath
+        [string] $MetadataPath,
+        [string] $ObservedEvidencePath,
+        [string] $TaskOutcomePath,
+        [string] $CollectorPath
     )
 
-    $pr = $Delivery.pr
-    $receipt = if ($Delivery.ContainsKey('receipt') -and $Delivery.receipt -is [hashtable]) { $Delivery.receipt } else { $null }
-    $preflight = if ($null -ne $receipt) { Test-DeliveryPreflight -Receipt $receipt } else { 'missing_preflight' }
-    $confirmed = $Delivery.providerConfirmed -eq $true -and
-        $Delivery.state -in @('created', 'reused') -and
-        $null -ne $receipt -and
-        $preflight -eq 'ready' -and
-        [string]$Delivery.repository -eq [string]$receipt.repository -and
-        [string]$Delivery.storyBranch -eq [string]$receipt.storyBranch -and
-        [string]$Delivery.prBase -eq [string]$receipt.prBase -and
-        [string]$Delivery.reviewedHead -eq [string]$receipt.approvedHead -and
-        [string]$Delivery.reviewedHead -eq [string]$receipt.branchHead -and
-        [string]$Delivery.reviewedHead -eq [string]$receipt.checksHead -and
-        [string]$Delivery.reviewedHead -eq [string]$receipt.finalStoryReviewHead -and
-        $null -ne $pr -and
-        [string]$pr.repository -eq [string]$receipt.repository -and
-        [string]$pr.headBranch -eq [string]$receipt.storyBranch -and
-        [string]$pr.head -eq [string]$receipt.branchHead -and
-        [string]$pr.base -eq [string]$receipt.prBase -and
-        [string]$pr.state -eq 'open' -and
-        $pr.isClosed -eq $false
-    if (-not $confirmed) {
-        return [ordered]@{
-            deliveryState = 'reconcile'
-            reportState = 'not_attempted'
-            prReadyEvent = $false
-            reportId = $null
-            jsonPath = $null
-            response = 'PR delivery reconciliation required; performance report not attempted.'
-        }
-    }
-
-    $prIdentity = [ordered]@{
-        provider = 'github'
-        owner = 'blakeg83'
-        repository = 'taiga-mcp'
-        number = [int]$pr.number
-        reviewedHead = [string]$Delivery.reviewedHead
-    }
-    $prReady = New-PerformanceEvent -RunId $RunId -EventId "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)" -EventType 'pr_ready' -OccurredAtUtc $OccurredAtUtc -ReviewMode $ReviewMode -Revision ([string]$Delivery.reviewedHead) -PullRequest $prIdentity
-    if (-not (Invoke-PerformanceRecorder -RecorderPath $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -Event $prReady)) {
-        return [ordered]@{
-            deliveryState = 'confirmed'
-            reportState = 'unavailable'
-            prReadyEvent = $false
-            reportId = $null
-            jsonPath = $null
-            response = 'PR ready for approval; performance report unavailable (recorder failure).'
-        }
-    }
-
-    try {
-        [IO.Directory]::CreateDirectory($ArtifactRoot) | Out-Null
-        $ledgerPath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'events.jsonl'
-        $viewRoot = Join-Path $ExternalRunRoot 'revision-bound-views'
-        $aggregationEventsPath = New-RevisionBoundLedgerView -LedgerPath $ledgerPath -ReviewedHead ([string]$Delivery.reviewedHead) -ViewRoot $viewRoot
-        $aggregatorParameters = @{
-            EventsPath = $aggregationEventsPath
-            ReviewMode = $ReviewMode
-            ReviewedHead = [string]$Delivery.reviewedHead
-            BaseRevision = $BaseRevision
-            RepositoryPath = $RepositoryPath
-            ArtifactDirectory = $ArtifactRoot
-        }
-        if (@($TaskRefs).Count -gt 0) {
-            $aggregatorParameters['TaskRefs'] = [int[]]$TaskRefs
-        }
-        if (-not [string]::IsNullOrWhiteSpace($MetadataPath)) {
-            $aggregatorParameters['MetadataPath'] = $MetadataPath
-        }
-        $output = @(& $AggregatorPath @aggregatorParameters 2>&1)
-        $report = (($output | ForEach-Object { [string]$_ }) -join [Environment]::NewLine) | ConvertFrom-Json -Depth 100
-        $artifacts = Resolve-PublishedReportArtifacts -ArtifactRoot $ArtifactRoot -ReportId ([string]$report.reportId)
-        $summary = "report=$($report.reportId); timeToPr=$($report.metrics.timeToPr.state); limitations=$(@($report.provenance.limitations) -join ', ')"
-        return [ordered]@{
-            deliveryState = 'confirmed'
-            reportState = 'published'
-            prReadyEvent = $true
-            reportId = [string]$report.reportId
-            jsonPath = $artifacts.jsonPath
-            manifestPath = $artifacts.manifestPath
-            response = "PR ready for approval; performance report: $summary; JSON artifact: $($artifacts.jsonPath)"
-        }
-    }
-    catch {
-        return [ordered]@{
-            deliveryState = 'confirmed'
-            reportState = 'unavailable'
-            prReadyEvent = $true
-            reportId = $null
-            jsonPath = $null
-            response = "PR ready for approval; performance report unavailable/limited: $($_.Exception.Message)"
-        }
-    }
+    $PSBoundParameters['OccurredAtUtc'] = $OccurredAtUtc
+    $entry = Join-Path $PSScriptRoot '../../../../scripts/finalize-story-performance.ps1'
+    (& $entry @PSBoundParameters) | ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String
 }
 
 function New-ConfirmedDelivery {
@@ -595,7 +461,7 @@ function New-ConfirmedDelivery {
 
     Assert-True ($Resolution.state -in @('create', 'reused')) "provider resolution must be create or reused before confirmation: $($Resolution.state)"
     $providerPr = [pscustomobject]@{
-        url = [string]$Resolution.pr.url
+        url = 'https://github.com/blakeg83/taiga-mcp/pull/157'
         number = if ($Resolution.pr.PSObject.Properties['number']) { [int]$Resolution.pr.number } else { 157 }
         repository = [string]$Receipt.repository
         headBranch = [string]$Receipt.storyBranch
@@ -668,7 +534,7 @@ try {
     $runA = New-SyntheticPerformanceRun -RecorderPath $reportRecorderPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-a' -OccurredAtUtc '2026-10-10T01:59:00Z'
     $artifactA = Join-Path $reportFixtureRoot 'artifacts-a'
     $createdReport = Invoke-ReportFinalization -Delivery $confirmedCreate -RecorderPath $reportRecorderPath -AggregatorPath $reportAggregatorPath -ExternalRunRoot $reportFixtureRoot -RunId 'synthetic-pr-report-a' -ArtifactRoot $artifactA -BaseRevision $reportBase -RepositoryPath $reportRepositoryPath
-    Assert-True ($createdReport.deliveryState -eq 'confirmed' -and $createdReport.reportState -eq 'published' -and $createdReport.prReadyEvent) 'confirmed PR creation must append pr_ready and publish a report'
+    Assert-True ($createdReport.deliveryState -eq 'confirmed' -and $createdReport.reportState -eq 'published' -and $createdReport.prReadyEvent) "confirmed PR creation must append pr_ready and publish a report: $($createdReport.response)"
     Assert-True ($createdReport.response.Contains('performance report:') -and $createdReport.response.Contains('JSON artifact:') -and (Test-Path -LiteralPath $createdReport.jsonPath -PathType Leaf)) 'normal confirmed response must include a concise report and JSON artifact reference'
     $createdJson = Get-Content -Raw -LiteralPath $createdReport.jsonPath | ConvertFrom-Json -Depth 100
     Assert-True ([string]$createdJson.reportId -eq $createdReport.reportId -and (Test-Path -LiteralPath $createdReport.manifestPath -PathType Leaf)) 'normal response artifact reference must bind the returned report identity and manifest'

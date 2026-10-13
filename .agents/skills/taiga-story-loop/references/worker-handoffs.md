@@ -30,8 +30,14 @@ The coordinator owns `story_started`, explicit `wait_started`/
 `wait_ended`, and the confirmed `pr_ready` boundary; PR readiness remains the
 task #157 endpoint.
 
-Use the actual recorder
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with the
+Use `scripts/record-story-performance-transition.ps1` at each existing
+boundary. It invokes the actual recorder
+`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` and performs
+lightweight, nonblocking boundary/linkage diagnostics. Supply the authorized
+ordered `TaskRefs` so advancement/final-review checks can identify missing
+implementation ends and mode-specific acceptance evidence. Record the returned
+limitations in the existing evidence/continuation surface and continue an
+otherwise valid transition; do not add telemetry-only worker turns. Use the
 setup `runId`, project/story identity, selected mode, actual UTC boundary, and
 the stable identity fields required by
 [performance-reporting](performance-reporting.md). A review request ID is not
@@ -39,14 +45,23 @@ a review attempt ID: a retry increments `reviewAttemptOrdinal`, while an exact
 replay of an event, handoff, or stale revision is a no-op/reconciliation case.
 `phaseId` binds implementation/review/correction pairs, `correctionId` binds a
 correction pair, `reviewRequestId`/`reviewAttemptId` distinguish the request
-from one actual attempt, and `waitId` binds an explicit wait pair. Attach known
-model/effort and an attributable usage snapshot when available; preserve
+from one actual attempt, and `waitId` binds an explicit wait pair. Maintain known
+model/effort and profile changes in the validated setup metadata; attach an
+attributable usage snapshot when available and preserve
 `unavailable`/null when it is not. Do not estimate usage or emit a routine
 telemetry-only summary/message. Recording failures leave the handoff and its
 ownership gates unchanged and disclose the affected measurement coverage.
 For each reviewer-owned review event, explicitly emit
 `supersedesReviewAttemptId: null`; only `correction_started` and
-`correction_ready` retain the non-null finding identity.
+`correction_ready` retain the non-null finding identity. Correction events
+must emit null `reviewRequestId`, `reviewAttemptId`, `reviewKind`, and
+`reviewAttemptOrdinal`; correction linkage uses `phaseId`, `correctionId`,
+and `supersedesReviewAttemptId`.
+
+For an observed quota interruption/resumption, the coordinator uses existing
+`wait_started`/`wait_ended` boundaries with stable `waitId` and
+`waitKind: quota_blocked`. Record real observation timestamps. A quota window
+is not a blocked-duration measurement; incomplete boundaries remain partial.
 
 `per_task` records the task review/correction events above. `story_end_only`
 does not create task-scoped review or correction events, but it still records

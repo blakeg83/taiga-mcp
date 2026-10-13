@@ -81,8 +81,11 @@ An exact current acceptance releases the next task only when the declared
 review mode permits it. Do not treat an idle worker, elapsed time, duplicate
 event, stale SHA, or changed scope as review evidence.
 
-Record lifecycle observations at the actual review boundary with the existing
-performance recorder. When beginning an exact request/attempt, emit
+Record lifecycle observations at the actual review boundary with the repo-root
+`scripts/record-story-performance-transition.ps1`, existing run/event arguments,
+and authorized ordered `TaskRefs`. It invokes the existing recorder and checks
+matching boundary identities; disclose diagnostics without blocking otherwise
+valid review or sending a telemetry-only message. When beginning an exact request/attempt, emit
 `review_started`; when the current attempt closes, emit `review_findings` or
 `review_accepted` with the same `phaseId`, `reviewRequestId`, `reviewAttemptId`,
 ordinal, review kind, and revision. For the whole-story review, use
@@ -90,7 +93,8 @@ ordinal, review kind, and revision. For the whole-story review, use
 create an event for an old or
 duplicate handoff: stable attempt identity and exact revision make it a
 no-op/reconciliation case. Explicit coordinator waits use a stable `waitId`;
-copy known model/effort and attributable usage snapshots when available; keep
+maintain known model/effort and changes in the validated setup metadata, and
+attach attributable usage snapshots when available; keep
 unavailable usage null and never estimate it.
 Set `supersedesReviewAttemptId` explicitly to JSON `null` on every
 reviewer-owned start or outcome event, including correction re-reviews and

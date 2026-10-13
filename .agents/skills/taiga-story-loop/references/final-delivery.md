@@ -111,3 +111,19 @@ the final PR evidence. Return to the appropriate existing worker/reviewer
 route, obtain fresh review at the new HEAD, and reuse or update the final PR
 only after revalidation. Do not claim epic or master completion from PR
 creation alone.
+
+## Story performance report index
+
+At final epic delivery, include a lightweight index for every authorized child
+story: story ref, PR, reviewed HEAD, report publication state, collection outcome,
+concise metric coverage, accessible JSON/Markdown references, and specific
+limitations. Use the immutable story reports and finalizer receipts already
+produced by normal story PR delivery. Preserve unavailable/limited rows; do not
+silently drop an unmeasured story, recollect historical evidence, or create a
+consolidated analytics subsystem. No extra user request is needed.
+
+Format the selected delivered-HEAD finalizer receipts with
+`scripts/get-epic-performance-index.ps1 -StoryRefs <ordered child refs>
+-StoryReportsPath <external JSON array of receipts>` and include its `markdown`
+in the normal final epic response. The formatter retains missing-report rows
+and excludes local-only paths from user artifact links.
