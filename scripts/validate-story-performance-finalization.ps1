@@ -108,6 +108,17 @@ try {
     $reviewFieldEvent.projectId = 12; $reviewFieldEvent.storyId = 753; $reviewFieldEvent.storyRef = 215; $reviewFieldEvent.reviewRequestId = $null
     $reviewFieldResult = Record-Transition $reviewFieldEvent
     Assert-True ($reviewFieldResult.status -eq 'unavailable' -and ($reviewFieldResult.diagnostics -join '; ') -ceq "recorder_validation_rejected: review events require 'reviewRequestId'" -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $reviewFieldRun) -PathType Container)) 'transition wrapper classifies required review-field validation with its bounded safe reason and no append'
+    $missingEnvelopeRun = 'recorder-missing-envelope-diagnostic'
+    $missingEnvelopeResult = (& $transition -ExternalRunRoot $fixtureRoot -RunId $missingEnvelopeRun -EventJson '{}' -TaskRefs @(155,156)) | ConvertFrom-Json -Depth 100
+    Assert-True ($missingEnvelopeResult.status -eq 'unavailable' -and ($missingEnvelopeResult.diagnostics -join '; ') -ceq "recorder_validation_rejected: 'event.schemaVersion' is required" -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $missingEnvelopeRun) -PathType Container)) 'transition wrapper classifies missing required envelope fields with a bounded contextual reason and no append'
+    $nonObjectEnvelopeRun = 'recorder-nonobject-envelope-diagnostic'
+    $nonObjectEnvelopeResult = (& $transition -ExternalRunRoot $fixtureRoot -RunId $nonObjectEnvelopeRun -EventJson '[]' -TaskRefs @(155,156)) | ConvertFrom-Json -Depth 100
+    Assert-True ($nonObjectEnvelopeResult.status -eq 'unavailable' -and ($nonObjectEnvelopeResult.diagnostics -join '; ') -ceq 'recorder_validation_rejected: event JSON must contain one object' -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $nonObjectEnvelopeRun) -PathType Container)) 'transition wrapper classifies non-object envelope input with a bounded reason and no append'
+    $nestedRequiredRun = 'recorder-nested-required-diagnostic'
+    $nestedRequiredEvent = New-PerformanceEvent -RunId $nestedRequiredRun -EventId "$nestedRequiredRun-invalid" -EventType story_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode story_end_only
+    $nestedRequiredEvent.projectId = 12; $nestedRequiredEvent.storyId = 753; $nestedRequiredEvent.storyRef = 215; $nestedRequiredEvent.provenance = [ordered]@{ observedBy = 'synthetic'; coverage = 'test'; synthetic = $true }
+    $nestedRequiredResult = Record-Transition $nestedRequiredEvent
+    Assert-True ($nestedRequiredResult.status -eq 'unavailable' -and ($nestedRequiredResult.diagnostics -join '; ') -ceq "recorder_validation_rejected: 'provenance.source' is required" -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $nestedRequiredRun) -PathType Container)) 'transition wrapper classifies missing nested required fields with a bounded contextual reason and no append'
     $malformedDiagnosticRun = 'malformed-input-diagnostic'
     $malformedSecretMarker = 'synthetic-secret-field'
     $malformedJson = '{"' + $malformedSecretMarker + '-' + ('x' * 10000) + '":'
