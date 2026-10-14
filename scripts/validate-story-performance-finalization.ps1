@@ -119,6 +119,24 @@ try {
     $nestedRequiredEvent.projectId = 12; $nestedRequiredEvent.storyId = 753; $nestedRequiredEvent.storyRef = 215; $nestedRequiredEvent.provenance = [ordered]@{ observedBy = 'synthetic'; coverage = 'test'; synthetic = $true }
     $nestedRequiredResult = Record-Transition $nestedRequiredEvent
     Assert-True ($nestedRequiredResult.status -eq 'unavailable' -and ($nestedRequiredResult.diagnostics -join '; ') -ceq "recorder_validation_rejected: 'provenance.source' is required" -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $nestedRequiredRun) -PathType Container)) 'transition wrapper classifies missing nested required fields with a bounded contextual reason and no append'
+    $requiredFieldBase = New-PerformanceEvent -RunId required-field-base -EventId required-field-base-review -EventType review_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId required-field-review -Role reviewer -ReviewRequestId required-review-request -ReviewAttemptId required-review-attempt -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $head
+    $requiredFieldBase.projectId = 12; $requiredFieldBase.storyId = 753; $requiredFieldBase.storyRef = 215
+    $requiredFieldBase = $requiredFieldBase | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100 -DateKind String
+    foreach ($requiredField in @('taskRef', 'sessionId', 'workerId', 'phaseId', 'correctionId', 'reviewRequestId', 'reviewAttemptId', 'reviewKind', 'reviewAttemptOrdinal', 'supersedesReviewAttemptId', 'revision')) {
+        $requiredRun = "recorder-required-$requiredField"
+        $requiredObject = [ordered]@{}
+        foreach ($property in $requiredFieldBase.PSObject.Properties) {
+            if ($property.Name -cne $requiredField) {
+                $requiredObject[$property.Name] = $property.Value
+            }
+        }
+        $requiredObject.runId = $requiredRun
+        $requiredObject.eventId = "$requiredRun-invalid"
+        $requiredObject.transitionId = $requiredObject.eventId
+        $requiredResult = (& $transition -ExternalRunRoot $fixtureRoot -RunId $requiredRun -EventJson ($requiredObject | ConvertTo-Json -Depth 100 -Compress) -TaskRefs @(155,156)) | ConvertFrom-Json -Depth 100
+        $requiredText = $requiredResult.diagnostics -join '; '
+        Assert-True ($requiredResult.status -eq 'unavailable' -and $requiredText -ceq "recorder_validation_rejected: 'event.$requiredField' is required" -and $requiredText.Length -le 256 -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $requiredRun) -PathType Container)) "transition wrapper classifies missing event.$requiredField as a bounded validation rejection without append"
+    }
     $malformedDiagnosticRun = 'malformed-input-diagnostic'
     $malformedSecretMarker = 'synthetic-secret-field'
     $malformedJson = '{"' + $malformedSecretMarker + '-' + ('x' * 10000) + '":'

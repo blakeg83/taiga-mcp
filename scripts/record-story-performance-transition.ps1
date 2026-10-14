@@ -22,7 +22,15 @@ function Get-RecorderValidationDiagnostic {
         "'occurredAtUtc' must be an ISO 8601 UTC timestamp ending in Z" = 'occurredAtUtc must be an ISO 8601 UTC timestamp ending in Z'
         'correctionId is allowed only on correction events' = 'correctionId is allowed only on correction events'
     }
-    $knownFieldPattern = '(?:schemaVersion|kind|eventId|runId|projectId|storyId|storyRef|taskRef|role|sessionId|workerId|transitionId|scope|phaseId|correctionId|reviewRequestId|reviewAttemptId|reviewKind|reviewAttemptOrdinal|supersedesReviewAttemptId|eventType|occurredAtUtc|revision|reviewMode|provenance|usage|waitId|waitKind|pullRequest|event\.(?:schemaVersion|kind|eventId|runId|projectId|storyId|storyRef|role|transitionId|scope|eventType|occurredAtUtc|reviewMode|provenance|usage)|usage\.(?:state|source|coverage|streamId|role|sessionId|sampledAtUtc|baselineAtUtc|counterSemantics|counters|reason|fallback)|provenance\.(?:source|observedBy|observer|coverage|synthetic)|pullRequest\.(?:provider|owner|repository|number|reviewedHead)|usage\.counterSemantics\.(?:cachedInput|reasoning)|usage\.counters\.(?:inputTokens|cachedInputTokens|outputTokens|reasoningTokens))'
+    $topLevelFields = @(
+        'schemaVersion', 'kind', 'eventId', 'runId', 'projectId', 'storyId', 'storyRef',
+        'taskRef', 'role', 'sessionId', 'workerId', 'transitionId', 'scope', 'phaseId',
+        'correctionId', 'reviewRequestId', 'reviewAttemptId', 'reviewKind',
+        'reviewAttemptOrdinal', 'supersedesReviewAttemptId', 'eventType', 'occurredAtUtc',
+        'revision', 'reviewMode', 'provenance', 'usage', 'waitId', 'waitKind', 'pullRequest'
+    )
+    $topLevelFieldPattern = '(?:' + (($topLevelFields | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')'
+    $knownFieldPattern = "(?:$topLevelFieldPattern|event\.$topLevelFieldPattern|usage\.(?:state|source|coverage|streamId|role|sessionId|sampledAtUtc|baselineAtUtc|counterSemantics|counters|reason|fallback)|provenance\.(?:source|observedBy|observer|coverage|synthetic)|pullRequest\.(?:provider|owner|repository|number|reviewedHead)|usage\.counterSemantics\.(?:cachedInput|reasoning)|usage\.counters\.(?:inputTokens|cachedInputTokens|outputTokens|reasoningTokens))"
     $knownFieldReasonPattern = '(?:is required|must be 1|must be a JSON object|must be a nonblank safe string|must be a positive integer|must be a nonnegative integer|has an unsupported value|must be an ISO 8601 UTC timestamp ending in Z|must be a full Git SHA|must be a full Git SHA or null|must be a Boolean|must be an absolute path|is not a valid path|is allowed only on review events|is allowed only on correction events)'
     $knownStaticMessages = @(
         'external run root must be outside the source worktree',
