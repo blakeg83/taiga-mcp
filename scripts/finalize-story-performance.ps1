@@ -23,6 +23,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'format-story-performance-utc.ps1')
+. (Join-Path $PSScriptRoot 'new-story-performance-event.ps1')
 if (-not $PSBoundParameters.ContainsKey('OccurredAtUtc')) {
     $OccurredAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
 }
@@ -195,14 +196,7 @@ function Invoke-Finalization {
             foreach ($key in $identity.Keys) { if ($ready.pullRequest[$key] -cne $identity[$key]) { throw 'pr_ready identity conflict' } }
         }
         elseif (-not $missingStart) {
-            $ready = [ordered]@{}
-            foreach ($key in $start.Keys) { $ready[$key] = $start[$key] }
-            $ready.eventId = "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)"
-            $ready.transitionId = $ready.eventId
-            $ready.eventType = 'pr_ready'; $ready.occurredAtUtc = $OccurredAtUtc
-            $ready.revision = [string] $Delivery.reviewedHead; $ready.pullRequest = $identity
-            $ready.usage = $null
-            $ready.provenance = [ordered]@{ source = 'confirmed_pr_delivery'; observedBy = 'finalize-story-performance'; coverage = 'confirmed provider receipt and exact reviewed HEAD'; synthetic = [bool] $start.provenance.synthetic }
+            $ready = New-StoryPerformanceEvent -EventId "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)" -EventType 'pr_ready' -OccurredAtUtc $OccurredAtUtc -ProjectId ([int] $start.projectId) -StoryId ([int] $start.storyId) -StoryRef ([int] $start.storyRef) -RunId $RunId -Scope story -Role coordinator -ReviewMode $ReviewMode -SessionId ([string] $start.sessionId) -WorkerId ([string] $start.workerId) -Revision ([string] $Delivery.reviewedHead) -Provenance ([ordered]@{ source = 'confirmed_pr_delivery'; observedBy = 'finalize-story-performance'; coverage = 'confirmed provider receipt and exact reviewed HEAD'; synthetic = [bool] $start.provenance.synthetic }) -PullRequest $identity
         }
         if (-not $missingStart) {
             $recordOutput = @(& pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson ($ready | ConvertTo-Json -Compress -Depth 100) 2>&1)

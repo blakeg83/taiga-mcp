@@ -184,7 +184,7 @@ else {
             if ($parsed.kind -ceq 'story_performance_event_frame') { $parsed.event } else { $parsed }
         })
     $defaultReady = @($defaultEvents | Where-Object eventType -eq 'pr_ready')
-    Assert-True ($defaultResult.reportState -eq 'published' -and $defaultReady.Count -eq 1 -and [string]$defaultReady[0].occurredAtUtc -match 'Z$') 'omitted finalizer timestamp uses a generated canonical UTC boundary'
+    Assert-True ($defaultResult.reportState -eq 'published' -and $defaultReady.Count -eq 1 -and [string]$defaultReady[0].occurredAtUtc -match 'Z$' -and $null -eq $defaultReady[0].reviewRequestId -and $null -eq $defaultReady[0].reviewAttemptId -and $null -eq $defaultReady[0].reviewKind -and $null -eq $defaultReady[0].reviewAttemptOrdinal -and $null -eq $defaultReady[0].correctionId -and $null -eq $defaultReady[0].supersedesReviewAttemptId) 'omitted finalizer timestamp uses a type-aware pr_ready constructor without stale review or correction identity'
 
     foreach ($invalidOccurredAt in @('', ' ')) {
         $invalidRun = if ($invalidOccurredAt.Length -eq 0) { 'empty-finalizer-timestamp' } else { 'blank-finalizer-timestamp' }

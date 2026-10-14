@@ -68,6 +68,13 @@ must emit null `reviewRequestId`, `reviewAttemptId`, `reviewKind`, and
 `reviewAttemptOrdinal`; correction linkage uses `phaseId`, `correctionId`,
 and `supersedesReviewAttemptId`.
 
+Construct each event from its explicit type-scoped inputs; do not clone the
+last ledger event and mutate its `eventType`. A review constructor owns only
+review request/attempt/kind/ordinal fields, a correction constructor owns only
+correction linkage, and implementation-ready events emit both identity groups
+as JSON `null`. Incompatible explicit fields are a construction error so stale
+identities are rejected instead of silently carried into the next boundary.
+
 For an observed quota interruption/resumption, the coordinator uses existing
 `wait_started`/`wait_ended` boundaries with stable `waitId` and
 `waitKind: quota_blocked`. Record real observation timestamps. A quota window

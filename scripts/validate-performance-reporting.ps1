@@ -12,6 +12,7 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'new-story-performance-event.ps1')
 
 function Assert-True {
     param([Parameter(Mandatory)] [bool] $Condition, [Parameter(Mandatory)] [string] $Message)
@@ -61,43 +62,7 @@ function New-Event {
         [string] $Role = 'coordinator'
     )
 
-    $correctionEvents = @('correction_started', 'correction_ready')
-    if ($EventType -notin $correctionEvents -and -not [string]::IsNullOrWhiteSpace([string] $SupersedesReviewAttemptId)) {
-        throw "Integrated fixture event construction failed: non-correction event '$EventType' must emit supersedesReviewAttemptId=null"
-    }
-
-    $event = [ordered]@{
-        schemaVersion = 1
-        kind = 'story_performance_event'
-        eventId = $EventId
-        runId = 'synthetic-task-152'
-        projectId = 12
-        storyId = 727
-        storyRef = 143
-        taskRef = $TaskRef
-        role = $Role
-        sessionId = $SessionId
-        workerId = 'synthetic-worker'
-        transitionId = $EventId
-        scope = $Scope
-        phaseId = Get-NullableText $PhaseId
-        correctionId = Get-NullableText $CorrectionId
-        reviewRequestId = Get-NullableText $ReviewRequestId
-        reviewAttemptId = Get-NullableText $ReviewAttemptId
-        reviewKind = Get-NullableText $ReviewKind
-        reviewAttemptOrdinal = $ReviewAttemptOrdinal
-        supersedesReviewAttemptId = Get-NullableText $SupersedesReviewAttemptId
-        eventType = $EventType
-        occurredAtUtc = $OccurredAtUtc
-        revision = Get-NullableText $Revision
-        reviewMode = $ReviewMode
-        provenance = [ordered]@{ source = 'synthetic_fixture'; observedBy = 'validator'; coverage = 'fixed UTC fixture'; synthetic = $true }
-        usage = $Usage
-        waitId = Get-NullableText $WaitId
-        waitKind = Get-NullableText $WaitKind
-        pullRequest = $null
-    }
-    return [pscustomobject] $event
+    return New-StoryPerformanceEvent -EventId $EventId -EventType $EventType -OccurredAtUtc $OccurredAtUtc -ProjectId 12 -StoryId 727 -StoryRef 143 -RunId 'synthetic-task-152' -Scope $Scope -Role $Role -ReviewMode $ReviewMode -TaskRef $TaskRef -PhaseId (Get-NullableText $PhaseId) -CorrectionId (Get-NullableText $CorrectionId) -ReviewRequestId (Get-NullableText $ReviewRequestId) -ReviewAttemptId (Get-NullableText $ReviewAttemptId) -ReviewKind (Get-NullableText $ReviewKind) -ReviewAttemptOrdinal $ReviewAttemptOrdinal -SupersedesReviewAttemptId (Get-NullableText $SupersedesReviewAttemptId) -Revision (Get-NullableText $Revision) -SessionId $SessionId -WorkerId 'synthetic-worker' -Provenance ([ordered]@{ source = 'synthetic_fixture'; observedBy = 'validator'; coverage = 'fixed UTC fixture'; synthetic = $true }) -Usage $Usage -WaitId (Get-NullableText $WaitId) -WaitKind (Get-NullableText $WaitKind)
 }
 
 function New-UsageSample {
@@ -321,6 +286,18 @@ Assert-True (-not $recorderSource.Contains('Get-JsonSidecarCount')) 'ordinary re
 try {
     $revisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $revisionB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $constructorCorrection = New-Event -EventId 'constructor-correction' -EventType correction_ready -OccurredAtUtc '2026-10-09T09:59:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-correction' -CorrectionId 'constructor-correction-1' -SupersedesReviewAttemptId 'constructor-attempt-1' -Revision $revisionB -Role implementer
+    $constructorReview = New-Event -EventId 'constructor-review' -EventType review_started -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-review' -ReviewRequestId 'constructor-request-2' -ReviewAttemptId 'constructor-attempt-2' -ReviewKind correction_rereview -ReviewAttemptOrdinal 1 -Revision $revisionB -Role reviewer
+    $constructorReady = New-Event -EventId 'constructor-ready' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:01:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-implementation' -Revision $revisionB -Role implementer
+    Assert-True ($constructorCorrection.correctionId -ceq 'constructor-correction-1' -and $constructorCorrection.supersedesReviewAttemptId -ceq 'constructor-attempt-1' -and $null -eq $constructorCorrection.reviewRequestId -and $null -eq $constructorCorrection.reviewAttemptId) 'event constructor keeps correction linkage and clears review-only identity'
+    Assert-True ($constructorReview.reviewRequestId -ceq 'constructor-request-2' -and $constructorReview.reviewAttemptId -ceq 'constructor-attempt-2' -and $null -eq $constructorReview.correctionId -and $null -eq $constructorReview.supersedesReviewAttemptId) 'event constructor keeps review identity and clears correction-only linkage'
+    Assert-True ($null -eq $constructorReady.reviewRequestId -and $null -eq $constructorReady.reviewAttemptId -and $null -eq $constructorReady.correctionId -and $null -eq $constructorReady.supersedesReviewAttemptId) 'event constructor clears review and correction identity from implementation-ready events'
+    $malformedConstructorRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid' -EventType review_started -OccurredAtUtc '2026-10-09T10:02:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid' -ReviewRequestId 'constructor-request' -ReviewAttemptId 'constructor-attempt' -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $revisionB -CorrectionId 'stale-correction' -Role reviewer | Out-Null
+    }
+    catch { $malformedConstructorRejected = $true }
+    Assert-True $malformedConstructorRejected 'event constructor rejects incompatible explicit stale correction identity'
     $events = @(
         (New-Event -EventId 'story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'story' -Role 'coordinator'),
         (New-Event -EventId 'impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:05:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'task-152-impl' -Role 'implementer'),
