@@ -121,7 +121,34 @@ function Get-RecorderFailureDiagnostic {
 
     $validationDiagnostic = Get-RecorderValidationDiagnostic -Output $Output
     if ($validationDiagnostic) { return $validationDiagnostic }
-    return "recorder_execution_failed: recorder exited with code $ExitCode; validation reason unavailable"
+    return "recorder_execution_failed: recorder exited with code $ExitCode; validation reason unavailable; $(Get-RecorderOutputSummary -Output $Output)"
+}
+
+function Get-RecorderOutputSummary {
+    param([AllowNull()] [object[]] $Output)
+
+    $itemKinds = [Collections.Generic.HashSet[string]]::new()
+    $categories = [Collections.Generic.HashSet[string]]::new()
+    $items = @($Output)
+    foreach ($item in $items) {
+        if ($item -is [System.Management.Automation.ErrorRecord]) {
+            [void] $itemKinds.Add('error_record')
+            if ([string] $item.FullyQualifiedErrorId -ceq 'NativeCommandError') { [void] $categories.Add('native_error') }
+            elseif ([string] $item.FullyQualifiedErrorId -ceq 'NativeCommandErrorMessage') { [void] $categories.Add('native_error_message') }
+            else { [void] $categories.Add('error_record_other') }
+        }
+        elseif ($item -is [string]) {
+            [void] $itemKinds.Add('string')
+            [void] $categories.Add('unrecognized')
+        }
+        else {
+            [void] $itemKinds.Add('other')
+            [void] $categories.Add('other')
+        }
+    }
+    if ($items.Count -eq 0) { [void] $categories.Add('empty') }
+    if ($itemKinds.Count -eq 0) { [void] $itemKinds.Add('none') }
+    return "recorder_output_items=$($items.Count); recorder_output_kinds=$(@($itemKinds | Sort-Object) -join ','); recorder_output_categories=$(@($categories | Sort-Object) -join ',')"
 }
 
 function Get-TransitionFailureDiagnostic {

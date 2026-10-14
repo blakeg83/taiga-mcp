@@ -82,9 +82,25 @@ function Get-SafeTransitionResultSummary {
         if (-not $categories.Contains($category)) { [void] $categories.Add($category) }
     }
     if ($categories.Count -eq 0) { [void] $categories.Add('none') }
+    $childOutputKinds = [Collections.Generic.HashSet[string]]::new()
+    $childOutputCategories = [Collections.Generic.HashSet[string]]::new()
+    $allowedChildKinds = @('error_record', 'string', 'other', 'none')
+    $allowedChildCategories = @('native_error', 'native_error_message', 'error_record_other', 'unrecognized', 'other', 'empty')
+    foreach ($diagnostic in $diagnostics) {
+        $text = [string] $diagnostic
+        foreach ($match in @([regex]::Match($text, 'recorder_output_kinds=(?<value>[a-z_,]+)'), [regex]::Match($text, 'recorder_output_categories=(?<value>[a-z_,]+)'))) {
+            if (-not $match.Success) { continue }
+            foreach ($value in $match.Groups['value'].Value -split ',') {
+                if ($match.Value.StartsWith('recorder_output_kinds=') -and $value -in $allowedChildKinds) { [void] $childOutputKinds.Add($value) }
+                if ($match.Value.StartsWith('recorder_output_categories=') -and $value -in $allowedChildCategories) { [void] $childOutputCategories.Add($value) }
+            }
+        }
+    }
+    if ($childOutputKinds.Count -eq 0) { [void] $childOutputKinds.Add('none') }
+    if ($childOutputCategories.Count -eq 0) { [void] $childOutputCategories.Add('none') }
     $runDirectoryExists = Test-Path -LiteralPath $RunPath -PathType Container
     $ledgerExists = Test-Path -LiteralPath (Join-Path $RunPath 'events.jsonl') -PathType Leaf
-    return "type=$resultType; status=$status; diagnosticCount=$($diagnostics.Count); categories=$($categories -join ','); runDirectoryExists=$runDirectoryExists; ledgerExists=$ledgerExists; runtime=$(Get-SafeRuntimeSummary)"
+    return "type=$resultType; status=$status; diagnosticCount=$($diagnostics.Count); categories=$($categories -join ','); childOutputKinds=$(@($childOutputKinds | Sort-Object) -join ','); childOutputCategories=$(@($childOutputCategories | Sort-Object) -join ','); runDirectoryExists=$runDirectoryExists; ledgerExists=$ledgerExists; runtime=$(Get-SafeRuntimeSummary)"
 }
 function Start-Run {
     param([string] $RunId, [string] $Mode = 'story_end_only')
@@ -223,7 +239,7 @@ try {
     $controlScriptText = @'
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('unavailable', 'execution')] [string] $Mode,
+    [Parameter(Mandatory)] [ValidateSet('unavailable', 'execution', 'output')] [string] $Mode,
     [Parameter(Mandatory)] [string] $TransitionPath,
     [Parameter(Mandatory)] [string] $ExternalRunRoot,
     [Parameter(Mandatory)] [string] $RunId,
@@ -235,8 +251,14 @@ if ($Mode -ceq 'unavailable') {
         Microsoft.PowerShell.Management\Get-Command @args
     }
 }
-else {
+elseif ($Mode -ceq 'execution') {
     function global:pwsh { throw 'synthetic recorder launch failure' }
+}
+else {
+    function global:pwsh {
+        Write-Output 'synthetic-secret-child-output'
+        $global:LASTEXITCODE = 17
+    }
 }
 & $TransitionPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventPath $EventPath -TaskRefs @(216,217,218,219,220,221)
 '@
@@ -248,6 +270,11 @@ else {
     $executionRun = 'recorder-execution-diagnostic'
     $executionControl = (& $pwshPath -NoProfile -File $controlScript -Mode execution -TransitionPath $transition -ExternalRunRoot $fixtureRoot -RunId $executionRun -EventPath $controlEventPath) | ConvertFrom-Json -Depth 100
     Assert-True ($executionControl.status -eq 'unavailable' -and ($executionControl.diagnostics -join '; ') -ceq 'recorder_execution_failed: recorder process could not be started' -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $executionRun) -PathType Container)) 'recorder execution failure is explicit, bounded, nonblocking, and does not append'
+    $outputRun = 'recorder-output-diagnostic'
+    $outputControl = (& $pwshPath -NoProfile -File $controlScript -Mode output -TransitionPath $transition -ExternalRunRoot $fixtureRoot -RunId $outputRun -EventPath $controlEventPath) | ConvertFrom-Json -Depth 100
+    $outputDiagnostic = $outputControl.diagnostics -join '; '
+    $outputSummary = Get-SafeTransitionResultSummary -Result $outputControl -RunPath (Join-Path $fixtureRoot $outputRun)
+    Assert-True ($outputControl.status -eq 'unavailable' -and $outputDiagnostic -ceq 'recorder_execution_failed: recorder exited with code 17; validation reason unavailable; recorder_output_items=1; recorder_output_kinds=string; recorder_output_categories=unrecognized' -and $outputSummary.Contains('childOutputKinds=string') -and $outputSummary.Contains('childOutputCategories=unrecognized') -and -not $outputDiagnostic.Contains('synthetic-secret-child-output') -and -not $outputSummary.Contains('synthetic-secret-child-output') -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $outputRun) -PathType Container)) 'recorder nonzero output is classified with bounded output-shape categories without exposing child text or appending'
 
     $defaultRun = Start-Run 'omitted-finalizer-timestamp'
     $defaultParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = 'omitted-finalizer-timestamp'; ArtifactRoot = (Join-Path $fixtureRoot 'omitted-finalizer-timestamp-artifacts'); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(155,156) }
