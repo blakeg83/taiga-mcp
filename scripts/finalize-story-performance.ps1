@@ -109,6 +109,33 @@ function Resolve-PublishedReportArtifacts {
     }
 }
 
+function Get-CollectionReasonCode {
+    param(
+        [Parameter(Mandatory)] [string] $Status,
+        [AllowNull()] [object] $Usage,
+        [AllowNull()] [string] $Fallback = $null
+    )
+
+    if ($Status -eq 'measured') { return 'measured' }
+    if ($Status -eq 'partial') { return 'partial_coverage' }
+    if ($Status -eq 'failed') { return 'collector_failed' }
+    if ($Status -eq 'skipped') { return 'collection_skipped' }
+    if ($null -ne $Usage) {
+        $diagnostics = @($Usage.bindingDiagnostics)
+        if (@($diagnostics | Where-Object { $_.category -eq 'binding_invalid' -or $_.category -eq 'binding_unverified' -or $_.category -eq 'binding_conflict' }).Count -gt 0) {
+            return 'binding_unavailable_or_invalid'
+        }
+        if (@($Usage.sessions | Where-Object { $_.state -eq 'unavailable' -and [int]$_.invalidRecords -gt 0 }).Count -gt 0) {
+            return 'binding_unavailable_or_invalid'
+        }
+        if (@($diagnostics | Where-Object { $_.category -eq 'source_unavailable' -or $_.category -eq 'source_invalid' }).Count -gt 0) {
+            return 'source_unavailable_or_invalid'
+        }
+    }
+    if ($Fallback -like 'story_usage_boundary_unavailable*') { return 'boundary_unavailable' }
+    return 'source_unavailable'
+}
+
 function Invoke-Finalization {
     if ($DeliveryPath) { $Delivery = Get-Content -LiteralPath $DeliveryPath -Raw | ConvertFrom-Json -AsHashtable -Depth 100 }
     $pr = if ($Delivery.ContainsKey('pr')) { $Delivery.pr } else { $null }
@@ -234,13 +261,14 @@ function Invoke-Finalization {
             $attempt = [ordered]@{
                 schemaVersion = 1; kind = 'story_performance_collection_attempt'; runId = $RunId
                 projectId = $start.projectId; storyId = $start.storyId; reviewedHead = $Delivery.reviewedHead
-                discoveryAttempted = $true; collectorInvoked = $false; status = 'source_unavailable'; reason = $null
+                discoveryAttempted = $true; collectorInvoked = $false; status = 'source_unavailable'; reasonCode = 'source_unavailable'; reason = $null
             }
             if ([string]::IsNullOrWhiteSpace($ObservedEvidencePath)) {
                 $ObservedEvidencePath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'observed-role-token-usage.json'
             }
             $usagePath = Join-Path $viewRoot 'usage.json'
             if (-not (Test-Path -LiteralPath $ObservedEvidencePath -PathType Leaf)) {
+                $attempt.reasonCode = 'source_missing'
                 $attempt.reason = 'observed role/session/source bindings unavailable; no trustworthy collector source selected'
             }
             else {
@@ -252,10 +280,21 @@ function Invoke-Finalization {
                     $usage = Get-Content -LiteralPath $usagePath -Raw | ConvertFrom-Json -Depth 100 -DateKind String
                     if ($usage.kind -cne 'story_performance_role_token_usage' -or $usage.runId -cne $RunId -or $usage.projectId -ne $start.projectId -or $usage.storyId -ne $start.storyId) { throw 'invalid collector output identity' }
                     $attempt.status = if ($usage.coverage -eq 'unavailable') { 'source_unavailable' } elseif ($usage.coverage -eq 'measured' -and @($usage.roleTotals.PSObject.Properties).Count -eq 3) { 'measured' } else { 'partial' }
+                    $attempt.reasonCode = Get-CollectionReasonCode -Status $attempt.status -Usage $usage
                     $attempt.reason = "collector coverage=$($usage.coverage); missing sessions, sources, or boundary counters remain unavailable"
                 }
                 catch {
-                    $attempt.status = 'failed'; $attempt.reason = 'collector execution or output validation failed; attributable token totals unavailable'
+                    $collectorMessage = [string] $_.Exception.Message
+                    if ($collectorMessage -like 'story_usage_boundary_unavailable*') {
+                        $attempt.status = 'source_unavailable'
+                        $attempt.reasonCode = 'boundary_unavailable'
+                        $attempt.reason = 'collector discovery reached the existing role sources, but a story_started boundary was unavailable; boundary token deltas remain unavailable'
+                    }
+                    else {
+                        $attempt.status = 'failed'
+                        $attempt.reasonCode = 'collector_failed'
+                        $attempt.reason = 'collector execution or output validation failed; attributable token totals unavailable'
+                    }
                     $usagePath = $null
                 }
             }

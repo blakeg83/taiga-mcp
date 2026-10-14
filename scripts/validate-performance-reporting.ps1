@@ -859,6 +859,10 @@ try {
                 role = 'implementer'; workerId = 'synthetic-implementer'; sessionId = 'synthetic-implementer-session'; model = 'gpt-5.6-luna'; effort = 'xhigh'; effectiveFromUtc = '2026-10-09T10:00:00Z'; effectiveToUtc = $null; changeId = 'implementer-profile-change-1';
                 provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'exact assignment interval'; synthetic = $true }
             }
+            [ordered]@{
+                role = 'reviewer'; workerId = 'synthetic-reviewer'; sessionId = 'synthetic-reviewer-session'; model = 'gpt-6.1-sol'; effort = 'medium'; effectiveFromUtc = '2026-10-09T10:00:00Z'; effectiveToUtc = $null; changeId = 'reviewer-profile-1';
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'exact assignment interval'; synthetic = $true }
+            }
         )
         provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'complete setup fixture'; synthetic = $true }
     }
@@ -873,7 +877,18 @@ try {
     $oneProfileDiagnostic = [string]($oneProfileOutput -join [Environment]::NewLine)
     Assert-True ($LASTEXITCODE -eq 0) "a one-record profiles array should remain a valid array and publish successfully (diagnostic: $oneProfileDiagnostic)"
     $oneProfileReport = Get-Content -Raw -LiteralPath $oneProfileOutputPath | ConvertFrom-Json -Depth 100
-    Assert-True ([string]$oneProfileReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($oneProfileReport.metrics.modelsAndReasoning.value).Count -eq 1) 'one supplied profile should remain measured'
+    Assert-True ([string]$oneProfileReport.metrics.modelsAndReasoning.state -ceq 'partial' -and @($oneProfileReport.metrics.modelsAndReasoning.value).Count -eq 1 -and @($oneProfileReport.metrics.modelsAndReasoning.missingRoles) -contains 'implementer' -and @($oneProfileReport.metrics.modelsAndReasoning.missingRoles) -contains 'reviewer') 'one supplied profile should remain source-backed but explicitly partial'
+
+    $missingCoordinatorMetadataPath = Join-Path $root 'missing-coordinator-setup-metadata.json'
+    $missingCoordinatorOutputPath = Join-Path $artifactRoot 'missing-coordinator.json'
+    $missingCoordinatorMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $missingCoordinatorMetadata.profiles = @($missingCoordinatorMetadata.profiles | Where-Object role -ne 'coordinator')
+    [IO.File]::WriteAllText($missingCoordinatorMetadataPath, ($missingCoordinatorMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $missingCoordinatorOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $missingCoordinatorMetadataPath -OutputPath $missingCoordinatorOutputPath 2>&1
+    $missingCoordinatorDiagnostic = [string]($missingCoordinatorOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "missing coordinator metadata should publish a limited report (diagnostic: $missingCoordinatorDiagnostic)"
+    $missingCoordinatorReport = Get-Content -Raw -LiteralPath $missingCoordinatorOutputPath | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$missingCoordinatorReport.metrics.modelsAndReasoning.state -ceq 'partial' -and @($missingCoordinatorReport.metrics.modelsAndReasoning.missingRoles) -contains 'coordinator' -and ([string]$missingCoordinatorReport.metrics.modelsAndReasoning.missingData).Contains('coordinator')) 'missing coordinator profile must remain explicitly limited'
 
     $shapeCases = @(
         [ordered]@{ name = 'zero-profiles'; profiles = @() }
@@ -936,13 +951,13 @@ try {
     $changedProfile.model = 'gpt-6.1-sol'
     $changedProfile.effectiveFromUtc = '2026-10-09T10:30:00Z'
     $changedProfile.changeId = 'implementer-change-2'
-    $nonOverlappingMetadata.profiles = @($initialProfile, $changedProfile)
+    $nonOverlappingMetadata.profiles = @($nonOverlappingMetadata.profiles[0], $initialProfile, $changedProfile, $nonOverlappingMetadata.profiles[2])
     [IO.File]::WriteAllText($nonOverlappingChangePath, ($nonOverlappingMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
     $nonOverlappingOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $nonOverlappingChangePath -OutputPath $nonOverlappingChangeOutputPath 2>&1
     $nonOverlappingDiagnostic = [string]($nonOverlappingOutput -join [Environment]::NewLine)
     Assert-True ($LASTEXITCODE -eq 0) "non-overlapping profile changes should remain valid (diagnostic: $nonOverlappingDiagnostic)"
     $nonOverlappingReport = Get-Content -Raw -LiteralPath $nonOverlappingChangeOutputPath | ConvertFrom-Json -Depth 100
-    Assert-True ([string]$nonOverlappingReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($nonOverlappingReport.metrics.modelsAndReasoning.value).Count -eq 2) 'non-overlapping profile changes should remain measured'
+    Assert-True ([string]$nonOverlappingReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($nonOverlappingReport.metrics.modelsAndReasoning.value).Count -eq 4) 'non-overlapping profile changes should remain measured'
 
     $conflictingProfilePath = Join-Path $root 'conflicting-profile.json'
     $conflictingProfileOutputPath = Join-Path $artifactRoot 'conflicting-profile.json'
@@ -963,10 +978,10 @@ try {
     $metadataReport = Get-Content -Raw -LiteralPath $metadataJsonPath | ConvertFrom-Json -Depth 100
     $metadataMarkdown = Get-Content -Raw -LiteralPath $metadataMarkdownPath
     Assert-True ([string]$metadataReport.metrics.modelsAndReasoning.state -ceq 'measured' -and
-        @($metadataReport.metrics.modelsAndReasoning.value).Count -eq 2 -and
+        @($metadataReport.metrics.modelsAndReasoning.value).Count -eq 3 -and
         [string]$metadataReport.metrics.modelsAndReasoning.value[1].model -ceq 'gpt-5.6-luna' -and
         [string]$metadataReport.metrics.modelsAndReasoning.value[1].changeId -ceq 'implementer-profile-change-1' -and
-        [int]$metadataReport.provenance.setupMetadata.recordCount -eq 2) 'supplied setup profiles and changes must remain source-backed in JSON'
+        [int]$metadataReport.provenance.setupMetadata.recordCount -eq 3) 'supplied setup profiles and changes must remain source-backed in JSON'
     Assert-True ($metadataMarkdown.Contains('## Role profiles') -and $metadataMarkdown.Contains('model=gpt-6.1-sol') -and $metadataMarkdown.Contains('effort=xhigh') -and $metadataMarkdown.Contains('change=implementer-profile-change-1')) 'supplied setup profiles and changes must render semantically in Markdown'
 
     $invalidMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20

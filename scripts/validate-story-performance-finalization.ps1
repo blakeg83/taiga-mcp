@@ -220,7 +220,10 @@ else {
     }
     $missingStartLedger = Join-Path (Join-Path $fixtureRoot $missingStartRun) 'events.jsonl'
     $missingStartArtifactRoot = Join-Path $fixtureRoot "$missingStartRun-artifacts"
+    $missingStartEvidence = Join-Path $fixtureRoot 'missing-start-evidence.json'
+    Write-Json $missingStartEvidence @{ rows = @(@{ role = 'implementer'; scope = 'story-215'; sessionId = 'missing-start-session'; sourcePath = (Join-Path $fixtureRoot 'missing-start-session.jsonl') }) }
     $missingStartParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = $missingStartRun; ArtifactRoot = $missingStartArtifactRoot; BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'per_task'; TaskRefs = @(155); OccurredAtUtc = '2026-10-10T05:20:00Z'; ArtifactsAccessibleToUser = $true }
+    $missingStartParameters.ObservedEvidencePath = $missingStartEvidence
     $missingStartResult = (& $finalizer @missingStartParameters) | ConvertFrom-Json -Depth 100 -DateKind String
     $missingStartReport = Get-Content -LiteralPath $missingStartResult.jsonPath -Raw | ConvertFrom-Json -Depth 100
     $missingStartEvents = @(Get-Content -LiteralPath $missingStartLedger | ForEach-Object {
@@ -228,7 +231,7 @@ else {
             if ($parsed.kind -ceq 'story_performance_event_frame') { $parsed.event } else { $parsed }
         })
     Assert-True ($missingStartResult.deliveryState -eq 'confirmed' -and $missingStartResult.reportState -eq 'published' -and $missingStartResult.prReadyEvent -and $missingStartResult.storyRef -eq 215 -and $missingStartResult.storyId -eq 753) 'missing story start preserves confirmed delivery and derives story identity from coherent pr_ready evidence'
-    Assert-True ($missingStartResult.limitations -join '; ' -match 'story_started boundary is absent' -and $missingStartResult.collectionAttempt.discoveryAttempted -and $missingStartReport.metrics.timeToPr.state -eq 'unavailable' -and $missingStartReport.metrics.implementationElapsed.state -eq 'measured' -and $missingStartReport.metrics.reviewElapsed.state -eq 'measured') 'missing story start publishes a limited report, attempts applicable collection discovery, and retains implementation and review measurements'
+    Assert-True ($missingStartResult.limitations -join '; ' -match 'story_started boundary is absent' -and $missingStartResult.collectionAttempt.discoveryAttempted -and $missingStartResult.collectionAttempt.collectorInvoked -and $missingStartResult.collectionAttempt.status -eq 'source_unavailable' -and $missingStartResult.collectionAttempt.reasonCode -eq 'boundary_unavailable' -and $missingStartReport.metrics.timeToPr.state -eq 'unavailable' -and $missingStartReport.metrics.implementationElapsed.state -eq 'measured' -and $missingStartReport.metrics.reviewElapsed.state -eq 'measured') 'missing story start publishes a limited report, reaches collection, distinguishes the unavailable boundary, and retains implementation and review measurements'
     Assert-True ((Test-Path -LiteralPath $missingStartResult.jsonPath -PathType Leaf) -and (Test-Path -LiteralPath $missingStartResult.markdownPath -PathType Leaf) -and (Test-Path -LiteralPath $missingStartResult.manifestPath -PathType Leaf) -and $missingStartEvents.Count -eq 5 -and @($missingStartEvents | Where-Object eventType -eq 'story_started').Count -eq 0) 'missing story start publishes all artifacts without inferring, appending, or rewriting a story_started event'
     $missingStartDigest = Get-FileHash -LiteralPath $missingStartResult.jsonPath -Algorithm SHA256
     $missingStartAgain = (& $finalizer @missingStartParameters) | ConvertFrom-Json -Depth 100 -DateKind String
@@ -364,7 +367,7 @@ else {
     Write-Json (Join-Path $fixtureRoot 'wrong-binding.json') @{ rows = @(@{ role = 'implementer'; sessionId = 'wrong-session'; scope = 'story-144'; sourcePath = $rows[0].sourcePath }) }
     $invalid = Finish-Run 'invalid-session' -Evidence (Join-Path $fixtureRoot 'wrong-binding.json')
     $invalidReport = Get-Content -LiteralPath $invalid.jsonPath -Raw | ConvertFrom-Json -Depth 100
-    Assert-True ($invalid.collectionAttempt.status -eq 'source_unavailable' -and $null -eq $invalidReport.metrics.observedTotalTokens.value) 'unverified local session counters cannot be attributed'
+    Assert-True ($invalid.collectionAttempt.status -eq 'source_unavailable' -and $invalid.collectionAttempt.reasonCode -eq 'binding_unavailable_or_invalid' -and $null -eq $invalidReport.metrics.observedTotalTokens.value) 'unverified local session counters cannot be attributed and the binding limitation is named'
     $null = Start-Run 'partial-roles'
     Write-Json (Join-Path $fixtureRoot 'one-role.json') @{ rows = @($rows[0]) }
     $oneRole = Finish-Run 'partial-roles' -Evidence (Join-Path $fixtureRoot 'one-role.json')

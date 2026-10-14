@@ -551,8 +551,12 @@ ledger remains unchanged except for the normally confirmed `pr_ready` append.
 
 `provenance.collectionAttempt` distinguishes `measured`, `partial`,
 `source_unavailable`, `failed`, and `skipped`, with `discoveryAttempted`,
-`collectorInvoked`, and a reason. This is collection-attempt evidence, separate
-from metric states. Direct aggregation without finalization reports `skipped`.
+`collectorInvoked`, a bounded `reasonCode`, and a reason. Binding problems,
+inaccessible sources, missing lifecycle boundaries, and collector execution
+failures remain distinct; a missing `story_started` boundary is
+`source_unavailable` with `boundary_unavailable`, not a collector failure.
+This is collection-attempt evidence, separate from metric states. Direct
+aggregation without finalization reports `skipped`.
 An existing exact-HEAD report is checksum-verified and returned without
 recollection/overwrite; historical reports lacking attempt evidence remain
 preserved and explicitly disclose that absence.
@@ -569,6 +573,15 @@ Timing values have separate semantics:
 - `quotaAdjustedElapsed`: wall-clock elapsed minus confirmed quota overlap;
   other idle time remains included.
 - `activeExecutionElapsed`: unavailable without independent activity evidence.
+
+Setup metadata is complete only when validated coordinator, implementer, and
+reviewer profile evidence is present. A missing role remains `partial` with
+that role listed in `missingRoles`; it never causes a model or reasoning
+setting to be guessed. A profile's optional `sessionId` is not a token source
+by itself: observed-role rows must name a real local source, and the collector
+accepts counters only after `session_meta.payload.id` matches the declared
+session ID. Invalid or inaccessible bindings are retained as bounded
+diagnostics and cannot produce measured role totals.
 
 If `story_started` is absent but the ledger contains exactly one coherent
 story-scoped `pr_ready` event for the confirmed provider PR and reviewed HEAD,
