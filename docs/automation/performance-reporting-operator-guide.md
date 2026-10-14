@@ -564,6 +564,15 @@ Timing values have separate semantics:
   other idle time remains included.
 - `activeExecutionElapsed`: unavailable without independent activity evidence.
 
+If `story_started` is absent but the ledger contains exactly one coherent
+story-scoped `pr_ready` event for the confirmed provider PR and reviewed HEAD,
+finalization anchors story identity to that existing readiness event. It does
+not infer or append a replacement start event. JSON, Markdown, and manifest
+artifacts may still publish with implementation/review measurements preserved;
+`timeToPr` is `unavailable` and the report names the missing start boundary.
+Ambiguous, conflicting, or missing readiness evidence keeps the report
+unavailable while confirmed PR delivery remains valid.
+
 Quota events use existing `wait_started`/`wait_ended` and a stable `waitId`;
 the quota window length is never a blocked-duration estimate. Correction events
 use `phaseId`, `correctionId`, `supersedesReviewAttemptId` and null review

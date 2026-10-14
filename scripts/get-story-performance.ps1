@@ -2255,7 +2255,19 @@ foreach ($record in @($records)) {
 
 $storyStarts = @($records | Where-Object { $_.EventType -eq 'story_started' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
 $prReady = @($records | Where-Object { $_.EventType -eq 'pr_ready' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
-$timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Identity 'story|time_to_pr' -Kind 'story_to_pr' -Anomalies $anomalies
+if ($storyStarts.Count -eq 0 -and $prReady.Count -eq 1) {
+    [void] $anomalies.Add((New-Anomaly -Code 'missing_story_start' -Message 'story_started boundary is absent; timeToPr is unavailable while coherent event measurements are retained' -Identity 'story|story_started' -EventIds @($prReady[0].EventId)))
+    $timeToPrInterval = [pscustomobject][ordered]@{
+        state = 'unavailable'
+        elapsedMilliseconds = $null
+        startUtc = $null
+        endUtc = $null
+        missingData = 'story_started boundary is absent; confirmed pr_ready evidence is present'
+    }
+}
+else {
+    $timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Identity 'story|time_to_pr' -Kind 'story_to_pr' -Anomalies $anomalies
+}
 
 $implementationStarts = New-OrdinalHashtable
 $implementationEnds = New-OrdinalHashtable
@@ -3688,6 +3700,7 @@ $reportLimitations = @(
     'Unknown values remain null; unavailable evidence is never treated as zero.'
     'Implementation/review elapsed are summed phase durations, including overlapping phases and inactivity; they are not wall-clock or active execution time.'
     if ($collectionAttempt.status -notin @('measured')) { "Token collection outcome: $($collectionAttempt.status); $($collectionAttempt.reason)" }
+    if ($storyStarts.Count -eq 0 -and $prReady.Count -eq 1) { 'story_started boundary is absent; timeToPr remains unavailable while coherent implementation and review measurements are retained.' }
     if ($null -ne (Get-PropertyValue $collectionAttempt 'setupMetadataLimitation')) { [string] (Get-PropertyValue $collectionAttempt 'setupMetadataLimitation') }
     if ([string] $setupMetadata.state -eq 'unavailable') { 'Role model and reasoning-effort profiles are unavailable because no validated setup metadata input was supplied.' }
     if ($comparisonMetrics.changedFiles.state -eq 'unavailable' -or $comparisonMetrics.linesAdded.state -eq 'unavailable' -or $comparisonMetrics.linesDeleted.state -eq 'unavailable') { 'Git comparison metrics require an explicit valid base revision, reviewed HEAD, and repository path.' }

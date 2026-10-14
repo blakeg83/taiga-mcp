@@ -159,10 +159,6 @@ function Invoke-Finalization {
             $record = $_ | ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String
             if ($record.kind -ceq 'story_performance_event_frame') { $record.event } else { $record }
         })
-        $starts = @($records | Where-Object eventType -eq 'story_started')
-        if ($starts.Count -ne 1 -or $starts[0].runId -cne $RunId -or $starts[0].reviewMode -cne $ReviewMode) { throw 'story initialization is missing, ambiguous, or mismatched' }
-        $start = $starts[0]
-        $result.storyRef = $start.storyRef; $result.projectId = $start.projectId; $result.storyId = $start.storyId
         # Derive PR identity from the confirmed provider record, never this repository.
         $prUri = [Uri] $pr.url
         $parts = $prUri.AbsolutePath.Trim('/').Split('/')
@@ -170,11 +166,35 @@ function Invoke-Finalization {
         $identity = [ordered]@{ provider = 'github'; owner = $parts[0]; repository = $parts[1]; number = [int] $pr.number; reviewedHead = [string] $Delivery.reviewedHead }
         $existing = @($records | Where-Object { $_.eventType -ceq 'pr_ready' -and $_.revision -ceq $Delivery.reviewedHead })
         if ($existing.Count -gt 1) { throw 'ambiguous pr_ready evidence' }
-        if ($existing.Count -eq 1) {
-            $ready = $existing[0]
-            foreach ($key in $identity.Keys) { if ($ready.pullRequest[$key] -cne $identity[$key]) { throw 'pr_ready identity conflict' } }
+        $starts = @($records | Where-Object eventType -eq 'story_started')
+        $missingStart = $false
+        if ($starts.Count -gt 1) { throw 'story initialization is missing, ambiguous, or mismatched' }
+        if ($starts.Count -eq 1) {
+            if ($starts[0].runId -cne $RunId -or $starts[0].reviewMode -cne $ReviewMode) { throw 'story initialization is missing, ambiguous, or mismatched' }
+            $start = $starts[0]
         }
         else {
+            if ($existing.Count -ne 1) { throw 'story initialization is missing and confirmed pr_ready evidence is unavailable' }
+            $start = $existing[0]
+            $missingStart = $true
+        }
+        foreach ($record in $records) {
+            if ($record.runId -cne $RunId -or $record.projectId -ne $start.projectId -or
+                $record.storyId -ne $start.storyId -or $record.storyRef -ne $start.storyRef -or
+                $record.reviewMode -cne $ReviewMode) {
+                throw 'story telemetry identity is missing, ambiguous, or mismatched'
+            }
+        }
+        if ($start.scope -cne 'story' -or $start.eventType -ne 'story_started' -and $start.eventType -ne 'pr_ready') {
+            throw 'story initialization anchor is not a valid story boundary'
+        }
+        $result.storyRef = $start.storyRef; $result.projectId = $start.projectId; $result.storyId = $start.storyId
+        if ($existing.Count -eq 1) {
+            $ready = $existing[0]
+            if ($ready.scope -cne 'story' -or $ready.role -cne 'coordinator') { throw 'pr_ready evidence is not a story coordinator boundary' }
+            foreach ($key in $identity.Keys) { if ($ready.pullRequest[$key] -cne $identity[$key]) { throw 'pr_ready identity conflict' } }
+        }
+        elseif (-not $missingStart) {
             $ready = [ordered]@{}
             foreach ($key in $start.Keys) { $ready[$key] = $start[$key] }
             $ready.eventId = "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)"
@@ -184,10 +204,12 @@ function Invoke-Finalization {
             $ready.usage = $null
             $ready.provenance = [ordered]@{ source = 'confirmed_pr_delivery'; observedBy = 'finalize-story-performance'; coverage = 'confirmed provider receipt and exact reviewed HEAD'; synthetic = [bool] $start.provenance.synthetic }
         }
-        $recordOutput = @(& pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson ($ready | ConvertTo-Json -Compress -Depth 100) 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw 'recorder failure; no confirmed pr_ready recording' }
-        $recordResult = ($recordOutput -join "`n") | ConvertFrom-Json
-        if ($recordResult.status -notin @('appended', 'noop')) { throw 'recorder failure or unknown recording outcome' }
+        if (-not $missingStart) {
+            $recordOutput = @(& pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson ($ready | ConvertTo-Json -Compress -Depth 100) 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw 'recorder failure; no confirmed pr_ready recording' }
+            $recordResult = ($recordOutput -join "`n") | ConvertFrom-Json
+            if ($recordResult.status -notin @('appended', 'noop')) { throw 'recorder failure or unknown recording outcome' }
+        }
         $result.prReadyEvent = $true
         # Reconcile immutable exact-HEAD artifacts before collecting new evidence.
         $priorReports = @()

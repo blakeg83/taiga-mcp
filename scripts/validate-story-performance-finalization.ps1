@@ -196,6 +196,68 @@ else {
         Assert-True ($invalidResult.reportState -eq 'unavailable' -and -not $invalidResult.prReadyEvent -and $beforeInvalidLedger -ceq $afterInvalidLedger -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot "$invalidRun-artifacts") -PathType Container)) "explicit finalizer timestamp '$invalidOccurredAt' is rejected without replacement, ledger append, or report publication"
     }
 
+    # A missing story_started boundary may be recovered from one coherent confirmed
+    # pr_ready boundary, but the finalizer must not infer or append a replacement start.
+    $missingStartRun = 'missing-story-start'
+    $missingPullRequest = [ordered]@{ provider = 'github'; owner = 'blakeg83'; repository = 'taiga-mcp'; number = 157; reviewedHead = $head }
+    $rejectedMissingStart = New-PerformanceEvent -RunId $missingStartRun -EventId "$missingStartRun-rejected-start" -EventType story_started -OccurredAtUtc '2026-10-10T05:00:00+00:00' -ReviewMode per_task
+    $rejectedMissingStart.projectId = 12; $rejectedMissingStart.storyId = 753; $rejectedMissingStart.storyRef = 215; $rejectedMissingStart.occurredAtUtc = '2026-10-10T05:00:00+00:00'
+    $rejectedMissingStartResult = Record-Transition $rejectedMissingStart
+    Assert-True ($rejectedMissingStartResult.status -eq 'unavailable' -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $missingStartRun) -PathType Container)) 'rejected missing-start initialization is fail-open and does not create a ledger'
+    $missingImplementationStart = New-PerformanceEvent -RunId $missingStartRun -EventId "$missingStartRun-implementation-start" -EventType implementation_started -OccurredAtUtc '2026-10-10T05:01:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId missing-start-implementation -Role implementer
+    $missingImplementationStart.projectId = 12; $missingImplementationStart.storyId = 753; $missingImplementationStart.storyRef = 215
+    $missingImplementationReady = New-PerformanceEvent -RunId $missingStartRun -EventId "$missingStartRun-implementation-ready" -EventType task_ready_for_review -OccurredAtUtc '2026-10-10T05:05:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId missing-start-implementation -Role implementer -Revision $head
+    $missingImplementationReady.projectId = 12; $missingImplementationReady.storyId = 753; $missingImplementationReady.storyRef = 215
+    $missingReviewStart = New-PerformanceEvent -RunId $missingStartRun -EventId "$missingStartRun-review-start" -EventType review_started -OccurredAtUtc '2026-10-10T05:06:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId missing-start-review -Role reviewer -ReviewRequestId missing-start-request -ReviewAttemptId missing-start-attempt -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $head
+    $missingReviewStart.projectId = 12; $missingReviewStart.storyId = 753; $missingReviewStart.storyRef = 215
+    $missingReviewAccepted = New-PerformanceEvent -RunId $missingStartRun -EventId "$missingStartRun-review-accepted" -EventType review_accepted -OccurredAtUtc '2026-10-10T05:08:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId missing-start-review -Role reviewer -ReviewRequestId missing-start-request -ReviewAttemptId missing-start-attempt -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $head
+    $missingReviewAccepted.projectId = 12; $missingReviewAccepted.storyId = 753; $missingReviewAccepted.storyRef = 215
+    $missingPrReady = New-PerformanceEvent -RunId $missingStartRun -EventId "$missingStartRun-pr-ready" -EventType pr_ready -OccurredAtUtc '2026-10-10T05:10:00Z' -ReviewMode per_task -Scope story -Role coordinator -Revision $head -PullRequest $missingPullRequest
+    $missingPrReady.projectId = 12; $missingPrReady.storyId = 753; $missingPrReady.storyRef = 215
+    foreach ($event in @($missingImplementationStart, $missingImplementationReady, $missingReviewStart, $missingReviewAccepted, $missingPrReady)) {
+        $observation = Record-Transition $event
+        Assert-True ($observation.status -eq 'appended') "missing-start lifecycle event is retained: $($event.eventId)"
+    }
+    $missingStartLedger = Join-Path (Join-Path $fixtureRoot $missingStartRun) 'events.jsonl'
+    $missingStartArtifactRoot = Join-Path $fixtureRoot "$missingStartRun-artifacts"
+    $missingStartParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = $missingStartRun; ArtifactRoot = $missingStartArtifactRoot; BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'per_task'; TaskRefs = @(155); OccurredAtUtc = '2026-10-10T05:20:00Z'; ArtifactsAccessibleToUser = $true }
+    $missingStartResult = (& $finalizer @missingStartParameters) | ConvertFrom-Json -Depth 100 -DateKind String
+    $missingStartReport = Get-Content -LiteralPath $missingStartResult.jsonPath -Raw | ConvertFrom-Json -Depth 100
+    $missingStartEvents = @(Get-Content -LiteralPath $missingStartLedger | ForEach-Object {
+            $parsed = $_ | ConvertFrom-Json -Depth 100 -DateKind String
+            if ($parsed.kind -ceq 'story_performance_event_frame') { $parsed.event } else { $parsed }
+        })
+    Assert-True ($missingStartResult.deliveryState -eq 'confirmed' -and $missingStartResult.reportState -eq 'published' -and $missingStartResult.prReadyEvent -and $missingStartResult.storyRef -eq 215 -and $missingStartResult.storyId -eq 753) 'missing story start preserves confirmed delivery and derives story identity from coherent pr_ready evidence'
+    Assert-True ($missingStartResult.limitations -join '; ' -match 'story_started boundary is absent' -and $missingStartResult.collectionAttempt.discoveryAttempted -and $missingStartReport.metrics.timeToPr.state -eq 'unavailable' -and $missingStartReport.metrics.implementationElapsed.state -eq 'measured' -and $missingStartReport.metrics.reviewElapsed.state -eq 'measured') 'missing story start publishes a limited report, attempts applicable collection discovery, and retains implementation and review measurements'
+    Assert-True ((Test-Path -LiteralPath $missingStartResult.jsonPath -PathType Leaf) -and (Test-Path -LiteralPath $missingStartResult.markdownPath -PathType Leaf) -and (Test-Path -LiteralPath $missingStartResult.manifestPath -PathType Leaf) -and $missingStartEvents.Count -eq 5 -and @($missingStartEvents | Where-Object eventType -eq 'story_started').Count -eq 0) 'missing story start publishes all artifacts without inferring, appending, or rewriting a story_started event'
+    $missingStartDigest = Get-FileHash -LiteralPath $missingStartResult.jsonPath -Algorithm SHA256
+    $missingStartAgain = (& $finalizer @missingStartParameters) | ConvertFrom-Json -Depth 100 -DateKind String
+    Assert-True ($missingStartAgain.reportId -ceq $missingStartResult.reportId -and (Get-FileHash -LiteralPath $missingStartResult.jsonPath -Algorithm SHA256).Hash -ceq $missingStartDigest.Hash -and @((Get-Content -LiteralPath $missingStartLedger)).Count -eq 5) 'missing-start finalization is idempotent and preserves the append-only ledger'
+    $missingStartModeMismatchParameters = @{}
+    foreach ($key in $missingStartParameters.Keys) { $missingStartModeMismatchParameters[$key] = $missingStartParameters[$key] }
+    $missingStartModeMismatchParameters.ReviewMode = 'story_end_only'
+    $missingStartModeMismatch = (& $finalizer @missingStartModeMismatchParameters) | ConvertFrom-Json -Depth 100 -DateKind String
+    Assert-True ($missingStartModeMismatch.deliveryState -eq 'confirmed' -and $missingStartModeMismatch.reportState -eq 'unavailable' -and -not $missingStartModeMismatch.prReadyEvent -and $missingStartModeMismatch.response.Contains('story telemetry identity')) 'missing-start review-mode mismatch remains unavailable without invalidating confirmed delivery'
+
+    $missingConfirmedPrRun = 'missing-confirmed-pr'
+    $missingConfirmedPrEvent = New-PerformanceEvent -RunId $missingConfirmedPrRun -EventId "$missingConfirmedPrRun-implementation-start" -EventType implementation_started -OccurredAtUtc '2026-10-10T05:01:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId missing-confirmed-pr-implementation -Role implementer
+    $missingConfirmedPrEvent.projectId = 12; $missingConfirmedPrEvent.storyId = 753; $missingConfirmedPrEvent.storyRef = 215
+    $missingConfirmedPrObservation = Record-Transition $missingConfirmedPrEvent
+    Assert-True ($missingConfirmedPrObservation.status -eq 'appended') 'missing-confirmed-PR evidence retains valid lifecycle data before finalization'
+    $missingConfirmedPrResult = (& $finalizer -Delivery $delivery -ExternalRunRoot $fixtureRoot -RunId $missingConfirmedPrRun -ArtifactRoot (Join-Path $fixtureRoot "$missingConfirmedPrRun-artifacts") -BaseRevision $head -RepositoryPath $repository -ReviewMode per_task -TaskRefs @(155) -OccurredAtUtc '2026-10-10T05:20:00Z') | ConvertFrom-Json -Depth 100 -DateKind String
+    Assert-True ($missingConfirmedPrResult.deliveryState -eq 'confirmed' -and $missingConfirmedPrResult.reportState -eq 'unavailable' -and -not $missingConfirmedPrResult.prReadyEvent -and $missingConfirmedPrResult.response.Contains('confirmed pr_ready evidence is unavailable')) 'missing confirmed PR evidence remains unavailable without invalidating confirmed delivery'
+
+    $ambiguousMissingStartRun = 'ambiguous-missing-story-start'
+    foreach ($suffix in @('one', 'two')) {
+        $ambiguousMinute = if ($suffix -ceq 'one') { '1' } else { '2' }
+        $ambiguousReady = New-PerformanceEvent -RunId $ambiguousMissingStartRun -EventId "$ambiguousMissingStartRun-pr-ready-$suffix" -EventType pr_ready -OccurredAtUtc "2026-10-10T05:1$($ambiguousMinute):00Z" -ReviewMode per_task -Scope story -Role coordinator -Revision $head -PullRequest $missingPullRequest
+        $ambiguousReady.projectId = 12; $ambiguousReady.storyId = 753; $ambiguousReady.storyRef = 215
+        $ambiguousObservation = Record-Transition $ambiguousReady
+        Assert-True ($ambiguousObservation.status -eq 'appended') "ambiguous missing-start evidence is retained for safety validation: $suffix"
+    }
+    $ambiguousResult = (& $finalizer -Delivery $delivery -ExternalRunRoot $fixtureRoot -RunId $ambiguousMissingStartRun -ArtifactRoot (Join-Path $fixtureRoot "$ambiguousMissingStartRun-artifacts") -BaseRevision $head -RepositoryPath $repository -ReviewMode per_task -TaskRefs @(155) -OccurredAtUtc '2026-10-10T05:20:00Z') | ConvertFrom-Json -Depth 100 -DateKind String
+    Assert-True ($ambiguousResult.deliveryState -eq 'confirmed' -and $ambiguousResult.reportState -eq 'unavailable' -and -not $ambiguousResult.prReadyEvent -and $ambiguousResult.response.Contains('ambiguous')) 'ambiguous missing-start boundaries remain unavailable without invalidating confirmed delivery'
+
     $ledger = Start-Run 'complete'
     # Two overlapping implementation phases: sum=15 min, union=10 min.
     foreach ($task in @(155,156)) {
