@@ -242,11 +242,13 @@ Immediately after the submitted `Start` is authoritative and before worker
 dispatch, initialize and verify the required performance run. Choose a path-safe `runId`
 and coordinator-selected external run root outside the source worktree. Write
 the validated `story_performance_setup` metadata beside the ledger when
-assignment profiles are available, then invoke
+assignment profiles are available, then construct a `story_started` event and
+invoke the installed entry point with `-EventJson` or `-EventPath` using
+[portable telemetry calls](telemetry-invocation.md):
 `scripts/record-story-performance-transition.ps1` with `MetadataPath`, the
 authorized ordered `TaskRefs`, and `ObservedEvidencePath` when known. It uses
 the actual recorder
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` with one
+`scripts/write-performance-event.ps1` with one
 `story_started` event containing the resolved project/story identity, review
 mode, authorization-safe provenance, and the actual UTC boundary. Verify the
 returned recording result and diagnostics. Bind known coordinator/worker

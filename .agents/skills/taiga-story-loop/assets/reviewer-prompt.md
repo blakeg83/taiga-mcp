@@ -17,6 +17,9 @@ implementer's checkout.
 | PR base | `{{prBase}}` |
 | Authorization | `{{authorizationRecord}}` |
 | Review cadence | `{{reviewMode}}` |
+| Project internal ID | `{{projectId}}` |
+| Installed skill root | `{{skillRoot}}` (absolute folder containing the loaded `SKILL.md`) |
+| Telemetry run | `{{externalRunRoot}}` / `{{runId}}` (existing run identity; unavailable history stays unavailable) |
 | Ordered scope | `{{orderedTasks}}` |
 
 Read the complete story, selected task, repository instructions, and the exact
@@ -81,7 +84,10 @@ An exact current acceptance releases the next task only when the declared
 review mode permits it. Do not treat an idle worker, elapsed time, duplicate
 event, stale SHA, or changed scope as review evidence.
 
-Record lifecycle observations at the actual review boundary with the repo-root
+Read `references/telemetry-invocation.md` from the installed skill. Use the
+absolute skill root passed by the coordinator, construct each lifecycle event
+with its bundled constructor, and submit serialized `-EventJson` or `-EventPath`.
+Record lifecycle observations at the actual review boundary with the skill-relative
 `scripts/record-story-performance-transition.ps1`, existing run/event arguments,
 and authorized ordered `TaskRefs`. It invokes the existing recorder and checks
 matching boundary identities; disclose diagnostics without blocking otherwise

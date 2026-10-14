@@ -26,6 +26,11 @@ templates to preserve the selected requirements, task order, and observable
 completion evidence; ask for clarification when those inputs are missing or
 ambiguous.
 
+Read [portable telemetry calls](references/telemetry-invocation.md) before
+initialization, worker assignments, or finalization. Resolve the absolute installed
+skill folder and pass it to workers; telemetry `scripts/` paths are relative to
+that folder. Construct each event and supply `-EventJson` or `-EventPath`.
+
 After a submitted `Start`, initialize and verify story measurement exactly once at the
 authorized story boundary through `scripts/record-story-performance-transition.ps1`,
 which uses the existing versioned recorder described in

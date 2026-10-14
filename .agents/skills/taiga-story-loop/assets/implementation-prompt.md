@@ -23,6 +23,9 @@ worktree:
 | Ordinary review destination | reviewer: `{{reviewerId}}` |
 | Escalation destination | coordinator: `{{coordinatorId}}` (blockers, delivery uncertainty, conflicting revisions, or scope/requirement decisions) |
 | Review mode | `{{reviewMode}}` (default `per_task`; optional `story_end_only`) |
+| Project internal ID | `{{projectId}}` |
+| Installed skill root | `{{skillRoot}}` (absolute folder containing the loaded `SKILL.md`) |
+| Telemetry run | `{{externalRunRoot}}` / `{{runId}}` (existing run identity; unavailable history stays unavailable) |
 | Scope | `{{scopeSummary}}` |
 
 Before editing, read the complete story goal, definition of done, ordered task list,
@@ -238,10 +241,13 @@ The worker still does not poll, infer acceptance from idle status, or widen
 scope; duplicate, stale, unknown-delivery, and conflicting-revision events are
 no-ops or coordinator reconciliation cases.
 
-At the real workflow boundary, use the repo-root
+Read `references/telemetry-invocation.md` from the installed skill. Use the
+absolute skill root passed by the coordinator, construct each lifecycle event
+with its bundled constructor, and submit serialized `-EventJson` or `-EventPath`.
+At the real workflow boundary, use the skill-relative
 `scripts/record-story-performance-transition.ps1` with the authorized ordered
 `TaskRefs` and existing run/event arguments. It records through
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` and returns
+`scripts/write-performance-event.ps1` in that same installed folder and returns
 immediate nonblocking completeness diagnostics. First
 concrete task work is `implementation_started`; a frozen implementation-ready
 packet in either mode is `task_ready_for_review`. In `per_task` it precedes the

@@ -32,7 +32,7 @@ task #157 endpoint.
 
 Use `scripts/record-story-performance-transition.ps1` at each existing
 boundary. It invokes the actual recorder
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` and performs
+`scripts/write-performance-event.ps1` and performs
 lightweight, nonblocking boundary/linkage diagnostics. Supply the authorized
 ordered `TaskRefs` so advancement/final-review checks can identify missing
 implementation ends and mode-specific acceptance evidence. Record the returned
@@ -75,16 +75,18 @@ correction linkage, and implementation-ready events emit both identity groups
 as JSON `null`. Incompatible explicit fields are a construction error so stale
 identities are rejected instead of silently carried into the next boundary.
 
-The executable production entry point for these examples is
-[`scripts/new-story-performance-event.ps1`](../../../../scripts/new-story-performance-event.ps1).
+Resolve `$skillRoot` from the loaded skill folder as described in
+[portable telemetry calls](telemetry-invocation.md). The executable production
+entry point for these examples is
+[`scripts/new-story-performance-event.ps1`](../scripts/new-story-performance-event.ps1).
 Dot-source it once, capture a real UTC boundary through the canonical formatter,
 and pass each constructed JSON event through
-[`scripts/record-story-performance-transition.ps1`](../../../../scripts/record-story-performance-transition.ps1):
+[`scripts/record-story-performance-transition.ps1`](../scripts/record-story-performance-transition.ps1):
 
 ```powershell
-. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
-. (Join-Path $repoRoot 'scripts/new-story-performance-event.ps1')
-$transition = Join-Path $repoRoot 'scripts/record-story-performance-transition.ps1'
+. (Join-Path $skillRoot 'scripts/format-story-performance-utc.ps1')
+. (Join-Path $skillRoot 'scripts/new-story-performance-event.ps1')
+$transition = Join-Path $skillRoot 'scripts/record-story-performance-transition.ps1'
 $common = @{
     ProjectId = $projectId; StoryId = $storyId; StoryRef = $storyRef
     RunId = $runId; ReviewMode = 'per_task'; Usage = $null
@@ -160,10 +162,10 @@ data, not an inference from whichever events happen to be present.
 
 When a workflow transition constructs an event boundary and setup/profile
 metadata, capture one `DateTimeOffset` and format that captured instant through
-the repository helper before building either payload:
+the installed skill helper before building either payload:
 
 ```powershell
-. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+. (Join-Path $skillRoot 'scripts/format-story-performance-utc.ps1')
 $capturedBoundary = [DateTimeOffset]::UtcNow
 $boundaryUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $capturedBoundary
 

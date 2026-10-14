@@ -131,8 +131,12 @@ Each assignment includes a destination table:
 
 Performance recording observes the transitions already owned by the pair; it
 does not add a workflow action, a worker, a poll, or a telemetry-only message.
+Each full assignment includes the absolute installed `skillRoot`, external run
+root, runId, and resolved project/story IDs. Use the constructed event and
+recorder calls in [portable telemetry calls](telemetry-invocation.md); runtime
+paths resolve from that skill folder regardless of the worker's checkout.
 The actor at the real boundary appends one version-1 event through
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` using the
+`scripts/write-performance-event.ps1` using the
 run, project, story, and explicitly selected `reviewMode` from setup. The
 event's `eventId`/`transitionId` and `phaseId`, `correctionId`,
 `reviewRequestId`/`reviewAttemptId`, or `waitId` identity are stable across
