@@ -23,7 +23,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'format-story-performance-utc.ps1')
-if ([string]::IsNullOrWhiteSpace($OccurredAtUtc)) {
+if (-not $PSBoundParameters.ContainsKey('OccurredAtUtc')) {
     $OccurredAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
 }
 function Assert-True { param([bool] $Condition, [string] $Message) if (-not $Condition) { throw $Message } }

@@ -82,6 +82,26 @@ try {
     $invalidOutput = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $fixtureRoot -RunId $runtimeRun -EventJson ($invalidEvent | ConvertTo-Json -Compress -Depth 100) 2>&1)
     Assert-True ($LASTEXITCODE -ne 0 -and ($invalidOutput -join [Environment]::NewLine).Contains('UTC timestamp ending in Z') -and (Get-Item -LiteralPath $runtimeLedger).Length -eq $runtimeLength) 'non-Z UTC input follows recorder validation without changing the immutable ledger'
 
+    $defaultRun = Start-Run 'omitted-finalizer-timestamp'
+    $defaultParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = 'omitted-finalizer-timestamp'; ArtifactRoot = (Join-Path $fixtureRoot 'omitted-finalizer-timestamp-artifacts'); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(155,156) }
+    $defaultResult = (& $finalizer @defaultParameters) | ConvertFrom-Json -Depth 100 -DateKind String
+    $defaultEvents = @(Get-Content -LiteralPath $defaultRun | ForEach-Object {
+            $parsed = $_ | ConvertFrom-Json -Depth 100 -DateKind String
+            if ($parsed.kind -ceq 'story_performance_event_frame') { $parsed.event } else { $parsed }
+        })
+    $defaultReady = @($defaultEvents | Where-Object eventType -eq 'pr_ready')
+    Assert-True ($defaultResult.reportState -eq 'published' -and $defaultReady.Count -eq 1 -and [string]$defaultReady[0].occurredAtUtc -match 'Z$') 'omitted finalizer timestamp uses a generated canonical UTC boundary'
+
+    foreach ($invalidOccurredAt in @('', ' ')) {
+        $invalidRun = if ($invalidOccurredAt.Length -eq 0) { 'empty-finalizer-timestamp' } else { 'blank-finalizer-timestamp' }
+        $invalidLedger = Start-Run $invalidRun
+        $beforeInvalidLedger = (Get-FileHash -LiteralPath $invalidLedger -Algorithm SHA256).Hash
+        $invalidParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = $invalidRun; ArtifactRoot = (Join-Path $fixtureRoot "$invalidRun-artifacts"); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(155,156); OccurredAtUtc = $invalidOccurredAt }
+        $invalidResult = (& $finalizer @invalidParameters) | ConvertFrom-Json -Depth 100 -DateKind String
+        $afterInvalidLedger = (Get-FileHash -LiteralPath $invalidLedger -Algorithm SHA256).Hash
+        Assert-True ($invalidResult.reportState -eq 'unavailable' -and -not $invalidResult.prReadyEvent -and $beforeInvalidLedger -ceq $afterInvalidLedger -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot "$invalidRun-artifacts") -PathType Container)) "explicit finalizer timestamp '$invalidOccurredAt' is rejected without replacement, ledger append, or report publication"
+    }
+
     $ledger = Start-Run 'complete'
     # Two overlapping implementation phases: sum=15 min, union=10 min.
     foreach ($task in @(155,156)) {
