@@ -50,7 +50,17 @@ model/effort and profile changes in the validated setup metadata; attach an
 attributable usage snapshot when available and preserve
 `unavailable`/null when it is not. Do not estimate usage or emit a routine
 telemetry-only summary/message. Recording failures leave the handoff and its
-ownership gates unchanged and disclose the affected measurement coverage.
+ownership gates unchanged and disclose the affected measurement coverage. The
+transition wrapper distinguishes a rejected event from recorder execution or
+availability failure in its bounded `diagnostics` result. For example,
+`recorder_validation_rejected: occurredAtUtc must be an ISO 8601 UTC timestamp
+ending in Z` means correct the supplied boundary and retry the same authorized
+transition; `recorder_unavailable: pwsh executable is unavailable` and
+`recorder_execution_failed: ...` mean preserve the valid workflow transition,
+surface limited telemetry, and reconcile the measurement path before retrying.
+These diagnostics never include raw event JSON, prompt/transcript content,
+secrets, or arbitrary recorder output. Do not append a replacement event merely
+to repair a rejected payload.
 For each reviewer-owned review event, explicitly emit
 `supersedesReviewAttemptId: null`; only `correction_started` and
 `correction_ready` retain the non-null finding identity. Correction events

@@ -14,12 +14,57 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $diagnostics = [Collections.Generic.List[string]]::new()
 $result = [ordered]@{ status = 'unavailable'; telemetryState = 'limited'; diagnostics = @(); recorder = $null }
+
+function Get-RecorderValidationDiagnostic {
+    param([AllowNull()] [object[]] $Output)
+
+    $knownMessages = [ordered]@{
+        "'occurredAtUtc' must be an ISO 8601 UTC timestamp ending in Z" = 'occurredAtUtc must be an ISO 8601 UTC timestamp ending in Z'
+        'correctionId is allowed only on correction events' = 'correctionId is allowed only on correction events'
+    }
+    foreach ($item in @($Output)) {
+        $message = if ($item -is [System.Management.Automation.ErrorRecord] -and $null -ne $item.Exception) {
+            [string] $item.Exception.Message
+        }
+        else {
+            [string] $item
+        }
+        foreach ($knownMessage in $knownMessages.Keys) {
+            if ($message.IndexOf($knownMessage, [StringComparison]::Ordinal) -ge 0) {
+                return "recorder_validation_rejected: $($knownMessages[$knownMessage])"
+            }
+        }
+    }
+    return $null
+}
+
+function Get-RecorderFailureDiagnostic {
+    param(
+        [AllowNull()] [object[]] $Output,
+        [Parameter(Mandatory)] [int] $ExitCode
+    )
+
+    $validationDiagnostic = Get-RecorderValidationDiagnostic -Output $Output
+    if ($validationDiagnostic) { return $validationDiagnostic }
+    return "recorder_execution_failed: recorder exited with code $ExitCode; validation reason unavailable"
+}
+
 try {
     if ($EventPath) { $EventJson = Get-Content -LiteralPath $EventPath -Raw }
     $event = $EventJson | ConvertFrom-Json -Depth 100 -DateKind String
     $recorder = Join-Path $PSScriptRoot '../.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1'
-    $output = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $EventJson 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw 'recording failed: invalid event or recorder unavailable; transition may continue with limited telemetry' }
+    if ($null -eq (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+        throw 'recorder_unavailable: pwsh executable is unavailable'
+    }
+    try {
+        $output = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $EventJson 2>&1)
+    }
+    catch {
+        throw 'recorder_execution_failed: recorder process could not be started'
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw (Get-RecorderFailureDiagnostic -Output $output -ExitCode $LASTEXITCODE)
+    }
     $result.recorder = ($output -join "`n") | ConvertFrom-Json
     $result.status = $result.recorder.status
     if ($result.status -notin @('appended', 'noop')) { throw 'recording outcome is unconfirmed; reconcile telemetry without blocking workflow' }

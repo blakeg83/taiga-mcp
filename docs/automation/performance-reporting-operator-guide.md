@@ -496,6 +496,16 @@ diagnostics. Recording and diagnostic failures are limitations; they are not
 workflow authorization or advancement gates. Actual observed UTC timestamps
 are required. No historical boundary may be manufactured.
 
+The wrapper's bounded `diagnostics` distinguish actionable event rejection from
+recorder availability or execution failure. A value such as
+`recorder_validation_rejected: occurredAtUtc must be an ISO 8601 UTC timestamp
+ending in Z` identifies the field to correct before retrying the same
+authorized transition. `recorder_unavailable: ...` and
+`recorder_execution_failed: ...` require preserving the valid workflow outcome,
+surfacing limited telemetry, and reconciling the recorder path before retrying.
+These messages omit raw event JSON, payload values, secrets, prompts, and
+transcripts; do not append a replacement event to repair rejected input.
+
 After a confirmed exact-HEAD PR create/reuse, invoke the production finalizer:
 
 ```powershell

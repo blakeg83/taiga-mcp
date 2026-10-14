@@ -81,6 +81,14 @@ try {
     $runtimeLength = (Get-Item -LiteralPath $runtimeLedger).Length
     $invalidOutput = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $fixtureRoot -RunId $runtimeRun -EventJson ($invalidEvent | ConvertTo-Json -Compress -Depth 100) 2>&1)
     Assert-True ($LASTEXITCODE -ne 0 -and ($invalidOutput -join [Environment]::NewLine).Contains('UTC timestamp ending in Z') -and (Get-Item -LiteralPath $runtimeLedger).Length -eq $runtimeLength) 'non-Z UTC input follows recorder validation without changing the immutable ledger'
+    $invalidTransition = Record-Transition $invalidEvent
+    Assert-True ($invalidTransition.status -eq 'unavailable' -and ($invalidTransition.diagnostics -join '; ').Contains('recorder_validation_rejected: occurredAtUtc must be an ISO 8601 UTC timestamp ending in Z') -and (Get-Item -LiteralPath $runtimeLedger).Length -eq $runtimeLength) 'transition wrapper surfaces the bounded timestamp validation reason without blocking the caller or appending invalid input'
+    $correctionDiagnosticRun = 'recorder-correction-diagnostic'
+    $correctionDiagnosticEvent = New-PerformanceEvent -RunId $correctionDiagnosticRun -EventId "$correctionDiagnosticRun-invalid" -EventType story_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode story_end_only
+    $correctionDiagnosticEvent.correctionId = 'synthetic-secret-correction'
+    $correctionDiagnostic = Record-Transition $correctionDiagnosticEvent
+    $correctionDiagnosticText = $correctionDiagnostic.diagnostics -join '; '
+    Assert-True ($correctionDiagnostic.status -eq 'unavailable' -and $correctionDiagnosticText.Contains('recorder_validation_rejected: correctionId is allowed only on correction events') -and -not $correctionDiagnosticText.Contains('synthetic-secret-correction') -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $correctionDiagnosticRun) -PathType Container)) 'transition wrapper surfaces the bounded correction-field validation reason without exposing payload values or appending invalid input'
 
     $defaultRun = Start-Run 'omitted-finalizer-timestamp'
     $defaultParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = 'omitted-finalizer-timestamp'; ArtifactRoot = (Join-Path $fixtureRoot 'omitted-finalizer-timestamp-artifacts'); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(155,156) }
