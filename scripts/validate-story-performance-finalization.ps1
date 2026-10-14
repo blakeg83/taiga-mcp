@@ -95,6 +95,19 @@ try {
     $revisionDiagnostic = Record-Transition $revisionDiagnosticEvent
     $revisionDiagnosticText = $revisionDiagnostic.diagnostics -join '; '
     Assert-True ($revisionDiagnostic.status -eq 'unavailable' -and $revisionDiagnosticText.Contains("recorder_validation_rejected: 'revision' must be a full Git SHA or null") -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $revisionDiagnosticRun) -PathType Container)) 'transition wrapper classifies another recorder field rejection as validation with a bounded safe reason and no append'
+    foreach ($schemaCase in @(
+            @{ run = 'recorder-schema-version-diagnostic'; property = 'schemaVersion'; value = 2; expected = "recorder_validation_rejected: 'schemaVersion' must be 1" },
+            @{ run = 'recorder-kind-diagnostic'; property = 'kind'; value = 'wrong-kind'; expected = "recorder_validation_rejected: 'kind' must be story_performance_event" })) {
+        $schemaEvent = New-PerformanceEvent -RunId $schemaCase.run -EventId "$($schemaCase.run)-invalid" -EventType story_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode story_end_only
+        $schemaEvent.projectId = 12; $schemaEvent.storyId = 753; $schemaEvent.storyRef = 215; $schemaEvent.($schemaCase.property) = $schemaCase.value
+        $schemaResult = Record-Transition $schemaEvent
+        Assert-True ($schemaResult.status -eq 'unavailable' -and ($schemaResult.diagnostics -join '; ') -ceq $schemaCase.expected -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $schemaCase.run) -PathType Container)) "transition wrapper classifies $($schemaCase.property) validation with its bounded safe reason and no append"
+    }
+    $reviewFieldRun = 'recorder-review-field-diagnostic'
+    $reviewFieldEvent = New-PerformanceEvent -RunId $reviewFieldRun -EventId "$reviewFieldRun-invalid" -EventType review_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId review-field-diagnostic -Role reviewer -ReviewRequestId review-request -ReviewAttemptId review-attempt -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $head
+    $reviewFieldEvent.projectId = 12; $reviewFieldEvent.storyId = 753; $reviewFieldEvent.storyRef = 215; $reviewFieldEvent.reviewRequestId = $null
+    $reviewFieldResult = Record-Transition $reviewFieldEvent
+    Assert-True ($reviewFieldResult.status -eq 'unavailable' -and ($reviewFieldResult.diagnostics -join '; ') -ceq "recorder_validation_rejected: review events require 'reviewRequestId'" -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $reviewFieldRun) -PathType Container)) 'transition wrapper classifies required review-field validation with its bounded safe reason and no append'
     $malformedDiagnosticRun = 'malformed-input-diagnostic'
     $malformedSecretMarker = 'synthetic-secret-field'
     $malformedJson = '{"' + $malformedSecretMarker + '-' + ('x' * 10000) + '":'

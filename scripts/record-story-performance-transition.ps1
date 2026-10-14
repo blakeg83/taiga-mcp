@@ -23,7 +23,7 @@ function Get-RecorderValidationDiagnostic {
         'correctionId is allowed only on correction events' = 'correctionId is allowed only on correction events'
     }
     $knownFieldPattern = '(?:schemaVersion|kind|eventId|runId|projectId|storyId|storyRef|taskRef|role|sessionId|workerId|transitionId|scope|phaseId|correctionId|reviewRequestId|reviewAttemptId|reviewKind|reviewAttemptOrdinal|supersedesReviewAttemptId|eventType|occurredAtUtc|revision|reviewMode|provenance|usage|waitId|waitKind|pullRequest|usage\.streamId|usage\.role|usage\.sampledAtUtc|usage\.baselineAtUtc|usage\.counterSemantics\.cachedInput|usage\.counterSemantics\.reasoning|provenance\.observedBy|provenance\.observer|provenance\.source|provenance\.coverage|provenance\.synthetic|pullRequest\.owner|pullRequest\.repository|pullRequest\.number|pullRequest\.reviewedHead)'
-    $knownFieldReasonPattern = '(?:must be a JSON object|is required|must be a nonblank safe string|must be a positive integer|must be a nonnegative integer|has an unsupported value|must be an ISO 8601 UTC timestamp ending in Z|must be a full Git SHA|must be a full Git SHA or null|must be an absolute path|is not a valid path|must be a Boolean|is allowed only on review events|is allowed only on correction events)'
+    $knownFieldReasonPattern = '(?:must be 1|must be a JSON object|must be a nonblank safe string|must be a positive integer|must be a nonnegative integer|has an unsupported value|must be an ISO 8601 UTC timestamp ending in Z|must be a full Git SHA|must be a full Git SHA or null|must be a Boolean|must be an absolute path|is not a valid path|is allowed only on review events|is allowed only on correction events)'
     $knownStaticMessages = @(
         'external run root must be outside the source worktree',
         "'pullRequest.reviewedHead' must be a full Git SHA",
@@ -34,6 +34,8 @@ function Get-RecorderValidationDiagnostic {
         'numeric usage samples require usage.counterSemantics.reasoning',
         'measured usage requires nonempty counters',
         'measured usage requires known counter semantics',
+        "'schemaVersion' must be 1",
+        "'kind' must be story_performance_event",
         "'revision' must be a full Git SHA or null",
         'supersedesReviewAttemptId is only valid on correction events',
         'task-scoped events require a positive taskRef',
@@ -78,6 +80,9 @@ function Get-RecorderValidationDiagnostic {
             }
         }
         if ($candidate -and $candidate -match "^'(?<field>$knownFieldPattern)' $knownFieldReasonPattern$") {
+            return "recorder_validation_rejected: $candidate"
+        }
+        if ($candidate -and $candidate -match "^review events require '(?<field>$knownFieldPattern)'$") {
             return "recorder_validation_rejected: $candidate"
         }
         if ($candidate -and $candidate -match "^'[A-Za-z][A-Za-z0-9_.]{0,96}' is not an allowlisted field$") {
