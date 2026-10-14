@@ -781,7 +781,7 @@ $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('taiga-performance-overhead
 $externalRoot = Join-Path $fixtureRoot 'external-run-root'
 $automaticReviewPath = Join-Path $PSScriptRoot 'validate-automatic-review-flow.ps1'
 $recorderPath = Join-Path $PSScriptRoot 'write-performance-event.ps1'
-$aggregatorPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..\scripts\get-story-performance.ps1'))
+$aggregatorPath = Join-Path $PSScriptRoot 'get-story-performance.ps1'
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\..'))
 
 [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null

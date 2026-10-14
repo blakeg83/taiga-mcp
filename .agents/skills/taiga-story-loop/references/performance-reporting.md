@@ -207,7 +207,10 @@ do not write tracked repository state.
 
 ### Recorder lifecycle and cleanup contract
 
-The recorder entry point is `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`.
+The recorder entry point is `scripts/write-performance-event.ps1` relative to
+the installed skill folder. Read [portable telemetry calls](telemetry-invocation.md)
+for copy-folder installation, path resolution, valid initialization/worker events,
+and all mandatory finalization inputs.
 Callers pass an absolute `-ExternalRunRoot` outside the source worktree and a
 path-safe `-RunId`; the recorder owns only
 `<external-run-root>/<runId>/events.jsonl` plus its lock and diagnostic

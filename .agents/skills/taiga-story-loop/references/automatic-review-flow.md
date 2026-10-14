@@ -52,7 +52,7 @@ The implementer emits a non-null superseded-attempt identity only on the paired
 `correction_started` and `correction_ready` events.
 
 Every observation uses the actual
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1` helper
+`scripts/write-performance-event.ps1` helper
 with the selected setup mode and the exact revision/identity available at that
 boundary. `phaseId`, `correctionId`, `reviewRequestId`, `reviewAttemptId`,
 `reviewAttemptOrdinal`, and `waitId` are stable keys, not values regenerated

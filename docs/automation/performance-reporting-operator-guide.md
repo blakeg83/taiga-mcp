@@ -1,5 +1,29 @@
 # Story performance reporting operator guide
 
+## Standalone installation
+
+Copy only `.agents/skills/taiga-story-loop/` to
+`~/.codex/skills/taiga-story-loop/`. All runtime telemetry scripts and helpers
+are bundled there. Use absolute paths relative to the installed skill folder;
+the target repository and current working directory do not locate the runtime.
+PowerShell 7.5+ and Git are required, together with writable external run and
+artifact directories and the existing workflow provider connections. Local
+attributable token sources are optional and never replaced by estimates.
+
+See [portable telemetry calls](../../.agents/skills/taiga-story-loop/references/telemetry-invocation.md)
+for complete initialization, worker, and confirmed-delivery finalization calls.
+The root `scripts/` entry points below remain compatibility wrappers for source
+checkout operators. New runtime code belongs in the skill, not those wrappers.
+Development validators are not runtime prerequisites.
+
+Run `pwsh -NoProfile -File scripts/validate-story-performance-portability.ps1`
+to exercise a copied installation against an unrelated disposable repository.
+CI also runs that driver in a separate job without checking out this repository.
+It asserts persisted lifecycle boundaries, production finalization, JSON and
+Markdown checksums, measured elapsed time, unavailable token sources, and reuse.
+Use `-ExampleArtifactRoot <absolute external directory>` to retain a synthetic
+example report; the fixture cleans only its own disposable files.
+
 This guide turns the versioned performance contract into a safe operator
 runbook. It is the Task #160 documentation artifact for epic #140 and story
 #145. The examples are sanitized synthetic fixtures; they are not live Taiga,

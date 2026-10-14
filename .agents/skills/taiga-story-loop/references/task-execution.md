@@ -145,7 +145,7 @@ corrections, in both modes.
 The coordinator owns explicit wait boundaries and the story/PR boundaries;
 `pr_ready` remains deferred to task #157.
 
-Use the actual `.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`
+Use the actual `scripts/write-performance-event.ps1`
 recorder helper and stable `phaseId`, `correctionId`,
 `reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
 from [worker-handoffs](worker-handoffs.md#recording-the-handoff-boundary). Duplicate

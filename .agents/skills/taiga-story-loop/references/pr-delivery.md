@@ -113,6 +113,8 @@ branch, topology-specific base, approved/branch HEAD, checks HEAD, and final
 story-review HEAD. Matching copies that disagree with the receipt are still
 reconciliation cases.
 
+Use the complete parameter example in [portable telemetry calls](telemetry-invocation.md).
+Resolve scripts from the absolute installed skill root, not the target project.
 After confirmed create or reuse, run the mandatory production entry point
 `scripts/finalize-story-performance.ps1` once. Do not assemble recorder,
 collector, and aggregator steps manually. Supply the confirmed delivery/preflight

@@ -71,7 +71,7 @@ Evidence: <current handoff/review/check references; no copied findings>
 `Performance pointer` is optional so notes written before story measurement was
 introduced remain readable and writable. After a submitted `Start`, a new run
 uses a fresh path-safe `runId`, appends one `story_started` event through
-`.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1`, and
+`scripts/write-performance-event.ps1`, and
 records the validated pointer only after the recorder confirms the append. The
 pointer may use `lastEvent=none | lastObservedUtc=unavailable` when the
 measurement attempt failed; that limitation is not a workflow failure. It

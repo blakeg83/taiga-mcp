@@ -56,7 +56,7 @@ $performanceStartScriptPath = Join-Path $PSScriptRoot 'validate-performance-star
 $lifecycleBindingsScriptPath = Join-Path $PSScriptRoot 'validate-lifecycle-bindings.ps1'
 $repoRoot = (Resolve-Path (Join-Path $skillRoot '..\..\..')).Path
 $operatorGuidePath = Join-Path $repoRoot 'docs/automation/README.md'
-$performanceAggregationPath = Join-Path $repoRoot 'scripts/get-story-performance.ps1'
+$performanceAggregationPath = Join-Path $PSScriptRoot 'get-story-performance.ps1'
 
 if (-not (Test-Path $walkthroughPath)) {
     throw 'Missing recorded synthetic walkthrough reference.'
