@@ -125,11 +125,11 @@ function Get-CollectionReasonCode {
         if (@($diagnostics | Where-Object { $_.category -eq 'binding_invalid' -or $_.category -eq 'binding_unverified' -or $_.category -eq 'binding_conflict' }).Count -gt 0) {
             return 'binding_unavailable_or_invalid'
         }
-        if (@($Usage.sessions | Where-Object { $_.state -eq 'unavailable' -and [int]$_.invalidRecords -gt 0 }).Count -gt 0) {
-            return 'binding_unavailable_or_invalid'
-        }
         if (@($diagnostics | Where-Object { $_.category -eq 'source_unavailable' -or $_.category -eq 'source_invalid' }).Count -gt 0) {
             return 'source_unavailable_or_invalid'
+        }
+        if (@($Usage.sessions | Where-Object { $_.state -eq 'unavailable' -and [int]$_.invalidRecords -gt 0 }).Count -gt 0) {
+            return 'binding_unavailable_or_invalid'
         }
     }
     if ($Fallback -like 'story_usage_boundary_unavailable*') { return 'boundary_unavailable' }

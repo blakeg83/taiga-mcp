@@ -37,9 +37,12 @@ function Add-BindingDiagnostic {
         sourcePath = $SourcePath
         reason = $Reason
     }
-    $key = ConvertTo-CanonicalJson $diagnostic
     foreach ($existing in @($script:BindingDiagnostics)) {
-        if ((ConvertTo-CanonicalJson $existing) -ceq $key) { return }
+        if ([string] (Get-Value $existing 'category') -ceq $Category -and
+            [string] (Get-Value $existing 'role') -ceq [string] $Role -and
+            [string] (Get-Value $existing 'sessionId') -ceq [string] $SessionId -and
+            [string] (Get-Value $existing 'sourcePath') -ceq [string] $SourcePath -and
+            [string] (Get-Value $existing 'reason') -ceq $Reason) { return }
     }
     [void] $script:BindingDiagnostics.Add([pscustomobject] $diagnostic)
 }
@@ -586,9 +589,6 @@ if ($SessionLifetime) {
         }
         $seenSessions[$sessionId] = $role
         $sourcePath = Resolve-ObservedSourcePath -Evidence $row
-        if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-            Add-BindingDiagnostic -Category 'source_unavailable' -Role $role -SessionId $sessionId -SourcePath $sourcePath -Reason 'declared local session source file is inaccessible'
-        }
         $existing = @($savedSessions | Where-Object {
                 [string] (Get-Value $_ 'sessionId') -ceq $sessionId -and
                 [string] (Get-Value $_ 'role') -ceq $role
@@ -743,9 +743,6 @@ foreach ($row in $rows) {
         continue
     }
     $seenBindings[$bindingKey] = $role
-    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-        Add-BindingDiagnostic -Category 'source_unavailable' -Role $role -SessionId $sessionId -SourcePath $sourcePath -Reason 'declared local session source file is inaccessible'
-    }
     $existing = @((Get-Value $state 'sessions') | Where-Object { [string] (Get-Value $_ 'sourcePath') -ceq $sourcePath -and [string] (Get-Value $_ 'sessionId') -ceq $sessionId }) | Select-Object -First 1
     $session = if ($null -ne $existing) { $existing } else { New-SessionState -Evidence $row }
     Read-SessionIncrement -State $session -StartUtc $boundaries.startUtc -EndUtc $boundaries.endUtc

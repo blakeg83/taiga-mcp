@@ -10,6 +10,7 @@ $recorder = Join-Path $PSScriptRoot '../.agents/skills/taiga-story-loop/scripts/
 $transition = Join-Path $PSScriptRoot 'record-story-performance-transition.ps1'
 $finalizer = Join-Path $PSScriptRoot 'finalize-story-performance.ps1'
 $aggregator = Join-Path $PSScriptRoot 'get-story-performance.ps1'
+$collector = Join-Path $PSScriptRoot 'collect-role-token-usage.ps1'
 . (Join-Path $PSScriptRoot 'format-story-performance-utc.ps1')
 $head = (& git -C $PSScriptRoot rev-parse HEAD).Trim()
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -363,11 +364,35 @@ else {
     $invalidSetup = (& $finalizer -Delivery $delivery -ExternalRunRoot $fixtureRoot -RunId invalid-setup -ArtifactRoot (Join-Path $fixtureRoot 'invalid-setup-artifacts') -BaseRevision $head -RepositoryPath $repository -ReviewMode story_end_only -TaskRefs @(155,156) -MetadataPath (Join-Path $fixtureRoot 'missing-setup.json') -OccurredAtUtc '2026-10-10T04:20:00Z') | ConvertFrom-Json -Depth 100
     Assert-True ($invalidSetup.reportState -eq 'published' -and $invalidSetup.metricCoverage.modelsAndReasoning -eq 'unavailable' -and ($invalidSetup.limitations -join '; ').Contains('setup metadata was invalid')) 'invalid optional setup evidence is diagnosed before publication and still yields a limited report'
 
-    $null = Start-Run 'invalid-session'
+    $invalidLedger = Start-Run 'invalid-session'
     Write-Json (Join-Path $fixtureRoot 'wrong-binding.json') @{ rows = @(@{ role = 'implementer'; sessionId = 'wrong-session'; scope = 'story-144'; sourcePath = $rows[0].sourcePath }) }
     $invalid = Finish-Run 'invalid-session' -Evidence (Join-Path $fixtureRoot 'wrong-binding.json')
     $invalidReport = Get-Content -LiteralPath $invalid.jsonPath -Raw | ConvertFrom-Json -Depth 100
     Assert-True ($invalid.collectionAttempt.status -eq 'source_unavailable' -and $invalid.collectionAttempt.reasonCode -eq 'binding_unavailable_or_invalid' -and $null -eq $invalidReport.metrics.observedTotalTokens.value) 'unverified local session counters cannot be attributed and the binding limitation is named'
+
+    $freshMissingEvidence = Join-Path $fixtureRoot 'fresh-process-missing-source.json'
+    $freshMissingState = Join-Path $fixtureRoot 'fresh-process-missing-source-state.json'
+    $freshMissingOutput = Join-Path $fixtureRoot 'fresh-process-missing-source-output.json'
+    Write-Json $freshMissingEvidence @{ rows = @(@{ role = 'implementer'; scope = 'story-144'; sessionId = 'fresh-missing-session'; sourcePath = (Join-Path $fixtureRoot 'fresh-missing-session.jsonl') }) }
+    $freshMissingInvocation = & pwsh -NoProfile -File $collector -ObservedEvidencePath $freshMissingEvidence -EventsPath $invalidLedger -StatePath $freshMissingState -OutputPath $freshMissingOutput 2>&1
+    $freshMissingOutputData = Get-Content -LiteralPath $freshMissingOutput -Raw | ConvertFrom-Json -Depth 100
+    Assert-True ($LASTEXITCODE -eq 0 -and @($freshMissingOutputData.bindingDiagnostics | Where-Object { $_.category -eq 'source_unavailable' }).Count -eq 1) 'fresh-process collector keeps inaccessible source diagnostics without relying on shared test functions'
+
+    $freshNullEvidence = Join-Path $fixtureRoot 'fresh-process-null-source.json'
+    $freshNullState = Join-Path $fixtureRoot 'fresh-process-null-source-state.json'
+    $freshNullOutput = Join-Path $fixtureRoot 'fresh-process-null-source-output.json'
+    Write-Json $freshNullEvidence @{ rows = @(@{ role = 'reviewer'; scope = 'story-144'; sessionId = 'fresh-null-session'; sourcePath = $null }) }
+    $freshNullInvocation = & pwsh -NoProfile -File $collector -ObservedEvidencePath $freshNullEvidence -EventsPath $invalidLedger -StatePath $freshNullState -OutputPath $freshNullOutput 2>&1
+    $freshNullOutputData = Get-Content -LiteralPath $freshNullOutput -Raw | ConvertFrom-Json -Depth 100
+    Assert-True ($LASTEXITCODE -eq 0 -and @($freshNullOutputData.bindingDiagnostics | Where-Object { $_.category -eq 'binding_invalid' }).Count -eq 1) 'fresh-process collector keeps null source binding diagnostics without relying on shared test functions'
+
+    $inaccessibleRun = 'inaccessible-source'
+    $inaccessibleEvidence = Join-Path $fixtureRoot 'inaccessible-source.json'
+    $null = Start-Run $inaccessibleRun
+    Write-Json $inaccessibleEvidence @{ rows = @(@{ role = 'implementer'; scope = 'story-144'; sessionId = 'inaccessible-session'; sourcePath = (Join-Path $fixtureRoot 'inaccessible-session.jsonl') }) }
+    $inaccessibleResult = Finish-Run $inaccessibleRun -Evidence $inaccessibleEvidence
+    $inaccessibleReport = Get-Content -LiteralPath $inaccessibleResult.jsonPath -Raw | ConvertFrom-Json -Depth 100
+    Assert-True ($inaccessibleResult.collectionAttempt.status -eq 'source_unavailable' -and $inaccessibleResult.collectionAttempt.reasonCode -eq 'source_unavailable_or_invalid' -and $null -eq $inaccessibleReport.metrics.observedTotalTokens.value) 'inaccessible source remains source-unavailable rather than generic invalid binding'
     $null = Start-Run 'partial-roles'
     Write-Json (Join-Path $fixtureRoot 'one-role.json') @{ rows = @($rows[0]) }
     $oneRole = Finish-Run 'partial-roles' -Evidence (Join-Path $fixtureRoot 'one-role.json')
