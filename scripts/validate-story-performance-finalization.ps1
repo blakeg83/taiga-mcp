@@ -243,6 +243,27 @@ else {
     $missingStartModeMismatch = (& $finalizer @missingStartModeMismatchParameters) | ConvertFrom-Json -Depth 100 -DateKind String
     Assert-True ($missingStartModeMismatch.deliveryState -eq 'confirmed' -and $missingStartModeMismatch.reportState -eq 'unavailable' -and -not $missingStartModeMismatch.prReadyEvent -and $missingStartModeMismatch.response.Contains('story telemetry identity')) 'missing-start review-mode mismatch remains unavailable without invalidating confirmed delivery'
 
+    $storyEndMissingStartRun = 'missing-story-end-start'
+    $storyEndPullRequest = [ordered]@{
+        provider = 'github'
+        owner = 'blakeg83'
+        repository = 'taiga-mcp'
+        number = [int] $delivery.pr.number
+        reviewedHead = $head
+    }
+    $storyEndReady = New-PerformanceEvent -RunId $storyEndMissingStartRun -EventId "$storyEndMissingStartRun-pr-ready" -EventType pr_ready -OccurredAtUtc '2026-10-10T05:30:00Z' -ReviewMode story_end_only -Scope story -Role coordinator -Revision $head -PullRequest $storyEndPullRequest
+    $storyEndReady.projectId = 12; $storyEndReady.storyId = 753; $storyEndReady.storyRef = 215
+    $storyEndObservation = Record-Transition $storyEndReady
+    Assert-True ($storyEndObservation.status -eq 'appended') 'story_end_only missing-start readiness is retained through the production transition path'
+    $storyEndMissingStartParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = $storyEndMissingStartRun; ArtifactRoot = (Join-Path $fixtureRoot "$storyEndMissingStartRun-artifacts"); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(); OccurredAtUtc = '2026-10-10T05:35:00Z'; ArtifactsAccessibleToUser = $true }
+    $storyEndMissingStartResult = (& $finalizer @storyEndMissingStartParameters) | ConvertFrom-Json -Depth 100 -DateKind String
+    $storyEndMissingStartReport = Get-Content -LiteralPath $storyEndMissingStartResult.jsonPath -Raw | ConvertFrom-Json -Depth 100
+    $storyEndMissingStartEvents = @(Get-Content -LiteralPath (Join-Path (Join-Path $fixtureRoot $storyEndMissingStartRun) 'events.jsonl') | ForEach-Object {
+            $parsed = $_ | ConvertFrom-Json -Depth 100 -DateKind String
+            if ($parsed.kind -ceq 'story_performance_event_frame') { $parsed.event } else { $parsed }
+        })
+    Assert-True ($storyEndMissingStartResult.reportState -eq 'published' -and $storyEndMissingStartResult.collectionAttempt.status -eq 'source_unavailable' -and $storyEndMissingStartReport.metrics.timeToPr.state -eq 'unavailable' -and @($storyEndMissingStartEvents | Where-Object eventType -eq 'story_started').Count -eq 0) 'story_end_only missing-start production finalization publishes a limited report without inventing a start boundary'
+
     $missingConfirmedPrRun = 'missing-confirmed-pr'
     $missingConfirmedPrEvent = New-PerformanceEvent -RunId $missingConfirmedPrRun -EventId "$missingConfirmedPrRun-implementation-start" -EventType implementation_started -OccurredAtUtc '2026-10-10T05:01:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId missing-confirmed-pr-implementation -Role implementer
     $missingConfirmedPrEvent.projectId = 12; $missingConfirmedPrEvent.storyId = 753; $missingConfirmedPrEvent.storyRef = 215

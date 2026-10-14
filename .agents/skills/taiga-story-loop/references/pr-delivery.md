@@ -129,7 +129,11 @@ attempts existing role-token collection/source discovery before calling
 `scripts/get-story-performance.ps1`. Valid collector output is passed through
 `-UsageMetadataPath`; validated setup metadata through `-MetadataPath`.
 Collection attempt outcome (`measured`, `partial`, `source_unavailable`,
-`failed`, or `skipped`) is separate from each metric's measurement state.
+`failed`, or `skipped`) is separate from each metric's measurement state;
+`collectionAttempt.reasonCode` distinguishes missing sources, invalid bindings,
+missing lifecycle boundaries, and collector failures. A missing
+`story_started` boundary is an honest `boundary_unavailable` limitation, not a
+collector failure.
 A missing binding file means discovery was attempted but no trustworthy source
 was selected, rather than a successful zero-token collection. Do not use thread
 IDs as local session bindings or scan unrelated transcripts to guess a source.

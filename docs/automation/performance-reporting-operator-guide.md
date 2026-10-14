@@ -538,6 +538,25 @@ base/diff, branch/approved/checks/final-review exact-HEAD evidence. The producti
 entry point validates this same receipt; a confirmed flag alone is insufficient.
 A telemetry command never confirms provider operations itself.
 
+For final production-path verification, run the focused finalization suite, the
+integrated reporting matrix, lifecycle ownership checks, and the full-range
+whitespace check from the repository root:
+
+```powershell
+pwsh -NoProfile -File scripts/validate-story-performance-finalization.ps1
+pwsh -NoProfile -File scripts/validate-performance-reporting.ps1
+pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-lifecycle-bindings.ps1
+git diff --check <captured-base-sha>..HEAD
+```
+
+The focused suite reaches the production finalizer in both `per_task` and
+`story_end_only` modes, exercises rejected and missing initialization,
+event-construction diagnostics, verified and unavailable source bindings,
+collector failure, limited publication, exact-HEAD idempotency, and normal
+JSON/Markdown delivery references. It uses isolated synthetic ledgers, counter
+files, receipts, and temporary directories; it does not mutate Taiga, provider
+state, or historical run artifacts.
+
 The finalizer checks the run's selected `observed-role-token-usage.json` sibling
 when an explicit evidence path is absent. It invokes the existing collector
 when bindings exist, including the collector's existing selected-source handling.
