@@ -130,6 +130,24 @@ Recovery rules are deliberately conservative:
   completed implementation, review, or PR-readiness transition. Reconcile
   before considering any retry; never blindly replay an ambiguous write.
 
+### Constructing live UTC boundaries
+
+Production transition events and setup/profile metadata must share one captured
+UTC instant and the repository's canonical formatter. From the repository
+root, use:
+
+```powershell
+. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+$capturedBoundary = [DateTimeOffset]::UtcNow
+$boundaryUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $capturedBoundary
+```
+
+Pass `$boundaryUtc` to `occurredAtUtc` and, when a profile begins at that
+boundary, to `effectiveFromUtc`. The formatter emits literal `Z` and preserves
+the captured instant. A direct `DateTimeOffset.UtcNow.ToString('o')` emits
+`+00:00`, which the recorder and report generator reject; existing historical
+timestamps are never silently rewritten.
+
 ### Bounded historical reporting recovery
 
 When a retained ledger contains a validated, narrowly scoped field-shape defect

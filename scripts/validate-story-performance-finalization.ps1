@@ -10,6 +10,7 @@ $recorder = Join-Path $PSScriptRoot '../.agents/skills/taiga-story-loop/scripts/
 $transition = Join-Path $PSScriptRoot 'record-story-performance-transition.ps1'
 $finalizer = Join-Path $PSScriptRoot 'finalize-story-performance.ps1'
 $aggregator = Join-Path $PSScriptRoot 'get-story-performance.ps1'
+. (Join-Path $PSScriptRoot 'format-story-performance-utc.ps1')
 $head = (& git -C $PSScriptRoot rev-parse HEAD).Trim()
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $receipt = New-DeliveryReceipt -ApprovedHead $head -BranchHead $head -ChecksHead $head -FinalStoryReviewHead $head -ReviewBaseSha $head -DiffRange "$head..$head"
@@ -41,6 +42,46 @@ function Finish-Run {
 }
 try {
     [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
+
+    $capturedInstant = [DateTimeOffset]::Parse(
+        '2026-10-10T04:00:00.1234567-07:00',
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind)
+    $canonicalInstant = Format-StoryPerformanceUtcTimestamp -Timestamp $capturedInstant
+    $roundTrippedInstant = [DateTimeOffset]::Parse(
+        $canonicalInstant,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind)
+    Assert-True ($canonicalInstant -match 'Z$' -and $roundTrippedInstant.UtcDateTime.Ticks -eq $capturedInstant.UtcDateTime.Ticks) 'canonical UTC formatting emits literal Z and preserves the captured instant'
+
+    $runtimeRun = 'runtime-timestamp'
+    $runtimeBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+    $runtimeStart = New-PerformanceEvent -RunId $runtimeRun -EventId "$runtimeRun-start" -EventType story_started -OccurredAtUtc $runtimeBoundary -ReviewMode story_end_only
+    $runtimeStartResult = Record-Transition $runtimeStart
+    Assert-True ($runtimeStartResult.status -eq 'appended') 'runtime-generated story_started reaches the production recorder'
+    $runtimeLedger = Join-Path (Join-Path $fixtureRoot $runtimeRun) 'events.jsonl'
+    $runtimeSetup = New-SyntheticSetupMetadata $runtimeRun
+    foreach ($profile in $runtimeSetup.profiles) { $profile.effectiveFromUtc = $runtimeBoundary }
+    $runtimeSetupPath = Join-Path $fixtureRoot 'runtime-setup.json'
+    Write-Json $runtimeSetupPath $runtimeSetup
+    $runtimeReport = (& $aggregator -EventsPath $runtimeLedger -ReviewMode story_end_only -MetadataPath $runtimeSetupPath) | ConvertFrom-Json -Depth 100
+    Assert-True ($runtimeReport.metrics.modelsAndReasoning.state -eq 'measured') 'the same runtime-generated UTC boundary is accepted for setup profile metadata'
+
+    $zeroOffset = [DateTimeOffset]::Parse(
+        '2026-10-10T04:00:00.1234567+00:00',
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind)
+    $canonicalZeroOffset = Format-StoryPerformanceUtcTimestamp -Timestamp $zeroOffset
+    $roundTrippedZeroOffset = [DateTimeOffset]::Parse(
+        $canonicalZeroOffset,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind)
+    Assert-True ($canonicalZeroOffset -match 'Z$' -and $roundTrippedZeroOffset.UtcDateTime.Ticks -eq $zeroOffset.UtcDateTime.Ticks) 'zero-offset DateTimeOffset round-trips through canonical UTC construction with the same instant'
+    $invalidEvent = New-PerformanceEvent -RunId $runtimeRun -EventId "$runtimeRun-invalid" -EventType story_started -OccurredAtUtc ($zeroOffset.ToString('o')) -ReviewMode story_end_only
+    $runtimeLength = (Get-Item -LiteralPath $runtimeLedger).Length
+    $invalidOutput = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $fixtureRoot -RunId $runtimeRun -EventJson ($invalidEvent | ConvertTo-Json -Compress -Depth 100) 2>&1)
+    Assert-True ($LASTEXITCODE -ne 0 -and ($invalidOutput -join [Environment]::NewLine).Contains('UTC timestamp ending in Z') -and (Get-Item -LiteralPath $runtimeLedger).Length -eq $runtimeLength) 'non-Z UTC input follows recorder validation without changing the immutable ledger'
+
     $ledger = Start-Run 'complete'
     # Two overlapping implementation phases: sum=15 min, union=10 min.
     foreach ($task in @(155,156)) {

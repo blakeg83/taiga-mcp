@@ -18,6 +18,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $utf8 = [Text.UTF8Encoding]::new($false, $true)
 $maxLineBytes = 16MB
+. (Join-Path $PSScriptRoot 'format-story-performance-utc.ps1')
 
 function Get-Value {
     param([AllowNull()] [object] $Object, [Parameter(Mandatory)] [string] $Name)
@@ -86,7 +87,7 @@ function New-Sample {
         [Parameter(Mandatory)] [int] $ResetCount
     )
     return [pscustomobject][ordered]@{
-        sampledAtUtc = $Time.ToString('o')
+        sampledAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $Time
         counters = Copy-CounterMap $Counters
         resetCount = $ResetCount
     }
@@ -323,8 +324,8 @@ function Read-SessionIncrement {
         $State.tokenStream = $null
     }
     if (-not $SessionLifetime) {
-        $startBinding = $StartUtc.ToString('o')
-        $endBinding = $EndUtc.ToString('o')
+        $startBinding = Format-StoryPerformanceUtcTimestamp -Timestamp $StartUtc
+        $endBinding = Format-StoryPerformanceUtcTimestamp -Timestamp $EndUtc
         if ([string] (Get-Value $State 'boundaryStartUtc') -cne $startBinding -or [string] (Get-Value $State 'boundaryEndUtc') -cne $endBinding) {
             $State.startExact = $null; $State.startAfter = $null; $State.startBefore = $null
             $State.endExact = $null; $State.endBefore = $null; $State.endAfter = $null
@@ -627,7 +628,7 @@ if ($SessionLifetime) {
     $missingRoles = @($roleCoverage.Keys | Where-Object { [string] (Get-Value $roleCoverage[$_] 'state') -eq 'unavailable' })
     $coverage = if (@($roleCoverage.Keys | Where-Object { [string] (Get-Value $roleCoverage[$_] 'state') -eq 'measured' }).Count -eq $roleCoverage.Count) { 'measured' } elseif (@($roleCoverage.Values | Where-Object { [string] (Get-Value $_ 'state') -in @('measured', 'partial') }).Count -gt 0) { 'partial' } else { 'unavailable' }
 
-    $stateOut = [ordered]@{ schemaVersion = 1; kind = 'story_performance_usage_cursor'; mode = 'session_lifetime'; updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); sessions = @($sessionStates) }
+    $stateOut = [ordered]@{ schemaVersion = 1; kind = 'story_performance_usage_cursor'; mode = 'session_lifetime'; updatedAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow); sessions = @($sessionStates) }
     $stateParent = Split-Path -Parent $StatePath
     if (-not [string]::IsNullOrWhiteSpace($stateParent)) { [IO.Directory]::CreateDirectory($stateParent) | Out-Null }
     [IO.File]::WriteAllText($StatePath, ($stateOut | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
@@ -728,7 +729,7 @@ foreach ($session in @($sessionStates)) {
     }
 }
 
-$stateOut = [ordered]@{ schemaVersion = 1; kind = 'story_performance_usage_cursor'; updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); sessions = @($sessionStates) }
+$stateOut = [ordered]@{ schemaVersion = 1; kind = 'story_performance_usage_cursor'; updatedAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow); sessions = @($sessionStates) }
 $stateParent = Split-Path -Parent $StatePath
 if (-not [string]::IsNullOrWhiteSpace($stateParent)) { [IO.Directory]::CreateDirectory($stateParent) | Out-Null }
 [IO.File]::WriteAllText($StatePath, ($stateOut | ConvertTo-Json -Depth 100), [Text.UTF8Encoding]::new($false))
@@ -741,7 +742,7 @@ $output = [ordered]@{
     storyId = $boundaries.storyId
     source = 'observed local Codex App session token_count cumulative counters'
     counterSemantics = [ordered]@{ input = 'cumulative input_tokens'; cachedInput = 'cached_input_tokens is included in input_tokens'; output = 'cumulative output_tokens'; reasoning = 'reasoning_output_tokens is included in output_tokens'; aggregation = 'subtract one start boundary from one end boundary per bound session; never sum cumulative notifications' }
-    boundary = [ordered]@{ startUtc = $boundaries.startUtc.ToString('o'); endUtc = $boundaries.endUtc.ToString('o'); sampling = 'complete JSONL lines only; exact boundary when present, otherwise explicit nearest-line coverage' }
+    boundary = [ordered]@{ startUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $boundaries.startUtc; endUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $boundaries.endUtc; sampling = 'complete JSONL lines only; exact boundary when present, otherwise explicit nearest-line coverage' }
     sessions = @($sampleOutput)
     roleTotals = $roleTotals
     coverage = if (@($sampleOutput | Where-Object state -eq 'measured').Count -eq $sampleOutput.Count -and $sampleOutput.Count -gt 0) { 'measured' } elseif (@($sampleOutput | Where-Object state -in @('measured','partial')).Count -gt 0) { 'partial' } else { 'unavailable' }

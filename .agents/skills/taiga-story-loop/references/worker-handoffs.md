@@ -69,6 +69,25 @@ implementation boundaries and final-story start, finding, correction, and
 re-review boundaries when they actually occur. The selected mode is setup
 data, not an inference from whichever events happen to be present.
 
+### Canonical UTC construction
+
+When a workflow transition constructs an event boundary and setup/profile
+metadata, capture one `DateTimeOffset` and format that captured instant through
+the repository helper before building either payload:
+
+```powershell
+. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+$capturedBoundary = [DateTimeOffset]::UtcNow
+$boundaryUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $capturedBoundary
+
+# Use the same $boundaryUtc for occurredAtUtc and effectiveFromUtc as needed.
+```
+
+The helper emits the canonical literal-`Z` form while preserving the captured
+instant. Do not use `DateTimeOffset.ToString('o')` directly (`+00:00` is
+rejected by the recorder), and do not rewrite already captured historical input;
+an invalid supplied timestamp must remain a bounded validation diagnostic.
+
 ## Task-ready message
 
 The implementer sends this to the reviewer after the task's implementation
