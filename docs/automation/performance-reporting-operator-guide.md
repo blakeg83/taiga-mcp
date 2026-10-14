@@ -289,6 +289,12 @@ boundary snapshots once per disjoint session, and
 marks nearest-line or incomplete boundaries as partial. It never sums
 cumulative notifications, uses account-limit windows, or exports prompt text.
 
+For live worker handoffs, use the type-aware constructor and transition-wrapper
+examples in [`worker-handoffs.md`](../../.agents/skills/taiga-story-loop/references/worker-handoffs.md).
+They show executable `New-StoryPerformanceEvent` calls for implementation-ready,
+correction, and correction re-review boundaries, including canonical UTC
+formatting, explicit worker/session identity, and null unsupported usage.
+
 Run the deterministic checks from the repository root:
 
 ```powershell

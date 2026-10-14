@@ -75,6 +75,76 @@ correction linkage, and implementation-ready events emit both identity groups
 as JSON `null`. Incompatible explicit fields are a construction error so stale
 identities are rejected instead of silently carried into the next boundary.
 
+The executable production entry point for these examples is
+[`scripts/new-story-performance-event.ps1`](../../../../scripts/new-story-performance-event.ps1).
+Dot-source it once, capture a real UTC boundary through the canonical formatter,
+and pass each constructed JSON event through
+[`scripts/record-story-performance-transition.ps1`](../../../../scripts/record-story-performance-transition.ps1):
+
+```powershell
+. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+. (Join-Path $repoRoot 'scripts/new-story-performance-event.ps1')
+$transition = Join-Path $repoRoot 'scripts/record-story-performance-transition.ps1'
+$common = @{
+    ProjectId = $projectId; StoryId = $storyId; StoryRef = $storyRef
+    RunId = $runId; ReviewMode = 'per_task'; Usage = $null
+}
+function Write-StoryPerformanceEvent {
+    param([Parameter(Mandatory)] [object] $Event)
+    & pwsh -NoProfile -File $transition -ExternalRunRoot $externalRunRoot `
+        -RunId $runId -TaskRefs @($taskRef) `
+        -EventJson ($Event | ConvertTo-Json -Depth 100 -Compress)
+}
+
+# Implementer: freeze the ready packet with explicit identity and null review/correction fields.
+$readyBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$ready = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-ready" `
+    -EventType 'task_ready_for_review' -OccurredAtUtc $readyBoundary -Scope task `
+    -Role implementer -TaskRef $taskRef -PhaseId $implementationPhaseId `
+    -SessionId $implementerSessionId -WorkerId $implementerWorkerId -Revision $reviewedHead `
+    -Provenance ([ordered]@{ source = 'workflow_transition'; observedBy = $implementerWorkerId; coverage = 'frozen task-ready boundary'; synthetic = $false }) `
+    -CorrectionId $null -SupersedesReviewAttemptId $null -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null
+Write-StoryPerformanceEvent $ready
+
+# Implementer: correction boundaries carry only explicit finding linkage.
+$correctionStartBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$correctionStart = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-correction-started" `
+    -EventType 'correction_started' -OccurredAtUtc $correctionStartBoundary -Scope task `
+    -Role implementer -TaskRef $taskRef -PhaseId $correctionPhaseId `
+    -CorrectionId $correctionId -SupersedesReviewAttemptId $findingAttemptId `
+    -SessionId $implementerSessionId -WorkerId $implementerWorkerId `
+    -Provenance ([ordered]@{ source = 'review_correction'; observedBy = $implementerWorkerId; coverage = 'current reviewer finding'; synthetic = $false })
+Write-StoryPerformanceEvent $correctionStart
+
+$correctionReadyBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$correctionReady = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-correction-ready" `
+    -EventType 'correction_ready' -OccurredAtUtc $correctionReadyBoundary -Scope task `
+    -Role implementer -TaskRef $taskRef -PhaseId $correctionPhaseId `
+    -CorrectionId $correctionId -SupersedesReviewAttemptId $findingAttemptId `
+    -SessionId $implementerSessionId -WorkerId $implementerWorkerId -Revision $correctedHead `
+    -Provenance ([ordered]@{ source = 'workflow_transition'; observedBy = $implementerWorkerId; coverage = 'frozen correction-ready boundary'; synthetic = $false })
+Write-StoryPerformanceEvent $correctionReady
+
+# Reviewer: re-review carries review identity and explicitly null correction linkage.
+$rereviewBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$rereview = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-rereview-started" `
+    -EventType 'review_started' -OccurredAtUtc $rereviewBoundary -Scope task `
+    -Role reviewer -TaskRef $taskRef -PhaseId $rereviewPhaseId `
+    -ReviewRequestId $reviewRequestId -ReviewAttemptId $reviewAttemptId `
+    -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal $reviewAttemptOrdinal `
+    -SessionId $reviewerSessionId -WorkerId $reviewerWorkerId -Revision $correctedHead `
+    -SupersedesReviewAttemptId $null -CorrectionId $null `
+    -Provenance ([ordered]@{ source = 'review_handoff'; observedBy = $reviewerWorkerId; coverage = 'exact correction re-review boundary'; synthetic = $false })
+Write-StoryPerformanceEvent $rereview
+```
+
+The variables in this example are the already-authorized run/task/revision and
+actual worker/session identities from setup and the handoff. If a source or
+usage value is not verified, leave it `$null`; do not substitute a thread ID,
+model guess, zero counter, or synthetic timestamp. Reviewer-owned events keep
+`SupersedesReviewAttemptId` explicitly null; only the two correction events use
+the finding attempt ID.
+
 For an observed quota interruption/resumption, the coordinator uses existing
 `wait_started`/`wait_ended` boundaries with stable `waitId` and
 `waitKind: quota_blocked`. Record real observation timestamps. A quota window
