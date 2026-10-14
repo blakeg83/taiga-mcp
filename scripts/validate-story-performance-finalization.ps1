@@ -26,6 +26,66 @@ function Record-Transition {
     param([object] $Event)
     (& $transition -ExternalRunRoot $fixtureRoot -RunId $Event.runId -EventJson ($Event | ConvertTo-Json -Depth 100 -Compress) -TaskRefs @(155,156)) | ConvertFrom-Json -Depth 100
 }
+function Get-SafeRuntimeSummary {
+    $nativePreference = if ($null -eq $PSNativeCommandUseErrorActionPreference) { 'unset' } elseif ($PSNativeCommandUseErrorActionPreference) { 'true' } else { 'false' }
+    $encoding = try { [Console]::OutputEncoding.WebName } catch { 'unavailable' }
+    $consoleWidth = try { [Console]::WindowWidth } catch { 'unavailable' }
+    return "pwsh=$($PSVersionTable.PSVersion.ToString()); nativeErrorPreference=$nativePreference; outputEncoding=$encoding; consoleWidth=$consoleWidth; culture=$([Globalization.CultureInfo]::CurrentCulture.Name)"
+}
+function Get-SafeTransitionResultSummary {
+    param(
+        [AllowNull()] [object] $Result,
+        [Parameter(Mandatory)] [string] $RunPath
+    )
+    $resultType = if ($null -eq $Result) { 'null' } else { $Result.GetType().Name }
+    $statusValue = $null
+    $diagnostics = @()
+    if ($null -ne $Result) {
+        $statusProperty = $Result.PSObject.Properties['status']
+        if ($null -ne $statusProperty) { $statusValue = [string] $statusProperty.Value }
+        $diagnosticsProperty = $Result.PSObject.Properties['diagnostics']
+        if ($null -ne $diagnosticsProperty) { $diagnostics = @($diagnosticsProperty.Value) }
+    }
+    $status = switch ($statusValue) {
+        'unavailable' { 'unavailable'; break }
+        'appended' { 'appended'; break }
+        'noop' { 'noop'; break }
+        default { if ([string]::IsNullOrWhiteSpace($statusValue)) { 'missing' } else { 'other' } }
+    }
+    $categories = [Collections.Generic.List[string]]::new()
+    foreach ($diagnostic in $diagnostics) {
+        $text = [string] $diagnostic
+        $category = if ($text -ceq "recorder_validation_rejected: 'revision' must be a full Git SHA or null") {
+            'validation_revision'
+        }
+        elseif ($text -match '^recorder_validation_rejected:') {
+            'validation_other'
+        }
+        elseif ($text -match '^recorder_unavailable:') {
+            'recorder_unavailable'
+        }
+        elseif ($text -match '^recorder_execution_failed:') {
+            'recorder_execution_failed'
+        }
+        elseif ($text -match '^input_invalid:') {
+            'input_invalid'
+        }
+        elseif ($text -match '^input_unavailable:') {
+            'input_unavailable'
+        }
+        elseif ([string]::IsNullOrWhiteSpace($text)) {
+            'blank'
+        }
+        else {
+            'unrecognized'
+        }
+        [void] $categories.Add($category)
+    }
+    if ($categories.Count -eq 0) { [void] $categories.Add('none') }
+    $runDirectoryExists = Test-Path -LiteralPath $RunPath -PathType Container
+    $ledgerExists = Test-Path -LiteralPath (Join-Path $RunPath 'events.jsonl') -PathType Leaf
+    return "type=$resultType; status=$status; diagnosticCount=$($diagnostics.Count); categories=$($categories -join ','); runDirectoryExists=$runDirectoryExists; ledgerExists=$ledgerExists; runtime=$(Get-SafeRuntimeSummary)"
+}
 function Start-Run {
     param([string] $RunId, [string] $Mode = 'story_end_only')
     $event = New-PerformanceEvent -RunId $RunId -EventId "$RunId-start" -EventType story_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode $Mode
@@ -43,6 +103,11 @@ function Finish-Run {
 }
 try {
     [IO.Directory]::CreateDirectory($fixtureRoot) | Out-Null
+    $summarySafety = Get-SafeTransitionResultSummary -Result ([pscustomobject]@{
+            status = 'unavailable'
+            diagnostics = @('recorder_execution_failed: synthetic-secret-payload', 'unexpected synthetic payload')
+        }) -RunPath (Join-Path $fixtureRoot 'diagnostic-summary-safety')
+    Assert-True ($summarySafety.Contains('status=unavailable') -and $summarySafety.Contains('diagnosticCount=2') -and $summarySafety.Contains('categories=recorder_execution_failed,unrecognized') -and -not $summarySafety.Contains('synthetic-secret-payload') -and -not $summarySafety.Contains('unexpected synthetic payload')) 'transition assertion summaries expose only safe result categories and never diagnostic payload text'
 
     $capturedInstant = [DateTimeOffset]::Parse(
         '2026-10-10T04:00:00.1234567-07:00',
@@ -95,7 +160,9 @@ try {
     $revisionDiagnosticEvent.projectId = 12; $revisionDiagnosticEvent.storyId = 753; $revisionDiagnosticEvent.storyRef = 215
     $revisionDiagnostic = Record-Transition $revisionDiagnosticEvent
     $revisionDiagnosticText = $revisionDiagnostic.diagnostics -join '; '
-    Assert-True ($revisionDiagnostic.status -eq 'unavailable' -and $revisionDiagnosticText.Contains("recorder_validation_rejected: 'revision' must be a full Git SHA or null") -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $revisionDiagnosticRun) -PathType Container)) 'transition wrapper classifies another recorder field rejection as validation with a bounded safe reason and no append'
+    $revisionDiagnosticSummary = Get-SafeTransitionResultSummary -Result $revisionDiagnostic -RunPath (Join-Path $fixtureRoot $revisionDiagnosticRun)
+    $revisionDiagnosticIsExpected = $revisionDiagnostic.status -eq 'unavailable' -and $revisionDiagnosticText.Contains("recorder_validation_rejected: 'revision' must be a full Git SHA or null") -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $revisionDiagnosticRun) -PathType Container)
+    Assert-True $revisionDiagnosticIsExpected "transition wrapper classifies another recorder field rejection as validation with a bounded safe reason and no append; observed=$revisionDiagnosticSummary; expectedCategory=validation_revision"
     foreach ($schemaCase in @(
             @{ run = 'recorder-schema-version-diagnostic'; property = 'schemaVersion'; value = 2; expected = "recorder_validation_rejected: 'schemaVersion' must be 1" },
             @{ run = 'recorder-kind-diagnostic'; property = 'kind'; value = 'wrong-kind'; expected = "recorder_validation_rejected: 'kind' must be story_performance_event" })) {
