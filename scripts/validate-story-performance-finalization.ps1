@@ -89,6 +89,50 @@ try {
     $correctionDiagnostic = Record-Transition $correctionDiagnosticEvent
     $correctionDiagnosticText = $correctionDiagnostic.diagnostics -join '; '
     Assert-True ($correctionDiagnostic.status -eq 'unavailable' -and $correctionDiagnosticText.Contains('recorder_validation_rejected: correctionId is allowed only on correction events') -and -not $correctionDiagnosticText.Contains('synthetic-secret-correction') -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $correctionDiagnosticRun) -PathType Container)) 'transition wrapper surfaces the bounded correction-field validation reason without exposing payload values or appending invalid input'
+    $revisionDiagnosticRun = 'recorder-revision-diagnostic'
+    $revisionDiagnosticEvent = New-PerformanceEvent -RunId $revisionDiagnosticRun -EventId "$revisionDiagnosticRun-invalid" -EventType task_ready_for_review -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode per_task -Scope task -TaskRef 155 -PhaseId revision-diagnostic -Role implementer -Revision 'invalid-synthetic-secret'
+    $revisionDiagnosticEvent.projectId = 12; $revisionDiagnosticEvent.storyId = 753; $revisionDiagnosticEvent.storyRef = 215
+    $revisionDiagnostic = Record-Transition $revisionDiagnosticEvent
+    $revisionDiagnosticText = $revisionDiagnostic.diagnostics -join '; '
+    Assert-True ($revisionDiagnostic.status -eq 'unavailable' -and $revisionDiagnosticText.Contains("recorder_validation_rejected: 'revision' must be a full Git SHA or null") -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $revisionDiagnosticRun) -PathType Container)) 'transition wrapper classifies another recorder field rejection as validation with a bounded safe reason and no append'
+    $malformedDiagnosticRun = 'malformed-input-diagnostic'
+    $malformedSecretMarker = 'synthetic-secret-field'
+    $malformedJson = '{"' + $malformedSecretMarker + '-' + ('x' * 10000) + '":'
+    $malformedDiagnostic = (& $transition -ExternalRunRoot $fixtureRoot -RunId $malformedDiagnosticRun -EventJson $malformedJson -TaskRefs @(155,156)) | ConvertFrom-Json -Depth 100
+    $malformedDiagnosticText = $malformedDiagnostic.diagnostics -join '; '
+    Assert-True ($malformedDiagnostic.status -eq 'unavailable' -and $malformedDiagnosticText -ceq 'input_invalid: event JSON could not be parsed' -and $malformedDiagnosticText.Length -le 128 -and -not $malformedDiagnosticText.Contains($malformedSecretMarker) -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $malformedDiagnosticRun) -PathType Container)) 'malformed and oversized input produces a bounded redacted diagnostic without blocking or creating a ledger'
+    $controlEvent = New-PerformanceEvent -RunId recorder-control-event -EventId recorder-control-event-start -EventType story_started -OccurredAtUtc '2026-10-10T04:00:00Z' -ReviewMode story_end_only
+    $controlEvent.projectId = 12; $controlEvent.storyId = 753; $controlEvent.storyRef = 215
+    $controlEventPath = Join-Path $fixtureRoot 'recorder-control-event.json'; Write-Json $controlEventPath $controlEvent
+    $controlScript = Join-Path $fixtureRoot 'recorder-control.ps1'
+    $controlScriptText = @'
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)] [ValidateSet('unavailable', 'execution')] [string] $Mode,
+    [Parameter(Mandatory)] [string] $TransitionPath,
+    [Parameter(Mandatory)] [string] $ExternalRunRoot,
+    [Parameter(Mandatory)] [string] $RunId,
+    [Parameter(Mandatory)] [string] $EventPath
+)
+if ($Mode -ceq 'unavailable') {
+    function global:Get-Command {
+        if ($args.Count -gt 0 -and [string] $args[0] -ceq 'pwsh') { return }
+        Microsoft.PowerShell.Management\Get-Command @args
+    }
+}
+else {
+    function global:pwsh { throw 'synthetic recorder launch failure' }
+}
+& $TransitionPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventPath $EventPath -TaskRefs @(216,217,218,219,220,221)
+'@
+    [IO.File]::WriteAllText($controlScript, $controlScriptText, $encoding)
+    $pwshPath = (Get-Command pwsh).Source
+    $unavailableRun = 'recorder-unavailable-diagnostic'
+    $unavailableControl = (& $pwshPath -NoProfile -File $controlScript -Mode unavailable -TransitionPath $transition -ExternalRunRoot $fixtureRoot -RunId $unavailableRun -EventPath $controlEventPath) | ConvertFrom-Json -Depth 100
+    Assert-True ($unavailableControl.status -eq 'unavailable' -and ($unavailableControl.diagnostics -join '; ') -ceq 'recorder_unavailable: pwsh executable is unavailable' -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $unavailableRun) -PathType Container)) 'recorder unavailability is explicit, bounded, nonblocking, and does not append'
+    $executionRun = 'recorder-execution-diagnostic'
+    $executionControl = (& $pwshPath -NoProfile -File $controlScript -Mode execution -TransitionPath $transition -ExternalRunRoot $fixtureRoot -RunId $executionRun -EventPath $controlEventPath) | ConvertFrom-Json -Depth 100
+    Assert-True ($executionControl.status -eq 'unavailable' -and ($executionControl.diagnostics -join '; ') -ceq 'recorder_execution_failed: recorder process could not be started' -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $executionRun) -PathType Container)) 'recorder execution failure is explicit, bounded, nonblocking, and does not append'
 
     $defaultRun = Start-Run 'omitted-finalizer-timestamp'
     $defaultParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = 'omitted-finalizer-timestamp'; ArtifactRoot = (Join-Path $fixtureRoot 'omitted-finalizer-timestamp-artifacts'); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(155,156) }
