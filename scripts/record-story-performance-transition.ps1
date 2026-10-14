@@ -75,32 +75,39 @@ function Get-RecorderValidationDiagnostic {
         "'runId' must be a path-safe stable identifier"
     )
     foreach ($item in @($Output)) {
-        $message = if ($item -is [System.Management.Automation.ErrorRecord] -and $null -ne $item.Exception) {
-            [string] $item.Exception.Message
+        $messages = if ($item -is [System.Management.Automation.ErrorRecord]) {
+            @(
+                [string] $item
+                if ($null -ne $item.Exception) { [string] $item.Exception.Message }
+                if ($null -ne $item.ErrorDetails) { [string] $item.ErrorDetails }
+            )
         }
         else {
-            [string] $item
+            @([string] $item)
         }
-        $candidate = $null
-        if ($message -match '(?m)^\s*\|\s*(?<candidate>[^\r\n]{1,240})\s*$') {
-            $candidate = $matches['candidate'].Trim()
-        }
-        foreach ($knownMessage in $knownMessages.Keys) {
-            if ($message.IndexOf($knownMessage, [StringComparison]::Ordinal) -ge 0) {
-                return "recorder_validation_rejected: $($knownMessages[$knownMessage])"
+        foreach ($message in $messages) {
+            if ([string]::IsNullOrWhiteSpace($message)) { continue }
+            $candidate = $null
+            if ($message -match '(?m)^\s*\|\s*(?<candidate>[^\r\n]{1,240})\s*$') {
+                $candidate = $matches['candidate'].Trim()
             }
-        }
-        if ($candidate -and $candidate -match "^'(?<field>$knownFieldPattern)' $knownFieldReasonPattern$") {
-            return "recorder_validation_rejected: $candidate"
-        }
-        if ($candidate -and $candidate -match "^review events require '(?<field>$knownFieldPattern)'$") {
-            return "recorder_validation_rejected: $candidate"
-        }
-        if ($candidate -and $candidate -match "^'[A-Za-z][A-Za-z0-9_.]{0,96}' is not an allowlisted field$") {
-            return 'recorder_validation_rejected: event contains a non-allowlisted field'
-        }
-        if ($candidate -and $candidate -in $knownStaticMessages) {
-            return "recorder_validation_rejected: $candidate"
+            foreach ($knownMessage in $knownMessages.Keys) {
+                if ($message.IndexOf($knownMessage, [StringComparison]::Ordinal) -ge 0) {
+                    return "recorder_validation_rejected: $($knownMessages[$knownMessage])"
+                }
+            }
+            if ($candidate -and $candidate -match "^'(?<field>$knownFieldPattern)' $knownFieldReasonPattern$") {
+                return "recorder_validation_rejected: $candidate"
+            }
+            if ($candidate -and $candidate -match "^review events require '(?<field>$knownFieldPattern)'$") {
+                return "recorder_validation_rejected: $candidate"
+            }
+            if ($candidate -and $candidate -match "^'[A-Za-z][A-Za-z0-9_.]{0,96}' is not an allowlisted field$") {
+                return 'recorder_validation_rejected: event contains a non-allowlisted field'
+            }
+            if ($candidate -and $candidate -in $knownStaticMessages) {
+                return "recorder_validation_rejected: $candidate"
+            }
         }
     }
     return $null
