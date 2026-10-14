@@ -79,7 +79,7 @@ function Get-SafeTransitionResultSummary {
         else {
             'unrecognized'
         }
-        [void] $categories.Add($category)
+        if (-not $categories.Contains($category)) { [void] $categories.Add($category) }
     }
     if ($categories.Count -eq 0) { [void] $categories.Add('none') }
     $runDirectoryExists = Test-Path -LiteralPath $RunPath -PathType Container
@@ -108,6 +108,11 @@ try {
             diagnostics = @('recorder_execution_failed: synthetic-secret-payload', 'unexpected synthetic payload')
         }) -RunPath (Join-Path $fixtureRoot 'diagnostic-summary-safety')
     Assert-True ($summarySafety.Contains('status=unavailable') -and $summarySafety.Contains('diagnosticCount=2') -and $summarySafety.Contains('categories=recorder_execution_failed,unrecognized') -and -not $summarySafety.Contains('synthetic-secret-payload') -and -not $summarySafety.Contains('unexpected synthetic payload')) 'transition assertion summaries expose only safe result categories and never diagnostic payload text'
+    $repeatedSummary = Get-SafeTransitionResultSummary -Result ([pscustomobject]@{
+            status = 'unavailable'
+            diagnostics = @('unexpected synthetic payload') * 1000
+        }) -RunPath (Join-Path $fixtureRoot 'diagnostic-summary-repeated')
+    Assert-True ($repeatedSummary.Length -le 1024 -and $repeatedSummary.Contains('diagnosticCount=1000') -and $repeatedSummary.Contains('categories=unrecognized') -and -not $repeatedSummary.Contains('unexpected synthetic payload')) 'transition assertion summaries deduplicate repeated categories and remain bounded without exposing payload text'
 
     $capturedInstant = [DateTimeOffset]::Parse(
         '2026-10-10T04:00:00.1234567-07:00',
