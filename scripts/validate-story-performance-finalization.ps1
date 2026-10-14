@@ -239,7 +239,7 @@ try {
     $controlScriptText = @'
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)] [ValidateSet('unavailable', 'execution', 'output')] [string] $Mode,
+    [Parameter(Mandatory)] [ValidateSet('unavailable', 'execution', 'output', 'wrapped')] [string] $Mode,
     [Parameter(Mandatory)] [string] $TransitionPath,
     [Parameter(Mandatory)] [string] $ExternalRunRoot,
     [Parameter(Mandatory)] [string] $RunId,
@@ -254,9 +254,17 @@ if ($Mode -ceq 'unavailable') {
 elseif ($Mode -ceq 'execution') {
     function global:pwsh { throw 'synthetic recorder launch failure' }
 }
-else {
+elseif ($Mode -ceq 'output') {
     function global:pwsh {
         Write-Output 'synthetic-secret-child-output'
+        $global:LASTEXITCODE = 17
+    }
+}
+else {
+    function global:pwsh {
+        $escape = [char]27
+        Write-Output "${escape}[31m    | 'revision' must be a full Git${escape}[0m"
+        Write-Output "${escape}[31m    | SHA or null${escape}[0m"
         $global:LASTEXITCODE = 17
     }
 }
@@ -275,6 +283,10 @@ else {
     $outputDiagnostic = $outputControl.diagnostics -join '; '
     $outputSummary = Get-SafeTransitionResultSummary -Result $outputControl -RunPath (Join-Path $fixtureRoot $outputRun)
     Assert-True ($outputControl.status -eq 'unavailable' -and $outputDiagnostic -ceq 'recorder_execution_failed: recorder exited with code 17; validation reason unavailable; recorder_output_items=1; recorder_output_kinds=string; recorder_output_categories=unrecognized' -and $outputSummary.Contains('childOutputKinds=string') -and $outputSummary.Contains('childOutputCategories=unrecognized') -and -not $outputDiagnostic.Contains('synthetic-secret-child-output') -and -not $outputSummary.Contains('synthetic-secret-child-output') -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $outputRun) -PathType Container)) 'recorder nonzero output is classified with bounded output-shape categories without exposing child text or appending'
+    $wrappedRun = 'recorder-wrapped-diagnostic'
+    $wrappedControl = (& $pwshPath -NoProfile -File $controlScript -Mode wrapped -TransitionPath $transition -ExternalRunRoot $fixtureRoot -RunId $wrappedRun -EventPath $controlEventPath) | ConvertFrom-Json -Depth 100
+    $wrappedDiagnostic = $wrappedControl.diagnostics -join '; '
+    Assert-True ($wrappedControl.status -eq 'unavailable' -and $wrappedDiagnostic -ceq "recorder_validation_rejected: 'revision' must be a full Git SHA or null" -and -not (Test-Path -LiteralPath (Join-Path $fixtureRoot $wrappedRun) -PathType Container)) 'multiline wrapped recorder validation output is matched only to the allowlisted reason without append'
 
     $defaultRun = Start-Run 'omitted-finalizer-timestamp'
     $defaultParameters = @{ Delivery = $delivery; ExternalRunRoot = $fixtureRoot; RunId = 'omitted-finalizer-timestamp'; ArtifactRoot = (Join-Path $fixtureRoot 'omitted-finalizer-timestamp-artifacts'); BaseRevision = $head; RepositoryPath = $repository; ReviewMode = 'story_end_only'; TaskRefs = @(155,156) }

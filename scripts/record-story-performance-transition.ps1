@@ -74,6 +74,52 @@ function Get-RecorderValidationDiagnostic {
         'event story binding does not match the selected external run',
         "'runId' must be a path-safe stable identifier"
     )
+    $normalizedParts = [Collections.Generic.List[string]]::new()
+    $normalizationBudget = 65536
+    $ansiPattern = ([char]27).ToString() + '\[[0-?]*[ -/]*[@-~]'
+    foreach ($item in @($Output)) {
+        $messages = if ($item -is [System.Management.Automation.ErrorRecord]) {
+            @(
+                [string] $item
+                if ($null -ne $item.Exception) { [string] $item.Exception.Message }
+                if ($null -ne $item.ErrorDetails) { [string] $item.ErrorDetails }
+            )
+        }
+        else {
+            @([string] $item)
+        }
+        foreach ($message in $messages) {
+            if ($normalizationBudget -le 0 -or [string]::IsNullOrWhiteSpace($message)) { continue }
+            $normalized = [regex]::Replace($message, $ansiPattern, '')
+            $normalized = $normalized -replace '\|', ' '
+            $normalized = [regex]::Replace($normalized, '\s+', ' ').Trim()
+            if ($normalized.Length -gt $normalizationBudget) { $normalized = $normalized.Substring(0, $normalizationBudget) }
+            if ($normalized.Length -gt 0) {
+                [void] $normalizedParts.Add($normalized)
+                $normalizationBudget -= $normalized.Length
+            }
+        }
+    }
+    $combined = $normalizedParts -join ' '
+    foreach ($knownMessage in $knownMessages.Keys) {
+        if ($combined.IndexOf($knownMessage, [StringComparison]::Ordinal) -ge 0) {
+            return "recorder_validation_rejected: $($knownMessages[$knownMessage])"
+        }
+    }
+    foreach ($knownStaticMessage in $knownStaticMessages) {
+        if ($combined.IndexOf($knownStaticMessage, [StringComparison]::Ordinal) -ge 0) {
+            return "recorder_validation_rejected: $knownStaticMessage"
+        }
+    }
+    if ($combined -match "'(?<field>$knownFieldPattern)' $knownFieldReasonPattern") {
+        return "recorder_validation_rejected: $($matches[0])"
+    }
+    if ($combined -match "review events require '(?<field>$knownFieldPattern)'") {
+        return "recorder_validation_rejected: $($matches[0])"
+    }
+    if ($combined -match "'[A-Za-z][A-Za-z0-9_.]{0,96}' is not an allowlisted field") {
+        return 'recorder_validation_rejected: event contains a non-allowlisted field'
+    }
     foreach ($item in @($Output)) {
         $messages = if ($item -is [System.Management.Automation.ErrorRecord]) {
             @(
