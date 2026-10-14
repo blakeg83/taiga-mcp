@@ -298,6 +298,24 @@ try {
     }
     catch { $malformedConstructorRejected = $true }
     Assert-True $malformedConstructorRejected 'event constructor rejects incompatible explicit stale correction identity'
+    $malformedCorrectionIdOnlyRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid-correction-id-only' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:02:30Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid-correction-id-only' -Revision $revisionB -CorrectionId 'stale-correction' -Role implementer | Out-Null
+    }
+    catch { $malformedCorrectionIdOnlyRejected = $true }
+    Assert-True $malformedCorrectionIdOnlyRejected 'event constructor rejects correctionId supplied alone on a non-correction event'
+    $malformedSupersedesOnlyRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid-supersedes-only' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:02:40Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid-supersedes-only' -Revision $revisionB -SupersedesReviewAttemptId 'stale-attempt' -Role implementer | Out-Null
+    }
+    catch { $malformedSupersedesOnlyRejected = $true }
+    Assert-True $malformedSupersedesOnlyRejected 'event constructor rejects supersedesReviewAttemptId supplied alone on a non-correction event'
+    $malformedWaitKindOnlyRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid-wait-kind-only' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:02:50Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid-wait-kind-only' -Revision $revisionB -WaitKind reviewer -Role implementer | Out-Null
+    }
+    catch { $malformedWaitKindOnlyRejected = $true }
+    Assert-True $malformedWaitKindOnlyRejected 'event constructor rejects waitKind supplied alone on a non-wait event'
     $events = @(
         (New-Event -EventId 'story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'story' -Role 'coordinator'),
         (New-Event -EventId 'impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:05:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'task-152-impl' -Role 'implementer'),

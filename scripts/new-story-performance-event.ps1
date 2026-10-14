@@ -70,13 +70,13 @@ function New-StoryPerformanceEvent {
     if (-not $isReview -and @($reviewValues | Where-Object { Test-PerformanceEventValue $_ }).Count -gt 0) {
         throw "event-type constructor rejected review identity on non-review event '$EventType'"
     }
-    if (-not $isCorrection -and (Test-PerformanceEventValue $correctionValue -or Test-PerformanceEventValue $supersedesValue)) {
+    if (-not $isCorrection -and ((Test-PerformanceEventValue $correctionValue) -or (Test-PerformanceEventValue $supersedesValue))) {
         throw "event-type constructor rejected correction identity on non-correction event '$EventType'"
     }
     if ($isCorrection -and @($reviewValues | Where-Object { Test-PerformanceEventValue $_ }).Count -gt 0) {
         throw "event-type constructor rejected review identity on correction event '$EventType'"
     }
-    if (-not $isWait -and (Test-PerformanceEventValue $waitIdValue -or Test-PerformanceEventValue $waitKindValue)) {
+    if (-not $isWait -and ((Test-PerformanceEventValue $waitIdValue) -or (Test-PerformanceEventValue $waitKindValue))) {
         throw "event-type constructor rejected wait identity on non-wait event '$EventType'"
     }
     if ($EventType -notin @('pr_ready') -and $null -ne $PullRequest) {
