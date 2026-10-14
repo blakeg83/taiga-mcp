@@ -130,6 +130,24 @@ Recovery rules are deliberately conservative:
   completed implementation, review, or PR-readiness transition. Reconcile
   before considering any retry; never blindly replay an ambiguous write.
 
+### Constructing live UTC boundaries
+
+Production transition events and setup/profile metadata must share one captured
+UTC instant and the repository's canonical formatter. From the repository
+root, use:
+
+```powershell
+. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+$capturedBoundary = [DateTimeOffset]::UtcNow
+$boundaryUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $capturedBoundary
+```
+
+Pass `$boundaryUtc` to `occurredAtUtc` and, when a profile begins at that
+boundary, to `effectiveFromUtc`. The formatter emits literal `Z` and preserves
+the captured instant. A direct `DateTimeOffset.UtcNow.ToString('o')` emits
+`+00:00`, which the recorder and report generator reject; existing historical
+timestamps are never silently rewritten.
+
 ### Bounded historical reporting recovery
 
 When a retained ledger contains a validated, narrowly scoped field-shape defect
@@ -270,6 +288,12 @@ whose `payload.type` is `token_count` and whose counter is
 boundary snapshots once per disjoint session, and
 marks nearest-line or incomplete boundaries as partial. It never sums
 cumulative notifications, uses account-limit windows, or exports prompt text.
+
+For live worker handoffs, use the type-aware constructor and transition-wrapper
+examples in [`worker-handoffs.md`](../../.agents/skills/taiga-story-loop/references/worker-handoffs.md).
+They show executable `New-StoryPerformanceEvent` calls for implementation-ready,
+correction, and correction re-review boundaries, including canonical UTC
+formatting, explicit worker/session identity, and null unsupported usage.
 
 Run the deterministic checks from the repository root:
 
@@ -478,6 +502,16 @@ diagnostics. Recording and diagnostic failures are limitations; they are not
 workflow authorization or advancement gates. Actual observed UTC timestamps
 are required. No historical boundary may be manufactured.
 
+The wrapper's bounded `diagnostics` distinguish actionable event rejection from
+recorder availability or execution failure. A value such as
+`recorder_validation_rejected: occurredAtUtc must be an ISO 8601 UTC timestamp
+ending in Z` identifies the field to correct before retrying the same
+authorized transition. `recorder_unavailable: ...` and
+`recorder_execution_failed: ...` require preserving the valid workflow outcome,
+surfacing limited telemetry, and reconciling the recorder path before retrying.
+These messages omit raw event JSON, payload values, secrets, prompts, and
+transcripts; do not append a replacement event to repair rejected input.
+
 After a confirmed exact-HEAD PR create/reuse, invoke the production finalizer:
 
 ```powershell
@@ -504,6 +538,25 @@ base/diff, branch/approved/checks/final-review exact-HEAD evidence. The producti
 entry point validates this same receipt; a confirmed flag alone is insufficient.
 A telemetry command never confirms provider operations itself.
 
+For final production-path verification, run the focused finalization suite, the
+integrated reporting matrix, lifecycle ownership checks, and the full-range
+whitespace check from the repository root:
+
+```powershell
+pwsh -NoProfile -File scripts/validate-story-performance-finalization.ps1
+pwsh -NoProfile -File scripts/validate-performance-reporting.ps1
+pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-lifecycle-bindings.ps1
+git diff --check <captured-base-sha>..HEAD
+```
+
+The focused suite reaches the production finalizer in both `per_task` and
+`story_end_only` modes, exercises rejected and missing initialization,
+event-construction diagnostics, verified and unavailable source bindings,
+collector failure, limited publication, exact-HEAD idempotency, and normal
+JSON/Markdown delivery references. It uses isolated synthetic ledgers, counter
+files, receipts, and temporary directories; it does not mutate Taiga, provider
+state, or historical run artifacts.
+
 The finalizer checks the run's selected `observed-role-token-usage.json` sibling
 when an explicit evidence path is absent. It invokes the existing collector
 when bindings exist, including the collector's existing selected-source handling.
@@ -517,8 +570,12 @@ ledger remains unchanged except for the normally confirmed `pr_ready` append.
 
 `provenance.collectionAttempt` distinguishes `measured`, `partial`,
 `source_unavailable`, `failed`, and `skipped`, with `discoveryAttempted`,
-`collectorInvoked`, and a reason. This is collection-attempt evidence, separate
-from metric states. Direct aggregation without finalization reports `skipped`.
+`collectorInvoked`, a bounded `reasonCode`, and a reason. Binding problems,
+inaccessible sources, missing lifecycle boundaries, and collector execution
+failures remain distinct; a missing `story_started` boundary is
+`source_unavailable` with `boundary_unavailable`, not a collector failure.
+This is collection-attempt evidence, separate from metric states. Direct
+aggregation without finalization reports `skipped`.
 An existing exact-HEAD report is checksum-verified and returned without
 recollection/overwrite; historical reports lacking attempt evidence remain
 preserved and explicitly disclose that absence.
@@ -535,6 +592,24 @@ Timing values have separate semantics:
 - `quotaAdjustedElapsed`: wall-clock elapsed minus confirmed quota overlap;
   other idle time remains included.
 - `activeExecutionElapsed`: unavailable without independent activity evidence.
+
+Setup metadata is complete only when validated coordinator, implementer, and
+reviewer profile evidence is present. A missing role remains `partial` with
+that role listed in `missingRoles`; it never causes a model or reasoning
+setting to be guessed. A profile's optional `sessionId` is not a token source
+by itself: observed-role rows must name a real local source, and the collector
+accepts counters only after `session_meta.payload.id` matches the declared
+session ID. Invalid or inaccessible bindings are retained as bounded
+diagnostics and cannot produce measured role totals.
+
+If `story_started` is absent but the ledger contains exactly one coherent
+story-scoped `pr_ready` event for the confirmed provider PR and reviewed HEAD,
+finalization anchors story identity to that existing readiness event. It does
+not infer or append a replacement start event. JSON, Markdown, and manifest
+artifacts may still publish with implementation/review measurements preserved;
+`timeToPr` is `unavailable` and the report names the missing start boundary.
+Ambiguous, conflicting, or missing readiness evidence keeps the report
+unavailable while confirmed PR delivery remains valid.
 
 Quota events use existing `wait_started`/`wait_ended` and a stable `waitId`;
 the quota window length is never a blocked-duration estimate. Correction events

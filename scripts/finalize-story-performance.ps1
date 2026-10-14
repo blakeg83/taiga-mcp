@@ -14,7 +14,7 @@ param(
     [string] $ObservedEvidencePath,
     [string] $TaskOutcomePath,
     [string] $Scope,
-    [string] $OccurredAtUtc = [DateTime]::UtcNow.ToString('o'),
+    [string] $OccurredAtUtc,
     [switch] $ArtifactsAccessibleToUser,
     [string] $RecorderPath = (Join-Path $PSScriptRoot '../.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1'),
     [string] $AggregatorPath = (Join-Path $PSScriptRoot 'get-story-performance.ps1'),
@@ -22,6 +22,11 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'format-story-performance-utc.ps1')
+. (Join-Path $PSScriptRoot 'new-story-performance-event.ps1')
+if (-not $PSBoundParameters.ContainsKey('OccurredAtUtc')) {
+    $OccurredAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+}
 function Assert-True { param([bool] $Condition, [string] $Message) if (-not $Condition) { throw $Message } }
 function Test-DeliveryPreflight {
     param([hashtable] $Receipt)
@@ -104,6 +109,33 @@ function Resolve-PublishedReportArtifacts {
     }
 }
 
+function Get-CollectionReasonCode {
+    param(
+        [Parameter(Mandatory)] [string] $Status,
+        [AllowNull()] [object] $Usage,
+        [AllowNull()] [string] $Fallback = $null
+    )
+
+    if ($Status -eq 'measured') { return 'measured' }
+    if ($Status -eq 'partial') { return 'partial_coverage' }
+    if ($Status -eq 'failed') { return 'collector_failed' }
+    if ($Status -eq 'skipped') { return 'collection_skipped' }
+    if ($null -ne $Usage) {
+        $diagnostics = @($Usage.bindingDiagnostics)
+        if (@($diagnostics | Where-Object { $_.category -eq 'binding_invalid' -or $_.category -eq 'binding_unverified' -or $_.category -eq 'binding_conflict' }).Count -gt 0) {
+            return 'binding_unavailable_or_invalid'
+        }
+        if (@($diagnostics | Where-Object { $_.category -eq 'source_unavailable' -or $_.category -eq 'source_invalid' }).Count -gt 0) {
+            return 'source_unavailable_or_invalid'
+        }
+        if (@($Usage.sessions | Where-Object { $_.state -eq 'unavailable' -and [int]$_.invalidRecords -gt 0 }).Count -gt 0) {
+            return 'binding_unavailable_or_invalid'
+        }
+    }
+    if ($Fallback -like 'story_usage_boundary_unavailable*') { return 'boundary_unavailable' }
+    return 'source_unavailable'
+}
+
 function Invoke-Finalization {
     if ($DeliveryPath) { $Delivery = Get-Content -LiteralPath $DeliveryPath -Raw | ConvertFrom-Json -AsHashtable -Depth 100 }
     $pr = if ($Delivery.ContainsKey('pr')) { $Delivery.pr } else { $null }
@@ -155,10 +187,6 @@ function Invoke-Finalization {
             $record = $_ | ConvertFrom-Json -AsHashtable -Depth 100 -DateKind String
             if ($record.kind -ceq 'story_performance_event_frame') { $record.event } else { $record }
         })
-        $starts = @($records | Where-Object eventType -eq 'story_started')
-        if ($starts.Count -ne 1 -or $starts[0].runId -cne $RunId -or $starts[0].reviewMode -cne $ReviewMode) { throw 'story initialization is missing, ambiguous, or mismatched' }
-        $start = $starts[0]
-        $result.storyRef = $start.storyRef; $result.projectId = $start.projectId; $result.storyId = $start.storyId
         # Derive PR identity from the confirmed provider record, never this repository.
         $prUri = [Uri] $pr.url
         $parts = $prUri.AbsolutePath.Trim('/').Split('/')
@@ -166,24 +194,43 @@ function Invoke-Finalization {
         $identity = [ordered]@{ provider = 'github'; owner = $parts[0]; repository = $parts[1]; number = [int] $pr.number; reviewedHead = [string] $Delivery.reviewedHead }
         $existing = @($records | Where-Object { $_.eventType -ceq 'pr_ready' -and $_.revision -ceq $Delivery.reviewedHead })
         if ($existing.Count -gt 1) { throw 'ambiguous pr_ready evidence' }
-        if ($existing.Count -eq 1) {
-            $ready = $existing[0]
-            foreach ($key in $identity.Keys) { if ($ready.pullRequest[$key] -cne $identity[$key]) { throw 'pr_ready identity conflict' } }
+        $starts = @($records | Where-Object eventType -eq 'story_started')
+        $missingStart = $false
+        if ($starts.Count -gt 1) { throw 'story initialization is missing, ambiguous, or mismatched' }
+        if ($starts.Count -eq 1) {
+            if ($starts[0].runId -cne $RunId -or $starts[0].reviewMode -cne $ReviewMode) { throw 'story initialization is missing, ambiguous, or mismatched' }
+            $start = $starts[0]
         }
         else {
-            $ready = [ordered]@{}
-            foreach ($key in $start.Keys) { $ready[$key] = $start[$key] }
-            $ready.eventId = "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)"
-            $ready.transitionId = $ready.eventId
-            $ready.eventType = 'pr_ready'; $ready.occurredAtUtc = $OccurredAtUtc
-            $ready.revision = [string] $Delivery.reviewedHead; $ready.pullRequest = $identity
-            $ready.usage = $null
-            $ready.provenance = [ordered]@{ source = 'confirmed_pr_delivery'; observedBy = 'finalize-story-performance'; coverage = 'confirmed provider receipt and exact reviewed HEAD'; synthetic = [bool] $start.provenance.synthetic }
+            if ($existing.Count -ne 1) { throw 'story initialization is missing and confirmed pr_ready evidence is unavailable' }
+            $start = $existing[0]
+            $missingStart = $true
         }
-        $recordOutput = @(& pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson ($ready | ConvertTo-Json -Compress -Depth 100) 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw 'recorder failure; no confirmed pr_ready recording' }
-        $recordResult = ($recordOutput -join "`n") | ConvertFrom-Json
-        if ($recordResult.status -notin @('appended', 'noop')) { throw 'recorder failure or unknown recording outcome' }
+        foreach ($record in $records) {
+            if ($record.runId -cne $RunId -or $record.projectId -ne $start.projectId -or
+                $record.storyId -ne $start.storyId -or $record.storyRef -ne $start.storyRef -or
+                $record.reviewMode -cne $ReviewMode) {
+                throw 'story telemetry identity is missing, ambiguous, or mismatched'
+            }
+        }
+        if ($start.scope -cne 'story' -or $start.eventType -ne 'story_started' -and $start.eventType -ne 'pr_ready') {
+            throw 'story initialization anchor is not a valid story boundary'
+        }
+        $result.storyRef = $start.storyRef; $result.projectId = $start.projectId; $result.storyId = $start.storyId
+        if ($existing.Count -eq 1) {
+            $ready = $existing[0]
+            if ($ready.scope -cne 'story' -or $ready.role -cne 'coordinator') { throw 'pr_ready evidence is not a story coordinator boundary' }
+            foreach ($key in $identity.Keys) { if ($ready.pullRequest[$key] -cne $identity[$key]) { throw 'pr_ready identity conflict' } }
+        }
+        elseif (-not $missingStart) {
+            $ready = New-StoryPerformanceEvent -EventId "$RunId/pr-ready-$($pr.number)-$($Delivery.reviewedHead)" -EventType 'pr_ready' -OccurredAtUtc $OccurredAtUtc -ProjectId ([int] $start.projectId) -StoryId ([int] $start.storyId) -StoryRef ([int] $start.storyRef) -RunId $RunId -Scope story -Role coordinator -ReviewMode $ReviewMode -SessionId ([string] $start.sessionId) -WorkerId ([string] $start.workerId) -Revision ([string] $Delivery.reviewedHead) -Provenance ([ordered]@{ source = 'confirmed_pr_delivery'; observedBy = 'finalize-story-performance'; coverage = 'confirmed provider receipt and exact reviewed HEAD'; synthetic = [bool] $start.provenance.synthetic }) -PullRequest $identity
+        }
+        if (-not $missingStart) {
+            $recordOutput = @(& pwsh -NoProfile -File $RecorderPath -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson ($ready | ConvertTo-Json -Compress -Depth 100) 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw 'recorder failure; no confirmed pr_ready recording' }
+            $recordResult = ($recordOutput -join "`n") | ConvertFrom-Json
+            if ($recordResult.status -notin @('appended', 'noop')) { throw 'recorder failure or unknown recording outcome' }
+        }
         $result.prReadyEvent = $true
         # Reconcile immutable exact-HEAD artifacts before collecting new evidence.
         $priorReports = @()
@@ -214,13 +261,14 @@ function Invoke-Finalization {
             $attempt = [ordered]@{
                 schemaVersion = 1; kind = 'story_performance_collection_attempt'; runId = $RunId
                 projectId = $start.projectId; storyId = $start.storyId; reviewedHead = $Delivery.reviewedHead
-                discoveryAttempted = $true; collectorInvoked = $false; status = 'source_unavailable'; reason = $null
+                discoveryAttempted = $true; collectorInvoked = $false; status = 'source_unavailable'; reasonCode = 'source_unavailable'; reason = $null
             }
             if ([string]::IsNullOrWhiteSpace($ObservedEvidencePath)) {
                 $ObservedEvidencePath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'observed-role-token-usage.json'
             }
             $usagePath = Join-Path $viewRoot 'usage.json'
             if (-not (Test-Path -LiteralPath $ObservedEvidencePath -PathType Leaf)) {
+                $attempt.reasonCode = 'source_missing'
                 $attempt.reason = 'observed role/session/source bindings unavailable; no trustworthy collector source selected'
             }
             else {
@@ -232,10 +280,21 @@ function Invoke-Finalization {
                     $usage = Get-Content -LiteralPath $usagePath -Raw | ConvertFrom-Json -Depth 100 -DateKind String
                     if ($usage.kind -cne 'story_performance_role_token_usage' -or $usage.runId -cne $RunId -or $usage.projectId -ne $start.projectId -or $usage.storyId -ne $start.storyId) { throw 'invalid collector output identity' }
                     $attempt.status = if ($usage.coverage -eq 'unavailable') { 'source_unavailable' } elseif ($usage.coverage -eq 'measured' -and @($usage.roleTotals.PSObject.Properties).Count -eq 3) { 'measured' } else { 'partial' }
+                    $attempt.reasonCode = Get-CollectionReasonCode -Status $attempt.status -Usage $usage
                     $attempt.reason = "collector coverage=$($usage.coverage); missing sessions, sources, or boundary counters remain unavailable"
                 }
                 catch {
-                    $attempt.status = 'failed'; $attempt.reason = 'collector execution or output validation failed; attributable token totals unavailable'
+                    $collectorMessage = [string] $_.Exception.Message
+                    if ($collectorMessage -like 'story_usage_boundary_unavailable*') {
+                        $attempt.status = 'source_unavailable'
+                        $attempt.reasonCode = 'boundary_unavailable'
+                        $attempt.reason = 'collector discovery reached the existing role sources, but a story_started boundary was unavailable; boundary token deltas remain unavailable'
+                    }
+                    else {
+                        $attempt.status = 'failed'
+                        $attempt.reasonCode = 'collector_failed'
+                        $attempt.reason = 'collector execution or output validation failed; attributable token totals unavailable'
+                    }
                     $usagePath = $null
                 }
             }

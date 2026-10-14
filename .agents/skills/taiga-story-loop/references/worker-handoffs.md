@@ -50,13 +50,100 @@ model/effort and profile changes in the validated setup metadata; attach an
 attributable usage snapshot when available and preserve
 `unavailable`/null when it is not. Do not estimate usage or emit a routine
 telemetry-only summary/message. Recording failures leave the handoff and its
-ownership gates unchanged and disclose the affected measurement coverage.
+ownership gates unchanged and disclose the affected measurement coverage. The
+transition wrapper distinguishes a rejected event from recorder execution or
+availability failure in its bounded `diagnostics` result. For example,
+`recorder_validation_rejected: occurredAtUtc must be an ISO 8601 UTC timestamp
+ending in Z` means correct the supplied boundary and retry the same authorized
+transition; `recorder_unavailable: pwsh executable is unavailable` and
+`recorder_execution_failed: ...` mean preserve the valid workflow transition,
+surface limited telemetry, and reconcile the measurement path before retrying.
+These diagnostics never include raw event JSON, prompt/transcript content,
+secrets, or arbitrary recorder output. Do not append a replacement event merely
+to repair a rejected payload.
 For each reviewer-owned review event, explicitly emit
 `supersedesReviewAttemptId: null`; only `correction_started` and
 `correction_ready` retain the non-null finding identity. Correction events
 must emit null `reviewRequestId`, `reviewAttemptId`, `reviewKind`, and
 `reviewAttemptOrdinal`; correction linkage uses `phaseId`, `correctionId`,
 and `supersedesReviewAttemptId`.
+
+Construct each event from its explicit type-scoped inputs; do not clone the
+last ledger event and mutate its `eventType`. A review constructor owns only
+review request/attempt/kind/ordinal fields, a correction constructor owns only
+correction linkage, and implementation-ready events emit both identity groups
+as JSON `null`. Incompatible explicit fields are a construction error so stale
+identities are rejected instead of silently carried into the next boundary.
+
+The executable production entry point for these examples is
+[`scripts/new-story-performance-event.ps1`](../../../../scripts/new-story-performance-event.ps1).
+Dot-source it once, capture a real UTC boundary through the canonical formatter,
+and pass each constructed JSON event through
+[`scripts/record-story-performance-transition.ps1`](../../../../scripts/record-story-performance-transition.ps1):
+
+```powershell
+. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+. (Join-Path $repoRoot 'scripts/new-story-performance-event.ps1')
+$transition = Join-Path $repoRoot 'scripts/record-story-performance-transition.ps1'
+$common = @{
+    ProjectId = $projectId; StoryId = $storyId; StoryRef = $storyRef
+    RunId = $runId; ReviewMode = 'per_task'; Usage = $null
+}
+function Write-StoryPerformanceEvent {
+    param([Parameter(Mandatory)] [object] $Event)
+    & pwsh -NoProfile -File $transition -ExternalRunRoot $externalRunRoot `
+        -RunId $runId -TaskRefs @($taskRef) `
+        -EventJson ($Event | ConvertTo-Json -Depth 100 -Compress)
+}
+
+# Implementer: freeze the ready packet with explicit identity and null review/correction fields.
+$readyBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$ready = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-ready" `
+    -EventType 'task_ready_for_review' -OccurredAtUtc $readyBoundary -Scope task `
+    -Role implementer -TaskRef $taskRef -PhaseId $implementationPhaseId `
+    -SessionId $implementerSessionId -WorkerId $implementerWorkerId -Revision $reviewedHead `
+    -Provenance ([ordered]@{ source = 'workflow_transition'; observedBy = $implementerWorkerId; coverage = 'frozen task-ready boundary'; synthetic = $false }) `
+    -CorrectionId $null -SupersedesReviewAttemptId $null -ReviewRequestId $null -ReviewAttemptId $null -ReviewKind $null -ReviewAttemptOrdinal $null
+Write-StoryPerformanceEvent $ready
+
+# Implementer: correction boundaries carry only explicit finding linkage.
+$correctionStartBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$correctionStart = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-correction-started" `
+    -EventType 'correction_started' -OccurredAtUtc $correctionStartBoundary -Scope task `
+    -Role implementer -TaskRef $taskRef -PhaseId $correctionPhaseId `
+    -CorrectionId $correctionId -SupersedesReviewAttemptId $findingAttemptId `
+    -SessionId $implementerSessionId -WorkerId $implementerWorkerId `
+    -Provenance ([ordered]@{ source = 'review_correction'; observedBy = $implementerWorkerId; coverage = 'current reviewer finding'; synthetic = $false })
+Write-StoryPerformanceEvent $correctionStart
+
+$correctionReadyBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$correctionReady = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-correction-ready" `
+    -EventType 'correction_ready' -OccurredAtUtc $correctionReadyBoundary -Scope task `
+    -Role implementer -TaskRef $taskRef -PhaseId $correctionPhaseId `
+    -CorrectionId $correctionId -SupersedesReviewAttemptId $findingAttemptId `
+    -SessionId $implementerSessionId -WorkerId $implementerWorkerId -Revision $correctedHead `
+    -Provenance ([ordered]@{ source = 'workflow_transition'; observedBy = $implementerWorkerId; coverage = 'frozen correction-ready boundary'; synthetic = $false })
+Write-StoryPerformanceEvent $correctionReady
+
+# Reviewer: re-review carries review identity and explicitly null correction linkage.
+$rereviewBoundary = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow)
+$rereview = New-StoryPerformanceEvent @common -EventId "$runId/task-$taskRef-rereview-started" `
+    -EventType 'review_started' -OccurredAtUtc $rereviewBoundary -Scope task `
+    -Role reviewer -TaskRef $taskRef -PhaseId $rereviewPhaseId `
+    -ReviewRequestId $reviewRequestId -ReviewAttemptId $reviewAttemptId `
+    -ReviewKind 'correction_rereview' -ReviewAttemptOrdinal $reviewAttemptOrdinal `
+    -SessionId $reviewerSessionId -WorkerId $reviewerWorkerId -Revision $correctedHead `
+    -SupersedesReviewAttemptId $null -CorrectionId $null `
+    -Provenance ([ordered]@{ source = 'review_handoff'; observedBy = $reviewerWorkerId; coverage = 'exact correction re-review boundary'; synthetic = $false })
+Write-StoryPerformanceEvent $rereview
+```
+
+The variables in this example are the already-authorized run/task/revision and
+actual worker/session identities from setup and the handoff. If a source or
+usage value is not verified, leave it `$null`; do not substitute a thread ID,
+model guess, zero counter, or synthetic timestamp. Reviewer-owned events keep
+`SupersedesReviewAttemptId` explicitly null; only the two correction events use
+the finding attempt ID.
 
 For an observed quota interruption/resumption, the coordinator uses existing
 `wait_started`/`wait_ended` boundaries with stable `waitId` and
@@ -68,6 +155,25 @@ does not create task-scoped review or correction events, but it still records
 implementation boundaries and final-story start, finding, correction, and
 re-review boundaries when they actually occur. The selected mode is setup
 data, not an inference from whichever events happen to be present.
+
+### Canonical UTC construction
+
+When a workflow transition constructs an event boundary and setup/profile
+metadata, capture one `DateTimeOffset` and format that captured instant through
+the repository helper before building either payload:
+
+```powershell
+. (Join-Path $repoRoot 'scripts/format-story-performance-utc.ps1')
+$capturedBoundary = [DateTimeOffset]::UtcNow
+$boundaryUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $capturedBoundary
+
+# Use the same $boundaryUtc for occurredAtUtc and effectiveFromUtc as needed.
+```
+
+The helper emits the canonical literal-`Z` form while preserving the captured
+instant. Do not use `DateTimeOffset.ToString('o')` directly (`+00:00` is
+rejected by the recorder), and do not rewrite already captured historical input;
+an invalid supplied timestamp must remain a bounded validation diagnostic.
 
 ## Task-ready message
 

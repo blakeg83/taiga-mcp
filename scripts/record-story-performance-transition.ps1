@@ -14,12 +14,223 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $diagnostics = [Collections.Generic.List[string]]::new()
 $result = [ordered]@{ status = 'unavailable'; telemetryState = 'limited'; diagnostics = @(); recorder = $null }
+
+function Get-RecorderValidationDiagnostic {
+    param([AllowNull()] [object[]] $Output)
+
+    $knownMessages = [ordered]@{
+        "'occurredAtUtc' must be an ISO 8601 UTC timestamp ending in Z" = 'occurredAtUtc must be an ISO 8601 UTC timestamp ending in Z'
+        'correctionId is allowed only on correction events' = 'correctionId is allowed only on correction events'
+    }
+    $topLevelFields = @(
+        'schemaVersion', 'kind', 'eventId', 'runId', 'projectId', 'storyId', 'storyRef',
+        'taskRef', 'role', 'sessionId', 'workerId', 'transitionId', 'scope', 'phaseId',
+        'correctionId', 'reviewRequestId', 'reviewAttemptId', 'reviewKind',
+        'reviewAttemptOrdinal', 'supersedesReviewAttemptId', 'eventType', 'occurredAtUtc',
+        'revision', 'reviewMode', 'provenance', 'usage', 'waitId', 'waitKind', 'pullRequest'
+    )
+    $topLevelFieldPattern = '(?:' + (($topLevelFields | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')'
+    $knownFieldPattern = "(?:$topLevelFieldPattern|event\.$topLevelFieldPattern|usage\.(?:state|source|coverage|streamId|role|sessionId|sampledAtUtc|baselineAtUtc|counterSemantics|counters|reason|fallback)|provenance\.(?:source|observedBy|observer|coverage|synthetic)|pullRequest\.(?:provider|owner|repository|number|reviewedHead)|usage\.counterSemantics\.(?:cachedInput|reasoning)|usage\.counters\.(?:inputTokens|cachedInputTokens|outputTokens|reasoningTokens))"
+    $knownFieldReasonPattern = '(?:is required|must be 1|must be a JSON object|must be a nonblank safe string|must be a positive integer|must be a nonnegative integer|has an unsupported value|must be an ISO 8601 UTC timestamp ending in Z|must be a full Git SHA|must be a full Git SHA or null|must be a Boolean|must be an absolute path|is not a valid path|is allowed only on review events|is allowed only on correction events)'
+    $knownStaticMessages = @(
+        'external run root must be outside the source worktree',
+        "'pullRequest.reviewedHead' must be a full Git SHA",
+        "'provenance.observedBy' or 'provenance.observer' is required",
+        'usage.role must match event role',
+        'numeric usage samples require counterSemantics',
+        'numeric usage samples require usage.counterSemantics.cachedInput',
+        'numeric usage samples require usage.counterSemantics.reasoning',
+        'measured usage requires nonempty counters',
+        'measured usage requires known counter semantics',
+        'event JSON must be nonblank',
+        'event JSON is malformed',
+        'event JSON must contain one object',
+        "'schemaVersion' must be 1",
+        "'kind' must be story_performance_event",
+        "'revision' must be a full Git SHA or null",
+        'supersedesReviewAttemptId is only valid on correction events',
+        'task-scoped events require a positive taskRef',
+        'story-scoped events require taskRef to be null',
+        'wait boundary events require phaseId to be null',
+        'wait boundary events require revision to be null',
+        'wait identity fields are allowed only on wait boundary events',
+        'story_started requires story scope and coordinator role',
+        'story_started requires null phaseId and revision',
+        'pr_ready requires story scope and coordinator role',
+        'pr_ready requires null phaseId and a full revision',
+        'pullRequest.reviewedHead must match event revision',
+        'pullRequest is allowed only on pr_ready',
+        'implementation_started requires task scope, implementer role and phaseId',
+        'task_ready_for_review requires task scope, implementer role, phaseId and full revision',
+        'review events require review scope, reviewer role and phaseId',
+        'task review events require an initial_task or correction_rereview kind',
+        'final-story review events require a final-story review kind',
+        'final review events require final_story scope',
+        'correction events require correction scope, implementer role, phaseId, correctionId and supersedesReviewAttemptId',
+        'correction_started requires a null revision',
+        'correction_ready requires a full revision',
+        'final-story correction events require taskRef to be null',
+        'event runId does not match the selected external run',
+        'event story binding does not match the selected external run',
+        "'runId' must be a path-safe stable identifier"
+    )
+    $normalizedParts = [Collections.Generic.List[string]]::new()
+    $normalizationBudget = 65536
+    $ansiPattern = ([char]27).ToString() + '\[[0-?]*[ -/]*[@-~]'
+    foreach ($item in @($Output)) {
+        $messages = if ($item -is [System.Management.Automation.ErrorRecord]) {
+            @(
+                [string] $item
+                if ($null -ne $item.Exception) { [string] $item.Exception.Message }
+                if ($null -ne $item.ErrorDetails) { [string] $item.ErrorDetails }
+            )
+        }
+        else {
+            @([string] $item)
+        }
+        foreach ($message in $messages) {
+            if ($normalizationBudget -le 0 -or [string]::IsNullOrWhiteSpace($message)) { continue }
+            $normalized = [regex]::Replace($message, $ansiPattern, '')
+            $normalized = $normalized -replace '\|', ' '
+            $normalized = [regex]::Replace($normalized, '\s+', ' ').Trim()
+            if ($normalized.Length -gt $normalizationBudget) { $normalized = $normalized.Substring(0, $normalizationBudget) }
+            if ($normalized.Length -gt 0) {
+                [void] $normalizedParts.Add($normalized)
+                $normalizationBudget -= $normalized.Length
+            }
+        }
+    }
+    $combined = $normalizedParts -join ' '
+    foreach ($knownMessage in $knownMessages.Keys) {
+        if ($combined.IndexOf($knownMessage, [StringComparison]::Ordinal) -ge 0) {
+            return "recorder_validation_rejected: $($knownMessages[$knownMessage])"
+        }
+    }
+    foreach ($knownStaticMessage in $knownStaticMessages) {
+        if ($combined.IndexOf($knownStaticMessage, [StringComparison]::Ordinal) -ge 0) {
+            return "recorder_validation_rejected: $knownStaticMessage"
+        }
+    }
+    if ($combined -match "'(?<field>$knownFieldPattern)' $knownFieldReasonPattern") {
+        return "recorder_validation_rejected: $($matches[0])"
+    }
+    if ($combined -match "review events require '(?<field>$knownFieldPattern)'") {
+        return "recorder_validation_rejected: $($matches[0])"
+    }
+    if ($combined -match "'[A-Za-z][A-Za-z0-9_.]{0,96}' is not an allowlisted field") {
+        return 'recorder_validation_rejected: event contains a non-allowlisted field'
+    }
+    foreach ($item in @($Output)) {
+        $messages = if ($item -is [System.Management.Automation.ErrorRecord]) {
+            @(
+                [string] $item
+                if ($null -ne $item.Exception) { [string] $item.Exception.Message }
+                if ($null -ne $item.ErrorDetails) { [string] $item.ErrorDetails }
+            )
+        }
+        else {
+            @([string] $item)
+        }
+        foreach ($message in $messages) {
+            if ([string]::IsNullOrWhiteSpace($message)) { continue }
+            $candidate = $null
+            if ($message -match '(?m)^\s*\|\s*(?<candidate>[^\r\n]{1,240})\s*$') {
+                $candidate = $matches['candidate'].Trim()
+            }
+            foreach ($knownMessage in $knownMessages.Keys) {
+                if ($message.IndexOf($knownMessage, [StringComparison]::Ordinal) -ge 0) {
+                    return "recorder_validation_rejected: $($knownMessages[$knownMessage])"
+                }
+            }
+            if ($candidate -and $candidate -match "^'(?<field>$knownFieldPattern)' $knownFieldReasonPattern$") {
+                return "recorder_validation_rejected: $candidate"
+            }
+            if ($candidate -and $candidate -match "^review events require '(?<field>$knownFieldPattern)'$") {
+                return "recorder_validation_rejected: $candidate"
+            }
+            if ($candidate -and $candidate -match "^'[A-Za-z][A-Za-z0-9_.]{0,96}' is not an allowlisted field$") {
+                return 'recorder_validation_rejected: event contains a non-allowlisted field'
+            }
+            if ($candidate -and $candidate -in $knownStaticMessages) {
+                return "recorder_validation_rejected: $candidate"
+            }
+        }
+    }
+    return $null
+}
+
+function Get-RecorderFailureDiagnostic {
+    param(
+        [AllowNull()] [object[]] $Output,
+        [Parameter(Mandatory)] [int] $ExitCode
+    )
+
+    $validationDiagnostic = Get-RecorderValidationDiagnostic -Output $Output
+    if ($validationDiagnostic) { return $validationDiagnostic }
+    return "recorder_execution_failed: recorder exited with code $ExitCode; validation reason unavailable; $(Get-RecorderOutputSummary -Output $Output)"
+}
+
+function Get-RecorderOutputSummary {
+    param([AllowNull()] [object[]] $Output)
+
+    $itemKinds = [Collections.Generic.HashSet[string]]::new()
+    $categories = [Collections.Generic.HashSet[string]]::new()
+    $items = @($Output)
+    foreach ($item in $items) {
+        if ($item -is [System.Management.Automation.ErrorRecord]) {
+            [void] $itemKinds.Add('error_record')
+            if ([string] $item.FullyQualifiedErrorId -ceq 'NativeCommandError') { [void] $categories.Add('native_error') }
+            elseif ([string] $item.FullyQualifiedErrorId -ceq 'NativeCommandErrorMessage') { [void] $categories.Add('native_error_message') }
+            else { [void] $categories.Add('error_record_other') }
+        }
+        elseif ($item -is [string]) {
+            [void] $itemKinds.Add('string')
+            [void] $categories.Add('unrecognized')
+        }
+        else {
+            [void] $itemKinds.Add('other')
+            [void] $categories.Add('other')
+        }
+    }
+    if ($items.Count -eq 0) { [void] $categories.Add('empty') }
+    if ($itemKinds.Count -eq 0) { [void] $itemKinds.Add('none') }
+    return "recorder_output_items=$($items.Count); recorder_output_kinds=$(@($itemKinds | Sort-Object) -join ','); recorder_output_categories=$(@($categories | Sort-Object) -join ',')"
+}
+
+function Get-TransitionFailureDiagnostic {
+    param([Parameter(Mandatory)] [string] $Message)
+
+    if ($Message -match '^input_invalid:') { return 'input_invalid: event JSON could not be parsed' }
+    if ($Message -match '^input_unavailable:') { return 'input_unavailable: event input could not be read' }
+    if ($Message -match '^recorder_validation_rejected:') { return $Message }
+    if ($Message -match '^recorder_unavailable:') { return 'recorder_unavailable: pwsh executable is unavailable' }
+    if ($Message -match '^recorder_execution_failed:') {
+        if ($Message -match 'process could not be started') { return 'recorder_execution_failed: recorder process could not be started' }
+        if ($Message -match 'exited with code -?\d{1,10}; validation reason unavailable') { return $Message }
+    }
+    return 'recorder_execution_failed: transition recording failed; diagnostic detail unavailable'
+}
+
 try {
-    if ($EventPath) { $EventJson = Get-Content -LiteralPath $EventPath -Raw }
-    $event = $EventJson | ConvertFrom-Json -Depth 100 -DateKind String
+    if ($EventPath) {
+        try { $EventJson = Get-Content -LiteralPath $EventPath -Raw }
+        catch { throw 'input_unavailable: event input could not be read' }
+    }
+    try { $event = $EventJson | ConvertFrom-Json -Depth 100 -DateKind String }
+    catch { throw 'input_invalid: event JSON could not be parsed' }
     $recorder = Join-Path $PSScriptRoot '../.agents/skills/taiga-story-loop/scripts/write-performance-event.ps1'
-    $output = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $EventJson 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw 'recording failed: invalid event or recorder unavailable; transition may continue with limited telemetry' }
+    if ($null -eq (Get-Command pwsh -ErrorAction SilentlyContinue)) {
+        throw 'recorder_unavailable: pwsh executable is unavailable'
+    }
+    try {
+        $output = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $EventJson 2>&1)
+    }
+    catch {
+        throw 'recorder_execution_failed: recorder process could not be started'
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw (Get-RecorderFailureDiagnostic -Output $output -ExitCode $LASTEXITCODE)
+    }
     $result.recorder = ($output -join "`n") | ConvertFrom-Json
     $result.status = $result.recorder.status
     if ($result.status -notin @('appended', 'noop')) { throw 'recording outcome is unconfirmed; reconcile telemetry without blocking workflow' }
@@ -97,6 +308,6 @@ try {
     }
     $result.telemetryState = if ($diagnostics.Count -eq 0) { 'verified' } else { 'limited' }
 }
-catch { $diagnostics.Add($_.Exception.Message) }
+catch { $diagnostics.Add((Get-TransitionFailureDiagnostic -Message ([string] $_.Exception.Message))) }
 $result.diagnostics = @($diagnostics)
 $result | ConvertTo-Json -Depth 100

@@ -12,6 +12,7 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'new-story-performance-event.ps1')
 
 function Assert-True {
     param([Parameter(Mandatory)] [bool] $Condition, [Parameter(Mandatory)] [string] $Message)
@@ -61,43 +62,7 @@ function New-Event {
         [string] $Role = 'coordinator'
     )
 
-    $correctionEvents = @('correction_started', 'correction_ready')
-    if ($EventType -notin $correctionEvents -and -not [string]::IsNullOrWhiteSpace([string] $SupersedesReviewAttemptId)) {
-        throw "Integrated fixture event construction failed: non-correction event '$EventType' must emit supersedesReviewAttemptId=null"
-    }
-
-    $event = [ordered]@{
-        schemaVersion = 1
-        kind = 'story_performance_event'
-        eventId = $EventId
-        runId = 'synthetic-task-152'
-        projectId = 12
-        storyId = 727
-        storyRef = 143
-        taskRef = $TaskRef
-        role = $Role
-        sessionId = $SessionId
-        workerId = 'synthetic-worker'
-        transitionId = $EventId
-        scope = $Scope
-        phaseId = Get-NullableText $PhaseId
-        correctionId = Get-NullableText $CorrectionId
-        reviewRequestId = Get-NullableText $ReviewRequestId
-        reviewAttemptId = Get-NullableText $ReviewAttemptId
-        reviewKind = Get-NullableText $ReviewKind
-        reviewAttemptOrdinal = $ReviewAttemptOrdinal
-        supersedesReviewAttemptId = Get-NullableText $SupersedesReviewAttemptId
-        eventType = $EventType
-        occurredAtUtc = $OccurredAtUtc
-        revision = Get-NullableText $Revision
-        reviewMode = $ReviewMode
-        provenance = [ordered]@{ source = 'synthetic_fixture'; observedBy = 'validator'; coverage = 'fixed UTC fixture'; synthetic = $true }
-        usage = $Usage
-        waitId = Get-NullableText $WaitId
-        waitKind = Get-NullableText $WaitKind
-        pullRequest = $null
-    }
-    return [pscustomobject] $event
+    return New-StoryPerformanceEvent -EventId $EventId -EventType $EventType -OccurredAtUtc $OccurredAtUtc -ProjectId 12 -StoryId 727 -StoryRef 143 -RunId 'synthetic-task-152' -Scope $Scope -Role $Role -ReviewMode $ReviewMode -TaskRef $TaskRef -PhaseId (Get-NullableText $PhaseId) -CorrectionId (Get-NullableText $CorrectionId) -ReviewRequestId (Get-NullableText $ReviewRequestId) -ReviewAttemptId (Get-NullableText $ReviewAttemptId) -ReviewKind (Get-NullableText $ReviewKind) -ReviewAttemptOrdinal $ReviewAttemptOrdinal -SupersedesReviewAttemptId (Get-NullableText $SupersedesReviewAttemptId) -Revision (Get-NullableText $Revision) -SessionId $SessionId -WorkerId 'synthetic-worker' -Provenance ([ordered]@{ source = 'synthetic_fixture'; observedBy = 'validator'; coverage = 'fixed UTC fixture'; synthetic = $true }) -Usage $Usage -WaitId (Get-NullableText $WaitId) -WaitKind (Get-NullableText $WaitKind)
 }
 
 function New-UsageSample {
@@ -321,6 +286,36 @@ Assert-True (-not $recorderSource.Contains('Get-JsonSidecarCount')) 'ordinary re
 try {
     $revisionA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
     $revisionB = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $constructorCorrection = New-Event -EventId 'constructor-correction' -EventType correction_ready -OccurredAtUtc '2026-10-09T09:59:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-correction' -CorrectionId 'constructor-correction-1' -SupersedesReviewAttemptId 'constructor-attempt-1' -Revision $revisionB -Role implementer
+    $constructorReview = New-Event -EventId 'constructor-review' -EventType review_started -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-review' -ReviewRequestId 'constructor-request-2' -ReviewAttemptId 'constructor-attempt-2' -ReviewKind correction_rereview -ReviewAttemptOrdinal 1 -Revision $revisionB -Role reviewer
+    $constructorReady = New-Event -EventId 'constructor-ready' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:01:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-implementation' -Revision $revisionB -Role implementer
+    Assert-True ($constructorCorrection.correctionId -ceq 'constructor-correction-1' -and $constructorCorrection.supersedesReviewAttemptId -ceq 'constructor-attempt-1' -and $null -eq $constructorCorrection.reviewRequestId -and $null -eq $constructorCorrection.reviewAttemptId) 'event constructor keeps correction linkage and clears review-only identity'
+    Assert-True ($constructorReview.reviewRequestId -ceq 'constructor-request-2' -and $constructorReview.reviewAttemptId -ceq 'constructor-attempt-2' -and $null -eq $constructorReview.correctionId -and $null -eq $constructorReview.supersedesReviewAttemptId) 'event constructor keeps review identity and clears correction-only linkage'
+    Assert-True ($null -eq $constructorReady.reviewRequestId -and $null -eq $constructorReady.reviewAttemptId -and $null -eq $constructorReady.correctionId -and $null -eq $constructorReady.supersedesReviewAttemptId) 'event constructor clears review and correction identity from implementation-ready events'
+    $malformedConstructorRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid' -EventType review_started -OccurredAtUtc '2026-10-09T10:02:00Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid' -ReviewRequestId 'constructor-request' -ReviewAttemptId 'constructor-attempt' -ReviewKind initial_task -ReviewAttemptOrdinal 1 -Revision $revisionB -CorrectionId 'stale-correction' -Role reviewer | Out-Null
+    }
+    catch { $malformedConstructorRejected = $true }
+    Assert-True $malformedConstructorRejected 'event constructor rejects incompatible explicit stale correction identity'
+    $malformedCorrectionIdOnlyRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid-correction-id-only' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:02:30Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid-correction-id-only' -Revision $revisionB -CorrectionId 'stale-correction' -Role implementer | Out-Null
+    }
+    catch { $malformedCorrectionIdOnlyRejected = $true }
+    Assert-True $malformedCorrectionIdOnlyRejected 'event constructor rejects correctionId supplied alone on a non-correction event'
+    $malformedSupersedesOnlyRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid-supersedes-only' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:02:40Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid-supersedes-only' -Revision $revisionB -SupersedesReviewAttemptId 'stale-attempt' -Role implementer | Out-Null
+    }
+    catch { $malformedSupersedesOnlyRejected = $true }
+    Assert-True $malformedSupersedesOnlyRejected 'event constructor rejects supersedesReviewAttemptId supplied alone on a non-correction event'
+    $malformedWaitKindOnlyRejected = $false
+    try {
+        New-Event -EventId 'constructor-invalid-wait-kind-only' -EventType task_ready_for_review -OccurredAtUtc '2026-10-09T10:02:50Z' -Scope task -TaskRef 152 -PhaseId 'constructor-invalid-wait-kind-only' -Revision $revisionB -WaitKind reviewer -Role implementer | Out-Null
+    }
+    catch { $malformedWaitKindOnlyRejected = $true }
+    Assert-True $malformedWaitKindOnlyRejected 'event constructor rejects waitKind supplied alone on a non-wait event'
     $events = @(
         (New-Event -EventId 'story-start' -EventType 'story_started' -OccurredAtUtc '2026-10-09T10:00:00Z' -Scope 'story' -Role 'coordinator'),
         (New-Event -EventId 'impl-start' -EventType 'implementation_started' -OccurredAtUtc '2026-10-09T10:05:00Z' -Scope 'task' -TaskRef 152 -PhaseId 'task-152-impl' -Role 'implementer'),
@@ -864,6 +859,10 @@ try {
                 role = 'implementer'; workerId = 'synthetic-implementer'; sessionId = 'synthetic-implementer-session'; model = 'gpt-5.6-luna'; effort = 'xhigh'; effectiveFromUtc = '2026-10-09T10:00:00Z'; effectiveToUtc = $null; changeId = 'implementer-profile-change-1';
                 provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'exact assignment interval'; synthetic = $true }
             }
+            [ordered]@{
+                role = 'reviewer'; workerId = 'synthetic-reviewer'; sessionId = 'synthetic-reviewer-session'; model = 'gpt-6.1-sol'; effort = 'medium'; effectiveFromUtc = '2026-10-09T10:00:00Z'; effectiveToUtc = $null; changeId = 'reviewer-profile-1';
+                provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'exact assignment interval'; synthetic = $true }
+            }
         )
         provenance = [ordered]@{ source = 'setup_assignment'; observedBy = 'synthetic-validator'; coverage = 'complete setup fixture'; synthetic = $true }
     }
@@ -878,7 +877,18 @@ try {
     $oneProfileDiagnostic = [string]($oneProfileOutput -join [Environment]::NewLine)
     Assert-True ($LASTEXITCODE -eq 0) "a one-record profiles array should remain a valid array and publish successfully (diagnostic: $oneProfileDiagnostic)"
     $oneProfileReport = Get-Content -Raw -LiteralPath $oneProfileOutputPath | ConvertFrom-Json -Depth 100
-    Assert-True ([string]$oneProfileReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($oneProfileReport.metrics.modelsAndReasoning.value).Count -eq 1) 'one supplied profile should remain measured'
+    Assert-True ([string]$oneProfileReport.metrics.modelsAndReasoning.state -ceq 'partial' -and @($oneProfileReport.metrics.modelsAndReasoning.value).Count -eq 1 -and @($oneProfileReport.metrics.modelsAndReasoning.missingRoles) -contains 'implementer' -and @($oneProfileReport.metrics.modelsAndReasoning.missingRoles) -contains 'reviewer') 'one supplied profile should remain source-backed but explicitly partial'
+
+    $missingCoordinatorMetadataPath = Join-Path $root 'missing-coordinator-setup-metadata.json'
+    $missingCoordinatorOutputPath = Join-Path $artifactRoot 'missing-coordinator.json'
+    $missingCoordinatorMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20 -DateKind String
+    $missingCoordinatorMetadata.profiles = @($missingCoordinatorMetadata.profiles | Where-Object role -ne 'coordinator')
+    [IO.File]::WriteAllText($missingCoordinatorMetadataPath, ($missingCoordinatorMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    $missingCoordinatorOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $missingCoordinatorMetadataPath -OutputPath $missingCoordinatorOutputPath 2>&1
+    $missingCoordinatorDiagnostic = [string]($missingCoordinatorOutput -join [Environment]::NewLine)
+    Assert-True ($LASTEXITCODE -eq 0) "missing coordinator metadata should publish a limited report (diagnostic: $missingCoordinatorDiagnostic)"
+    $missingCoordinatorReport = Get-Content -Raw -LiteralPath $missingCoordinatorOutputPath | ConvertFrom-Json -Depth 100
+    Assert-True ([string]$missingCoordinatorReport.metrics.modelsAndReasoning.state -ceq 'partial' -and @($missingCoordinatorReport.metrics.modelsAndReasoning.missingRoles) -contains 'coordinator' -and ([string]$missingCoordinatorReport.metrics.modelsAndReasoning.missingData).Contains('coordinator')) 'missing coordinator profile must remain explicitly limited'
 
     $shapeCases = @(
         [ordered]@{ name = 'zero-profiles'; profiles = @() }
@@ -941,13 +951,13 @@ try {
     $changedProfile.model = 'gpt-6.1-sol'
     $changedProfile.effectiveFromUtc = '2026-10-09T10:30:00Z'
     $changedProfile.changeId = 'implementer-change-2'
-    $nonOverlappingMetadata.profiles = @($initialProfile, $changedProfile)
+    $nonOverlappingMetadata.profiles = @($nonOverlappingMetadata.profiles[0], $initialProfile, $changedProfile, $nonOverlappingMetadata.profiles[2])
     [IO.File]::WriteAllText($nonOverlappingChangePath, ($nonOverlappingMetadata | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
     $nonOverlappingOutput = & pwsh -NoProfile -File $scriptPath -EventsPath $ledger -ReviewMode per_task -MetadataPath $nonOverlappingChangePath -OutputPath $nonOverlappingChangeOutputPath 2>&1
     $nonOverlappingDiagnostic = [string]($nonOverlappingOutput -join [Environment]::NewLine)
     Assert-True ($LASTEXITCODE -eq 0) "non-overlapping profile changes should remain valid (diagnostic: $nonOverlappingDiagnostic)"
     $nonOverlappingReport = Get-Content -Raw -LiteralPath $nonOverlappingChangeOutputPath | ConvertFrom-Json -Depth 100
-    Assert-True ([string]$nonOverlappingReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($nonOverlappingReport.metrics.modelsAndReasoning.value).Count -eq 2) 'non-overlapping profile changes should remain measured'
+    Assert-True ([string]$nonOverlappingReport.metrics.modelsAndReasoning.state -ceq 'measured' -and @($nonOverlappingReport.metrics.modelsAndReasoning.value).Count -eq 4) 'non-overlapping profile changes should remain measured'
 
     $conflictingProfilePath = Join-Path $root 'conflicting-profile.json'
     $conflictingProfileOutputPath = Join-Path $artifactRoot 'conflicting-profile.json'
@@ -968,10 +978,10 @@ try {
     $metadataReport = Get-Content -Raw -LiteralPath $metadataJsonPath | ConvertFrom-Json -Depth 100
     $metadataMarkdown = Get-Content -Raw -LiteralPath $metadataMarkdownPath
     Assert-True ([string]$metadataReport.metrics.modelsAndReasoning.state -ceq 'measured' -and
-        @($metadataReport.metrics.modelsAndReasoning.value).Count -eq 2 -and
+        @($metadataReport.metrics.modelsAndReasoning.value).Count -eq 3 -and
         [string]$metadataReport.metrics.modelsAndReasoning.value[1].model -ceq 'gpt-5.6-luna' -and
         [string]$metadataReport.metrics.modelsAndReasoning.value[1].changeId -ceq 'implementer-profile-change-1' -and
-        [int]$metadataReport.provenance.setupMetadata.recordCount -eq 2) 'supplied setup profiles and changes must remain source-backed in JSON'
+        [int]$metadataReport.provenance.setupMetadata.recordCount -eq 3) 'supplied setup profiles and changes must remain source-backed in JSON'
     Assert-True ($metadataMarkdown.Contains('## Role profiles') -and $metadataMarkdown.Contains('model=gpt-6.1-sol') -and $metadataMarkdown.Contains('effort=xhigh') -and $metadataMarkdown.Contains('change=implementer-profile-change-1')) 'supplied setup profiles and changes must render semantically in Markdown'
 
     $invalidMetadata = $setupMetadata | ConvertTo-Json -Depth 20 | ConvertFrom-Json -Depth 20

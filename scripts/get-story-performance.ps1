@@ -556,12 +556,25 @@ function Get-SetupMetadata {
         throw [System.InvalidOperationException]::new('setup_metadata_conflict: overlapping profile intervals disagree for the same role, worker, and session')
     }
 
+    $requiredRoles = @('coordinator', 'implementer', 'reviewer')
+    $presentRoles = @(Get-UniqueValuesLinear -Values @($records | ForEach-Object { [string] $_.role }))
+    $missingRoles = @($requiredRoles | Where-Object { $_ -notin $presentRoles })
+    $coverage = "validated $($records.Count) role profile record(s), including explicit changes"
+    $missingData = $null
+    $state = 'measured'
+    if ($missingRoles.Count -gt 0) {
+        $state = 'partial'
+        $coverage = "$coverage; missing validated role profile(s): $($missingRoles -join ', ')"
+        $missingData = "validated profile evidence is unavailable for role(s): $($missingRoles -join ', ')"
+    }
+
     return [pscustomobject][ordered]@{
-        state = 'measured'
+        state = $state
         records = @($records)
         source = [string] (Get-PropertyValue $rootProvenance 'source')
-        coverage = "validated $($records.Count) role profile record(s), including explicit changes"
-        missingData = $null
+        coverage = $coverage
+        missingData = $missingData
+        missingRoles = @($missingRoles)
         provenance = $rootProvenance
     }
 }
@@ -2255,7 +2268,19 @@ foreach ($record in @($records)) {
 
 $storyStarts = @($records | Where-Object { $_.EventType -eq 'story_started' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
 $prReady = @($records | Where-Object { $_.EventType -eq 'pr_ready' -and [string](Get-PropertyValue $_.Event 'scope') -eq 'story' })
-$timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Identity 'story|time_to_pr' -Kind 'story_to_pr' -Anomalies $anomalies
+if ($storyStarts.Count -eq 0 -and $prReady.Count -eq 1) {
+    [void] $anomalies.Add((New-Anomaly -Code 'missing_story_start' -Message 'story_started boundary is absent; timeToPr is unavailable while coherent event measurements are retained' -Identity 'story|story_started' -EventIds @($prReady[0].EventId)))
+    $timeToPrInterval = [pscustomobject][ordered]@{
+        state = 'unavailable'
+        elapsedMilliseconds = $null
+        startUtc = $null
+        endUtc = $null
+        missingData = 'story_started boundary is absent; confirmed pr_ready evidence is present'
+    }
+}
+else {
+    $timeToPrInterval = Get-IntervalResult -Starts $storyStarts -Ends $prReady -Identity 'story|time_to_pr' -Kind 'story_to_pr' -Anomalies $anomalies
+}
 
 $implementationStarts = New-OrdinalHashtable
 $implementationEnds = New-OrdinalHashtable
@@ -3348,6 +3373,7 @@ function New-SetupMetadataMetric {
     $metric = New-Metric -State ([string] $SetupMetadata.state) -Value $records -Unit 'metadata records' -Source ([string] $SetupMetadata.source) -Calculation 'retain exact role/worker/model/effort records and ordered profile changes' -Coverage ([string] $SetupMetadata.coverage) -MissingData ([string] $SetupMetadata.missingData)
     $metric | Add-Member -NotePropertyName roleCount -NotePropertyValue $roles.Count -Force
     $metric | Add-Member -NotePropertyName changeCount -NotePropertyValue $changes.Count -Force
+    $metric | Add-Member -NotePropertyName missingRoles -NotePropertyValue @((Get-PropertyValue $SetupMetadata 'missingRoles')) -Force
     return $metric
 }
 
@@ -3688,7 +3714,9 @@ $reportLimitations = @(
     'Unknown values remain null; unavailable evidence is never treated as zero.'
     'Implementation/review elapsed are summed phase durations, including overlapping phases and inactivity; they are not wall-clock or active execution time.'
     if ($collectionAttempt.status -notin @('measured')) { "Token collection outcome: $($collectionAttempt.status); $($collectionAttempt.reason)" }
+    if ($storyStarts.Count -eq 0 -and $prReady.Count -eq 1) { 'story_started boundary is absent; timeToPr remains unavailable while coherent implementation and review measurements are retained.' }
     if ($null -ne (Get-PropertyValue $collectionAttempt 'setupMetadataLimitation')) { [string] (Get-PropertyValue $collectionAttempt 'setupMetadataLimitation') }
+    if ([string] $setupMetadata.state -eq 'partial') { "Role model and reasoning-effort profile coverage is partial; missing roles: $((Get-PropertyValue $setupMetadata 'missingRoles') -join ', ')." }
     if ([string] $setupMetadata.state -eq 'unavailable') { 'Role model and reasoning-effort profiles are unavailable because no validated setup metadata input was supplied.' }
     if ($comparisonMetrics.changedFiles.state -eq 'unavailable' -or $comparisonMetrics.linesAdded.state -eq 'unavailable' -or $comparisonMetrics.linesDeleted.state -eq 'unavailable') { 'Git comparison metrics require an explicit valid base revision, reviewed HEAD, and repository path.' }
     if ($null -eq $observedUsageMetadata) { 'Observed role token totals require the incremental collector output; event-level usage remains separately reported.' }
@@ -3769,6 +3797,7 @@ $report = [ordered]@{
             state = [string] $setupMetadata.state
             recordCount = @($setupMetadata.records).Count
             coverage = [string] $setupMetadata.coverage
+            missingRoles = @((Get-PropertyValue $setupMetadata 'missingRoles'))
         }
         observedRoleTokenUsage = if ($null -eq $observedUsageMetadata) { [ordered]@{ state = 'unavailable'; coverage = 'collector output was not supplied' } } else { [ordered]@{ state = [string] $observedUsageMetadata.coverage; boundary = $observedUsageMetadata.boundary; source = [string] $observedUsageMetadata.source } }
         limitations = @($reportLimitations)
