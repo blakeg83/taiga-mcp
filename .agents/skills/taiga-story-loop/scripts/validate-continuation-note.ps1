@@ -445,7 +445,6 @@ function New-QuotaRecoveryState {
         [Parameter(Mandatory)] [string] $Worktree,
         [Parameter(Mandatory)] [string] $WaitId,
         [Parameter(Mandatory)] [string] $WaitStartedAtUtc,
-        [AllowNull()] [string] $WaitEndedAtUtc = $null,
         [AllowNull()] [string] $DeliveryReference = $null,
         [ValidateSet('delivered', 'rejected', 'unknown')] [string] $DeliveryOutcome = 'delivered',
         [AllowNull()] [string] $NotePath = $null
@@ -471,7 +470,6 @@ function New-QuotaRecoveryState {
         Worktree = $Worktree
         WaitId = $WaitId
         WaitStartedAtUtc = $WaitStartedAtUtc
-        WaitEndedAtUtc = $WaitEndedAtUtc
         DeliveryReference = $DeliveryReference
         DeliveryOutcome = $DeliveryOutcome
         NotePath = $NotePath
@@ -580,7 +578,7 @@ function Invoke-QuotaWorkerRecovery {
     if ([string]$State.DeliveryOutcome -ceq 'rejected') {
         return [pscustomobject]@{ Decision = 'quota_rejection_deferred'; Packet = $packet }
     }
-    if ([string]::IsNullOrWhiteSpace([string]$State.DeliveryReference) -or [string]::IsNullOrWhiteSpace([string]$State.WaitEndedAtUtc)) {
+    if ([string]::IsNullOrWhiteSpace([string]$State.DeliveryReference)) {
         if (-not (Persist-QuotaWaitOutcome -State $State -Parts $parts -Outcome unknown -Delivery 'unknown')) {
             [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'quota_wait_persistence_unavailable'; Action = 'bounded_reconciliation' })
             return [pscustomobject]@{ Decision = 'delivery_unknown_reconcile'; Packet = $packet }
@@ -588,12 +586,6 @@ function Invoke-QuotaWorkerRecovery {
         [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'confirmed_delivery_evidence_missing'; Action = 'bounded_reconciliation' })
         return [pscustomobject]@{ Decision = 'delivery_unknown_reconcile'; Packet = $packet }
     }
-    [void]$State.Telemetry.Add([pscustomobject]@{
-        EventType = 'wait_ended'
-        WaitId = [string]$State.WaitId
-        WaitKind = 'quota_blocked'
-        OccurredAtUtc = [string]$State.WaitEndedAtUtc
-    })
     if ([string]::IsNullOrWhiteSpace([string]$State.NotePath)) {
         Set-QuotaWaitDelivery -Snapshot $State.PlannerState.Snapshot -Parts $parts -Delivery ([string]$State.DeliveryReference)
     } else {
@@ -641,6 +633,19 @@ function Observe-QuotaWorkerProgress {
         Evidence = [string]$Observation.Evidence
     }
     [void]$State.ProgressEvidence.Add($evidence)
+    # A dispatch receipt cannot establish capacity. Only a separately observed,
+    # timestamped action closes the wait, once, for this worker and episode.
+    $timestampProperty = $Observation.PSObject.Properties['OccurredAtUtc']
+    if ($null -ne $timestampProperty -and -not [string]::IsNullOrWhiteSpace([string]$timestampProperty.Value) -and
+        @($State.Telemetry | Where-Object EventType -eq 'wait_ended').Count -eq 0) {
+        [void]$State.Telemetry.Add([pscustomobject]@{
+            EventType = 'wait_ended'
+            Observation = 'quota_capacity_verified'
+            WaitId = [string]$State.WaitId
+            WaitKind = 'quota_blocked'
+            OccurredAtUtc = [string]$timestampProperty.Value
+        })
+    }
     [pscustomobject]@{ Decision = 'substantive_progress'; Evidence = $evidence }
 }
 
@@ -1214,6 +1219,7 @@ try {
     ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-delivered-observe' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-observe-1' -DeliveryOutcome delivered
     [void]$heartbeatProgressState.ResumeInvocations.Add([pscustomobject]@{ Role = 'implementer'; ThreadId = 'impl-thread'; HostId = 'local'; TaskRef = 77; Revision = 'revision-quota-a1'; Stage = 'implementation' })
     $heartbeatProgressResult = Observe-QuotaWorkerProgress -State $heartbeatProgressState -Observation $heartbeatProgress
+    Assert-True ($heartbeatProgressState.Telemetry.Count -eq 1) 'execution without an observed timestamp leaves the quota boundary unavailable'
     Assert-True ($heartbeatProgressResult.Decision -eq 'substantive_progress' -and $heartbeatProgressState.ProgressEvidence.Count -eq 1) 'ordinary post-delivery heartbeat observation can become substantive progress'
 
     $deliveredFailureHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'delivered') -Workers @(
@@ -1272,12 +1278,12 @@ try {
 
     $implRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
         (New-SyntheticQuotaWorker -Role implementer)
-    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-impl' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -WaitEndedAtUtc '2026-10-15T14:00:01Z' -DeliveryReference 'delivery-impl-1' -DeliveryOutcome delivered
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-impl' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-impl-1' -DeliveryOutcome delivered
     $implResume = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $availableQuotaTick
     Assert-True ($implResume.Decision -eq 'continuation_delivered' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implResume.Packet.Role -ceq 'implementer' -and $implResume.Packet.ThreadId -ceq 'impl-thread' -and $implResume.Packet.HostId -ceq 'local' -and $implResume.Packet.TaskRef -eq 77 -and $implResume.Packet.Revision -ceq 'revision-quota-a1' -and $implResume.Packet.Authorization -ceq 'auth-synthetic-52') 'eligible implementer recovery resumes the same scoped worker once'
-    Assert-True ($implRecovery.Telemetry.Count -eq 2 -and $implRecovery.Telemetry[0].EventType -ceq 'wait_started' -and $implRecovery.Telemetry[0].WaitId -ceq 'quota-wait-impl' -and $implRecovery.Telemetry[0].WaitKind -ceq 'quota_blocked' -and $implRecovery.Telemetry[1].EventType -ceq 'wait_ended' -and $implRecovery.Telemetry[1].WaitId -ceq 'quota-wait-impl' -and $implRecovery.PlannerState.Snapshot['Quota wait'].StartsWith('delivered |')) 'confirmed delivery closes the same quota wait and records existing telemetry boundaries'
+    Assert-True ($implRecovery.Telemetry.Count -eq 1 -and $implRecovery.Telemetry[0].EventType -ceq 'wait_started' -and $implRecovery.Telemetry[0].WaitId -ceq 'quota-wait-impl' -and $implRecovery.Telemetry[0].WaitKind -ceq 'quota_blocked' -and $implRecovery.PlannerState.Snapshot['Quota wait'].StartsWith('delivered |')) 'confirmed delivery suppresses duplicate dispatch without closing the quota telemetry wait'
     $implDuplicate = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $availableQuotaTick
-    Assert-True ($implDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 2) 'repeated eligible ticks do not duplicate a confirmed continuation'
+    Assert-True ($implDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 1) 'repeated eligible ticks do not duplicate a confirmed continuation'
 
     $reviewerPlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'waiting') -Workers @(
         [pscustomobject]@{ Role = 'implementer'; State = 'awaiting_review'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
@@ -1288,7 +1294,7 @@ try {
     $reviewerRecovery = New-QuotaRecoveryState -PlannerState $reviewerPlanner -WorkerEvidence @(
         (New-SyntheticQuotaWorker -Role implementer -State awaiting_review -Stage implementation)
         (New-SyntheticQuotaWorker -Role reviewer -Stage review -ThreadId 'review-thread')
-    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-review' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -WaitEndedAtUtc '2026-10-15T14:00:02Z' -DeliveryReference 'delivery-review-1' -DeliveryOutcome delivered
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-review' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-review-1' -DeliveryOutcome delivered
     $reviewerResume = Invoke-QuotaWorkerRecovery -State $reviewerRecovery -Plan $reviewerPlan
     Assert-True ($reviewerResume.Decision -eq 'continuation_delivered' -and $reviewerRecovery.ResumeInvocations.Count -eq 1 -and $reviewerResume.Packet.Role -ceq 'reviewer' -and $reviewerResume.Packet.ThreadId -ceq 'review-thread' -and @($reviewerRecovery.ResumeInvocations | Where-Object { $_.Role -ceq 'implementer' }).Count -eq 0) 'reviewer recovery resumes only the interrupted reviewer while awaiting_review implementer remains untouched'
 
@@ -1368,13 +1374,13 @@ try {
     )
     $deliveredFollowupPlan = Invoke-HealthyHeartbeatTick -State $implRecovery.PlannerState
     $deliveredFollowup = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $deliveredFollowupPlan
-    Assert-True ($deliveredFollowupPlan.Decision -eq 'quiet_unchanged' -and $deliveredFollowupPlan.Targets.Count -eq 1 -and $deliveredFollowupPlan.Targets[0].ThreadId -ceq 'impl-thread' -and $deliveredFollowup.Decision -eq 'quiet_unchanged' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 2) 'confirmed delivery suppresses duplicate quota wakes while ordinary same-worker observation continues'
+    Assert-True ($deliveredFollowupPlan.Decision -eq 'quiet_unchanged' -and $deliveredFollowupPlan.Targets.Count -eq 1 -and $deliveredFollowupPlan.Targets[0].ThreadId -ceq 'impl-thread' -and $deliveredFollowup.Decision -eq 'quiet_unchanged' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 1) 'confirmed delivery suppresses duplicate quota wakes while ordinary same-worker observation continues'
 
     $newFailurePlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T15:00:00Z'
     $newFailurePlan = Invoke-HealthyHeartbeatTick -State $newFailurePlanner
     $newFailureRecovery = New-QuotaRecoveryState -PlannerState $newFailurePlanner -WorkerEvidence @(
         (New-SyntheticQuotaWorker -Role implementer)
-    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-impl-2' -WaitStartedAtUtc '2026-10-15T14:50:00Z' -WaitEndedAtUtc '2026-10-15T15:00:01Z' -DeliveryReference 'delivery-impl-2' -DeliveryOutcome delivered
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-impl-2' -WaitStartedAtUtc '2026-10-15T14:50:00Z' -DeliveryReference 'delivery-impl-2' -DeliveryOutcome delivered
     $newFailureResume = Invoke-QuotaWorkerRecovery -State $newFailureRecovery -Plan $newFailurePlan
     Assert-True ($newFailureResume.Decision -eq 'continuation_delivered' -and $newFailureResume.Packet.ThreadId -ceq $implResume.Packet.ThreadId -and $newFailureRecovery.WaitId -cne $implRecovery.WaitId -and $newFailureRecovery.ResumeInvocations.Count -eq 1) 'a newly evidenced quota failure opens a new wait while reusing the same worker identity'
 
@@ -1407,9 +1413,21 @@ try {
         Action = 'scoped_check'
         Outcome = 'confirmed'
         Evidence = 'check-exit-0'
+        OccurredAtUtc = '2026-10-15T14:05:00Z'
     }
+    foreach ($unprovenAction in @('scoped_continuation', 'status_update', '')) {
+        $unproven = $progressObservation.PSObject.Copy()
+        $unproven.Action = $unprovenAction
+        $result = Observe-QuotaWorkerProgress -State $implRecovery -Observation $unproven
+        Assert-True ($result.Decision -eq 'no_progress' -and $implRecovery.Telemetry.Count -eq 1) 'delivery, status, or missing execution evidence cannot close the quota wait'
+    }
+    $staleProgress = $progressObservation.PSObject.Copy()
+    $staleProgress.ThreadId = 'other-thread'
+    $staleResult = Observe-QuotaWorkerProgress -State $implRecovery -Observation $staleProgress
+    Assert-True ($staleResult.Decision -eq 'reconcile_required' -and $implRecovery.Telemetry.Count -eq 1) 'another worker cannot prove capacity for this quota episode'
     $observedProgress = Observe-QuotaWorkerProgress -State $implRecovery -Observation $progressObservation
     Assert-True ($observedProgress.Decision -eq 'substantive_progress' -and $implRecovery.ProgressEvidence.Count -eq 1 -and $implRecovery.ProgressEvidence[0].Evidence -ceq 'check-exit-0') 'synthetic integration records observed worker progress with matching stage and revision'
+    Assert-True ($implRecovery.Telemetry.Count -eq 2 -and $implRecovery.Telemetry[1].EventType -ceq 'wait_ended' -and $implRecovery.Telemetry[1].Observation -ceq 'quota_capacity_verified' -and $implRecovery.Telemetry[1].WaitId -ceq 'quota-wait-impl' -and $implRecovery.Telemetry[1].WaitKind -ceq 'quota_blocked' -and $implRecovery.Telemetry[1].OccurredAtUtc -ceq '2026-10-15T14:05:00Z') 'verified execution closes the same quota wait at the execution observation, not delivery time'
     $statusOnlyObservation = [pscustomobject]@{
         Role = 'implementer'; ThreadId = 'impl-thread'; HostId = 'local'; TaskRef = 77; Revision = 'revision-quota-a1'; Stage = 'implementation'; Action = 'status_update'; Outcome = 'confirmed'; Evidence = 'status-ref'
     }
@@ -1425,6 +1443,8 @@ try {
     }
     $noProgress = Observe-QuotaWorkerProgress -State $implRecovery -Observation $noProgressObservation
     Assert-True ($noProgress.Decision -eq 'no_progress' -and $implRecovery.ProgressEvidence.Count -eq 1 -and $implRecovery.ResumeInvocations.Count -eq 1) 'missing worker evidence remains unrecovered without another wake'
+    $null = Observe-QuotaWorkerProgress -State $implRecovery -Observation $progressObservation
+    Assert-True ($implRecovery.Telemetry.Count -eq 2) 'replayed execution evidence cannot duplicate the quota wait end'
 
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'

@@ -171,14 +171,18 @@ thread/host and current task/stage/revision/branch/worktree/authorization; it
 never replaces the worker pair, wakes a healthy awaiting-review implementer
 alongside an interrupted reviewer, changes model or effort, or sends a second
 request for the same tick. A confirmed delivery changes only the compact
-`Quota wait` outcome to `delivered` and closes the matching `quota_blocked`
-wait; it suppresses another quota wake for that interruption while the ordinary
-heartbeat continues observing the same running worker. A later observed quota
+`Quota wait` outcome to `delivered`; it suppresses another quota wake for that
+interruption while the ordinary heartbeat continues observing the same running
+worker. A later observed quota
 failure may reopen the compact state. A confirmed rejection retains the wait
 for a later eligible tick. An unknown delivery records no `wait_ended` boundary
 and requires reconciliation before retry; inactivity is not proof of
 non-delivery. Delivery is distinct from substantive progress, which must be
-evidenced by the next stage-appropriate action.
+evidenced by the next stage-appropriate action. Only independently verified
+worker execution or capacity records `quota_capacity_verified` and closes the
+matching `quota_blocked` telemetry wait at that observation's timestamp. Without
+that proof, leave the wait open and quota duration partial or unavailable, as
+specified in [telemetry invocation](telemetry-invocation.md#explicit-interruption-observations).
 
 `per_task` records the task review/correction events above. `story_end_only`
 does not create task-scoped review or correction events, but it still records
