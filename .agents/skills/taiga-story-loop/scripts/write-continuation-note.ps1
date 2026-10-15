@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $fields = @(
     'Run', 'Scope', 'Repository', 'Base', 'Topology', 'Feature', 'Current', 'Story branch',
     'Implementer', 'Pair', 'Integrated pair', 'Setup authorization', 'Review mode', 'PR', 'PR delivery', 'Approval',
-    'Review', 'Integrated review', 'Final review', 'Final delivery', 'Merge', 'Next', 'Recovery', 'Performance pointer',
+    'Review', 'Integrated review', 'Final review', 'Final delivery', 'Merge', 'Next', 'Recovery', 'Quota wait', 'Performance pointer',
     'Worker cursors', 'Task state', 'Gate', 'Pending action', 'Evidence'
 )
 $required = @(
@@ -25,6 +25,9 @@ foreach ($key in $Snapshot.Keys) {
     if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value) -or
         $value.IndexOfAny([char[]]"`r`n") -ge 0 -or $value.Length -gt 1024) {
         throw "Continuation field '$key' must be a nonblank single-line string of at most 1024 characters."
+    }
+    if ($key -ceq 'Quota wait' -and $value -notmatch '^(waiting|delivered|unknown) \| worker: (implementer|reviewer) \| stage: [^|]+ \| evidence: [^|]+ \| reset: (unknown|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,7})?Z) \| delivery: [^|]+$') {
+        throw "Continuation field 'Quota wait' must use waiting, delivered, or unknown state with worker, stage, evidence, reset, and delivery fields."
     }
 }
 foreach ($key in $required) {

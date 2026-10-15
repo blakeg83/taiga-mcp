@@ -4,8 +4,9 @@ Keep one short note per authorized story-loop run, outside the source
 worktrees. It is a pointer to authoritative systems, not a durable workflow
 engine. Store only the selected scope, ordered story/task sequence,
 branch/worktree lineage, worker chats, PR identity, current stage,
-approval/merge state, recovery reference, and the optional compact performance
-pointer. Keep performance history in the external event ledger.
+approval/merge state, recovery reference, the optional compact quota-wait state,
+and the optional compact performance pointer. Keep performance history in the
+external event ledger.
 
 ## Template
 
@@ -34,6 +35,7 @@ Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha 
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
 Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
+Quota wait: <optional: waiting|delivered|unknown | worker: implementer|reviewer | stage: <stage> | evidence: <safe reference> | reset: <UTC estimate or unknown> | delivery: <none or safe reference>>
 Performance pointer: <none before Start, or schema=1 | run=<run-id> | project=<project-id> | story=<story-id>/<story-ref> | ledger=<external-ledger-path> | lastEvent=<event-id> | lastObservedUtc=<utc>
 ```
 
@@ -123,6 +125,14 @@ reconciliation if a required fact cannot be retained.
 The helper only persists supplied observations; it does not verify their truth
 or infer task acceptance, approval, or merge.
 
+`Quota wait` is optional so older notes remain readable and writable. When
+present, it is one bounded single-line state: `waiting`, `delivered`, or
+`unknown`, followed by the affected worker, stage, safe evidence reference,
+optional UTC reset estimate, and continuation-delivery outcome. It does not
+duplicate the normal worker, task, branch, revision, authority, pending-action,
+or gate fields. Reset values are scheduling hints, never proof of capacity or
+an exact blocked duration.
+
 For an existing accumulated note, first preserve it as a separate historical
 evidence file, then reconcile and write the current snapshot. Store only its
 path under `Evidence`; routine reads never include that file or `.previous`.
@@ -200,6 +210,23 @@ The heartbeat planner applies this order on every scheduled tick:
 5. If the target set is empty, end silently without a wait. The planner never
    rereads transcripts, tickets, source, or historical notes merely because a
    30-minute tick elapsed.
+
+When the optional `Quota wait` field is present, apply the same schedule and
+gate/terminal precedence before the worker-identity checks. A `delivered` state
+suppresses another quota continuation for that interruption, then returns to the
+ordinary bounded observation path for the same running worker; an observed new
+quota failure may reopen the state as `waiting`. An `unknown` delivery state
+opens one bounded reconciliation and does not wake a worker. For `waiting`, a confirmed approval or terminal gate
+ends quietly, and a confirmed quota rejection defers to a later eligible tick
+without an immediate retry. A known future reset estimate defers when no fresh
+authoritative capacity result is available. Fresh authoritative `exhausted`
+evidence defers and may replace the reset estimate; fresh `available` evidence
+returns one bounded attempt-eligibility result. If the reset is unknown or has
+elapsed and capacity metadata is absent, elapsed time alone may return that
+same eligibility result, subject to the next reconciliation step. The healthy
+planner does not poll a new capacity service, perform the attempt, append tick
+history, wake stopped workers, or create nested/duplicate automations; the
+reconciliation owner records the later delivery and attempt outcome.
 
 Healthy and unanswered user waits do not reread tickets/comments, source,
 diffs, tests, historical notes, or full chat transcripts; they do not repeat
