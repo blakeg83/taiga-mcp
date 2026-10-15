@@ -152,6 +152,30 @@ For an observed quota interruption/resumption, the coordinator uses existing
 `waitKind: quota_blocked`. Record real observation timestamps. A quota window
 is not a blocked-duration measurement; incomplete boundaries remain partial.
 
+### Quota recovery reconciliation
+
+After the existing heartbeat returns an eligible quota attempt, reconcile the
+compact snapshot against the authoritative worker pair before sending anything.
+Select exactly the affected `implementer` or `reviewer` from `Quota wait`, then
+match its confirmed thread/host, stopped or quota-blocked state, current task,
+stage, branch, worktree, revision, authorization, pending-action state, and
+external-operation outcome. A running worker, missing identity, stale binding,
+pending handoff, or unknown external outcome opens bounded reconciliation and
+does not dispatch.
+
+For a valid stopped affected worker, construct one scoped continuation packet for
+that same worker and eligible heartbeat. The packet carries the recorded
+thread/host and current task/stage/revision/branch/worktree/authorization; it
+never replaces the worker pair, wakes a healthy awaiting-review implementer
+alongside an interrupted reviewer, changes model or effort, or sends a second
+request for the same tick. A confirmed delivery changes only the compact
+`Quota wait` outcome to `delivered` and closes the matching `quota_blocked`
+wait. A confirmed rejection retains the wait for a later eligible tick. An
+unknown delivery records no `wait_ended` boundary and requires reconciliation
+before retry; inactivity is not proof of non-delivery. Delivery is distinct from
+substantive progress, which must be evidenced by the next stage-appropriate
+action.
+
 `per_task` records the task review/correction events above. `story_end_only`
 does not create task-scoped review or correction events, but it still records
 implementation boundaries and final-story start, finding, correction, and

@@ -392,6 +392,147 @@ function Invoke-QuotaHeartbeatPlan {
     [pscustomobject]@{ Decision = 'quota_attempt_eligible'; Targets = @(); Waits = 0; SnapshotChanged = $false }
 }
 
+function Set-QuotaWaitDelivery {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot,
+        [Parameter(Mandatory)] [psobject] $Parts,
+        [Parameter(Mandatory)] [string] $Delivery
+    )
+
+    $Snapshot['Quota wait'] = "delivered | worker: $($Parts.Worker) | stage: $($Parts.Stage) | evidence: $($Parts.Evidence) | reset: $($Parts.Reset) | delivery: $Delivery"
+}
+
+function New-QuotaRecoveryState {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PlannerState,
+        [Parameter(Mandatory)] [object[]] $WorkerEvidence,
+        [Parameter(Mandatory)] [int] $CurrentTask,
+        [Parameter(Mandatory)] [string] $CurrentRevision,
+        [Parameter(Mandatory)] [string] $Authorization,
+        [Parameter(Mandatory)] [string] $Branch,
+        [Parameter(Mandatory)] [string] $Worktree,
+        [Parameter(Mandatory)] [string] $WaitId,
+        [Parameter(Mandatory)] [string] $WaitStartedAtUtc,
+        [AllowNull()] [string] $WaitEndedAtUtc = $null,
+        [AllowNull()] [string] $DeliveryReference = $null,
+        [ValidateSet('delivered', 'rejected', 'unknown')] [string] $DeliveryOutcome = 'delivered'
+    )
+
+    if ([string]::IsNullOrWhiteSpace($WaitId) -or [string]::IsNullOrWhiteSpace($WaitStartedAtUtc)) {
+        throw 'quota recovery state requires a stable wait id and observed start timestamp'
+    }
+    $telemetry = [System.Collections.Generic.List[object]]::new()
+    [void]$telemetry.Add([pscustomobject]@{
+        EventType = 'wait_started'
+        WaitId = $WaitId
+        WaitKind = 'quota_blocked'
+        OccurredAtUtc = $WaitStartedAtUtc
+    })
+    [ordered]@{
+        PlannerState = $PlannerState
+        WorkerEvidence = @($WorkerEvidence)
+        CurrentTask = $CurrentTask
+        CurrentRevision = $CurrentRevision
+        Authorization = $Authorization
+        Branch = $Branch
+        Worktree = $Worktree
+        WaitId = $WaitId
+        WaitStartedAtUtc = $WaitStartedAtUtc
+        WaitEndedAtUtc = $WaitEndedAtUtc
+        DeliveryReference = $DeliveryReference
+        DeliveryOutcome = $DeliveryOutcome
+        ResumeInvocations = [System.Collections.Generic.List[object]]::new()
+        Reconciliation = [System.Collections.Generic.List[object]]::new()
+        Telemetry = $telemetry
+    }
+}
+
+function Get-QuotaWorkerRecoveryBlocker {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
+        [Parameter(Mandatory)] [psobject] $Parts
+    )
+
+    $workers = @($State.WorkerEvidence | Where-Object { [string]$_.Role -ceq [string]$Parts.Worker })
+    if ($workers.Count -ne 1) { return 'affected worker identity is missing or duplicated' }
+    $worker = $workers[0]
+    $confirmedValue = Get-QuotaEvidenceProperty -Evidence $worker -Name 'Confirmed'
+    $confirmed = if ($confirmedValue -is [bool]) { [bool]$confirmedValue } else { [string]$confirmedValue -ceq 'true' }
+    if (-not $confirmed -or [string]$worker.Outcome -in @('unknown', 'failed')) { return 'affected worker confirmation or external outcome is unresolved' }
+    if ([string]$worker.State -notin @('stopped', 'quota_blocked', 'interrupted')) { return 'affected worker is already running or not resumable' }
+    foreach ($identity in @('ThreadId', 'HostId')) {
+        if ([string]::IsNullOrWhiteSpace([string]$worker.$identity)) { return "affected worker $identity is missing" }
+    }
+    if ([int]$worker.TaskRef -ne [int]$State.CurrentTask) { return 'affected worker task binding is stale' }
+    foreach ($binding in @(
+        @{ Name = 'Revision'; Expected = [string]$State.CurrentRevision },
+        @{ Name = 'Stage'; Expected = [string]$Parts.Stage },
+        @{ Name = 'Branch'; Expected = [string]$State.Branch },
+        @{ Name = 'Worktree'; Expected = [string]$State.Worktree },
+        @{ Name = 'Authorization'; Expected = [string]$State.Authorization }
+    )) {
+        if ([string]$worker.($binding.Name) -cne [string]$binding.Expected) { return "affected worker $($binding.Name) binding is stale" }
+    }
+    if ([string]$worker.PendingAction -cne 'none') { return 'affected worker has a pending or uncertain action' }
+    if ([string]$worker.ExternalOutcome -cne 'confirmed') { return 'affected worker external outcome is uncertain' }
+    $worker
+}
+
+function Invoke-QuotaWorkerRecovery {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
+        [Parameter(Mandatory)] [psobject] $Plan
+    )
+
+    if ($State.ResumeInvocations.Count -gt 0) {
+        return [pscustomobject]@{ Decision = 'duplicate_resume_suppressed'; Packet = $null }
+    }
+    if ([string]$Plan.Decision -cne 'quota_attempt_eligible') {
+        return [pscustomobject]@{ Decision = [string]$Plan.Decision; Packet = $null }
+    }
+
+    $parts = Get-QuotaWaitParts -Snapshot $State.PlannerState.Snapshot
+    $worker = Get-QuotaWorkerRecoveryBlocker -State $State -Parts $parts
+    if ($worker -is [string]) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = [string]$worker; Action = 'bounded_reconciliation' })
+        return [pscustomobject]@{ Decision = 'reconcile_required'; Packet = $null }
+    }
+
+    $packet = [ordered]@{
+        Action = 'scoped_continuation'
+        Role = [string]$worker.Role
+        ThreadId = [string]$worker.ThreadId
+        HostId = [string]$worker.HostId
+        TaskRef = [int]$State.CurrentTask
+        Revision = [string]$State.CurrentRevision
+        Stage = [string]$Parts.Stage
+        Branch = [string]$State.Branch
+        Worktree = [string]$State.Worktree
+        Authorization = [string]$State.Authorization
+    }
+    [void]$State.ResumeInvocations.Add([pscustomobject]$packet)
+
+    if ([string]$State.DeliveryOutcome -ceq 'unknown') {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'continuation_delivery_unknown'; Action = 'bounded_reconciliation' })
+        return [pscustomobject]@{ Decision = 'delivery_unknown_reconcile'; Packet = $packet }
+    }
+    if ([string]$State.DeliveryOutcome -ceq 'rejected') {
+        return [pscustomobject]@{ Decision = 'quota_rejection_deferred'; Packet = $packet }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$State.DeliveryReference) -or [string]::IsNullOrWhiteSpace([string]$State.WaitEndedAtUtc)) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'confirmed_delivery_evidence_missing'; Action = 'bounded_reconciliation' })
+        return [pscustomobject]@{ Decision = 'delivery_unknown_reconcile'; Packet = $packet }
+    }
+    [void]$State.Telemetry.Add([pscustomobject]@{
+        EventType = 'wait_ended'
+        WaitId = [string]$State.WaitId
+        WaitKind = 'quota_blocked'
+        OccurredAtUtc = [string]$State.WaitEndedAtUtc
+    })
+    Set-QuotaWaitDelivery -Snapshot $State.PlannerState.Snapshot -Parts $parts -Delivery ([string]$State.DeliveryReference)
+    [pscustomobject]@{ Decision = 'continuation_delivered'; Packet = $packet }
+}
+
 function Invoke-HealthyHeartbeatTick {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
 
@@ -896,6 +1037,85 @@ try {
     $pausedQuotaHeartbeat.Snapshot['Recovery'] = 'synthetic-heartbeat | schedule: PAUSED | target: none'
     $pausedQuotaTick = Invoke-HealthyHeartbeatTick -State $pausedQuotaHeartbeat
     Assert-True ($pausedQuotaTick.Decision -eq 'quiet_paused' -and $pausedQuotaHeartbeat.WaitInvocations.Count -eq 0) 'paused or terminal schedule precedence suppresses quota recovery'
+
+    function New-SyntheticQuotaWorker {
+        param(
+            [ValidateSet('implementer', 'reviewer')] [string] $Role,
+            [string] $State = 'stopped',
+            [bool] $Confirmed = $true,
+            [string] $Outcome = 'confirmed',
+            [string] $Stage = 'implementation',
+            [string] $ThreadId = 'impl-thread',
+            [string] $HostId = 'local',
+            [string] $PendingAction = 'none',
+            [string] $ExternalOutcome = 'confirmed'
+        )
+
+        [pscustomobject]@{
+            Role = $Role
+            State = $State
+            Confirmed = $Confirmed
+            Outcome = $Outcome
+            ThreadId = $ThreadId
+            HostId = $HostId
+            TaskRef = 77
+            Revision = 'revision-quota-a1'
+            Stage = $Stage
+            Branch = 'codex/story-52-synthetic'
+            Worktree = 'C:\Synthetic\story'
+            Authorization = 'auth-synthetic-52'
+            PendingAction = $PendingAction
+            ExternalOutcome = $ExternalOutcome
+        }
+    }
+
+    $implRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-impl' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -WaitEndedAtUtc '2026-10-15T14:00:01Z' -DeliveryReference 'delivery-impl-1' -DeliveryOutcome delivered
+    $implResume = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $availableQuotaTick
+    Assert-True ($implResume.Decision -eq 'continuation_delivered' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implResume.Packet.Role -ceq 'implementer' -and $implResume.Packet.ThreadId -ceq 'impl-thread' -and $implResume.Packet.HostId -ceq 'local' -and $implResume.Packet.TaskRef -eq 77 -and $implResume.Packet.Revision -ceq 'revision-quota-a1' -and $implResume.Packet.Authorization -ceq 'auth-synthetic-52') 'eligible implementer recovery resumes the same scoped worker once'
+    Assert-True ($implRecovery.Telemetry.Count -eq 2 -and $implRecovery.Telemetry[0].EventType -ceq 'wait_started' -and $implRecovery.Telemetry[0].WaitId -ceq 'quota-wait-impl' -and $implRecovery.Telemetry[0].WaitKind -ceq 'quota_blocked' -and $implRecovery.Telemetry[1].EventType -ceq 'wait_ended' -and $implRecovery.Telemetry[1].WaitId -ceq 'quota-wait-impl' -and $implRecovery.PlannerState.Snapshot['Quota wait'].StartsWith('delivered |')) 'confirmed delivery closes the same quota wait and records existing telemetry boundaries'
+    $implDuplicate = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $availableQuotaTick
+    Assert-True ($implDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 2) 'repeated eligible ticks do not duplicate a confirmed continuation'
+
+    $reviewerPlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'waiting') -Workers @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'awaiting_review'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+        [pscustomobject]@{ Role = 'reviewer'; State = 'stopped'; Confirmed = $false; Outcome = 'unknown'; ThreadId = ''; HostId = ''; Cursor = 'review-cursor-a1' }
+    ) -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $reviewerPlanner.Snapshot['Quota wait'] = 'waiting | worker: reviewer | stage: review | evidence: quota-ref | reset: unknown | delivery: none'
+    $reviewerPlan = Invoke-HealthyHeartbeatTick -State $reviewerPlanner
+    $reviewerRecovery = New-QuotaRecoveryState -PlannerState $reviewerPlanner -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer -State awaiting_review -Stage implementation)
+        (New-SyntheticQuotaWorker -Role reviewer -Stage review -ThreadId 'review-thread')
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-review' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -WaitEndedAtUtc '2026-10-15T14:00:02Z' -DeliveryReference 'delivery-review-1' -DeliveryOutcome delivered
+    $reviewerResume = Invoke-QuotaWorkerRecovery -State $reviewerRecovery -Plan $reviewerPlan
+    Assert-True ($reviewerResume.Decision -eq 'continuation_delivered' -and $reviewerRecovery.ResumeInvocations.Count -eq 1 -and $reviewerResume.Packet.Role -ceq 'reviewer' -and $reviewerResume.Packet.ThreadId -ceq 'review-thread' -and @($reviewerRecovery.ResumeInvocations | Where-Object { $_.Role -ceq 'implementer' }).Count -eq 0) 'reviewer recovery resumes only the interrupted reviewer while awaiting_review implementer remains untouched'
+
+    $runningRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer -State running)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-running' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-running-1' -DeliveryOutcome delivered
+    $runningResume = Invoke-QuotaWorkerRecovery -State $runningRecovery -Plan $availableQuotaTick
+    Assert-True ($runningResume.Decision -eq 'reconcile_required' -and $runningRecovery.ResumeInvocations.Count -eq 0 -and $runningRecovery.Reconciliation.Count -eq 1) 'already-running worker state blocks a duplicate quota wake'
+
+    $pendingActionRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer -PendingAction 'review_handoff_pending')
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-pending' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-pending-1' -DeliveryOutcome delivered
+    $pendingActionResume = Invoke-QuotaWorkerRecovery -State $pendingActionRecovery -Plan $availableQuotaTick
+    Assert-True ($pendingActionResume.Decision -eq 'reconcile_required' -and $pendingActionRecovery.ResumeInvocations.Count -eq 0) 'pending handoff or uncertain external action blocks blind replay'
+
+    $unknownDeliveryRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-unknown' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference '' -DeliveryOutcome unknown
+    $unknownDeliveryResume = Invoke-QuotaWorkerRecovery -State $unknownDeliveryRecovery -Plan $availableQuotaTick
+    Assert-True ($unknownDeliveryResume.Decision -eq 'delivery_unknown_reconcile' -and $unknownDeliveryRecovery.ResumeInvocations.Count -eq 1 -and $unknownDeliveryRecovery.Telemetry.Count -eq 1 -and $unknownDeliveryRecovery.Reconciliation.Count -eq 1) 'unknown continuation delivery records one attempted destination and reconciles before retry'
+    $unknownDeliveryDuplicate = Invoke-QuotaWorkerRecovery -State $unknownDeliveryRecovery -Plan $availableQuotaTick
+    Assert-True ($unknownDeliveryDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $unknownDeliveryRecovery.ResumeInvocations.Count -eq 1) 'unknown delivery does not authorize a duplicate retry'
+
+    $rejectedDeliveryRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-rejected' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference '' -DeliveryOutcome rejected
+    $rejectedDeliveryResume = Invoke-QuotaWorkerRecovery -State $rejectedDeliveryRecovery -Plan $availableQuotaTick
+    Assert-True ($rejectedDeliveryResume.Decision -eq 'quota_rejection_deferred' -and $rejectedDeliveryRecovery.ResumeInvocations.Count -eq 1 -and $rejectedDeliveryRecovery.Telemetry.Count -eq 1) 'confirmed quota rejection retains the wait for a later eligible tick without closing telemetry early'
 
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'
