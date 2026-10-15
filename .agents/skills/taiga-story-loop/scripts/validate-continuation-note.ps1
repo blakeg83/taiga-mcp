@@ -484,11 +484,11 @@ function Invoke-QuotaWorkerRecovery {
         [Parameter(Mandatory)] [psobject] $Plan
     )
 
-    if ($State.ResumeInvocations.Count -gt 0) {
-        return [pscustomobject]@{ Decision = 'duplicate_resume_suppressed'; Packet = $null }
-    }
     if ([string]$Plan.Decision -cne 'quota_attempt_eligible') {
         return [pscustomobject]@{ Decision = [string]$Plan.Decision; Packet = $null }
+    }
+    if ($State.ResumeInvocations.Count -gt 0) {
+        return [pscustomobject]@{ Decision = 'duplicate_resume_suppressed'; Packet = $null }
     }
 
     $parts = Get-QuotaWaitParts -Snapshot $State.PlannerState.Snapshot
@@ -1116,6 +1116,45 @@ try {
     ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-rejected' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference '' -DeliveryOutcome rejected
     $rejectedDeliveryResume = Invoke-QuotaWorkerRecovery -State $rejectedDeliveryRecovery -Plan $availableQuotaTick
     Assert-True ($rejectedDeliveryResume.Decision -eq 'quota_rejection_deferred' -and $rejectedDeliveryRecovery.ResumeInvocations.Count -eq 1 -and $rejectedDeliveryRecovery.Telemetry.Count -eq 1) 'confirmed quota rejection retains the wait for a later eligible tick without closing telemetry early'
+
+    $rejectionTickOnePlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $rejectionTickOnePlan = Invoke-HealthyHeartbeatTick -State $rejectionTickOnePlanner
+    $rejectionTickOne = New-QuotaRecoveryState -PlannerState $rejectionTickOnePlanner -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-repeat' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryOutcome rejected
+    $rejectionOneResult = Invoke-QuotaWorkerRecovery -State $rejectionTickOne -Plan $rejectionTickOnePlan
+    $rejectionOneDuplicate = Invoke-QuotaWorkerRecovery -State $rejectionTickOne -Plan $rejectionTickOnePlan
+    $rejectionTickTwoPlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:30:00Z'
+    $rejectionTickTwoPlan = Invoke-HealthyHeartbeatTick -State $rejectionTickTwoPlanner
+    $rejectionTickTwo = New-QuotaRecoveryState -PlannerState $rejectionTickTwoPlanner -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-repeat' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryOutcome rejected
+    $rejectionTwoResult = Invoke-QuotaWorkerRecovery -State $rejectionTickTwo -Plan $rejectionTickTwoPlan
+    Assert-True ($rejectionOneResult.Decision -eq 'quota_rejection_deferred' -and $rejectionOneDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $rejectionTwoResult.Decision -eq 'quota_rejection_deferred' -and $rejectionTickOne.ResumeInvocations.Count -eq 1 -and $rejectionTickTwo.ResumeInvocations.Count -eq 1) 'repeated quota rejections permit one attempt on each later eligible tick but never an immediate retry'
+
+    $deliveredFollowupPlan = Invoke-HealthyHeartbeatTick -State $implRecovery.PlannerState
+    $deliveredFollowup = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $deliveredFollowupPlan
+    Assert-True ($deliveredFollowupPlan.Decision -eq 'quota_wait_delivered' -and $deliveredFollowup.Decision -eq 'quota_wait_delivered' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 2) 'confirmed delivery keeps repeated heartbeat ticks quiet and preserves the existing recovery automation identity'
+
+    $newFailurePlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T15:00:00Z'
+    $newFailurePlan = Invoke-HealthyHeartbeatTick -State $newFailurePlanner
+    $newFailureRecovery = New-QuotaRecoveryState -PlannerState $newFailurePlanner -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer)
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-impl-2' -WaitStartedAtUtc '2026-10-15T14:50:00Z' -WaitEndedAtUtc '2026-10-15T15:00:01Z' -DeliveryReference 'delivery-impl-2' -DeliveryOutcome delivered
+    $newFailureResume = Invoke-QuotaWorkerRecovery -State $newFailureRecovery -Plan $newFailurePlan
+    Assert-True ($newFailureResume.Decision -eq 'continuation_delivered' -and $newFailureResume.Packet.ThreadId -ceq $implResume.Packet.ThreadId -and $newFailureRecovery.WaitId -cne $implRecovery.WaitId -and $newFailureRecovery.ResumeInvocations.Count -eq 1) 'a newly evidenced quota failure opens a new wait while reusing the same worker identity'
+
+    $missingIdentityRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer -ThreadId '')
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-missing-id' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-missing-id' -DeliveryOutcome delivered
+    $missingIdentityResume = Invoke-QuotaWorkerRecovery -State $missingIdentityRecovery -Plan $availableQuotaTick
+    Assert-True ($missingIdentityResume.Decision -eq 'reconcile_required' -and $missingIdentityRecovery.ResumeInvocations.Count -eq 0) 'missing worker identity requires reconciliation before any quota continuation'
+
+    $substantiveProgress = [System.Collections.Generic.List[object]]::new()
+    if ($implResume.Decision -eq 'continuation_delivered') {
+        [void]$substantiveProgress.Add([pscustomobject]@{ Action = 'scoped_check'; Worker = $implResume.Packet.Role; Revision = $implResume.Packet.Revision; ManualInput = 'none' })
+    }
+    Assert-True ($substantiveProgress.Count -eq 1 -and $substantiveProgress[0].Action -ceq 'scoped_check' -and $substantiveProgress[0].ManualInput -cne 'proceed') 'synthetic integration distinguishes substantive post-delivery progress from a manual continuation prompt'
 
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'
