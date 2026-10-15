@@ -258,13 +258,19 @@ function New-HeartbeatPlannerState {
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot,
         [Parameter(Mandatory)] [object[]] $Workers,
-        [Parameter(Mandatory)] [object[]] $WaitResult
+        [Parameter(Mandatory)] [object[]] $WaitResult,
+        [AllowNull()] [object] $QuotaEvidence = $null,
+        [AllowNull()] [string] $NowUtc = $null
     )
 
     [ordered]@{
         Snapshot = $Snapshot
         Workers = @($Workers)
         WaitResult = @($WaitResult)
+        QuotaEvidence = $QuotaEvidence
+        NowUtc = if ([string]::IsNullOrWhiteSpace($NowUtc)) {
+            [DateTimeOffset]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", [Globalization.CultureInfo]::InvariantCulture)
+        } else { $NowUtc }
         SnapshotReads = 0
         WaitInvocations = [System.Collections.Generic.List[object]]::new()
         SnapshotReplacements = [System.Collections.Generic.List[object]]::new()
@@ -290,6 +296,102 @@ function Get-HeartbeatWorkerCursorText {
     return $parts -join ' | '
 }
 
+function Get-QuotaWaitParts {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot)
+
+    if (-not $Snapshot.Contains('Quota wait') -or [string]::IsNullOrWhiteSpace([string]$Snapshot['Quota wait'])) {
+        return $null
+    }
+    $quotaText = [string]$Snapshot['Quota wait']
+    if ($quotaText -notmatch '^(?<State>waiting|delivered|unknown) \| worker: (?<Worker>implementer|reviewer) \| stage: (?<Stage>[^|]+) \| evidence: (?<Evidence>[^|]+) \| reset: (?<Reset>unknown|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z) \| delivery: (?<Delivery>[^|]+)$') {
+        throw 'invalid quota wait state in continuation snapshot'
+    }
+    [pscustomobject]@{
+        State = [string]$Matches['State']
+        Worker = [string]$Matches['Worker']
+        Stage = ([string]$Matches['Stage']).Trim()
+        Evidence = ([string]$Matches['Evidence']).Trim()
+        Reset = [string]$Matches['Reset']
+        Delivery = ([string]$Matches['Delivery']).Trim()
+    }
+}
+
+function Set-QuotaWaitReset {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot,
+        [Parameter(Mandatory)] [psobject] $Parts,
+        [Parameter(Mandatory)] [string] $Reset
+    )
+
+    $Snapshot['Quota wait'] = "$($Parts.State) | worker: $($Parts.Worker) | stage: $($Parts.Stage) | evidence: $($Parts.Evidence) | reset: $Reset | delivery: $($Parts.Delivery)"
+}
+
+function Get-QuotaEvidenceProperty {
+    param(
+        [AllowNull()] [object] $Evidence,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    if ($null -eq $Evidence) { return $null }
+    $property = $Evidence.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    $property.Value
+}
+
+function Invoke-QuotaHeartbeatPlan {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
+
+    $parts = Get-QuotaWaitParts -Snapshot $State.Snapshot
+    if ($null -eq $parts) { return $null }
+
+    if ($parts.State -ceq 'delivered') {
+        return [pscustomobject]@{ Decision = 'quota_wait_delivered'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+    if ($parts.State -ceq 'unknown') {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'quota_delivery_unknown'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'quota_wait_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $gate = if ($State.Snapshot.Contains('Gate')) { ([string]$State.Snapshot['Gate']).Trim() } else { 'none' }
+    if (-not [string]::IsNullOrWhiteSpace($gate) -and $gate -cne 'none') {
+        return [pscustomobject]@{ Decision = 'quota_wait_blocked_by_gate'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $evidence = $State.QuotaEvidence
+    $attemptOutcome = [string](Get-QuotaEvidenceProperty -Evidence $evidence -Name 'AttemptOutcome')
+    if ($attemptOutcome -ceq 'rejected') {
+        return [pscustomobject]@{ Decision = 'quota_rejection_deferred'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $capacity = [string](Get-QuotaEvidenceProperty -Evidence $evidence -Name 'Capacity')
+    $freshValue = Get-QuotaEvidenceProperty -Evidence $evidence -Name 'Fresh'
+    $fresh = if ($freshValue -is [bool]) { [bool]$freshValue } else { [string]$freshValue -ceq 'true' }
+    $revisedReset = [string](Get-QuotaEvidenceProperty -Evidence $evidence -Name 'ResetUtc')
+    $snapshotChanged = $false
+    if ($fresh -and $capacity -ceq 'exhausted') {
+        if (-not [string]::IsNullOrWhiteSpace($revisedReset) -and $parts.Reset -cne $revisedReset) {
+            Set-QuotaWaitReset -Snapshot $State.Snapshot -Parts $parts -Reset $revisedReset
+            [void]$State.SnapshotReplacements.Add([pscustomobject]@{ Reason = 'quota_reset_revised'; Evidence = $revisedReset })
+            [void]$State.Events.Add('snapshot_replace')
+            $snapshotChanged = $true
+        }
+        return [pscustomobject]@{ Decision = 'quota_wait_deferred_exhausted'; Targets = @(); Waits = 0; SnapshotChanged = $snapshotChanged }
+    }
+    if ($fresh -and $capacity -ceq 'available') {
+        return [pscustomobject]@{ Decision = 'quota_attempt_eligible'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    if ($parts.Reset -cne 'unknown') {
+        $nowUtc = [DateTimeOffset]::Parse([string]$State.NowUtc, [Globalization.CultureInfo]::InvariantCulture)
+        $resetUtc = [DateTimeOffset]::Parse($parts.Reset, [Globalization.CultureInfo]::InvariantCulture)
+        if ($nowUtc -lt $resetUtc) {
+            return [pscustomobject]@{ Decision = 'quota_wait_deferred_future_reset'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+        }
+    }
+    [pscustomobject]@{ Decision = 'quota_attempt_eligible'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+}
+
 function Invoke-HealthyHeartbeatTick {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
 
@@ -305,6 +407,9 @@ function Invoke-HealthyHeartbeatTick {
         [void]$State.Events.Add('reconcile_required')
         return [pscustomobject]@{ Decision = 'reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
     }
+
+    $quotaPlan = Invoke-QuotaHeartbeatPlan -State $State
+    if ($null -ne $quotaPlan) { return $quotaPlan }
 
     foreach ($worker in @($State.Workers)) {
         $unknownOutcome = [string]$worker.Outcome -in @('unknown', 'failed')
@@ -733,6 +838,64 @@ try {
     $unknownWaitHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{} + $heartbeatSnapshot) -Workers $quietWorkers -WaitResult @([pscustomobject]@{ ThreadId = 'impl-thread'; Outcome = 'unknown'; Cursor = 'impl-cursor-z9' }, [pscustomobject]@{ ThreadId = 'review-thread'; Outcome = 'unchanged'; Cursor = 'review-cursor-a1' })
     $unknownWaitTick = Invoke-HealthyHeartbeatTick -State $unknownWaitHeartbeat
     Assert-True ($unknownWaitTick.Decision -eq 'reconcile_required' -and $unknownWaitHeartbeat.WaitInvocations.Count -eq 1 -and $unknownWaitHeartbeat.SnapshotReplacements.Count -eq 0 -and $unknownWaitHeartbeat.TickHistory.Count -eq 0) 'unknown wait result opens bounded reconciliation without replay or cursor persistence'
+
+    function New-SyntheticQuotaHeartbeatSnapshot {
+        param(
+            [string] $State = 'waiting',
+            [string] $Reset = '2026-10-15T14:18:00Z',
+            [string] $Gate = 'none'
+        )
+
+        $quotaSnapshot = [ordered]@{}
+        foreach ($key in $heartbeatSnapshot.Keys) { $quotaSnapshot[$key] = $heartbeatSnapshot[$key] }
+        $quotaSnapshot['Gate'] = $Gate
+        $quotaSnapshot['Quota wait'] = "$State | worker: implementer | stage: implementation | evidence: quota-ref | reset: $Reset | delivery: none"
+        return $quotaSnapshot
+    }
+
+    $quotaStoppedWorkers = @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'stopped'; Confirmed = $false; Outcome = 'unknown'; ThreadId = ''; HostId = ''; Cursor = 'none' }
+    )
+    $futureQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'unknown'; Fresh = $false }) -NowUtc '2026-10-15T14:00:00Z'
+    $futureQuotaTick = Invoke-HealthyHeartbeatTick -State $futureQuotaHeartbeat
+    Assert-True ($futureQuotaTick.Decision -eq 'quota_wait_deferred_future_reset' -and $futureQuotaHeartbeat.WaitInvocations.Count -eq 0 -and $futureQuotaHeartbeat.TickHistory.Count -eq 0) 'future quota reset defers without waking a stopped or unresolved worker'
+
+    $availableQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $availableQuotaTick = Invoke-HealthyHeartbeatTick -State $availableQuotaHeartbeat
+    Assert-True ($availableQuotaTick.Decision -eq 'quota_attempt_eligible' -and $availableQuotaHeartbeat.WaitInvocations.Count -eq 0 -and $availableQuotaHeartbeat.TickHistory.Count -eq 0) 'fresh available capacity permits one bounded eligibility decision without a separate capacity poll'
+
+    $expiredQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'unknown'; Fresh = $false }) -NowUtc '2026-10-15T14:30:00Z'
+    $expiredQuotaTick = Invoke-HealthyHeartbeatTick -State $expiredQuotaHeartbeat
+    Assert-True ($expiredQuotaTick.Decision -eq 'quota_attempt_eligible' -and $expiredQuotaHeartbeat.WaitInvocations.Count -eq 0) 'elapsed time after a quota reset estimate permits one bounded attempt-eligibility result'
+
+    $unknownResetHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -Reset 'unknown') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence $null -NowUtc '2026-10-15T14:00:00Z'
+    $unknownResetTick = Invoke-HealthyHeartbeatTick -State $unknownResetHeartbeat
+    Assert-True ($unknownResetTick.Decision -eq 'quota_attempt_eligible' -and $unknownResetHeartbeat.WaitInvocations.Count -eq 0) 'missing reset and capacity metadata permit one bounded attempt subject to reconciliation'
+
+    $exhaustedQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'exhausted'; Fresh = $true; ResetUtc = '2026-10-15T15:00:00Z' }) -NowUtc '2026-10-15T14:30:00Z'
+    $exhaustedQuotaTick = Invoke-HealthyHeartbeatTick -State $exhaustedQuotaHeartbeat
+    Assert-True ($exhaustedQuotaTick.Decision -eq 'quota_wait_deferred_exhausted' -and $exhaustedQuotaHeartbeat.Snapshot['Quota wait'].Contains('reset: 2026-10-15T15:00:00Z') -and $exhaustedQuotaHeartbeat.SnapshotReplacements.Count -eq 1 -and $exhaustedQuotaHeartbeat.TickHistory.Count -eq 0) 'fresh exhausted capacity defers and may revise the quota reset without tick history'
+
+    $rejectedQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ AttemptOutcome = 'rejected' }) -NowUtc '2026-10-15T14:30:00Z'
+    $rejectedQuotaTick = Invoke-HealthyHeartbeatTick -State $rejectedQuotaHeartbeat
+    Assert-True ($rejectedQuotaTick.Decision -eq 'quota_rejection_deferred' -and $rejectedQuotaHeartbeat.WaitInvocations.Count -eq 0 -and $rejectedQuotaHeartbeat.SnapshotReplacements.Count -eq 0) 'confirmed quota rejection waits for a later scheduled tick without an immediate retry'
+
+    $deliveredQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'delivered') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $deliveredQuotaTick = Invoke-HealthyHeartbeatTick -State $deliveredQuotaHeartbeat
+    Assert-True ($deliveredQuotaTick.Decision -eq 'quota_wait_delivered' -and $deliveredQuotaHeartbeat.WaitInvocations.Count -eq 0) 'confirmed quota delivery suppresses routine heartbeat work'
+
+    $unknownQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'unknown') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $unknownQuotaTick = Invoke-HealthyHeartbeatTick -State $unknownQuotaHeartbeat
+    Assert-True ($unknownQuotaTick.Decision -eq 'quota_wait_reconcile_required' -and $unknownQuotaHeartbeat.WaitInvocations.Count -eq 0 -and $unknownQuotaHeartbeat.Reconciliation.Count -eq 1) 'unknown quota delivery opens reconciliation without a worker wake'
+
+    $gatedQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -Gate 'approval | user decision required') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $gatedQuotaTick = Invoke-HealthyHeartbeatTick -State $gatedQuotaHeartbeat
+    Assert-True ($gatedQuotaTick.Decision -eq 'quota_wait_blocked_by_gate' -and $gatedQuotaHeartbeat.WaitInvocations.Count -eq 0) 'approval gate precedence keeps quota recovery quiet'
+
+    $pausedQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $pausedQuotaHeartbeat.Snapshot['Recovery'] = 'synthetic-heartbeat | schedule: PAUSED | target: none'
+    $pausedQuotaTick = Invoke-HealthyHeartbeatTick -State $pausedQuotaHeartbeat
+    Assert-True ($pausedQuotaTick.Decision -eq 'quiet_paused' -and $pausedQuotaHeartbeat.WaitInvocations.Count -eq 0) 'paused or terminal schedule precedence suppresses quota recovery'
 
     $bad = [ordered]@{}; foreach ($key in $snapshot.Keys) { $bad[$key] = $snapshot[$key] }
     $bad['History'] = 'obsolete transcript'

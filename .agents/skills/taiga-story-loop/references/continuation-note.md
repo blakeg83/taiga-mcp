@@ -211,6 +211,21 @@ The heartbeat planner applies this order on every scheduled tick:
    rereads transcripts, tickets, source, or historical notes merely because a
    30-minute tick elapsed.
 
+When the optional `Quota wait` field is present, apply the same schedule and
+gate/terminal precedence before the worker-identity checks. A `delivered` state
+ends quietly; an `unknown` delivery state opens one bounded reconciliation and
+does not wake a worker. For `waiting`, a confirmed approval or terminal gate
+ends quietly, and a confirmed quota rejection defers to a later eligible tick
+without an immediate retry. A known future reset estimate defers when no fresh
+authoritative capacity result is available. Fresh authoritative `exhausted`
+evidence defers and may replace the reset estimate; fresh `available` evidence
+returns one bounded attempt-eligibility result. If the reset is unknown or has
+elapsed and capacity metadata is absent, elapsed time alone may return that
+same eligibility result, subject to the next reconciliation step. The healthy
+planner does not poll a new capacity service, perform the attempt, append tick
+history, wake stopped workers, or create nested/duplicate automations; the
+reconciliation owner records the later delivery and attempt outcome.
+
 Healthy and unanswered user waits do not reread tickets/comments, source,
 diffs, tests, historical notes, or full chat transcripts; they do not repeat
 prompts or send worker messages. A missing/corrupt snapshot requires

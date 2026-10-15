@@ -171,3 +171,12 @@ outside routine reads, and do not treat the note as evidence that an external
 operation succeeded. Use the replacement helper and healthy-heartbeat read
 budget in [minimal continuation note](continuation-note.md); full resume
 reconciliation is for interruptions or actionable changes, not healthy ticks.
+
+An optional `Quota wait` is planning context only. It preserves the existing
+`Recovery` automation identity and its 30-minute schedule while a confirmed
+future reset or exhaustion is deferred. The healthy tick may use one fresh
+capacity result or the reset estimate to return a bounded eligibility decision,
+but it never creates a capacity poller, retries a rejected attempt immediately,
+wakes a stopped worker, or creates a nested heartbeat. Unknown delivery remains
+a reconciliation state, and the reconciliation owner must record the later
+attempt and delivery outcome before replacing the compact field.
