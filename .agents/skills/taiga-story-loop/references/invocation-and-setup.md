@@ -182,8 +182,8 @@ branch/worktree, revision, authorization, pending action, and external outcome
 before one scoped continuation. Keep `wait_started`/`wait_ended` with the same
 `waitId` and `waitKind: quota_blocked`; delivery is not substantive progress.
 This path does not create another scheduler, poll capacity, wake stopped peers,
-or append tick history. See [story #194 recovery operations](../../../../docs/automation/story-194-recovery-operations.md)
-for the operator fallback and separately authorized host-validation plan.
+or append tick history. See [recovery operations](recovery-operations.md) for
+the operator fallback and separately authorized host-validation plan.
 
 If selectable authorization is supported and permitted, submit exactly one of
 the visible `Start` or `Cancel` choices. A displayed default, empty response,

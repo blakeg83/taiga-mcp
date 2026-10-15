@@ -5,6 +5,8 @@ story #194. It is operator guidance and evidence interpretation; it does not
 install the skill, start a workflow, induce account exhaustion, or authorize
 live Taiga/provider writes.
 
+The portable, skill-local copy is [recovery-operations.md](../../.agents/skills/taiga-story-loop/references/recovery-operations.md).
+
 ## Bounded recovery policy
 
 The existing coordinator heartbeat remains the only scheduler. While ordered
