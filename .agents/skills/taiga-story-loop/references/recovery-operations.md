@@ -20,7 +20,7 @@ For the optional `Quota wait` state:
 - An elapsed or unknown reset permits one bounded eligibility decision; time
   passing is not proof of capacity.
 - A confirmed rejection waits for a later eligible tick. Confirmed delivery
-  closes that interruption and suppresses another quota wake while ordinary
+  closes the dispatch interruption and suppresses another quota wake while ordinary
   heartbeat observation continues for the same running worker. A later observed
   quota failure may reopen the compact state. Unknown delivery is persisted and
   requires reconciliation before retry.
@@ -35,6 +35,13 @@ For the optional `Quota wait` state:
 Unchanged ticks stay quiet. Never retry an unknown send, wake stopped peers, or
 infer usable capacity from a timestamp. Use the same stable `waitId` and
 `waitKind: quota_blocked` for observed `wait_started` and `wait_ended` bounds.
+At the first explicit `usage_limit_exceeded`, record the failure timestamp
+through `New-StoryPerformanceInterruptionEvent` and the transition recorder,
+as described in [telemetry invocation](telemetry-invocation.md#explicit-interruption-observations).
+Failed recovery attempts reuse that episode without duplicate wait boundaries.
+Dispatch confirmation alone cannot close a telemetry quota wait. Record manual
+authorization waits separately as `manual_resume`; if capacity during that gap
+is unknown, retain the open quota boundary and partial duration coverage.
 
 ## Manual reconciliation fallback
 

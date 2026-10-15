@@ -61,6 +61,16 @@ synthetic tests must explicitly supply synthetic provenance.
 Workers use the same constructor/serialization/recorder sequence at actual
 boundaries, changing these type-specific inputs:
 
+Record each start as the first phase action after identifying the authorized
+task or review request: before substantive investigation, diff/source reading,
+planning, editing, testing, or validation. This applies to implementation,
+corrections (including final-story corrections), and review/re-review. Loading
+the helper and resolving the minimum stable identity may precede the start.
+Do not postpone it until the first edit, test, commit, or ready handoff. A
+duplicate/resumed message for an already open phase reuses its original start.
+If work already happened without a start, disclose the uncovered work; do not
+backdate a start from memory or move an existing boundary.
+
 | Boundary | Required constructor inputs beyond the common run/story/time fields |
 | --- | --- |
 | `implementation_started` | `Scope task`, `Role implementer`, `TaskRef`, stable `PhaseId`; null revision |
@@ -76,6 +86,58 @@ The constructor keeps review fields null on corrections and correction fields
 null on reviews. Serialize the constructed event to `-EventJson`, or persist it
 and pass `-EventPath`; one of those inputs is mandatory on every recorder call.
 Disclose recording diagnostics without blocking normal work.
+
+Inspect the returned `status` and `diagnostics` immediately. Only `appended` or
+`noop` confirms recording. The transition helper performs one bounded retry
+for the observed task-review typo `initial` -> `initial_task` on ordinal 1,
+preserving the original event ID, timestamp, and all other evidence. It returns
+both the specific rejection and recovery diagnostic. Other schema errors need
+one corrected submission using the saved observed event, followed by a status
+check. Never retry an ambiguous write or invent missing evidence. If recovery
+fails, retain the diagnostic and missing-boundary limitation in the normal
+handoff; continue authorized development without claiming complete telemetry.
+Before closing a review, reconcile any rejected start from its saved payload.
+
+## Explicit interruption observations
+
+The coordinator records observable `usage_limit_exceeded` failures at the
+existing worker-status/recovery boundary, using the affected worker's role and
+verified session identity (null if unavailable). Do this before scheduling or
+attempting recovery; do not wait for the interrupted worker to record it.
+Use `New-StoryPerformanceInterruptionEvent` from the same constructor file and
+submit its result through `record-story-performance-transition.ps1` as above:
+
+```powershell
+# Common run/story/review-mode fields plus affected role, workerId, sessionId,
+# scope, nullable taskRef, and provenance citing the actual observed failure.
+# Omit phase/review/correction identity: these are existing wait boundaries.
+$event = New-StoryPerformanceInterruptionEvent -Context $interruptionContext `
+    -InterruptionId $interruptionId -Observation usage_limit_exceeded `
+    -OccurredAtUtc $observedFailureUtc
+```
+
+The context uses the same constructor parameter names as the common event
+inputs. A stable interruption ID belongs to one affected worker and episode.
+Replay the exact original observation on reconciliation. Failed recovery
+attempts during that episode do not create another start or end. A new failure
+after verified recovery gets a new interruption ID.
+
+`quota_capacity_verified` ends the quota wait only at an independently observed
+availability boundary, such as a successful authorized recovery with observed
+worker execution. Delivery alone, elapsed reset estimates, silence, and missing
+samples cannot establish availability. If automatic recovery directly observes
+execution, use that observation's timestamp; describe coverage as observed
+failure-to-recovery, not the exact time account capacity first returned.
+
+When recovery is suspended awaiting user authorization, record
+`manual_resume_wait`; record `manual_resumed` at the actual authorized resume.
+Those observations pair a separate `manual_resume` wait and cannot close the
+quota wait. If capacity during that manual gap is unknown, leave the quota end
+unavailable, even when execution later resumes. Only independently evidenced
+capacity timestamps may close that quota wait. Preserve the unknown interval
+and explanation in the normal continuation/handoff. Reports keep total review
+wall time intact, exclude manual waits from proven quota duration, and leave
+quota-adjusted totals partial/unavailable when quota coverage is incomplete.
 
 ## Confirmed PR finalization
 

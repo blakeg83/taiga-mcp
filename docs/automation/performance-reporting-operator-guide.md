@@ -695,3 +695,36 @@ index entry points using synthetic credentials-free data and temporary artifacts
 It covers complete/partial/failed/skipped collection, unavailable session binding,
 correction parity, missing boundaries, task outcomes, quota/overlap semantics,
 normal response references, immutable reuse, and missing rows in epic delivery.
+
+### Issue #226 lifecycle and interruption regression
+
+Phase starts now precede substantive implementation, correction investigation,
+and review inspection. A late/missing boundary stays a reported limitation;
+never manufacture a timestamp to cover past work. The transition recorder
+repairs the known ordinal-1 task-review enum typo `initial` to `initial_task`
+with one retry, preserving the original observed boundary and surfacing both
+the rejection and confirmed recovery. Other errors retain bounded diagnostics.
+
+At an observed `usage_limit_exceeded`, the coordinator uses the bundled
+`New-StoryPerformanceInterruptionEvent` constructor and the existing transition
+recorder. Failed recovery attempts reuse the same interruption. A separate
+`manual_resume` wait records user-authorization delay; it cannot close the quota
+wait. Unknown availability leaves quota-adjusted totals partial/unavailable,
+with a unioned `knownSubtotal` for any complete, independently evidenced quota
+pairs. Review elapsed remains total wall time. See the portable
+[invocation contract](../../.agents/skills/taiga-story-loop/references/telemetry-invocation.md#explicit-interruption-observations)
+for observation types and evidence requirements. Copy the updated entire skill
+folder when upgrading an installed skill; there is no ledger migration or
+historical report reconstruction.
+
+```powershell
+pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-performance-interruptions.ps1
+```
+
+This CI check covers the Task #17 rejection/recovery, correction boundary guards,
+implementation/review interruptions, failed automated recovery and manual resume,
+unknown availability, overlapping quota waits, and idempotency. It also runs a
+small local workflow with actual source edits, checks, and Git commits through
+the production recorder/report paths. The local smoke does not exercise worker
+chat delivery or induce a real account usage-limit failure; interruption inputs
+are deterministic fixtures. No live Taiga writes or full story run are needed.

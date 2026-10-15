@@ -35,6 +35,12 @@ Immediately after assigning the persistent worker pair, run
 worker profiles. It validates setup metadata and discovers verified local token
 sources; finalization retries unresolved discovery automatically.
 
+Workers record phase starts before substantive investigation or review, including
+correction work, and inspect recorder outcomes immediately. At an observed
+`usage_limit_exceeded`, the coordinator records interruption evidence before
+recovery using the existing wait mechanism. Follow the bounded rejection
+recovery and manual/unknown-availability rules in the telemetry reference.
+
 After a submitted `Start`, initialize and verify story measurement exactly once at the
 authorized story boundary through `scripts/record-story-performance-transition.ps1`,
 which uses the existing versioned recorder described in

@@ -34,14 +34,14 @@ authoritative.
 
 The automatic flow records lifecycle events as side effects of the existing
 transition owner; it never creates a separate telemetry turn. In both modes,
-the implementer records `implementation_started` at the first concrete
-task-scoped edit/check and `task_ready_for_review` after the exact clean
+the implementer records `implementation_started` before substantive task
+investigation, source reading, planning, edits, or checks, and `task_ready_for_review` after the exact clean
 revision packet is frozen at the implementation-ready milestone. In
 `per_task`, that event precedes the direct task review; in `story_end_only`, it
 closes implementation without dispatching a task review. The implementer then
-`correction_started` when a current finding resumes correction, and
+records `correction_started` before investigating a current finding, and
 `correction_ready` when the corrected packet is frozen. The reviewer records
-`review_started`, `review_findings`, and `review_accepted` for the same stable
+`review_started` before substantive review inspection, then `review_findings` and `review_accepted` for the same stable
 request/attempt identity, and owns `final_review_started` plus its finding or
 acceptance. The coordinator records `story_started`, explicit
 `wait_started`/`wait_ended`, and the confirmed `pr_ready` boundary owned by
@@ -52,7 +52,7 @@ The implementer emits a non-null superseded-attempt identity only on the paired
 `correction_started` and `correction_ready` events.
 
 Every observation uses the actual
-`scripts/write-performance-event.ps1` helper
+`scripts/record-story-performance-transition.ps1` helper
 with the selected setup mode and the exact revision/identity available at that
 boundary. `phaseId`, `correctionId`, `reviewRequestId`, `reviewAttemptId`,
 `reviewAttemptOrdinal`, and `waitId` are stable keys, not values regenerated

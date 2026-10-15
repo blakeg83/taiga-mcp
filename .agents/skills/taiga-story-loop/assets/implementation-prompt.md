@@ -28,6 +28,14 @@ worktree:
 | Telemetry run | `{{externalRunRoot}}` / `{{runId}}` (existing run identity; unavailable history stays unavailable) |
 | Scope | `{{scopeSummary}}` |
 
+Before substantive task work, load `references/telemetry-invocation.md` and
+record `implementation_started` for the identified authorized task. For a
+current finding, record `correction_started` before investigating the finding,
+reading source/diffs, planning, editing, testing, or validating the correction.
+Reuse an already open phase on resume. Check the recorder result immediately;
+follow its bounded recovery path for rejection and disclose remaining gaps
+without blocking authorized work. Never backdate a boundary to cover prior work.
+
 Before editing, read the complete story goal, definition of done, ordered task list,
 every selected task description and checklist, the repository's
 instructions, and the confirmed branch/worktree receipt. The story's declared

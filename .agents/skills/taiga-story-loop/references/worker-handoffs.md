@@ -16,14 +16,16 @@ transcript, or a new chat for an ordinary correction.
 
 Each handoff has one performance observation at the boundary that already
 exists in this protocol. In both modes, the implementer records
-`implementation_started` at the first concrete task-scoped edit/check and
+`implementation_started` before substantive task investigation, source reading,
+planning, edits, or checks, and
 `task_ready_for_review` after the clean committed revision packet is frozen at
 the implementation-ready milestone. In `per_task`, that frozen event precedes
 the direct reviewer handoff; in `story_end_only`, it closes implementation but
 does not dispatch a task review. The reviewer records
-`review_started` when it begins the exact request/attempt and records
+`review_started` before inspecting the exact request/attempt and records
 `review_findings` or `review_accepted` when that current attempt closes. A
-current finding starts an implementer-owned `correction_started` phase; the
+current finding starts an implementer-owned `correction_started` phase before
+investigation, editing, testing, or validation; the
 corrected frozen packet records `correction_ready` before the direct re-review.
 The reviewer owns `final_review_started` and its finding/acceptance boundary.
 The coordinator owns `story_started`, explicit `wait_started`/
