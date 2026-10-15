@@ -171,6 +171,20 @@ target sets end silently. Missing/corrupt identity, failed/unknown results,
 interruption evidence, or a pending schedule opens bounded reconciliation and
 never guesses, replays, reminds, or redispatches.
 
+For an optional `Quota wait`, use the same order: schedule and gate/terminal
+precedence first, then the compact quota state, then one eligible same-worker
+reconciliation. A future reset or fresh exhaustion defers; missing capacity
+metadata after an unknown or elapsed reset allows one bounded eligibility
+decision, not proof of availability. Confirmed rejection waits for a later
+tick, confirmed delivery suppresses further wakes, and unknown delivery stops
+before retry. Match the affected worker's recorded thread/host, task/stage,
+branch/worktree, revision, authorization, pending action, and external outcome
+before one scoped continuation. Keep `wait_started`/`wait_ended` with the same
+`waitId` and `waitKind: quota_blocked`; delivery is not substantive progress.
+This path does not create another scheduler, poll capacity, wake stopped peers,
+or append tick history. See [story #194 recovery operations](../../../../docs/automation/story-194-recovery-operations.md)
+for the operator fallback and separately authorized host-validation plan.
+
 If selectable authorization is supported and permitted, submit exactly one of
 the visible `Start` or `Cancel` choices. A displayed default, empty response,
 timeout, unrelated text, or worker message is not a decision. Otherwise reply
