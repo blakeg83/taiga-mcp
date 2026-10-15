@@ -302,6 +302,7 @@ function New-SessionState {
         fileResetCount = 0
         sourceSessionVerified = $false
         tokenStream = $null
+        sourceSamples = @()
         boundaryStartUtc = $null
         boundaryEndUtc = $null
         latestSample = $null
@@ -354,12 +355,18 @@ function Read-SessionIncrement {
         $State.latestSample = $null
         $State.tokenStream = $null
     }
+    if ($null -eq $State.PSObject.Properties['sourceSamples']) { Add-Member -InputObject $State -NotePropertyName sourceSamples -NotePropertyValue @() }
+    $newSamples = [Collections.Generic.List[object]]::new()
+    foreach ($saved in @($State.sourceSamples)) { $newSamples.Add($saved) }
     if (-not $SessionLifetime) {
         $startBinding = Format-StoryPerformanceUtcTimestamp -Timestamp $StartUtc
         $endBinding = Format-StoryPerformanceUtcTimestamp -Timestamp $EndUtc
         if ([string] (Get-Value $State 'boundaryStartUtc') -cne $startBinding -or [string] (Get-Value $State 'boundaryEndUtc') -cne $endBinding) {
             $State.startExact = $null; $State.startAfter = $null; $State.startBefore = $null
             $State.endExact = $null; $State.endBefore = $null; $State.endAfter = $null
+            # A changed interval requires replay, including intermediate samples.
+            $State.byteOffset = 0L; $State.latestSample = $null; $State.sourceSessionVerified = $false
+            $newSamples.Clear()
             $State.boundaryStartUtc = $startBinding
             $State.boundaryEndUtc = $endBinding
         }
@@ -370,6 +377,10 @@ function Read-SessionIncrement {
         $State.fileResetCount++
         $State.resetCount++
         $State.sourceSessionVerified = $false
+        $State.latestSample = $null
+        $State.startExact = $null; $State.startAfter = $null; $State.startBefore = $null
+        $State.endExact = $null; $State.endBefore = $null; $State.endAfter = $null
+        $newSamples.Clear()
     }
     $stream = $null
     $reader = $null
@@ -428,6 +439,7 @@ function Read-SessionIncrement {
                     if (-not [string]::IsNullOrWhiteSpace($tokenStream) -and $tokenStream -cne 'event_msg/token_count') { $completeOffset = $cursor; continue }
                     $State.tokenStream = 'event_msg/token_count'
                 }
+                if ($isAcceptedSyntheticRecord -and [bool] $State.sourceSessionVerified) { $completeOffset = $cursor; continue }
                 if ($isAcceptedSyntheticRecord) {
                     if ($SessionLifetime) {
                         if ([bool] (Get-Value $State 'sourceSessionVerified')) { $completeOffset = $cursor; continue }
@@ -464,12 +476,14 @@ function Read-SessionIncrement {
                 $State.latestSample = $sample
                 if (-not $SessionLifetime) {
                     Update-BoundarySample -State $State -Sample $sample -StartUtc $StartUtc -EndUtc $EndUtc
+                    if ($isActualTokenRecord -and $time -ge $StartUtc -and $time -le $EndUtc) { $newSamples.Add($sample) }
                 }
                 $State.completeLines++
             }
             catch { $State.invalidRecords++ }
             $completeOffset = $cursor
         }
+        $State.sourceSamples = @($newSamples)
         $State.byteOffset = $completeOffset
     }
     finally {
@@ -491,7 +505,7 @@ function Select-BoundarySample {
 
 function Get-Delta {
     param([AllowNull()] [object] $Start, [AllowNull()] [object] $End, [Parameter(Mandatory)] [int] $StartResetCount, [Parameter(Mandatory)] [int] $EndResetCount)
-    if ($null -eq $Start -or $null -eq $End -or $StartResetCount -ne $EndResetCount) { return $null }
+    if ($null -eq $Start -or $null -eq $End -or $StartResetCount -ne $EndResetCount -or (Parse-Utc (Get-Value $End 'sampledAtUtc')) -lt (Parse-Utc (Get-Value $Start 'sampledAtUtc'))) { return $null }
     $delta = New-CounterMap
     foreach ($name in @($delta.Keys)) {
         $value = [long] (Get-Value (Get-Value $End 'counters') $name) - [long] (Get-Value (Get-Value $Start 'counters') $name)
@@ -760,8 +774,10 @@ foreach ($session in @($sessionStates)) {
     $endReset = if ($null -ne $endSample) { [int] (Get-Value $endSample 'resetCount') } else { -1 }
     $delta = Get-Delta -Start $startSample -End $endSample -StartResetCount $startReset -EndResetCount $endReset
     $coverage = if ($null -eq $delta) { 'unavailable: missing boundary sample or cumulative counter reset' } elseif ($startSelection.coverage -eq 'exact complete-line boundary sample' -and $endSelection.coverage -eq 'exact complete-line boundary sample') { 'measured exact complete-line story boundaries' } else { 'partial nearest complete-line story boundary coverage' }
-    $sampleStatus = if ($null -eq $delta) { 'unavailable' } elseif ($coverage.StartsWith('measured')) { 'measured' } else { 'partial' }
+    $sampleStatus = if ($null -eq $delta) { 'unavailable' } elseif ($coverage.StartsWith('measured') -and $session.invalidRecords -eq 0 -and $session.fileResetCount -eq 0) { 'measured' } else { 'partial' }
     [void] $sampleOutput.Add([ordered]@{
+            sourceSamples = @($session.sourceSamples)
+            sourceSessionVerified = [bool] $session.sourceSessionVerified
             role = [string] $session.role
             scope = [string] $session.scope
             sessionId = [string] $session.sessionId

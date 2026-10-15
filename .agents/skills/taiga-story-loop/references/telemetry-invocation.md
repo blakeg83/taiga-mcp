@@ -36,9 +36,26 @@ $result = & (Join-Path $skillRoot 'scripts/record-story-performance-transition.p
     -TaskRefs $taskRefs
 ```
 
+Immediately after creating the worker pair, call the installed
+`scripts/initialize-story-performance-roles.ps1` with `ExternalRunRoot`, `RunId`,
+`ProjectId`, `StoryId`, and `Profiles` (the three actual assignment objects).
+Each profile supplies `role`, `workerId`, nullable `sessionId`, `model`, `effort`,
+and the actual `effectiveFromUtc`. Include the coordinator. This helper creates
+and validates `setup-metadata.json` with provenance and generates
+`observed-role-token-usage.json`; do not hand-author either JSON file. Pass the
+same `Scope` to initialization and finalization if using a custom story scope.
+Missing sources produce diagnostics and do not block the workflow.
+
+Discovery uses known session IDs (or worker IDs as candidates), narrows filenames
+under `CODEX_HOME/sessions` and `CODEX_HOME/archived_sessions` (default `~/.codex`),
+and verifies the bounded `session_meta` header. A unique embedded identity match
+is required. Finalization retries discovery using saved profiles, or recorded
+worker identities when setup is unavailable. It automatically loads the default
+setup metadata path. An explicit binding file remains supported.
+
 Pass validated `-MetadataPath` and `-ObservedEvidencePath` when available.
-Missing local session identity stays null; a worker chat ID is not a local
-session ID. Supply explicit truthful provenance on every constructed event;
+A worker chat ID is only a candidate local session ID until the embedded
+`session_meta.payload.id` verifies it; unresolved identities stay unavailable. Supply explicit truthful provenance on every constructed event;
 synthetic tests must explicitly supply synthetic provenance.
 
 Workers use the same constructor/serialization/recorder sequence at actual
@@ -88,3 +105,23 @@ reviewed HEAD from confirmed delivery. Preserve its returned response, artifact
 references, coverage, and limitations in normal delivery. A failed measurement
 does not undo confirmed delivery. Repository-root compatibility scripts are for
 development callers only; portable execution uses the installed entry points.
+
+## Counter coverage
+
+The collector keeps verified counter samples, not transcript text. The reporter
+re-reads declared sources through the collector before accepting phase samples;
+agent-supplied event or metadata numbers do not establish numeric authority.
+Initial implementation, corrections, task reviews, re-reviews, final reviews,
+and explicit coordinator intervals use their existing paired phase identities.
+Each phase uses its first and last samples **inside** the phase. Asynchronous
+samples produce a partial inner-window delta with actual sampling times, never
+an interpolated exact measurement. Fewer than two samples or a counter reset
+leave the phase unavailable. Partial metric `knownSubtotal` is the covered
+subtotal; unmeasured activity remains unknown. Cached input and reasoning are
+components of input and output, respectively, and are never added again.
+
+Reuse the original event ID and timestamp when reconciling a boundary. The
+transition helper rejects a second implementation/correction boundary for the
+same phase and a completion without a matching start before appending. Use a
+distinct phase/correction ID for each correction. Record real coordinator wait
+starts/ends; gaps are never reconstructed from elapsed story time.

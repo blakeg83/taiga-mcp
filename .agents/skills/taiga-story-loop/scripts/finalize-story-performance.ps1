@@ -261,15 +261,46 @@ function Invoke-Finalization {
             $attempt = [ordered]@{
                 schemaVersion = 1; kind = 'story_performance_collection_attempt'; runId = $RunId
                 projectId = $start.projectId; storyId = $start.storyId; reviewedHead = $Delivery.reviewedHead
-                discoveryAttempted = $true; collectorInvoked = $false; status = 'source_unavailable'; reasonCode = 'source_unavailable'; reason = $null
+                discoveryAttempted = $false; collectorInvoked = $false; status = 'source_unavailable'; reasonCode = 'source_unavailable'; reason = $null
             }
-            if ([string]::IsNullOrWhiteSpace($ObservedEvidencePath)) {
-                $ObservedEvidencePath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'observed-role-token-usage.json'
+            $defaultEvidencePath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'observed-role-token-usage.json'
+            if ([string]::IsNullOrWhiteSpace($ObservedEvidencePath)) { $ObservedEvidencePath = $defaultEvidencePath }
+            # Preserve explicitly selected external sources. Automatically managed bindings
+            # at the default run path are always rediscovered, including archive moves.
+            $discoverSources = -not (Test-Path -LiteralPath $ObservedEvidencePath -PathType Leaf) -or
+                [IO.Path]::GetFullPath($ObservedEvidencePath) -eq [IO.Path]::GetFullPath($defaultEvidencePath)
+            if (-not $MetadataPath) {
+                $defaultMetadata = Join-Path (Join-Path $ExternalRunRoot $RunId) 'setup-metadata.json'
+                if (Test-Path -LiteralPath $defaultMetadata -PathType Leaf) { $MetadataPath = $defaultMetadata }
+            }
+            # Retry real discovery after assignment: sources may appear late or move to archive.
+            $bindings = @()
+            if ($MetadataPath) {
+                try {
+                    $setup = Get-Content -LiteralPath $MetadataPath -Raw | ConvertFrom-Json -Depth 100 -DateKind String
+                    $bindings += @($setup.profiles | ForEach-Object { @{ role = $_.role; workerId = $_.workerId; sessionId = $_.sessionId; scope = $(if ($Scope) { $Scope } else { 'story' }) } })
+                } catch { $attempt.reason = 'setup metadata is invalid; discovery will use recorded identities' }
+            }
+            if ($bindings.Count -eq 0 -and $discoverSources) {
+                $bindings = @($records | ForEach-Object { @{ role = $_.role; workerId = $_.workerId; sessionId = $_.sessionId; scope = $(if ($Scope) { $Scope } else { 'story' }) } })
+            }
+            $discoveryFailed = $false
+            if ($bindings.Count -gt 0 -and $discoverSources) {
+                $attempt.discoveryAttempted = $true
+                try { $null = & (Join-Path $PSScriptRoot 'resolve-story-token-sources.ps1') -Bindings $bindings -OutputPath $ObservedEvidencePath }
+                catch { $discoveryFailed = $true; $attempt.reason = 'local session discovery failed; sources remain unavailable' }
             }
             $usagePath = Join-Path $viewRoot 'usage.json'
-            if (-not (Test-Path -LiteralPath $ObservedEvidencePath -PathType Leaf)) {
+            if ($discoveryFailed) {
+                $attempt.reasonCode = 'binding_unavailable_or_invalid'
+            }
+            elseif (-not (Test-Path -LiteralPath $ObservedEvidencePath -PathType Leaf)) {
                 $attempt.reasonCode = 'source_missing'
                 $attempt.reason = 'observed role/session/source bindings unavailable; no trustworthy collector source selected'
+            }
+            elseif (@((Get-Content -LiteralPath $ObservedEvidencePath -Raw | ConvertFrom-Json -Depth 100).rows).Count -eq 0) {
+                $attempt.reasonCode = 'binding_unavailable_or_invalid'
+                $attempt.reason = 'session discovery found no unique verified sources; role bindings remain unavailable'
             }
             else {
                 try {

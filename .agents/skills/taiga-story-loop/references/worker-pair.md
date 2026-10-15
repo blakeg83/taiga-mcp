@@ -188,3 +188,10 @@ receipt, authorization summary, and a reference to the first assignment message
 in the continuation snapshot, replacing superseded values. Retain current
 worker cursors; keep assignment text in the worker chat. This is connection
 evidence, not reviewer acceptance.
+
+After both workers are assigned, initialize telemetry roles through
+`scripts/initialize-story-performance-roles.ps1` as described in
+[portable telemetry calls](telemetry-invocation.md). Supply the actual coordinator
+and both worker profiles; the helper generates provenance, validates setup early,
+and discovers verified local sources. Preserve diagnostics without interrupting
+ordinary task execution.

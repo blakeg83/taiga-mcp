@@ -1765,6 +1765,25 @@ function Get-ObservedRoleUsageMetadata {
     if ($null -eq $semantics -or [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $semantics 'aggregation'))) {
         throw [System.ArgumentException]::new('usage_metadata_invalid: cumulative counter semantics are required')
     }
+    # Never grant authority to agent-authored numbers in a metadata file. Re-read
+    # declared sources through the existing identity-verifying collector once.
+    if (@((Get-PropertyValue $metadata 'sessions') | Where-Object { $null -ne $_.PSObject.Properties['sourceSamples'] }).Count -gt 0) {
+        $scratch = Join-Path ([IO.Path]::GetTempPath()) ('taiga-usage-' + [guid]::NewGuid().ToString('N'))
+        [IO.Directory]::CreateDirectory($scratch) | Out-Null
+        try {
+            $bindingPath = Join-Path $scratch 'bindings.json'
+            $rows = @($metadata.sessions | ForEach-Object { @{ role = $_.role; scope = $_.scope; sessionId = $_.sessionId; sourcePath = $_.sourcePath } })
+            [IO.File]::WriteAllText($bindingPath, (@{ rows = $rows } | ConvertTo-Json -Depth 30))
+            $metadata = (& (Join-Path $PSScriptRoot 'collect-role-token-usage.ps1') -ObservedEvidencePath $bindingPath -EventsPath $EventsPath -StatePath (Join-Path $scratch 'cursor.json') -OutputPath (Join-Path $scratch 'usage.json')) | ConvertFrom-Json -Depth 100 -DateKind String
+        }
+        finally {
+            foreach ($name in @('bindings.json','cursor.json','usage.json')) {
+                $file = Join-Path $scratch $name
+                if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
+            }
+            Remove-Item -LiteralPath $scratch
+        }
+    }
     return $metadata
 }
 
@@ -1779,7 +1798,7 @@ function New-ObservedRoleUsageMetric {
     $partial = @($sessions | Where-Object { [string] (Get-PropertyValue $_ 'state') -ceq 'partial' })
     $unavailable = @($sessions | Where-Object { [string] (Get-PropertyValue $_ 'state') -eq 'unavailable' })
     $totals = Get-PropertyValue (Get-PropertyValue $Metadata 'roleTotals') $Role
-    if ($null -eq $totals -or $measured.Count -eq 0) {
+    if ($null -eq $totals -or ($measured.Count + $partial.Count) -eq 0) {
         $state = if ($partial.Count -gt 0 -or $unavailable.Count -gt 0) { 'partial' } else { 'unavailable' }
         $missing = if ($unavailable.Count -gt 0) { "$($unavailable.Count) bound session(s) had no attributable boundary delta" } else { 'complete attributable cumulative counter boundaries were not available for this role' }
         $metric = New-Metric -State $state -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract one story-start boundary counter from one confirmed-PR boundary counter per bound session' -Coverage ([string] (Get-PropertyValue $Metadata 'coverage')) -MissingData $missing
@@ -1791,8 +1810,8 @@ function New-ObservedRoleUsageMetric {
         $counters.totalTokens = [long] $counters.inputTokens + [long] $counters.outputTokens
         $incompleteCount = $partial.Count + $unavailable.Count
         $state = if ($incompleteCount -gt 0) { 'partial' } else { 'measured' }
-        $missingData = if ($partial.Count -gt 0 -and $unavailable.Count -gt 0) { "$($partial.Count) partial and $($unavailable.Count) unavailable bound session(s) remain outside the complete role total" } elseif ($partial.Count -gt 0) { "$($partial.Count) bound session(s) used nearest complete-line boundaries" } elseif ($unavailable.Count -gt 0) { "$($unavailable.Count) bound session(s) had no attributable boundary delta" } else { $null }
-        $value = if ($state -eq 'measured') { [long] $counters.totalTokens } else { $null }
+        $missingData = if ($partial.Count -gt 0 -and $unavailable.Count -gt 0) { "$($partial.Count) partial and $($unavailable.Count) unavailable bound session(s) limit coverage of this subtotal" } elseif ($partial.Count -gt 0) { "$($partial.Count) bound session(s) used nearest complete-line boundaries" } elseif ($unavailable.Count -gt 0) { "$($unavailable.Count) bound session(s) had no attributable boundary delta" } else { $null }
+        $value = [long] $counters.totalTokens
         $metric = New-Metric -State $state -Value $value -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at one story-start boundary from one confirmed-PR boundary per bound session' -Coverage ([string] (Get-PropertyValue $Metadata 'coverage')) -MissingData $missingData
         $metric | Add-Member -NotePropertyName counters -NotePropertyValue $counters -Force
     }
@@ -1908,6 +1927,8 @@ function Get-MarkdownMetricValue {
     }
     $value = Get-PropertyValue -Object $Metric -Name 'value'
     if ($null -eq $value) {
+        $knownSubtotal = Get-PropertyValue $Metric 'knownSubtotal'
+        if ($null -ne $knownSubtotal) { return "$knownSubtotal covered (partial)" }
         return 'unknown'
     }
     if ($value -is [System.Array]) {
@@ -1973,6 +1994,22 @@ function ConvertTo-Markdown {
         $value = Get-MarkdownMetricValue -Metric $metric
         [void] $lines.Add("| $(ConvertTo-MarkdownCell $property.Name) | $(ConvertTo-MarkdownCell $metric.state) | $(ConvertTo-MarkdownCell $value) | $(ConvertTo-MarkdownCell $metric.unit) | $(ConvertTo-MarkdownCell $metric.source) | $(ConvertTo-MarkdownCell $metric.coverage) | $(ConvertTo-MarkdownCell $metric.missingData) |")
     }
+    [void] $lines.Add('')
+    [void] $lines.Add('## Phase token coverage')
+    [void] $lines.Add('')
+    [void] $lines.Add('| Role | Task | Phase | State | Covered tokens | Actual first sample | Actual last sample |')
+    [void] $lines.Add('| --- | --- | --- | --- | --- | --- | --- |')
+    foreach ($name in @('implementationTokens','reviewTokens','coordinationTokens')) {
+        $metric = Get-ContainerValue -Container $Report.metrics -Name $name
+        foreach ($entry in @((Get-PropertyValue $metric 'evidence'))) {
+            if ($null -eq $entry) { continue }
+            $task = Get-PropertyValue $entry 'taskRef'
+            $phase = Get-PropertyValue $entry 'identity'
+            [void] $lines.Add("| $(ConvertTo-MarkdownCell $entry.role) | $(ConvertTo-MarkdownCell $task) | $(ConvertTo-MarkdownCell $phase) | $(ConvertTo-MarkdownCell $entry.state) | $(ConvertTo-MarkdownCell $entry.value) | $(ConvertTo-MarkdownCell $entry.startSampledAtUtc) | $(ConvertTo-MarkdownCell $entry.endSampledAtUtc) |")
+        }
+    }
+    [void] $lines.Add('')
+    [void] $lines.Add('Partial rows cover only the displayed sample window; remaining phase activity is unknown.')
     [void] $lines.Add('')
     [void] $lines.Add('## Comparison')
     [void] $lines.Add('')
@@ -2785,6 +2822,8 @@ function New-UsageRangePlan {
     return $plan
 }
 
+. (Join-Path $PSScriptRoot 'local-interval-token-usage.ps1')
+
 function Get-UsageBoundaryResult {
     param(
         [Parameter(Mandatory)] [object] $Interval,
@@ -2807,6 +2846,10 @@ function Get-UsageBoundaryResult {
 
     $result = [ordered]@{
         identity = $identity
+        taskRef = if ($null -ne $startEvent) { $startEvent.taskRef } else { $null }
+        phaseId = if ($null -ne $startEvent) { $startEvent.phaseId } else { $null }
+        eventType = if ($null -ne $startEvent) { $startEvent.eventType } else { $null }
+        reviewKind = if ($null -ne $startEvent) { $startEvent.reviewKind } else { $null }
         role = $Role
         intervalState = [string] $Interval.state
         startUtc = $Interval.startUtc
@@ -2829,6 +2872,11 @@ function Get-UsageBoundaryResult {
         components = $null
         coverage = 'no attributable numeric usage samples at both interval boundaries'
         missingData = $null
+    }
+
+    if ($null -ne $observedUsageMetadata -and $null -ne $startEvent -and $null -ne $endEvent -and $Interval.state -eq 'measured') {
+        $local = Get-LocalIntervalUsage -Result $result -StartEvent $startEvent -EndEvent $endEvent -Role $Role
+        if ($null -ne $local) { return $local }
     }
 
     if ($null -eq $startUsage -and $null -eq $endUsage) {
@@ -3322,6 +3370,8 @@ function Get-UsageMetric {
             $metric = New-Metric -State 'measured' -Value $sum -Unit 'tokens' -Source $Source -Calculation 'sum source-backed cumulative deltas by attributable stream' -Coverage "all $($evidence.Count) intervals have complete source-backed deltas" -MissingData $null
         }
     }
+    $known = @($evidence | Where-Object { $_.countable -ne $false -and $null -ne $_.value })
+    $metric | Add-Member -NotePropertyName knownSubtotal -NotePropertyValue $(if ($known.Count) { [long](($known | Measure-Object value -Sum).Sum) } else { $null }) -Force
     $metric | Add-Member -NotePropertyName role -NotePropertyValue $Role -Force
     $metric | Add-Member -NotePropertyName evidence -NotePropertyValue @($evidence) -Force
     return $metric
@@ -3640,11 +3690,6 @@ $reviewModeMetric = if ($null -eq $effectiveReviewMode) {
     New-Metric -State 'measured' -Value $effectiveReviewMode -Unit 'enum' -Source 'setup authorization or explicit input' -Calculation 'copy selected review mode' -Coverage 'one consistent review mode' -MissingData $null
 }
 
-$usageSampleIndex = New-UsageSampleIndex -Records $records
-$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
-$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
-$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
-$totalTokenMetric = Get-TotalUsageMetric -RoleMetrics @($implementationTokenMetric, $reviewTokenMetric, $coordinationTokenMetric)
 $metadataRunId = if ($runIds.Count -eq 1) { [string] $runIds[0] } else { $null }
 $metadataProjectId = if ($projectIds.Count -eq 1) { [int] $projectIds[0] } else { $null }
 $metadataStoryId = if ($storyIds.Count -eq 1) { [int] $storyIds[0] } else { $null }
@@ -3662,10 +3707,17 @@ else {
 }
 $modelsAndReasoningMetric = New-SetupMetadataMetric -SetupMetadata $setupMetadata
 $observedUsageMetadata = Get-ObservedRoleUsageMetadata -Path $UsageMetadataPath -RunId ([string] $metadataRunId) -ProjectId ([int] $metadataProjectId) -StoryId ([int] $metadataStoryId)
+$usageSampleIndex = New-UsageSampleIndex -Records $records
+$implementationTokenMetric = Get-UsageMetric -Intervals @($implementationIntervals + $correctionIntervals) -Role 'implementer' -Source 'source-backed implementer usage at implementation/correction boundaries' -NoDataMessage 'no attributable implementer usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
+$reviewTokenMetric = Get-UsageMetric -Intervals @($reviewIntervals) -Role 'reviewer' -Source 'source-backed reviewer usage at review-attempt boundaries' -NoDataMessage 'no attributable reviewer usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
+$coordinationTokenMetric = Get-UsageMetric -Intervals @($coordinationIntervals) -Role 'coordinator' -Source 'source-backed coordinator usage at coordinator-attributable wait boundaries' -NoDataMessage 'no attributable coordinator usage interval was recorded' -RecordsByEventId $recordsByEventId -UsageIndex $usageSampleIndex -StorySpan $timeToPrInterval -Anomalies $anomalies
+$totalTokenMetric = Get-TotalUsageMetric -RoleMetrics @($implementationTokenMetric, $reviewTokenMetric, $coordinationTokenMetric)
 $observedImplementerTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'implementer' }
 $observedReviewerTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'reviewer' }
 $observedCoordinatorTokenMetric = if ($null -eq $observedUsageMetadata) { New-Metric -State 'unavailable' -Value $null -Unit 'tokens' -Source 'incremental observed Codex session counters' -Calculation 'subtract cumulative counters at story boundaries' -Coverage 'no observed role token metadata was supplied' -MissingData 'run collect-role-token-usage.ps1 and pass UsageMetadataPath' } else { New-ObservedRoleUsageMetric -Metadata $observedUsageMetadata -Role 'coordinator' }
 $observedTotalTokenMetric = New-ObservedTotalUsageMetric -RoleMetrics @($observedImplementerTokenMetric, $observedReviewerTokenMetric, $observedCoordinatorTokenMetric)
+$observedKnown = @(@($observedImplementerTokenMetric, $observedReviewerTokenMetric, $observedCoordinatorTokenMetric) | Where-Object { $null -ne $_.value })
+$observedTotalTokenMetric | Add-Member -NotePropertyName knownSubtotal -NotePropertyValue $(if ($observedKnown.Count) { [long](($observedKnown | Measure-Object value -Sum).Sum) } else { $null }) -Force
 
 
 $eventReviewedHeadCandidates = @(Get-UniqueValuesLinear -Values @($prReady | ForEach-Object { [string] (Get-PropertyValue $_.Event.pullRequest 'reviewedHead') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }))
