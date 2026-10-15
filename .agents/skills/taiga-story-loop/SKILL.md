@@ -30,6 +30,10 @@ Read [portable telemetry calls](references/telemetry-invocation.md) before
 initialization, worker assignments, or finalization. Resolve the absolute installed
 skill folder and pass it to workers; telemetry `scripts/` paths are relative to
 that folder. Construct each event and supply `-EventJson` or `-EventPath`.
+Immediately after assigning the persistent worker pair, run
+`scripts/initialize-story-performance-roles.ps1` with the actual coordinator and
+worker profiles. It validates setup metadata and discovers verified local token
+sources; finalization retries unresolved discovery automatically.
 
 After a submitted `Start`, initialize and verify story measurement exactly once at the
 authorized story boundary through `scripts/record-story-performance-transition.ps1`,

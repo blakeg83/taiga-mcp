@@ -200,6 +200,7 @@ function Get-RecorderOutputSummary {
 function Get-TransitionFailureDiagnostic {
     param([Parameter(Mandatory)] [string] $Message)
 
+    if ($Message -match '^phase_boundary_conflict:') { return 'phase_boundary_conflict: duplicate, missing, or inconsistent phase boundary was not appended' }
     if ($Message -match '^input_invalid:') { return 'input_invalid: event JSON could not be parsed' }
     if ($Message -match '^input_unavailable:') { return 'input_unavailable: event input could not be read' }
     if ($Message -match '^recorder_validation_rejected:') { return $Message }
@@ -218,6 +219,32 @@ try {
     }
     try { $event = $EventJson | ConvertFrom-Json -Depth 100 -DateKind String }
     catch { throw 'input_invalid: event JSON could not be parsed' }
+    # Fail telemetry closed before appending an inconsistent implementation phase.
+    # Normal workflow execution remains independent of this diagnostic result.
+    $transitionLock = $null
+    $runDirectory = Join-Path $ExternalRunRoot $RunId
+    $hasEnvelope = @(@('eventType','phaseId','role','revision','taskRef','scope','eventId','correctionId','workerId','sessionId','occurredAtUtc') | Where-Object { $null -eq $event.PSObject.Properties[$_] }).Count -eq 0
+    $isPhaseBoundary = $hasEnvelope -and $event.eventType -in @('implementation_started','task_ready_for_review','correction_started','correction_ready')
+    $isValidPhaseEnd = $hasEnvelope -and ($event.eventType -notin @('task_ready_for_review','correction_ready') -or [string] $event.revision -cmatch '^[0-9a-f]{40}$')
+    if ($isPhaseBoundary -and $isValidPhaseEnd -and $event.phaseId -and $event.role -eq 'implementer') {
+        if ($RunId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or $RunId -in @('.','..')) { throw 'invalid run identity' }
+        [IO.Directory]::CreateDirectory($runDirectory) | Out-Null
+        $transitionLock = [IO.FileStream]::new((Join-Path $runDirectory 'phase-transition.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+        $ledgerPath = Join-Path $runDirectory 'events.jsonl'
+        $prior = if (Test-Path -LiteralPath $ledgerPath) { @(Get-Content -LiteralPath $ledgerPath | ForEach-Object {
+            $frame = $_ | ConvertFrom-Json -Depth 100 -DateKind String
+            if ($frame.kind -ceq 'story_performance_event_frame') { $frame.event } else { $frame }
+        }) } else { @() }
+        $phase = @($prior | Where-Object { $_.scope -ceq $event.scope -and $_.taskRef -eq $event.taskRef -and $_.role -ceq $event.role -and $_.phaseId -ceq $event.phaseId -and $_.correctionId -ceq $event.correctionId })
+        $other = @($phase | Where-Object { $_.eventType -ceq $event.eventType -and $_.eventId -cne $event.eventId })
+        if ($other.Count) { throw 'phase_boundary_conflict: phase already has this boundary; reuse its original event and timestamp' }
+        if ($event.eventType -in @('task_ready_for_review','correction_ready')) {
+            $startType = if ($event.eventType -eq 'task_ready_for_review') { 'implementation_started' } else { 'correction_started' }
+            $beginnings = @($phase | Where-Object eventType -eq $startType)
+            if ($beginnings.Count -ne 1) { throw 'phase_boundary_conflict: completion requires one matching start' }
+            if ($beginnings[0].workerId -cne $event.workerId -or $beginnings[0].sessionId -cne $event.sessionId -or [DateTimeOffset]::Parse($beginnings[0].occurredAtUtc) -gt [DateTimeOffset]::Parse($event.occurredAtUtc)) { throw 'phase_boundary_conflict: completion identity or time differs from its start' }
+        }
+    }
     $recorder = Join-Path $PSScriptRoot 'write-performance-event.ps1'
     if ($null -eq (Get-Command pwsh -ErrorAction SilentlyContinue)) {
         throw 'recorder_unavailable: pwsh executable is unavailable'
@@ -231,6 +258,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw (Get-RecorderFailureDiagnostic -Output $output -ExitCode $LASTEXITCODE)
     }
+    if ($null -ne $transitionLock) { $transitionLock.Dispose(); $transitionLock = $null }
     $result.recorder = ($output -join "`n") | ConvertFrom-Json
     $result.status = $result.recorder.status
     if ($result.status -notin @('appended', 'noop')) { throw 'recording outcome is unconfirmed; reconcile telemetry without blocking workflow' }
@@ -274,6 +302,10 @@ try {
             if ($event.reviewMode -eq 'per_task' -and @($records | Where-Object { $_.eventType -eq 'review_accepted' -and $_.taskRef -eq $taskRef }).Count -eq 0) { $diagnostics.Add("task #$taskRef acceptance evidence is missing at advancement/final review") }
         }
     }
+    if (-not $MetadataPath) {
+        $defaultMetadata = Join-Path $runDirectory 'setup-metadata.json'
+        if (Test-Path -LiteralPath $defaultMetadata) { $MetadataPath = $defaultMetadata }
+    }
     if ($event.eventType -eq 'story_started') {
         # Validate profiles with the same validator used by production reports.
         $parameters = @{ EventsPath = $result.recorder.ledgerPath; TaskRefs = $TaskRefs }
@@ -309,5 +341,6 @@ try {
     $result.telemetryState = if ($diagnostics.Count -eq 0) { 'verified' } else { 'limited' }
 }
 catch { $diagnostics.Add((Get-TransitionFailureDiagnostic -Message ([string] $_.Exception.Message))) }
+finally { if ($null -ne (Get-Variable transitionLock -ValueOnly -ErrorAction SilentlyContinue)) { $transitionLock.Dispose() } }
 $result.diagnostics = @($diagnostics)
 $result | ConvertTo-Json -Depth 100

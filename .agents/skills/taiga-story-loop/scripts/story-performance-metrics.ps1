@@ -9,7 +9,7 @@ function Get-CollectionAttempt {
         $attempt.runId -cne $RunId -or $attempt.projectId -ne $ProjectId -or $attempt.storyId -ne $StoryId -or
         $attempt.reviewedHead -cne $Head -or $attempt.status -notin @('measured', 'partial', 'source_unavailable', 'failed', 'skipped') -or
         $attempt.discoveryAttempted -isnot [bool] -or $attempt.collectorInvoked -isnot [bool] -or
-        ($attempt.status -in @('measured', 'partial') -and (-not $attempt.discoveryAttempted -or -not $attempt.collectorInvoked))) {
+        ($attempt.status -in @('measured', 'partial') -and (-not $attempt.collectorInvoked))) {
         throw 'collection_attempt_invalid: identity or outcome is invalid'
     }
     return $attempt
