@@ -417,6 +417,36 @@ try {
     Assert-True $created.Changed 'creates initial complete snapshot'
     Assert-True (-not [IO.File]::Exists($path + '.previous')) 'initial creation has no invented previous snapshot'
 
+    # Quota waits are optional compact state. Older snapshots omit this field;
+    # new snapshots retain the normal identity and gate fields while carrying
+    # one of the three delivery states needed by later heartbeat reconciliation.
+    $quotaSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $quotaSnapshot[$key] = $snapshot[$key] }
+    $quotaSnapshot['Quota wait'] = 'waiting | worker: implementer | stage: implementation | evidence: usage-limit-ref | reset: 2026-10-15T14:18:00Z | delivery: none'
+    $quotaCreated = & $writer -NotePath $path -Snapshot $quotaSnapshot
+    Assert-True $quotaCreated.Changed 'quota wait snapshot round-trips through the writer'
+    $quotaText = [IO.File]::ReadAllText($path)
+    Assert-True ($quotaText.Contains('Quota wait: ' + $quotaSnapshot['Quota wait'])) 'quota wait state is persisted'
+    Assert-True ($quotaText.Contains('Run: ' + $snapshot['Run']) -and
+        $quotaText.Contains('Implementer: ' + $snapshot['Implementer']) -and
+        $quotaText.Contains('Gate: ' + $snapshot['Gate'])) 'quota wait preserves existing identities and gates'
+    $quotaPrevious = $quotaText
+    foreach ($state in @('delivered', 'unknown')) {
+        $quotaSnapshot['Quota wait'] = "$state | worker: implementer | stage: implementation | evidence: usage-limit-ref | reset: unknown | delivery: continuation-ref"
+        $stateResult = & $writer -NotePath $path -Snapshot $quotaSnapshot
+        Assert-True $stateResult.Changed "quota wait $state state replaces the prior snapshot"
+        Assert-True ([IO.File]::ReadAllText($path + '.previous') -ceq $quotaPrevious) "quota wait $state state keeps the previous snapshot"
+        Assert-True ([IO.File]::ReadAllText($path).Contains("Quota wait: $state |")) "quota wait $state state is readable"
+        $quotaPrevious = [IO.File]::ReadAllText($path)
+    }
+    $quotaSnapshot['Quota wait'] = 'invalid-state | worker: implementer | stage: implementation | evidence: usage-limit-ref | reset: unknown | delivery: none'
+    Assert-Rejected $quotaSnapshot 'rejects an unknown quota wait state'
+    $withoutQuota = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $withoutQuota[$key] = $snapshot[$key] }
+    $withoutQuotaResult = & $writer -NotePath $path -Snapshot $withoutQuota
+    Assert-True $withoutQuotaResult.Changed 'older snapshot without quota wait remains writable'
+    Assert-True (-not [IO.File]::ReadAllText($path).Contains('Quota wait:')) 'omitted quota wait remains absent for older snapshots'
+
     # Existing snapshots predate optional final-review and performance fields;
     # both must remain writable while the coordinator reconciles them. The
     # historical note must not acquire a fabricated measurement pointer.

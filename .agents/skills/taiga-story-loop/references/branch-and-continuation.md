@@ -162,6 +162,7 @@ Workers: implementer <chat-id> | reviewer <chat-id>
 PR: <url or pending> | base <master or feature-branch> | head <sha>
 Approval: <pending/approved/merged/blocked> | next: <one action>
 Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
+Quota wait: <optional compact waiting|delivered|unknown state for an affected worker and continuation outcome>
 ```
 
 Replace the complete snapshot only after an authoritative fact changes; never

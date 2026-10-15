@@ -4,8 +4,9 @@ Keep one short note per authorized story-loop run, outside the source
 worktrees. It is a pointer to authoritative systems, not a durable workflow
 engine. Store only the selected scope, ordered story/task sequence,
 branch/worktree lineage, worker chats, PR identity, current stage,
-approval/merge state, recovery reference, and the optional compact performance
-pointer. Keep performance history in the external event ledger.
+approval/merge state, recovery reference, the optional compact quota-wait state,
+and the optional compact performance pointer. Keep performance history in the
+external event ledger.
 
 ## Template
 
@@ -34,6 +35,7 @@ Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha 
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
 Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
+Quota wait: <optional: waiting|delivered|unknown | worker: implementer|reviewer | stage: <stage> | evidence: <safe reference> | reset: <UTC estimate or unknown> | delivery: <none or safe reference>>
 Performance pointer: <none before Start, or schema=1 | run=<run-id> | project=<project-id> | story=<story-id>/<story-ref> | ledger=<external-ledger-path> | lastEvent=<event-id> | lastObservedUtc=<utc>
 ```
 
@@ -122,6 +124,14 @@ truncate unresolved facts: shorten evidence to references, and stop for
 reconciliation if a required fact cannot be retained.
 The helper only persists supplied observations; it does not verify their truth
 or infer task acceptance, approval, or merge.
+
+`Quota wait` is optional so older notes remain readable and writable. When
+present, it is one bounded single-line state: `waiting`, `delivered`, or
+`unknown`, followed by the affected worker, stage, safe evidence reference,
+optional UTC reset estimate, and continuation-delivery outcome. It does not
+duplicate the normal worker, task, branch, revision, authority, pending-action,
+or gate fields. Reset values are scheduling hints, never proof of capacity or
+an exact blocked duration.
 
 For an existing accumulated note, first preserve it as a separate historical
 evidence file, then reconcile and write the current snapshot. Store only its
