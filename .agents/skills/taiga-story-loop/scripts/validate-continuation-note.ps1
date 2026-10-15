@@ -345,7 +345,11 @@ function Invoke-QuotaHeartbeatPlan {
     if ($null -eq $parts) { return $null }
 
     if ($parts.State -ceq 'delivered') {
-        return [pscustomobject]@{ Decision = 'quota_wait_delivered'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+        $gate = if ($State.Snapshot.Contains('Gate')) { ([string]$State.Snapshot['Gate']).Trim() } else { 'none' }
+        if (-not [string]::IsNullOrWhiteSpace($gate) -and $gate -cne 'none') {
+            return [pscustomobject]@{ Decision = 'quota_wait_blocked_by_gate'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+        }
+        return $null
     }
     if ($parts.State -ceq 'unknown') {
         [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'quota_delivery_unknown'; Action = 'bounded_reconciliation' })
@@ -640,6 +644,31 @@ function Observe-QuotaWorkerProgress {
     [pscustomobject]@{ Decision = 'substantive_progress'; Evidence = $evidence }
 }
 
+function Apply-ObservedQuotaFailure {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
+        [Parameter(Mandatory)] [psobject] $Worker,
+        [Parameter(Mandatory)] [psobject] $Observed
+    )
+
+    $parts = Get-QuotaWaitParts -Snapshot $State.Snapshot
+    if ($null -eq $parts -or $parts.State -cne 'delivered') { return 'observed quota failure has no delivered wait to reopen' }
+    if ([string]$Worker.Role -cne [string]$parts.Worker) { return 'observed quota failure role does not match delivered wait' }
+    $savedPair = Get-SavedQuotaWorkerIdentity -Snapshot $State.Snapshot
+    if ($null -eq $savedPair) { return 'observed quota failure saved worker pair is unresolved' }
+    $expectedThread = if ($parts.Worker -ceq 'implementer') { $savedPair.ImplementerThread } else { $savedPair.ReviewerThread }
+    $expectedHost = if ($parts.Worker -ceq 'implementer') { $savedPair.ImplementerHost } else { $savedPair.ReviewerHost }
+    if ([string]$Worker.ThreadId -cne $expectedThread -or [string]$Worker.HostId -cne $expectedHost) { return 'observed quota failure worker does not match saved pair' }
+    $quotaEvidence = Get-QuotaEvidenceProperty -Evidence $Observed -Name 'QuotaEvidence'
+    $evidence = [string](Get-QuotaEvidenceProperty -Evidence $quotaEvidence -Name 'Evidence')
+    if ([string]::IsNullOrWhiteSpace($evidence)) { return 'observed quota failure evidence is missing' }
+    $reset = [string](Get-QuotaEvidenceProperty -Evidence $quotaEvidence -Name 'ResetUtc')
+    if ([string]::IsNullOrWhiteSpace($reset)) { $reset = 'unknown' }
+    $State.QuotaEvidence = $quotaEvidence
+    $State.Snapshot['Quota wait'] = "waiting | worker: $($parts.Worker) | stage: $($parts.Stage) | evidence: $evidence | reset: $reset | delivery: none"
+    [pscustomobject]@{ Evidence = $evidence; Reset = $reset }
+}
+
 function Invoke-HealthyHeartbeatTick {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
 
@@ -689,6 +718,7 @@ function Invoke-HealthyHeartbeatTick {
     [void]$State.WaitInvocations.Add($invocation)
     [void]$State.Events.Add('wait_threads')
     $snapshotChanged = $false
+    $observations = [System.Collections.Generic.List[object]]::new()
     foreach ($target in $targets) {
         $observed = @($State.WaitResult | Where-Object { [string]$_.ThreadId -ceq [string]$target.ThreadId } | Select-Object -First 1)
         if ($observed.Count -eq 0 -or [string]$observed[0].Outcome -in @('unknown', 'failed')) {
@@ -697,6 +727,29 @@ function Invoke-HealthyHeartbeatTick {
             return [pscustomobject]@{ Decision = 'reconcile_required'; Targets = $targets; Waits = 1; SnapshotChanged = $false }
         }
         $worker = @($State.Workers | Where-Object { [string]$_.ThreadId -ceq [string]$target.ThreadId } | Select-Object -First 1)[0]
+        $observation = [pscustomobject]@{
+            Role = [string]$worker.Role
+            ThreadId = [string]$target.ThreadId
+            HostId = [string]$target.HostId
+            Outcome = [string]$observed[0].Outcome
+            Cursor = [string]$observed[0].Cursor
+            Action = [string](Get-QuotaEvidenceProperty -Evidence $observed[0] -Name 'Action')
+            ProgressOutcome = [string](Get-QuotaEvidenceProperty -Evidence $observed[0] -Name 'ProgressOutcome')
+            Evidence = [string](Get-QuotaEvidenceProperty -Evidence $observed[0] -Name 'Evidence')
+            QuotaEvidence = Get-QuotaEvidenceProperty -Evidence $observed[0] -Name 'QuotaEvidence'
+        }
+        [void]$observations.Add($observation)
+        if ([string]$observed[0].Outcome -ceq 'quota_blocked') {
+            $quotaFailure = Apply-ObservedQuotaFailure -State $State -Worker $worker -Observed $observed[0]
+            if ($quotaFailure -is [string]) {
+                [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = [string]$quotaFailure; Action = 'bounded_reconciliation' })
+                [void]$State.Events.Add('reconcile_required')
+                return [pscustomobject]@{ Decision = 'reconcile_required'; Targets = $targets; Waits = 1; SnapshotChanged = $false; Observations = @($observations) }
+            }
+            [void]$State.SnapshotReplacements.Add([pscustomobject]@{ Reason = 'quota_failure_observed'; Evidence = [string]$quotaFailure.Evidence })
+            [void]$State.Events.Add('snapshot_replace')
+            return [pscustomobject]@{ Decision = 'quota_failure_observed'; Targets = $targets; Waits = 1; SnapshotChanged = $true; Observations = @($observations) }
+        }
         if (-not [string]::IsNullOrWhiteSpace([string]$observed[0].Cursor) -and
             [string]$observed[0].Cursor -cne [string]$worker.Cursor) {
             $worker.Cursor = [string]$observed[0].Cursor
@@ -714,6 +767,7 @@ function Invoke-HealthyHeartbeatTick {
         Targets = $targets
         Waits = 1
         SnapshotChanged = $snapshotChanged
+        Observations = @($observations)
     }
 }
 
@@ -1131,7 +1185,46 @@ try {
 
     $deliveredQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'delivered') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
     $deliveredQuotaTick = Invoke-HealthyHeartbeatTick -State $deliveredQuotaHeartbeat
-    Assert-True ($deliveredQuotaTick.Decision -eq 'quota_wait_delivered' -and $deliveredQuotaHeartbeat.WaitInvocations.Count -eq 0) 'confirmed quota delivery suppresses routine heartbeat work'
+    Assert-True ($deliveredQuotaTick.Decision -eq 'reconcile_required' -and $deliveredQuotaHeartbeat.WaitInvocations.Count -eq 0) 'delivered quota state still blocks a stopped unresolved worker without a quota wake'
+    $deliveredGateHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'delivered' -Gate 'approval | user decision required') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $deliveredGateTick = Invoke-HealthyHeartbeatTick -State $deliveredGateHeartbeat
+    Assert-True ($deliveredGateTick.Decision -eq 'quota_wait_blocked_by_gate' -and $deliveredGateHeartbeat.WaitInvocations.Count -eq 0) 'delivered quota state retains gate precedence before ordinary observation'
+
+    $deliveredRunningHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'delivered') -Workers @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'running'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+    ) -WaitResult @(
+        [pscustomobject]@{ ThreadId = 'impl-thread'; Outcome = 'changed'; Cursor = 'impl-cursor-a1'; Action = 'scoped_check'; ProgressOutcome = 'confirmed'; Evidence = 'check-exit-0' }
+    ) -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $deliveredRunningTick = Invoke-HealthyHeartbeatTick -State $deliveredRunningHeartbeat
+    Assert-True ($deliveredRunningTick.Decision -eq 'quiet_unchanged' -and $deliveredRunningHeartbeat.WaitInvocations.Count -eq 1 -and $deliveredRunningTick.Observations.Count -eq 1 -and $deliveredRunningTick.Observations[0].ThreadId -ceq 'impl-thread') 'delivered quota state returns to ordinary bounded observation for the same running worker'
+    $heartbeatProgressObservation = $deliveredRunningTick.Observations[0]
+    $heartbeatProgress = [pscustomobject]@{
+        Role = $heartbeatProgressObservation.Role
+        ThreadId = $heartbeatProgressObservation.ThreadId
+        HostId = $heartbeatProgressObservation.HostId
+        TaskRef = 77
+        Revision = 'revision-quota-a1'
+        Stage = 'implementation'
+        Action = $heartbeatProgressObservation.Action
+        Outcome = $heartbeatProgressObservation.ProgressOutcome
+        Evidence = $heartbeatProgressObservation.Evidence
+    }
+    $heartbeatProgressState = New-QuotaRecoveryState -PlannerState $deliveredRunningHeartbeat -WorkerEvidence @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'stopped'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; TaskRef = 77; Revision = 'revision-quota-a1'; Stage = 'implementation'; Branch = 'codex/story-52-synthetic'; Worktree = 'C:\Synthetic\story'; Authorization = 'auth-synthetic-52'; PendingAction = 'none'; ExternalOutcome = 'confirmed' }
+    ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-delivered-observe' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-observe-1' -DeliveryOutcome delivered
+    [void]$heartbeatProgressState.ResumeInvocations.Add([pscustomobject]@{ Role = 'implementer'; ThreadId = 'impl-thread'; HostId = 'local'; TaskRef = 77; Revision = 'revision-quota-a1'; Stage = 'implementation' })
+    $heartbeatProgressResult = Observe-QuotaWorkerProgress -State $heartbeatProgressState -Observation $heartbeatProgress
+    Assert-True ($heartbeatProgressResult.Decision -eq 'substantive_progress' -and $heartbeatProgressState.ProgressEvidence.Count -eq 1) 'ordinary post-delivery heartbeat observation can become substantive progress'
+
+    $deliveredFailureHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'delivered') -Workers @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'running'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+    ) -WaitResult @(
+        [pscustomobject]@{ ThreadId = 'impl-thread'; Outcome = 'quota_blocked'; Cursor = 'impl-cursor-b2'; QuotaEvidence = [pscustomobject]@{ Capacity = 'exhausted'; Fresh = $true; ResetUtc = '2026-10-15T15:00:00Z'; Evidence = 'quota-ref-2' } }
+    ) -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:30:00Z'
+    $deliveredFailureTick = Invoke-HealthyHeartbeatTick -State $deliveredFailureHeartbeat
+    Assert-True ($deliveredFailureTick.Decision -eq 'quota_failure_observed' -and $deliveredFailureHeartbeat.Snapshot['Quota wait'].StartsWith('waiting |') -and $deliveredFailureHeartbeat.Snapshot['Quota wait'].Contains('evidence: quota-ref-2') -and $deliveredFailureHeartbeat.Snapshot['Quota wait'].Contains('reset: 2026-10-15T15:00:00Z')) 'a later quota failure observed on the same worker reopens a delivered wait'
+    $deliveredFailureNextTick = Invoke-HealthyHeartbeatTick -State $deliveredFailureHeartbeat
+    Assert-True ($deliveredFailureNextTick.Decision -eq 'quota_wait_deferred_exhausted' -and $deliveredFailureHeartbeat.WaitInvocations.Count -eq 1) 'reopened quota failure returns to bounded quota planning on the next tick'
 
     $unknownQuotaHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot -State 'unknown') -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
     $unknownQuotaTick = Invoke-HealthyHeartbeatTick -State $unknownQuotaHeartbeat
@@ -1267,9 +1360,15 @@ try {
     $rejectionTwoResult = Invoke-QuotaWorkerRecovery -State $rejectionTickTwo -Plan $rejectionTickTwoPlan
     Assert-True ($rejectionOneResult.Decision -eq 'quota_rejection_deferred' -and $rejectionOneDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $rejectionTwoResult.Decision -eq 'quota_rejection_deferred' -and $rejectionTickOne.ResumeInvocations.Count -eq 1 -and $rejectionTickTwo.ResumeInvocations.Count -eq 1) 'repeated quota rejections permit one attempt on each later eligible tick but never an immediate retry'
 
+    $implRecovery.PlannerState.Workers = @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'running'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1' }
+    )
+    $implRecovery.PlannerState.WaitResult = @(
+        [pscustomobject]@{ ThreadId = 'impl-thread'; Outcome = 'unchanged'; Cursor = 'impl-cursor-a1' }
+    )
     $deliveredFollowupPlan = Invoke-HealthyHeartbeatTick -State $implRecovery.PlannerState
     $deliveredFollowup = Invoke-QuotaWorkerRecovery -State $implRecovery -Plan $deliveredFollowupPlan
-    Assert-True ($deliveredFollowupPlan.Decision -eq 'quota_wait_delivered' -and $deliveredFollowup.Decision -eq 'quota_wait_delivered' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 2) 'confirmed delivery keeps repeated heartbeat ticks quiet and preserves the existing recovery automation identity'
+    Assert-True ($deliveredFollowupPlan.Decision -eq 'quiet_unchanged' -and $deliveredFollowupPlan.Targets.Count -eq 1 -and $deliveredFollowupPlan.Targets[0].ThreadId -ceq 'impl-thread' -and $deliveredFollowup.Decision -eq 'quiet_unchanged' -and $implRecovery.ResumeInvocations.Count -eq 1 -and $implRecovery.Telemetry.Count -eq 2) 'confirmed delivery suppresses duplicate quota wakes while ordinary same-worker observation continues'
 
     $newFailurePlanner = New-HeartbeatPlannerState -Snapshot (New-SyntheticQuotaHeartbeatSnapshot) -Workers $quotaStoppedWorkers -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T15:00:00Z'
     $newFailurePlan = Invoke-HealthyHeartbeatTick -State $newFailurePlanner

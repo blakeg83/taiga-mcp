@@ -25,8 +25,10 @@ identity record:
   permits one bounded eligibility decision. Passing time is not proof of
   capacity.
 - A confirmed rejection remains waiting for a later eligible tick. A confirmed
-  delivery changes the outcome to `delivered` and suppresses further wakes for
-  that interruption. Unknown delivery requires reconciliation before retry.
+  delivery changes the outcome to `delivered` and suppresses another quota wake
+  for that interruption while ordinary heartbeat observation continues for the
+  same running worker. A later observed quota failure may reopen the compact
+  state. Unknown delivery requires reconciliation before retry.
 - On an eligible tick, reconcile the exact affected worker and send at most one
   scoped continuation to that same worker. A running worker, missing identity,
   stale task/stage/revision/branch/worktree/authorization binding, pending

@@ -176,8 +176,10 @@ precedence first, then the compact quota state, then one eligible same-worker
 reconciliation. A future reset or fresh exhaustion defers; missing capacity
 metadata after an unknown or elapsed reset allows one bounded eligibility
 decision, not proof of availability. Confirmed rejection waits for a later
-tick, confirmed delivery suppresses further wakes, and unknown delivery stops
-before retry. Match the affected worker's recorded thread/host, task/stage,
+tick, confirmed delivery suppresses another quota wake for that interruption
+while ordinary same-worker observation continues, and a later observed quota
+failure may reopen the compact state. Unknown delivery stops before retry.
+Match the affected worker's recorded thread/host, task/stage,
 branch/worktree, revision, authorization, pending action, and external outcome
 before one scoped continuation. Keep `wait_started`/`wait_ended` with the same
 `waitId` and `waitKind: quota_blocked`; delivery is not substantive progress.

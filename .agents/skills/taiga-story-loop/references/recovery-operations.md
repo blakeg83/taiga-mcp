@@ -20,8 +20,10 @@ For the optional `Quota wait` state:
 - An elapsed or unknown reset permits one bounded eligibility decision; time
   passing is not proof of capacity.
 - A confirmed rejection waits for a later eligible tick. Confirmed delivery
-  closes that interruption. Unknown delivery is persisted and requires
-  reconciliation before retry.
+  closes that interruption and suppresses another quota wake while ordinary
+  heartbeat observation continues for the same running worker. A later observed
+  quota failure may reopen the compact state. Unknown delivery is persisted and
+  requires reconciliation before retry.
 - An eligible tick may send at most one scoped continuation to the same
   affected worker. Match the saved worker thread and host, task, stage,
   revision, branch, worktree, authorization, pending action, and external

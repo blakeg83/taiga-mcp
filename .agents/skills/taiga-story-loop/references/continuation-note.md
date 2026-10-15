@@ -213,8 +213,10 @@ The heartbeat planner applies this order on every scheduled tick:
 
 When the optional `Quota wait` field is present, apply the same schedule and
 gate/terminal precedence before the worker-identity checks. A `delivered` state
-ends quietly; an `unknown` delivery state opens one bounded reconciliation and
-does not wake a worker. For `waiting`, a confirmed approval or terminal gate
+suppresses another quota continuation for that interruption, then returns to the
+ordinary bounded observation path for the same running worker; an observed new
+quota failure may reopen the state as `waiting`. An `unknown` delivery state
+opens one bounded reconciliation and does not wake a worker. For `waiting`, a confirmed approval or terminal gate
 ends quietly, and a confirmed quota rejection defers to a later eligible tick
 without an immediate retry. A known future reset estimate defers when no fresh
 authoritative capacity result is available. Fresh authoritative `exhausted`
