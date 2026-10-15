@@ -132,20 +132,20 @@ delivery remains an escalation and never enters `awaiting_review`.
 
 ### Lifecycle recording at task boundaries
 
-Record `implementation_started` when the resumed task reaches its first
-concrete task-scoped edit or check, not when a status-only write is made. In
+Record `implementation_started` before substantive task investigation, source
+reading, planning, editing, or checks. Reuse an already recorded start on resume. In
 both modes, record `task_ready_for_review` after the exact clean commit at the
 implementation-ready milestone. In `per_task`, then let the reviewer own the
 matching `review_started` and `review_findings`/`review_accepted` observations;
 in `story_end_only`, the implementation boundary does not dispatch a task
-review. A current task finding starts `correction_started`; the corrected
+review. Before investigating a current task finding, record `correction_started`; the corrected
 commit records `correction_ready` before direct re-review. The reviewer owns
 final-story start, finding, and re-review events in both modes. The implementer owns `correction_started` and `correction_ready`, including final-story
 corrections, in both modes.
 The coordinator owns explicit wait boundaries and the story/PR boundaries;
 `pr_ready` remains deferred to task #157.
 
-Use the actual `scripts/write-performance-event.ps1`
+Use the actual `scripts/record-story-performance-transition.ps1`
 recorder helper and stable `phaseId`, `correctionId`,
 `reviewRequestId`, `reviewAttemptId`, ordinal, revision, and `waitId` identities
 from [worker-handoffs](worker-handoffs.md#recording-the-handoff-boundary). Duplicate

@@ -13,6 +13,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $diagnostics = [Collections.Generic.List[string]]::new()
+$recoveredDiagnosticCount = 0
 $result = [ordered]@{ status = 'unavailable'; telemetryState = 'limited'; diagnostics = @(); recorder = $null }
 
 function Get-RecorderValidationDiagnostic {
@@ -256,7 +257,23 @@ try {
         throw 'recorder_execution_failed: recorder process could not be started'
     }
     if ($LASTEXITCODE -ne 0) {
-        throw (Get-RecorderFailureDiagnostic -Output $output -ExitCode $LASTEXITCODE)
+        $failure = Get-RecorderFailureDiagnostic -Output $output -ExitCode $LASTEXITCODE
+        # One evidence-preserving repair for the observed legacy enum mistake.
+        # Never retry ambiguous recorder failures or guess a request/attempt identity.
+        if ($failure -ceq "recorder_validation_rejected: 'reviewKind' has an unsupported value" -and
+            @(@('reviewKind','scope','eventType','reviewAttemptOrdinal','reviewMode') | Where-Object { $null -eq $event.PSObject.Properties[$_] }).Count -eq 0 -and
+            $event.reviewKind -ceq 'initial' -and $event.scope -ceq 'task' -and
+            $event.eventType -in @('review_started', 'review_findings', 'review_accepted') -and
+            $event.reviewAttemptOrdinal -eq 1 -and $event.reviewMode -ceq 'per_task') {
+            $diagnostics.Add($failure)
+            $event.reviewKind = 'initial_task'
+            $EventJson = $event | ConvertTo-Json -Depth 100 -Compress
+            $output = @(& pwsh -NoProfile -File $recorder -ExternalRunRoot $ExternalRunRoot -RunId $RunId -EventJson $EventJson 2>&1)
+            if ($LASTEXITCODE -ne 0) { throw (Get-RecorderFailureDiagnostic -Output $output -ExitCode $LASTEXITCODE) }
+            $diagnostics.Add('recorder_validation_recovered: reviewKind initial corrected to initial_task; original event identity and observed timestamp preserved')
+            $recoveredDiagnosticCount = 2
+        }
+        else { throw $failure }
     }
     if ($null -ne $transitionLock) { $transitionLock.Dispose(); $transitionLock = $null }
     $result.recorder = ($output -join "`n") | ConvertFrom-Json
@@ -338,7 +355,7 @@ try {
             }
         }
     }
-    $result.telemetryState = if ($diagnostics.Count -eq 0) { 'verified' } else { 'limited' }
+    $result.telemetryState = if ($diagnostics.Count -eq $recoveredDiagnosticCount) { 'verified' } else { 'limited' }
 }
 catch { $diagnostics.Add((Get-TransitionFailureDiagnostic -Message ([string] $_.Exception.Message))) }
 finally { if ($null -ne (Get-Variable transitionLock -ValueOnly -ErrorAction SilentlyContinue)) { $transitionLock.Dispose() } }

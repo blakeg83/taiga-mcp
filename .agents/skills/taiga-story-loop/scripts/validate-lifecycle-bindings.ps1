@@ -299,7 +299,7 @@ foreach ($text in @($workerPairText, $workerHandoffsText, $automaticFlowText, $t
     Assert-Contains $text 'telemetry-only' 'no telemetry-only workflow message'
 }
 foreach ($text in @($workerHandoffsText, $automaticFlowText, $taskExecutionText, $implementerPromptText)) {
-    Assert-Contains $text 'write-performance-event.ps1' 'actual recorder entry point'
+    Assert-True ($text.Contains('record-story-performance-transition.ps1') -or $text.Contains('write-performance-event.ps1')) 'actual recorder or transition entry point'
     Assert-Contains $text 'story_end_only' 'story-end-only mode contract'
     Assert-Contains $text 'per_task' 'per-task mode contract'
 }

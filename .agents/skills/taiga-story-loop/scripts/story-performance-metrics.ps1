@@ -65,6 +65,14 @@ function Get-ElapsedSemantics {
     $quotaState = if ($quota.Count -eq 0) { 'unavailable' } elseif ($quotaComplete -and $spanMeasured) { 'measured' } else { 'partial' }
     $blocked = if ($quotaComplete -and $spanMeasured) { Get-UnionMilliseconds -Intervals $quota -Start $start -End $end } else { $null }
     $quotaMetric = New-Metric -State $quotaState -Value $blocked -Unit 'milliseconds' -Source 'explicit quota_blocked wait boundaries' -Calculation 'union of confirmed quota waits clipped to story boundaries' -Coverage 'only observed interruption/resumption pairs; no quota-window inference' -MissingData $(if ($quotaState -ne 'measured') { 'quota or story boundaries are absent/incomplete; no zero or blocked-duration estimate is inferred' } else { $null })
+    if ($quotaState -eq 'partial' -and $spanMeasured) {
+        if (@($quota | Where-Object state -eq 'measured').Count -gt 0) {
+            $quotaMetric | Add-Member -NotePropertyName knownSubtotal -NotePropertyValue (Get-UnionMilliseconds -Intervals $quota -Start $start -End $end)
+        }
+        if (@($Waits | Where-Object waitKind -eq 'manual_resume').Count -gt 0) {
+            $quotaMetric.missingData = 'quota availability is not fully evidenced across manual resumption; manual authorization and unknown capacity time cannot be treated as proven quota blocking'
+        }
+    }
     $adjusted = New-Metric -State $quotaState -Value $(if ($null -ne $blocked) { [long] $StorySpan.elapsedMilliseconds - $blocked } else { $null }) -Unit 'milliseconds' -Source 'story boundaries and explicit quota waits' -Calculation 'story wall-clock elapsed minus confirmed quota-blocked overlap' -Coverage 'quota-adjusted elapsed includes other inactivity; it is not active execution time' -MissingData $quotaMetric.missingData
     $implementationState = if ($Implementation.Count -eq 0 -or -not $spanMeasured) { 'unavailable' } elseif (@($Implementation | Where-Object state -ne 'measured').Count -gt 0) { 'partial' } else { 'measured' }
     $implementationWall = New-Metric -State $implementationState -Value $(if ($implementationState -eq 'measured') { Get-UnionMilliseconds -Intervals $Implementation -Start $start -End $end } else { $null }) -Unit 'milliseconds' -Source 'paired implementation and correction boundaries' -Calculation 'union of phase intervals within story boundaries' -Coverage 'overlap counted once; includes idle and interruption time' -MissingData $(if ($implementationState -ne 'measured') { 'implementation or story boundary coverage is incomplete' } else { $null })

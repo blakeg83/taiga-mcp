@@ -119,3 +119,19 @@ function New-StoryPerformanceEvent {
     }
     [pscustomobject] $event
 }
+
+# Translate observed interruption evidence into the existing wait-event schema.
+# Context contains only common run/story/role/worker/session/provenance fields.
+function New-StoryPerformanceInterruptionEvent {
+    param(
+        [Parameter(Mandatory)] [hashtable] $Context,
+        [Parameter(Mandatory)] [string] $InterruptionId,
+        [Parameter(Mandatory)] [ValidateSet('usage_limit_exceeded', 'quota_capacity_verified', 'manual_resume_wait', 'manual_resumed')] [string] $Observation,
+        [Parameter(Mandatory)] [string] $OccurredAtUtc
+    )
+    $waitKind = if ($Observation -in @('manual_resume_wait', 'manual_resumed')) { 'manual_resume' } else { 'quota_blocked' }
+    $eventType = if ($Observation -in @('usage_limit_exceeded', 'manual_resume_wait')) { 'wait_started' } else { 'wait_ended' }
+    New-StoryPerformanceEvent @Context -EventId "$InterruptionId/$Observation" `
+        -EventType $eventType -OccurredAtUtc $OccurredAtUtc `
+        -WaitId "$InterruptionId/$waitKind" -WaitKind $waitKind
+}

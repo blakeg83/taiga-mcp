@@ -149,7 +149,7 @@ Only the paired correction events carry that finding identity.
 | Existing boundary | Event owner and event | Identity/boundary rule |
 | --- | --- | --- |
 | Confirmed `Start` and story-run initialization | coordinator: `story_started` | story scope; use the actual UTC start and setup provenance |
-| First concrete work on a current task | implementer: `implementation_started` | task ref + phase ID; revision may be null before a commit |
+| Before substantive work on a current task | implementer: `implementation_started` | task ref + phase ID; before investigation, planning, edits, or checks; revision may be null before a commit |
 | Frozen task-ready packet before direct delivery | implementer: `task_ready_for_review` | same phase ID + full revision; this does not prove delivery or review |
 | Reviewer begins the exact request/attempt | reviewer: `review_started` | request ID + attempt ID + ordinal + review kind + exact revision; `supersedesReviewAttemptId=null` |
 | Reviewer records a current finding or exact acceptance | reviewer: `review_findings` or `review_accepted` | same phase/request/attempt identity and revision; `supersedesReviewAttemptId=null` |
@@ -160,7 +160,7 @@ Only the paired correction events carry that finding identity.
 | Confirmed reviewed PR creation or reuse | coordinator: `pr_ready` | story scope + PR identity + exact reviewed HEAD; owned by task #157 |
 
 In both modes, `implementation_started` and `task_ready_for_review` record the
-implementation interval at the first concrete task work and the frozen
+implementation interval before substantive task work and at the frozen
 implementation-ready boundary. In `per_task`, task review, finding, correction,
 and re-review events are then recorded at their actual pair boundaries. In
 `story_end_only`, the implementation-ready `task_ready_for_review` event does

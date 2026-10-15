@@ -19,6 +19,7 @@ jobs:
       - run: dotnet build -c Release --no-restore
       - run: dotnet test -c Release --no-build --no-restore
       - run: pwsh -NoProfile -File scripts/validate-story-performance-finalization.ps1
+      - run: pwsh -NoProfile -File .agents/skills/taiga-story-loop/scripts/validate-performance-interruptions.ps1
       - run: pwsh -NoProfile -File scripts/validate-story-performance-portability.ps1
       - run: pwsh -NoProfile -File scripts/validate-token-discovery.ps1
       - name: Package isolated portability fixture
