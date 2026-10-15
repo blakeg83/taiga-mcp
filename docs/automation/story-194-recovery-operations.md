@@ -47,7 +47,7 @@ infer a quota duration from reset timestamps. Existing `wait_started` and
 
 The repository fixtures are deterministic and synthetic. The affected checks
 passed on the story branch at revision
-`f5f0262fef010b75145df56938ec29171dbb41ef`:
+`bc42f04d0467cf40334883697b672f179d5a99e3`:
 
 ```text
 git diff --check
