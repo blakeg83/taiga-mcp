@@ -24,10 +24,24 @@ Markdown checksums, measured elapsed time, unavailable token sources, and reuse.
 Use `-ExampleArtifactRoot <absolute external directory>` to retain a synthetic
 example report; the fixture cleans only its own disposable files.
 
+Windows CI also runs the complete offline story-loop regression matrix through
+`validate-performance-overhead.ps1`. That matrix invokes the checked-in
+recovery, handoff, review-flow, reporting, token-discovery, finalization, and
+portability validators in fresh PowerShell processes, and includes negative
+controls for unsafe workflow shortcuts. Its results are synthetic contract
+evidence only; they do not prove live provider writes, model behavior, token
+savings, or quota capacity.
+
 This guide turns the versioned performance contract into a safe operator
 runbook. It is the Task #160 documentation artifact for epic #140 and story
 #145. The examples are sanitized synthetic fixtures; they are not live Taiga,
 GitHub, Codex, provider, token, or release evidence.
+
+Recovery remains bounded by the existing 30-minute heartbeat. A successful
+eligible tick may resume the affected existing worker after authoritative
+reconciliation; elapsed reset time alone is not proof of capacity, and there is
+no uninterrupted-through-quota guarantee. Approval, terminal, cancellation,
+and uncertain-delivery gates still take precedence.
 
 The contract and capability boundary remain authoritative in
 [`performance-reporting.md`](../../.agents/skills/taiga-story-loop/references/performance-reporting.md).
