@@ -44,8 +44,17 @@ the project's existing In Progress status and add concise, meaningful progress
 updates in Taiga. Implement the whole story in the shared worktree and run the
 relevant local checks. Send the Reviewer a direct ready-for-review message with
 the changed files, a normalized content snapshot for every changed path
-(`path: present <SHA-256>` for files and `path: deleted` for deletions), the
-summary, and verification results, then stop editing while review is pending.
+(`path: present text <SHA-256>` for normalized text bytes,
+`path: present binary <SHA-256>` for raw binary bytes, and `path: deleted` for
+deletions), the summary, and verification results, then stop editing while
+review is pending.
+
+For every snapshot in this workflow, use the repository `.gitattributes` text
+rules (including `text=auto` detection) to classify files consistently as text
+or binary. Hash UTF-8 bytes after converting CRLF and CR line endings to LF for
+text files; hash raw bytes for binary files. Use this same canonicalization for
+the Implementer, Reviewer, Coordinator working-tree preflight, and
+post-commit verification.
 
 On a direct `CHANGES REQUESTED` message, make the requested corrections, rerun
 relevant checks, update Taiga, and send the same Reviewer a new review request.
@@ -57,8 +66,9 @@ contact the Coordinator for routine progress.
 
 Independently read the story and inspect the actual shared-worktree files. Check
 the complete acceptance criteria and relevant local verification. Recompute a
-normalized content snapshot from those files, using `path: present <SHA-256>`
-for file bytes and `path: deleted` for deletions; this snapshot is the identity
+normalized content snapshot from those files, using `path: present text
+<SHA-256>` for normalized text bytes, `path: present binary <SHA-256>` for raw
+binary bytes, and `path: deleted` for deletions; this snapshot is the identity
 of the reviewed contents, not just a file-name scope. For
 `CHANGES REQUESTED`, record concise actionable findings and the review phase in
 Taiga, then send the findings directly to the Implementer. Routine findings are
@@ -93,14 +103,17 @@ framework. If a host cannot exercise a path, report the exact unavailable
 capability and the resulting unverified path; never present it as passed.
 
 After explicit reviewer approval, the Coordinator confirms the Implementer is
-idle, inspects status and the complete diff, computes the same SHA-256 snapshot
-from the committed file contents, verifies every present digest, every deleted
-path, and the complete diff match the reviewed snapshot and scope, commits,
-verifies the commit, pushes, and creates a PR against the
-configured base branch (normally `master`). The PR includes the story reference,
-summary, and verification results. Send the PR URL and verified commit SHA to
-the Reviewer for the final Taiga update and report the URL and summary to the
-user. Never merge automatically.
+idle, inspects status and the complete diff, and computes the same canonical
+snapshot from the current working-tree contents. Before committing, it verifies
+every present digest, every deleted path, and the complete diff match the
+reviewed snapshot and scope. Only then does it commit. After committing, it
+independently computes the canonical snapshot from the resulting commit tree
+and verifies it again; any mismatch stops delivery and is reported. The
+Coordinator then verifies the commit, pushes, and creates a PR against the
+configured base branch (normally `master`). The PR includes the story
+reference, summary, and verification results. Send the PR URL and verified
+commit SHA to the Reviewer for the final Taiga update and report the URL and
+summary to the user. Never merge automatically.
 
 This skill is instruction-driven only. It must not add telemetry, token or
 performance tracking, event ledgers, persistent workflow state, continuation
