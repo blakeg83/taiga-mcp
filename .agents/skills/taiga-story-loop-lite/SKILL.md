@@ -9,20 +9,42 @@ Use this skill for exactly one explicitly selected Taiga user story. Resolve the
 story, repository, and base branch before setup. The workflow has exactly three
 participants: the Coordinator, one Implementer, and one Reviewer.
 
+Never use subagents in this workflow. This prohibition applies to every role
+and every phase, including setup, implementation, review, and validation. Never
+call `spawn_agent` or substitute a subagent for a conversation.
+
 ## Coordinator setup
+
+The originating chat is the Coordinator. Once the selected story's reference
+is resolved, rename that same chat to `User Story #<ref> Coordinator` using
+`mcp__codex_app__set_thread_title` with `title` set to that name and `threadId`
+omitted to target the calling chat. Verify the rename succeeded before creating
+the worker conversations. Do not create a separate Coordinator conversation.
 
 The Coordinator is the user's only contact. It reads the story scope, resolves
 the repository, and creates the story branch and shared worktree. It creates
-exactly two persistent conversations named:
+exactly two new persistent conversations using
+`mcp__codex_app__create_thread`, named and configured as follows:
 
-- `User Story #<ref> Implementer`
-- `User Story #<ref> Reviewer`
+- `User Story #<ref> Implementer`: GPT 5.6 Luna, xhigh reasoning;
+  pass `model: "gpt-5.6-luna"` and `thinking: "xhigh"`.
+- `User Story #<ref> Reviewer`: GPT 6.1 Sol, Medium reasoning;
+  pass `model: "gpt-6.1-sol"` and `thinking: "medium"`.
 
-Configure each conversation with the requested model and reasoning effort using
-capabilities available on the current host, then verify the returned identities
-and settings. Never assume creation or model configuration succeeded. Give both
+Pass these model and reasoning settings explicitly in each creation call; do
+not inherit defaults or rely on role-prompt text to configure them. If creation
+is queued, resolve it to an actual conversation `threadId` before messaging;
+a `clientThreadId` is not a conversation identity. Verify the returned identities
+and effective settings. If conversation creation or either required setting is
+unavailable or cannot be verified, report the exact limitation and stop before
+implementation. Never fall back to subagents or different models or reasoning
+levels. Never assume creation or model configuration succeeded. Give both
 workers the complete story requirements, shared worktree path, repository/base
 branch, their role, and the other worker's conversation identity.
+
+Use `mcp__codex_app__send_message_to_thread` with the actual conversation
+identities for worker handoffs, corrections, approvals, and blockers. Preserve
+the assigned model and reasoning settings throughout the same conversation pair.
 
 Before dispatch, run one setup-only native capability probe with this same pair:
 the Implementer sends a direct probe to the Reviewer and receives an
