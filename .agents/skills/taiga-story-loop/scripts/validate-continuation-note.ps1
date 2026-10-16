@@ -124,23 +124,23 @@ function Resolve-AuthoritativeRecoveryWorker {
         }
     }
 
-    # A stale continuation summary is only a pointer. A confirmed pending
+    # A stale continuation summary is only a pointer. A confirmed unfinished
     # review/handoff action on either fixed worker is the authoritative target.
     $pending = @($workers | Where-Object {
-        $pendingAction = [string](Get-AuthoritativeWorkerProperty -Worker $_ -Name 'PendingAction')
-        -not [string]::IsNullOrWhiteSpace($pendingAction) -and $pendingAction -cne 'none'
+        $unfinishedAction = [string](Get-AuthoritativeWorkerProperty -Worker $_ -Name 'UnfinishedAction')
+        -not [string]::IsNullOrWhiteSpace($unfinishedAction) -and $unfinishedAction -cne 'none'
     })
     if ($pending.Count -gt 1) {
-        return [pscustomobject]@{ Ready = $false; Reason = 'conflicting authoritative pending worker actions' }
+        return [pscustomobject]@{ Ready = $false; Reason = 'conflicting authoritative unfinished worker actions' }
     }
 
     $selected = if ($pending.Count -eq 1) { $pending[0] } else { $implementers[0] }
-    $selectedAction = [string](Get-AuthoritativeWorkerProperty -Worker $selected -Name 'PendingAction')
+    $selectedAction = [string](Get-AuthoritativeWorkerProperty -Worker $selected -Name 'UnfinishedAction')
     if ([string]::IsNullOrWhiteSpace($selectedAction)) { $selectedAction = 'none' }
     [pscustomobject]@{
         Ready = $true
         Worker = $selected
-        PendingAction = $selectedAction
+        UnfinishedAction = $selectedAction
         ActionEvidence = [string](Get-AuthoritativeWorkerProperty -Worker $selected -Name 'ActionEvidence')
     }
 }
@@ -232,8 +232,8 @@ function Get-AuthoritativeRecoveryState {
         return [pscustomobject]@{ Ready = $false; Reason = $workerSelection.Reason }
     }
     $selectedWorker = $workerSelection.Worker
-    $nextAction = if ($workerSelection.PendingAction -cne 'none') {
-        "resume task #$expectedNextTask $($selectedWorker.Role) action $($workerSelection.PendingAction)"
+    $nextAction = if ($workerSelection.UnfinishedAction -cne 'none') {
+        "resume task #$expectedNextTask $($selectedWorker.Role) action $($workerSelection.UnfinishedAction)"
     } elseif ($selectedWorker.Role -ceq 'implementer' -and $selectedWorker.State -eq 'implementing') {
         "continue task #$expectedNextTask implementation"
     } else {
@@ -242,7 +242,7 @@ function Get-AuthoritativeRecoveryState {
     $actionEvidence = if ([string]::IsNullOrWhiteSpace($workerSelection.ActionEvidence)) {
         ''
     } else {
-        " | action:$($selectedWorker.Role)/$($workerSelection.PendingAction):$($workerSelection.ActionEvidence)"
+        " | action:$($selectedWorker.Role)/$($workerSelection.UnfinishedAction):$($workerSelection.ActionEvidence)"
     }
     [pscustomobject]@{
         Ready = $true
@@ -250,7 +250,7 @@ function Get-AuthoritativeRecoveryState {
         TaskState = "$($selectedWorker.Revision) | $($selectedWorker.State)"
         Next = $nextAction
         ResumeRole = [string]$selectedWorker.Role
-        ResumeAction = [string]$workerSelection.PendingAction
+        ResumeAction = [string]$workerSelection.UnfinishedAction
         Evidence = "acceptance:$($acceptance.EvidenceRef) | write:$($write.EvidenceRef) | advancement:$($advancement.EvidenceRef) | workers:$($implementer.Cursor),$($reviewer.Cursor) | selected-worker:$($selectedWorker.Role)$actionEvidence"
     }
 }
@@ -1096,10 +1096,10 @@ try {
     $wrongWorkerState = New-AuthoritativePairState
     $wrongWorkerState['WorkerStates'][0].Revision = 'revision-stale-implementer-summary'
     $wrongWorkerState['WorkerStates'][0].State = 'stale_summary'
-    $wrongWorkerState['WorkerStates'][0] | Add-Member -NotePropertyName PendingAction -NotePropertyValue 'none'
+    $wrongWorkerState['WorkerStates'][0] | Add-Member -NotePropertyName UnfinishedAction -NotePropertyValue 'none'
     $wrongWorkerState['WorkerStates'][1].Revision = 'revision-review-b3'
     $wrongWorkerState['WorkerStates'][1].State = 'blocked'
-    $wrongWorkerState['WorkerStates'][1] | Add-Member -NotePropertyName PendingAction -NotePropertyValue 'review_handoff_pending'
+    $wrongWorkerState['WorkerStates'][1] | Add-Member -NotePropertyName UnfinishedAction -NotePropertyValue 'review_handoff_pending'
     $wrongWorkerState['WorkerStates'][1] | Add-Member -NotePropertyName ActionEvidence -NotePropertyValue 'reviewer-blocked-ref'
     $wrongWorkerDerived = Get-AuthoritativeRecoveryState -Authoritative $wrongWorkerState
     Assert-True ($wrongWorkerDerived.Ready -and $wrongWorkerDerived.ResumeRole -ceq 'reviewer' -and $wrongWorkerDerived.ResumeAction -ceq 'review_handoff_pending' -and $wrongWorkerDerived.TaskState -ceq 'revision-review-b3 | blocked' -and $wrongWorkerDerived.Evidence.Contains('selected-worker:reviewer') -and $wrongWorkerDerived.Evidence.Contains('reviewer-blocked-ref')) 'stale implementer summary yields to one authoritative pending reviewer action'
@@ -1109,11 +1109,21 @@ try {
     $wrongWorkerSnapshot['Task state'] = 'revision-stale-implementer-summary | stale_summary'
     $wrongWorkerSnapshot['Next'] = 'continue task #78 implementation'
     $wrongWorkerSnapshot['Evidence'] = 'stale-implementer-summary'
+    $wrongWorkerSnapshot['Recovery'] = 'automation-id | schedule: ACTIVE | target: ACTIVE'
+    $wrongWorkerSnapshot['Gate'] = 'none'
+    $wrongWorkerSnapshot['Implementer'] = 'impl-thread @ local | reviewer: review-thread @ local'
+    $wrongWorkerSnapshot['Quota wait'] = 'waiting | worker: reviewer | stage: review | evidence: reviewer-blocked-ref | reset: unknown | delivery: none'
     $wrongWorkerPath = Join-Path $fixtureRoot 'recovery-wrong-worker.md'
     & $writer -NotePath $wrongWorkerPath -Snapshot $wrongWorkerSnapshot | Out-Null
     $wrongWorkerRecovery = Invoke-StaleSnapshotRecovery -NotePath $wrongWorkerPath -StaleSnapshot $wrongWorkerSnapshot -Authoritative $wrongWorkerState
     $wrongWorkerSaved = Read-Snapshot -NotePath $wrongWorkerPath
     Assert-True ($wrongWorkerRecovery.SnapshotChanged -and $wrongWorkerSaved['Task state'] -ceq 'revision-review-b3 | blocked' -and $wrongWorkerSaved['Next'] -ceq 'resume task #78 reviewer action review_handoff_pending' -and $wrongWorkerSaved['Evidence'].Contains('reviewer-blocked-ref')) 'stale snapshot recovery records the actual unfinished reviewer without replaying the implementer'
+
+    $conflictingWorkerState = New-AuthoritativePairState
+    $conflictingWorkerState['WorkerStates'][0] | Add-Member -NotePropertyName UnfinishedAction -NotePropertyValue 'implementation_resume_pending'
+    $conflictingWorkerState['WorkerStates'][1] | Add-Member -NotePropertyName UnfinishedAction -NotePropertyValue 'review_handoff_pending'
+    $conflictingSelection = Get-AuthoritativeRecoveryState -Authoritative $conflictingWorkerState
+    Assert-True (-not $conflictingSelection.Ready -and $conflictingSelection.Reason -eq 'conflicting authoritative unfinished worker actions') 'conflicting unfinished actions hold recovery before either worker is woken'
 
     $missingEvidenceState = New-AuthoritativePairState
     [void]$missingEvidenceState['ConfirmedWrites'].Clear()
@@ -1345,6 +1355,8 @@ try {
             [string] $Stage = 'implementation',
             [string] $ThreadId = 'impl-thread',
             [string] $HostId = 'local',
+            [int] $TaskRef = 77,
+            [string] $Revision = 'revision-quota-a1',
             [string] $PendingAction = 'none',
             [string] $ExternalOutcome = 'confirmed'
         )
@@ -1356,8 +1368,8 @@ try {
             Outcome = $Outcome
             ThreadId = $ThreadId
             HostId = $HostId
-            TaskRef = 77
-            Revision = 'revision-quota-a1'
+            TaskRef = $TaskRef
+            Revision = $Revision
             Stage = $Stage
             Branch = 'codex/story-52-synthetic'
             Worktree = 'C:\Synthetic\story'
@@ -1388,6 +1400,26 @@ try {
     ) -CurrentTask 77 -CurrentRevision 'revision-quota-a1' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-review' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-review-1' -DeliveryOutcome delivered
     $reviewerResume = Invoke-QuotaWorkerRecovery -State $reviewerRecovery -Plan $reviewerPlan
     Assert-True ($reviewerResume.Decision -eq 'continuation_delivered' -and $reviewerRecovery.ResumeInvocations.Count -eq 1 -and $reviewerResume.Packet.Role -ceq 'reviewer' -and $reviewerResume.Packet.ThreadId -ceq 'review-thread' -and @($reviewerRecovery.ResumeInvocations | Where-Object { $_.Role -ceq 'implementer' }).Count -eq 0) 'reviewer recovery resumes only the interrupted reviewer while awaiting_review implementer remains untouched'
+
+    # The selected action must reach the existing bounded heartbeat/quota path:
+    # one eligible tick delivers one reviewer packet, while the next tick is
+    # quiet. The quota worker's PendingAction remains separate: it represents
+    # an uncertain external operation and must still hold blind replay.
+    $wrongWorkerPlanner = New-HeartbeatPlannerState -Snapshot $wrongWorkerSaved -Workers @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'awaiting_review'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-wrong' }
+        [pscustomobject]@{ Role = 'reviewer'; State = 'stopped'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'review-thread'; HostId = 'local'; Cursor = 'review-cursor-wrong' }
+    ) -WaitResult $quietWait -QuotaEvidence ([pscustomobject]@{ Capacity = 'available'; Fresh = $true }) -NowUtc '2026-10-15T14:00:00Z'
+    $wrongWorkerFirstTick = Invoke-HealthyHeartbeatTick -State $wrongWorkerPlanner
+    Assert-True ($wrongWorkerFirstTick.Decision -eq 'quota_attempt_eligible' -and $wrongWorkerPlanner.WaitInvocations.Count -eq 0) 'first eligible heartbeat selects the existing quota recovery path without a separate poll'
+    $wrongWorkerQuotaRecovery = New-QuotaRecoveryState -PlannerState $wrongWorkerPlanner -WorkerEvidence @(
+        (New-SyntheticQuotaWorker -Role implementer -State awaiting_review -TaskRef 78 -Revision 'revision-stale-implementer-summary')
+        (New-SyntheticQuotaWorker -Role reviewer -State stopped -Stage review -ThreadId 'review-thread' -TaskRef 78 -Revision 'revision-review-b3')
+    ) -CurrentTask 78 -CurrentRevision 'revision-review-b3' -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -WaitId 'quota-wait-wrong-worker' -WaitStartedAtUtc '2026-10-15T13:00:00Z' -DeliveryReference 'delivery-review-wrong-worker' -DeliveryOutcome delivered
+    $wrongWorkerFirstResume = Invoke-QuotaWorkerRecovery -State $wrongWorkerQuotaRecovery -Plan $wrongWorkerFirstTick
+    Assert-True ($wrongWorkerFirstResume.Decision -eq 'continuation_delivered' -and $wrongWorkerQuotaRecovery.ResumeInvocations.Count -eq 1 -and $wrongWorkerFirstResume.Packet.Action -ceq 'scoped_continuation' -and $wrongWorkerFirstResume.Packet.Role -ceq 'reviewer' -and $wrongWorkerFirstResume.Packet.ThreadId -ceq 'review-thread' -and @($wrongWorkerQuotaRecovery.ResumeInvocations | Where-Object { $_.Role -ceq 'implementer' }).Count -eq 0 -and $wrongWorkerPlanner.Snapshot['Quota wait'].StartsWith('delivered |')) 'first eligible recovery sends exactly one scoped reviewer continuation and leaves the stale-summary implementer untouched'
+    $wrongWorkerSecondTick = Invoke-HealthyHeartbeatTick -State $wrongWorkerPlanner
+    $wrongWorkerSecondResume = Invoke-QuotaWorkerRecovery -State $wrongWorkerQuotaRecovery -Plan $wrongWorkerSecondTick
+    Assert-True ($wrongWorkerSecondTick.Decision -eq 'quiet_no_active_workers' -and $wrongWorkerSecondResume.Decision -eq 'quiet_no_active_workers' -and $wrongWorkerPlanner.WaitInvocations.Count -eq 0 -and $wrongWorkerQuotaRecovery.ResumeInvocations.Count -eq 1) 'the subsequent heartbeat does not duplicate the delivered reviewer continuation'
 
     $runningRecovery = New-QuotaRecoveryState -PlannerState $availableQuotaHeartbeat -WorkerEvidence @(
         (New-SyntheticQuotaWorker -Role implementer -State running)
@@ -1561,7 +1593,7 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative two-worker stale-summary recovery, bounded heartbeat target selection, quiet unchanged ticks, cursor-only replacement, awaiting_review exclusion, paused/pending schedule guards, missing/unknown outcome holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative two-worker stale-summary recovery, first eligible reviewer continuation, conflicting-action hold, bounded heartbeat target selection, quiet unchanged ticks, cursor-only replacement, awaiting_review exclusion, paused/pending schedule guards, missing/unknown outcome holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.

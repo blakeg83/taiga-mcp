@@ -214,12 +214,14 @@ The heartbeat planner applies this order on every scheduled tick:
 When a continuation pointer is stale, reconcile the two fixed worker records
 in that same bounded status decision before choosing a recovery action. Treat
 the pointer's `Current`, `Task state`, and `Next` values as hints only: a
-confirmed pending review or handoff action on the reviewer (or implementer)
+confirmed unfinished review or handoff action on the reviewer (or implementer)
 selects that actual unfinished worker, while a conflicting pair holds for
-reconciliation. Do not wake the implementer merely because its old summary
-was the last pointer; a successful eligible recovery sends one scoped
-continuation to the selected existing worker and leaves the other worker
-untouched.
+reconciliation. Keep that known unfinished action distinct from the snapshot's
+pending-action external operation with an unknown outcome; the latter still
+requires reconciliation and cannot authorize replay. Do not wake the implementer merely
+because its old summary was the last pointer; a successful eligible recovery
+sends one scoped continuation to the selected existing worker and leaves the
+other worker untouched.
 
 When the optional `Quota wait` field is present, apply the same schedule and
 gate/terminal precedence before the worker-identity checks. A `delivered` state

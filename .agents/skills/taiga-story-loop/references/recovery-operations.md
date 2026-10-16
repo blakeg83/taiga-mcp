@@ -59,11 +59,13 @@ When delivery, identity, schedule state, or an external action is unknown:
    verify the affected worker's exact thread, host, task, revision, and current
    state. An idle or completed status alone does not prove interruption or
    non-delivery.
-4. Reconcile the current task/review stage and any pending review or handoff
-   evidence before sending anything. A stale implementer summary does not
-   select the implementer: resume the one worker that owns the confirmed
-   unfinished action, or hold if the pair conflicts. If that worker is running
-   or delivery is unknown, do not send a duplicate continuation.
+4. Reconcile the current task/review stage and any confirmed unfinished review
+   or handoff evidence before sending anything. A stale implementer summary
+   does not select the implementer: resume the one worker that owns the
+   confirmed unfinished action, or hold if the pair conflicts. Keep this known
+   action separate from a pending external operation with an unknown outcome;
+   the latter still blocks replay. If that worker is running or delivery is
+   unknown, do not send a duplicate continuation.
 5. Preserve all approval, input/trial, cancellation, PR/merge, and terminal
    gates. Wait for an authorized resolution instead of bypassing a gate.
 6. Record `wait_ended` only after a confirmed recovery boundary. Keep unknown
