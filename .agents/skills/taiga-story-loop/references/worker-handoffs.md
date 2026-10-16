@@ -12,6 +12,13 @@ state and handles exceptional escalation, but does not relay or restate a
 routine finding or correction. Do not require a JSON receipt, a copied ticket
 transcript, or a new chat for an ordinary correction.
 
+Every follow-up send to an existing worker uses the recipient's assigned
+settings: omit both the `model` and `thinking` arguments from the
+`mcp__codex_app__send_message_to_thread` arguments. This applies to ready,
+finding, correction, acceptance, final-review, and recovery messages. Those
+arguments belong only to coordinator-owned worker creation (or a separately
+authorized user configuration), never to an existing-worker handoff.
+
 ## Recording the handoff boundary
 
 Each handoff has one performance observation at the boundary that already

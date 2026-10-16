@@ -110,6 +110,16 @@ original chat cannot be used and the user authorizes the changed pair.
 
 ## Authorization and destinations
 
+### Existing-worker message settings
+
+When sending a message to an existing worker chat, omit both the `model` and
+`thinking` arguments. The recipient's assigned profile remains authoritative
+for every review, correction, acceptance, recovery, and coordinator-to-worker
+message. The coordinator may select `model` and `thinking` when creating a
+worker chat; that creation-time profile selection is separate from any
+separately authorized user configuration and must not be replayed on a
+follow-up send.
+
 The setup confirmation is the source of authority. It must explicitly include
 worker-to-worker and worker-to-coordinator messaging for this story, in
 addition to the coordinator's ordinary dispatch and review actions. The

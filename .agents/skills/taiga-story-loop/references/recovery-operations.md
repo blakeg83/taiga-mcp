@@ -28,6 +28,10 @@ For the optional `Quota wait` state:
   affected worker. Match the saved worker thread and host, task, stage,
   revision, branch, worktree, authorization, pending action, and external
   outcome before dispatch.
+- That continuation targets the existing worker with its assigned settings:
+  omit both the `model` and `thinking` arguments from the message. Recovery
+  does not select a replacement profile; creation-time profile selection and
+  separately authorized user configuration remain distinct.
 - Delivery and substantive progress are different observations. A stage-
   appropriate source edit, scoped check, review, reconciliation, or handoff
   must be observed before recovery is called successful.
