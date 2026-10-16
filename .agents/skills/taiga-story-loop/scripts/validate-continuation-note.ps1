@@ -382,6 +382,27 @@ function Get-QuotaWaitParts {
     }
 }
 
+function Get-AdvancePendingParts {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot)
+
+    if (-not $Snapshot.Contains('Advance pending') -or [string]::IsNullOrWhiteSpace([string]$Snapshot['Advance pending'])) {
+        return $null
+    }
+    $text = ([string]$Snapshot['Advance pending']).Trim()
+    if ($text -ceq 'none') { return $null }
+    if ($text -notmatch '^accepted task (?<AcceptedTask>#[0-9]+) @ (?<AcceptedRevision>[^|\s]+) \| next task (?<NextTask>#[0-9]+) \| remaining: (?<Remaining>[^|]+)$') {
+        return [pscustomobject]@{ Invalid = $true; Raw = $text }
+    }
+    [pscustomobject]@{
+        AcceptedTask = [string]$Matches['AcceptedTask']
+        AcceptedRevision = [string]$Matches['AcceptedRevision']
+        NextTask = [int](([string]$Matches['NextTask']).TrimStart('#'))
+        NextTaskRef = [string]$Matches['NextTask']
+        Remaining = ([string]$Matches['Remaining']).Trim()
+        Invalid = $false
+    }
+}
+
 function Set-QuotaWaitReset {
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Snapshot,
@@ -660,6 +681,94 @@ function Invoke-QuotaWorkerRecovery {
     [pscustomobject]@{ Decision = 'continuation_delivered'; Packet = $packet }
 }
 
+function New-AdvancePendingRecoveryState {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PlannerState,
+        [Parameter(Mandatory)] [object[]] $WorkerEvidence,
+        [Parameter(Mandatory)] [string] $Authorization,
+        [Parameter(Mandatory)] [string] $Branch,
+        [Parameter(Mandatory)] [string] $Worktree,
+        [AllowNull()] [string] $DeliveryReference = $null,
+        [ValidateSet('delivered', 'rejected', 'unknown')] [string] $DeliveryOutcome = 'delivered'
+    )
+
+    [ordered]@{
+        PlannerState = $PlannerState
+        WorkerEvidence = @($WorkerEvidence)
+        Authorization = $Authorization
+        Branch = $Branch
+        Worktree = $Worktree
+        DeliveryReference = $DeliveryReference
+        DeliveryOutcome = $DeliveryOutcome
+        ResumeInvocations = [System.Collections.Generic.List[object]]::new()
+        Reconciliation = [System.Collections.Generic.List[object]]::new()
+    }
+}
+
+function Get-AdvancePendingRecoveryWorker {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
+
+    $parts = Get-AdvancePendingParts -Snapshot $State.PlannerState.Snapshot
+    if ($null -eq $parts -or $parts.Invalid) { return 'advance_pending marker is missing or invalid' }
+    $workers = @($State.WorkerEvidence | Where-Object { [string]$_.Role -ceq 'implementer' })
+    if ($workers.Count -ne 1) { return 'advance_pending implementer identity is missing or duplicated' }
+    $worker = $workers[0]
+    $confirmed = Get-QuotaEvidenceProperty -Evidence $worker -Name 'Confirmed'
+    if ($confirmed -isnot [bool]) { $confirmed = [string]$confirmed -ceq 'true' }
+    if (-not $confirmed -or [string]$worker.Outcome -in @('unknown', 'failed')) { return 'advance_pending implementer confirmation or external outcome is unresolved' }
+    if ([string]$worker.State -notin @('stopped', 'interrupted')) { return 'advance_pending implementer is already running or not resumable' }
+    $savedPair = Get-SavedQuotaWorkerIdentity -Snapshot $State.PlannerState.Snapshot
+    if ($null -eq $savedPair) { return 'saved worker pair identity is unresolved' }
+    if ([string]$worker.ThreadId -cne [string]$savedPair.ImplementerThread -or [string]$worker.HostId -cne [string]$savedPair.ImplementerHost) { return 'advance_pending implementer identity does not match saved worker pair' }
+    if ([int]$worker.TaskRef -ne $parts.NextTask -or [string]$worker.Revision -cne $parts.AcceptedRevision) { return 'advance_pending implementer task or revision binding is stale' }
+    if ([string]$worker.PendingAction -cne 'none' -or [string]$worker.ExternalOutcome -cne 'confirmed') { return 'advance_pending implementer has a pending or uncertain external action' }
+    [pscustomobject]@{ Worker = $worker; Parts = $parts }
+}
+
+function Invoke-AdvancePendingRecovery {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
+        [Parameter(Mandatory)] [psobject] $Plan
+    )
+
+    if ([string]$Plan.Decision -cne 'advance_pending_eligible') {
+        return [pscustomobject]@{ Decision = [string]$Plan.Decision; Packet = $null }
+    }
+    if ($State.ResumeInvocations.Count -gt 0) {
+        return [pscustomobject]@{ Decision = 'duplicate_resume_suppressed'; Packet = $null }
+    }
+    $workerResult = Get-AdvancePendingRecoveryWorker -State $State
+    if ($workerResult -is [string]) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = [string]$workerResult; Action = 'bounded_reconciliation' })
+        return [pscustomobject]@{ Decision = 'reconcile_required'; Packet = $null }
+    }
+    $worker = $workerResult.Worker
+    $parts = $workerResult.Parts
+    $packet = [ordered]@{
+        Action = 'scoped_continuation'
+        Role = 'implementer'
+        ThreadId = [string]$worker.ThreadId
+        HostId = [string]$worker.HostId
+        TaskRef = $parts.NextTask
+        Revision = $parts.AcceptedRevision
+        Stage = 'implementation'
+        Remaining = $parts.Remaining
+        Branch = [string]$State.Branch
+        Worktree = [string]$State.Worktree
+        Authorization = [string]$State.Authorization
+    }
+    [void]$State.ResumeInvocations.Add([pscustomobject]$packet)
+    if ([string]$State.DeliveryOutcome -ceq 'unknown' -or [string]::IsNullOrWhiteSpace([string]$State.DeliveryReference)) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_continuation_delivery_unknown'; Action = 'bounded_reconciliation' })
+        return [pscustomobject]@{ Decision = 'delivery_unknown_reconcile'; Packet = $packet }
+    }
+    if ([string]$State.DeliveryOutcome -ceq 'rejected') {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_continuation_rejected'; Action = 'bounded_reconciliation' })
+        return [pscustomobject]@{ Decision = 'delivery_rejected_reconcile'; Packet = $packet }
+    }
+    [pscustomobject]@{ Decision = 'continuation_delivered'; Packet = $packet }
+}
+
 function Observe-QuotaWorkerProgress {
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
@@ -740,6 +849,78 @@ function Apply-ObservedQuotaFailure {
     [pscustomobject]@{ Evidence = $evidence; Reset = $reset }
 }
 
+function Invoke-AdvancePendingHeartbeatPlan {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
+
+    $parts = Get-AdvancePendingParts -Snapshot $State.Snapshot
+    if ($null -eq $parts) { return $null }
+    if ($parts.Invalid) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_marker_invalid'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $gate = if ($State.Snapshot.Contains('Gate')) { ([string]$State.Snapshot['Gate']).Trim() } else { 'none' }
+    if (-not [string]::IsNullOrWhiteSpace($gate) -and $gate -cne 'none') {
+        return [pscustomobject]@{ Decision = 'advance_pending_blocked_by_gate'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+    $pendingAction = if ($State.Snapshot.Contains('Pending action')) { ([string]$State.Snapshot['Pending action']).Trim() } else { 'none' }
+    if (-not [string]::IsNullOrWhiteSpace($pendingAction) -and $pendingAction -cne 'none') {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_external_action_unresolved'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $implementers = @($State.Workers | Where-Object { [string]$_.Role -ceq 'implementer' })
+    $reviewers = @($State.Workers | Where-Object { [string]$_.Role -ceq 'reviewer' })
+    if ($implementers.Count -ne 1 -or $reviewers.Count -ne 1) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_worker_pair_unresolved'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $implementer = $implementers[0]
+    $reviewer = $reviewers[0]
+    foreach ($worker in @($implementer, $reviewer)) {
+        $confirmed = Get-QuotaEvidenceProperty -Evidence $worker -Name 'Confirmed'
+        if ($confirmed -isnot [bool]) { $confirmed = [string]$confirmed -ceq 'true' }
+        if (-not $confirmed -or [string]$worker.Outcome -in @('unknown', 'failed') -or
+            [string]::IsNullOrWhiteSpace([string]$worker.ThreadId) -or
+            [string]::IsNullOrWhiteSpace([string]$worker.HostId)) {
+            [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_worker_identity_or_external_outcome_unresolved'; Action = 'bounded_reconciliation' })
+            [void]$State.Events.Add('reconcile_required')
+            return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+        }
+    }
+    if ([string]$reviewer.State -ceq 'running') {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_reviewer_is_active'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+    if ([string]$implementer.State -ceq 'running') { return $null }
+    if ([string]$implementer.State -notin @('stopped', 'interrupted')) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_worker_not_resumable'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+    if ([int]$implementer.TaskRef -ne $parts.NextTask -or [string]$implementer.Revision -cne $parts.AcceptedRevision) {
+        [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_worker_binding_stale'; Action = 'bounded_reconciliation' })
+        [void]$State.Events.Add('reconcile_required')
+        return [pscustomobject]@{ Decision = 'advance_pending_reconcile_required'; Targets = @(); Waits = 0; SnapshotChanged = $false }
+    }
+
+    $target = [ordered]@{
+        Role = 'implementer'
+        ThreadId = [string]$implementer.ThreadId
+        HostId = [string]$implementer.HostId
+        AfterCursor = [string]$implementer.Cursor
+        TaskRef = $parts.NextTask
+        Revision = $parts.AcceptedRevision
+        Remaining = $parts.Remaining
+    }
+    [pscustomobject]@{ Decision = 'advance_pending_eligible'; Targets = @($target); Waits = 0; SnapshotChanged = $false; Marker = $parts }
+}
+
 function Invoke-HealthyHeartbeatTick {
     param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
 
@@ -758,6 +939,9 @@ function Invoke-HealthyHeartbeatTick {
 
     $quotaPlan = Invoke-QuotaHeartbeatPlan -State $State
     if ($null -ne $quotaPlan) { return $quotaPlan }
+
+    $advancePlan = Invoke-AdvancePendingHeartbeatPlan -State $State
+    if ($null -ne $advancePlan) { return $advancePlan }
 
     foreach ($worker in @($State.Workers)) {
         $unknownOutcome = [string]$worker.Outcome -in @('unknown', 'failed')
@@ -1240,6 +1424,71 @@ try {
     $noActiveTick = Invoke-HealthyHeartbeatTick -State $noActiveHeartbeat
     Assert-True ($noActiveTick.Decision -eq 'quiet_no_active_workers' -and $noActiveHeartbeat.WaitInvocations.Count -eq 0 -and $noActiveHeartbeat.SnapshotReplacements.Count -eq 0) 'empty heartbeat target set ends silently without a wait'
 
+    function New-SyntheticAdvancePendingSnapshot {
+        param(
+            [string] $Gate = 'none',
+            [string] $PendingAction = 'none'
+        )
+
+        $advanceSnapshot = [ordered]@{}
+        foreach ($key in $snapshot.Keys) { $advanceSnapshot[$key] = $snapshot[$key] }
+        $advanceSnapshot['Recovery'] = $heartbeatSnapshot['Recovery']
+        $advanceSnapshot['Worker cursors'] = $heartbeatSnapshot['Worker cursors']
+        $advanceSnapshot['Implementer'] = 'impl-thread @ local | reviewer: review-thread @ local'
+        $advanceSnapshot['Advance pending'] = 'accepted task #25 @ revision-25 | next task #26 | remaining: concrete task-scoped source_edit or scoped_check in the same resumed turn'
+        $advanceSnapshot['Gate'] = $Gate
+        $advanceSnapshot['Pending action'] = $PendingAction
+        return $advanceSnapshot
+    }
+
+    # A persisted acceptance marker is an eligible heartbeat recovery input,
+    # not a reason to report no active workers. The planner selects only the
+    # stopped implementer, and the bounded recovery path sends one scoped
+    # continuation without touching the waiting reviewer or the marker.
+    $advanceRecoveryPath = Join-Path $fixtureRoot 'advance-recovery.md'
+    $advanceSnapshotToPersist = New-SyntheticAdvancePendingSnapshot
+    & $writer -NotePath $advanceRecoveryPath -Snapshot $advanceSnapshotToPersist | Out-Null
+    $advanceStoppedWorkers = @(
+        [pscustomobject]@{ Role = 'implementer'; State = 'stopped'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'impl-thread'; HostId = 'local'; Cursor = 'impl-cursor-a1'; TaskRef = 26; Revision = 'revision-25'; PendingAction = 'none'; ExternalOutcome = 'confirmed' }
+        [pscustomobject]@{ Role = 'reviewer'; State = 'waiting_for_implementation'; Confirmed = $true; Outcome = 'confirmed'; ThreadId = 'review-thread'; HostId = 'local'; Cursor = 'review-cursor-a1'; TaskRef = 26; Revision = 'revision-25'; PendingAction = 'none'; ExternalOutcome = 'confirmed' }
+    )
+    $advanceHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceRecoveryPath) -Workers $advanceStoppedWorkers -WaitResult $quietWait
+    $advancePlan = Invoke-HealthyHeartbeatTick -State $advanceHeartbeat
+    Assert-True ($advancePlan.Decision -eq 'advance_pending_eligible' -and $advancePlan.Targets.Count -eq 1 -and $advancePlan.Targets[0].Role -ceq 'implementer' -and $advancePlan.Targets[0].TaskRef -eq 26 -and $advancePlan.Targets[0].Revision -ceq 'revision-25' -and $advanceHeartbeat.WaitInvocations.Count -eq 0) 'persisted advance marker selects one stopped implementer without polling or waking the reviewer'
+    $advanceRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference 'advance-delivery-1' -DeliveryOutcome delivered
+    $advanceResume = Invoke-AdvancePendingRecovery -State $advanceRecovery -Plan $advancePlan
+    Assert-True ($advanceResume.Decision -eq 'continuation_delivered' -and $advanceResume.Packet.Action -ceq 'scoped_continuation' -and $advanceResume.Packet.Role -ceq 'implementer' -and $advanceResume.Packet.TaskRef -eq 26 -and $advanceResume.Packet.Revision -ceq 'revision-25' -and $advanceResume.Packet.Remaining.Contains('concrete task-scoped') -and $advanceRecovery.ResumeInvocations.Count -eq 1 -and @($advanceRecovery.ResumeInvocations | Where-Object { $_.Role -ceq 'reviewer' }).Count -eq 0) 'advance marker sends one authorized implementer continuation with the accepted revision and remaining action'
+    Assert-True ((Read-Snapshot $advanceRecoveryPath)['Advance pending'] -ceq $advanceSnapshotToPersist['Advance pending']) 'delivery does not clear the persisted marker before concrete recovery work'
+    $advanceDuplicate = Invoke-AdvancePendingRecovery -State $advanceRecovery -Plan $advancePlan
+    Assert-True ($advanceDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $advanceRecovery.ResumeInvocations.Count -eq 1) 'repeated eligible recovery cannot duplicate the implementer continuation'
+
+    $advanceRunningWorkers = @($advanceStoppedWorkers | ForEach-Object {
+        $copy = $_.PSObject.Copy()
+        if ([string]$copy.Role -ceq 'implementer') { $copy.State = 'running' }
+        $copy
+    })
+    $advanceRunningHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceRecoveryPath) -Workers $advanceRunningWorkers -WaitResult $quietWait
+    $advanceRunningPlan = Invoke-HealthyHeartbeatTick -State $advanceRunningHeartbeat
+    $advanceRunningResume = Invoke-AdvancePendingRecovery -State $advanceRecovery -Plan $advanceRunningPlan
+    Assert-True ($advanceRunningPlan.Decision -ne 'advance_pending_eligible' -and $advanceRunningResume.Decision -ne 'continuation_delivered' -and $advanceRecovery.ResumeInvocations.Count -eq 1) 'a running implementer cannot trigger another advance continuation'
+
+    $advanceGateHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticAdvancePendingSnapshot -Gate 'trial | approval required') -Workers $advanceStoppedWorkers -WaitResult $quietWait
+    $advanceGatePlan = Invoke-HealthyHeartbeatTick -State $advanceGateHeartbeat
+    $advanceGateRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceGateHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference 'advance-delivery-gate' -DeliveryOutcome delivered
+    $advanceGateResume = Invoke-AdvancePendingRecovery -State $advanceGateRecovery -Plan $advanceGatePlan
+    Assert-True ($advanceGatePlan.Decision -eq 'advance_pending_blocked_by_gate' -and $advanceGateResume.Decision -eq 'advance_pending_blocked_by_gate' -and $advanceGateRecovery.ResumeInvocations.Count -eq 0) 'a user gate prevents advance continuation sends and writes'
+
+    $advancePendingHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticAdvancePendingSnapshot -PendingAction 'operation-52 | outcome: unknown') -Workers $advanceStoppedWorkers -WaitResult $quietWait
+    $advancePendingPlan = Invoke-HealthyHeartbeatTick -State $advancePendingHeartbeat
+    Assert-True ($advancePendingPlan.Decision -eq 'advance_pending_reconcile_required' -and $advancePendingHeartbeat.WaitInvocations.Count -eq 0) 'an unresolved external action holds advance recovery before any send'
+
+    $advanceUnknownHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceRecoveryPath) -Workers $advanceStoppedWorkers -WaitResult $quietWait
+    $advanceUnknownPlan = Invoke-HealthyHeartbeatTick -State $advanceUnknownHeartbeat
+    $advanceUnknownRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceUnknownHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference '' -DeliveryOutcome unknown
+    $advanceUnknownResume = Invoke-AdvancePendingRecovery -State $advanceUnknownRecovery -Plan $advanceUnknownPlan
+    $advanceUnknownDuplicate = Invoke-AdvancePendingRecovery -State $advanceUnknownRecovery -Plan $advanceUnknownPlan
+    Assert-True ($advanceUnknownResume.Decision -eq 'delivery_unknown_reconcile' -and $advanceUnknownDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $advanceUnknownRecovery.ResumeInvocations.Count -eq 1 -and $advanceUnknownRecovery.Reconciliation.Count -eq 1) 'unknown advance delivery records one attempted destination and cannot retry blindly'
+
     $pausedHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{ Recovery = 'synthetic-heartbeat | schedule: PAUSED | target: none'; 'Worker cursors' = 'implementer impl-cursor-a1 | reviewer review-cursor-a1' }) -Workers $quietWorkers -WaitResult $quietWait
     $pausedTick = Invoke-HealthyHeartbeatTick -State $pausedHeartbeat
     Assert-True ($pausedTick.Decision -eq 'quiet_paused' -and $pausedHeartbeat.WaitInvocations.Count -eq 0) 'paused approval recovery performs no heartbeat wait'
@@ -1608,7 +1857,7 @@ try {
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
-    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-wrong-worker.md', 'recovery-wrong-worker.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md', 'quota-unknown-restart.md', 'quota-unknown-restart.md.previous')) {
+    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-wrong-worker.md', 'recovery-wrong-worker.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md', 'quota-unknown-restart.md', 'quota-unknown-restart.md.previous', 'advance-recovery.md', 'advance-recovery.md.previous')) {
         $fixtureFile = Join-Path $fixtureRoot $name
         if ([IO.File]::Exists($fixtureFile)) { [IO.File]::Delete($fixtureFile) }
     }

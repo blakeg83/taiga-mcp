@@ -73,6 +73,7 @@ function New-StoryState {
         finalReviewFindings = @()
         finalStoryState = 'pending'
         finalStoryApproval = $null
+        frozenReview = $null
     }
 }
 
@@ -158,9 +159,17 @@ function Add-ImplementerAction {
         $Kind -eq 'coordinator_copy' -or
         ($null -ne $State.pendingReview -and $Kind -notin ($reviewEndpointActions + $reviewResumeActions))) {
         if ($State.turnStatus -eq 'awaiting_review') {
-            $rejection = "implementer action '$Kind' is forbidden after the review handoff turn ended"
+            if ($Kind -eq 'source_edit' -and $null -ne $State.frozenReview) {
+                $rejection = "source edit conflicts with frozen review revision $($State.frozenReview.revision)"
+            } else {
+                $rejection = "implementer action '$Kind' is forbidden after the review handoff turn ended"
+            }
         } elseif ($null -ne $State.pendingReview) {
-            $rejection = "implementer action '$Kind' is forbidden while review is pending"
+            if ($Kind -eq 'source_edit' -and $null -ne $State.frozenReview) {
+                $rejection = "source edit conflicts with frozen review revision $($State.frozenReview.revision)"
+            } else {
+                $rejection = "implementer action '$Kind' is forbidden while review is pending"
+            }
         } else {
             $rejection = "implementer action '$Kind' is forbidden"
         }
@@ -217,11 +226,51 @@ function Add-ImplementerAction {
 }
 
 function Authorize-ImplementerResume {
-    param([System.Collections.IDictionary] $State)
+    param([System.Collections.IDictionary] $State, [switch] $AllowStopped)
 
-    Assert-True ($State.turnStatus -eq 'awaiting_review') 'reviewer resume requires an ended implementer turn'
+    $allowedStates = if ($AllowStopped) { @('awaiting_review', 'stopped') } else { @('awaiting_review') }
+    Assert-True ($State.turnStatus -in $allowedStates) 'worker resume requires an ended implementer turn'
     $State.currentTurnId = [int]$State.currentTurnId + 1
     $State.turnStatus = 'active'
+}
+
+function Stop-ImplementerTurnPrematurely {
+    param([System.Collections.IDictionary] $State)
+
+    Assert-True ($State.turnStatus -eq 'active') 'premature stop requires an active implementer turn'
+    $trace = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
+    $State.turnStatus = 'stopped'
+    $State.turns = @($State.turns) + [ordered]@{
+        actor = 'implementer'
+        chat = $State.implementer
+        turn = [int]$State.currentTurnId
+        handoff = 'interrupted'
+        task = [string](Get-CurrentTask $State).ref
+        branch = $State.branch
+        revision = if ($null -ne $State.advancePending) { [string]$State.advancePending.acceptedRevision } else { 'pending' }
+        reviewer = $State.reviewer
+        authorization = $State.authorization
+        state = 'stopped'
+        ended = $true
+        lastAction = if ($trace.Count -gt 0) { [string]$trace[-1].kind } else { 'none' }
+        actionCount = $trace.Count
+    }
+}
+
+function Resume-ImplementerOnHeartbeat {
+    param([System.Collections.IDictionary] $State, [System.Collections.IDictionary] $Packet)
+
+    Assert-True ($State.turnStatus -eq 'stopped') 'heartbeat recovery requires a stopped implementer turn'
+    Assert-True ($null -ne $State.advancePending) 'heartbeat recovery requires advance_pending'
+    $currentTask = Get-CurrentTask $State
+    Assert-True ([string]$Packet.role -eq 'implementer' -and
+        [string]$Packet.task -ceq [string]$currentTask.ref -and
+        [string]$Packet.revision -ceq [string]$State.advancePending.acceptedRevision -and
+        [string]$Packet.remaining -ceq [string]$State.advancePending.remainingAction) 'heartbeat recovery packet must bind to the durable next-task marker'
+    Authorize-ImplementerResume $State -AllowStopped
+    $State.implementationStartTurn = [int]$State.currentTurnId
+    Add-ImplementerAction $State 'heartbeat_continuation' $currentTask.ref ([string]$Packet.revision)
+    [ordered]@{ decision = 'resume_missing_implementation'; state = $State }
 }
 
 function Assert-NoPendingAcceptanceEscalations {
@@ -243,7 +292,7 @@ function End-ImplementerReviewTurn {
     Add-ImplementerAction $State 'send_review_handoff' $Task.ref ([string]$Task.pendingSha)
     Add-ImplementerAction $State 'final_response' $Task.ref ([string]$Task.pendingSha)
     $trace = @($State.implementerActions | Where-Object { [int]$_.turn -eq [int]$State.currentTurnId })
-    $authorizedPrefixKinds = @('reviewer_message_resume', 'source_edit', 'scoped_check', 'taiga_reconcile', 'advance_next_task')
+    $authorizedPrefixKinds = @('reviewer_message_resume', 'heartbeat_continuation', 'status_update', 'source_edit', 'scoped_check', 'taiga_reconcile', 'advance_next_task')
     $prefix = @()
     if ($trace.Count -gt 2) {
         $prefix = @($trace | Select-Object -First ($trace.Count - 2))
@@ -548,6 +597,7 @@ function Apply-Event {
             $task.state = 'awaiting_review'
             $task.pendingSha = [string]$Event.revision
             $State.pendingReview = [ordered]@{ taskId = $task.taskId; revision = [string]$Event.revision; reviewerId = [string]$Event.reviewerId; previousRevision = if ($Event.Contains('previousRevision')) { [string]$Event.previousRevision } else { $null } }
+            $State.frozenReview = [ordered]@{ taskId = $task.taskId; revision = [string]$Event.revision; branch = [string]$State.branch; scopeHash = [string]$State.scopeHash }
             $created = Add-Action $State 'review' $task.ref ([string]$Event.revision) $State.implementer $State.reviewer
             return [ordered]@{ decision = if ($created) { 'dispatch_review' } else { 'duplicate' }; state = $State }
         }
@@ -559,6 +609,7 @@ function Apply-Event {
             $State.implementationStartPending = $true
             $State.implementationStartTurn = [int]$State.currentTurnId
             $State.pendingReview = $null
+            $State.frozenReview = $null
             $created = Add-Action $State 'correction' $task.ref ([string]$Event.revision) $State.reviewer $State.implementer
             return [ordered]@{ decision = if ($created) { 'route_correction' } else { 'duplicate' }; state = $State }
         }
@@ -593,6 +644,7 @@ function Apply-Event {
             $task.acceptedSha = [string]$Event.revision
             $task.pendingSha = $null
             $State.pendingReview = $null
+            $State.frozenReview = $null
             [void](Add-Action $State 'acceptance' $task.ref ([string]$Event.revision) $State.reviewer $State.implementer)
             $State.actions = @($State.actions) + [ordered]@{ key = "taiga|$($task.ref)|$($Event.revision)"; kind = 'taiga_reconcile'; task = $task.ref; revision = [string]$Event.revision; branch = $State.branch; sender = $State.implementer; destination = 'Taiga'; worker = 'implementer' }
             if ($State.currentTaskIndex -eq ($State.tasks.Count - 1)) {
@@ -1240,6 +1292,7 @@ function Reconcile-TaskAcceptance {
     $task.pendingSha = $null
     $State.pendingReview = $null
     $State.pendingAcceptance = $null
+    $State.frozenReview = $null
     $State.acceptanceMarkers = @($State.acceptanceMarkers) + $marker
     [void](Add-Action $State 'acceptance' $task.ref ([string]$Event.revision) $State.reviewer $State.implementer)
     [void](Add-Action $State 'taiga_reconcile' $task.ref ([string]$Event.revision) $State.implementer 'Taiga')
@@ -1614,6 +1667,19 @@ foreach ($forbiddenAction in @('wait_threads', 'read_reviewer_chat', 'review_mon
 Assert-True (@($state.rejectedImplementerActions).Count -eq 7) 'fixture must attempt every forbidden post-termination action'
 Assert-True (@($state.implementerActions | Where-Object { $_.kind -in @('wait_threads', 'read_reviewer_chat', 'review_monitor', 'keep_alive', 'unchanged_acknowledgement', 'source_edit', 'coordinator_copy') }).Count -eq 0) 'implementer trace must contain no polling, monitor, keep-alive, unchanged acknowledgement, source edit, or coordinator copy after termination'
 Assert-True (@($state.implementerActions | Where-Object { [int]$_.turn -eq [int]$initialTurn.turn }).Count -eq $initialTurn.actionCount) 'post-termination attempts must not append to the ended turn trace'
+
+# A legitimate current-task edit is allowed before the review is frozen, but
+# a dirty-tree source edit against that frozen revision must hold without
+# changing the trace or creating another external action.
+$gitGuardState = New-StoryState 'per_task'
+Add-ImplementerAction $gitGuardState 'source_edit' '#65' 'working-tree-before-review'
+$gitGuardReady = Complete-ReviewHandoff $gitGuardState @{ eventId = 'git-guard-ready'; kind = 'ready_for_review'; taskId = 65; revision = 'frozen-review-sha'; reviewerId = $gitGuardState.reviewer; authorization = $gitGuardState.authorization }
+Assert-True ($gitGuardReady.decision -eq 'dispatch_review' -and $gitGuardState.frozenReview.revision -eq 'frozen-review-sha') 'review handoff must freeze the exact revision for dirty-tree protection'
+$gitGuardActionCount = @($gitGuardState.actions).Count
+$gitGuardTraceCount = @($gitGuardState.implementerActions).Count
+$gitGuardMessage = ''
+try { Add-ImplementerAction $gitGuardState 'source_edit' '#65' 'unexpected-dirty-change' } catch { $gitGuardMessage = [string]$_.Exception.Message }
+Assert-True ($gitGuardMessage.Contains('frozen review revision') -and @($gitGuardState.actions).Count -eq $gitGuardActionCount -and @($gitGuardState.implementerActions).Count -eq $gitGuardTraceCount -and $gitGuardState.frozenReview.revision -eq 'frozen-review-sha') 'frozen review must reject an unexpected dirty-tree source edit without a duplicate write or trace mutation'
 $healthyRecovery = Observe-HealthyReviewRecovery $state
 Assert-True ($healthyRecovery.decision -eq 'healthy_idle_no_wake' -and $state.recoveryObservations[0].implementerAction -eq 'none') 'healthy awaiting_review recovery must not wake or poll the implementer'
 
@@ -1762,19 +1828,41 @@ Complete-ReviewHandoff $earlyStopState @{ eventId = 'early-25-ready'; kind = 're
 $earlyAccept25 = New-TaskAcceptanceEvent $earlyStopState 'early-25-accept' $earlySha25 -TaskId 25
 $earlyAdvance25 = Resume-ImplementerOnReviewerMessage $earlyStopState $earlyAccept25
 Assert-True ($earlyAdvance25.decision -eq 'advance_next_task' -and $earlyStopState.tasks[1].state -eq 'in_progress' -and $earlyStopState.implementationStartPending -and $earlyStopState.advancePending.acceptedTask -eq '#25' -and $earlyStopState.advancePending.nextTask -eq '#26') 'early-stop #25-to-#26 acceptance must preserve the pending advancement marker'
-$earlyRecovery25 = Observe-HealthyReviewRecovery $earlyStopState
-Assert-True ($earlyRecovery25.decision -eq 'resume_missing_implementation' -and $earlyStopState.recoveryObservations[-1].advancePending.nextTask -eq '#26') 'early-stop #25-to-#26 recovery must resume the missing implementation start'
+$earlyReviewerActionCount25 = @($earlyStopState.actions | Where-Object { $_.worker -eq $earlyStopState.reviewer }).Count
+Stop-ImplementerTurnPrematurely $earlyStopState
+$earlyHeartbeatPacket25 = [ordered]@{
+    role = 'implementer'
+    task = '#26'
+    revision = $earlySha25
+    remaining = $earlyStopState.advancePending.remainingAction
+}
+$earlyHeartbeat25 = Resume-ImplementerOnHeartbeat $earlyStopState $earlyHeartbeatPacket25
+Assert-True ($earlyHeartbeat25.decision -eq 'resume_missing_implementation' -and $earlyStopState.turnStatus -eq 'active' -and $earlyStopState.currentTurnId -eq 3 -and $earlyStopState.implementationStartTurn -eq 3 -and $earlyStopState.advancePending.nextTask -eq '#26' -and @($earlyStopState.actions | Where-Object { $_.worker -eq $earlyStopState.reviewer }).Count -eq $earlyReviewerActionCount25) 'early-stop #25-to-#26 heartbeat recovery must resume a distinct implementer turn without waking the reviewer'
+Add-ImplementerAction $earlyStopState 'status_update' '#26' 'early-stop-26-status-only'
+Assert-True ($earlyStopState.advancePending.nextTask -eq '#26' -and $earlyStopState.implementationStartPending) 'status-only heartbeat recovery must preserve the #26 marker'
 Add-ImplementerAction $earlyStopState 'scoped_check' '#26' 'early-stop-26-first-check'
 Assert-True ($null -eq $earlyStopState.advancePending -and -not $earlyStopState.implementationStartPending) 'early-stop #25-to-#26 concrete evidence must clear the pending advancement marker'
+$early26ReadyTurn = $earlyStopState.currentTurnId
 $earlySha26 = ('a' * 40)
 Complete-ReviewHandoff $earlyStopState @{ eventId = 'early-26-ready'; kind = 'ready_for_review'; taskId = 26; revision = $earlySha26; reviewerId = $earlyStopState.reviewer; authorization = $earlyStopState.authorization } | Out-Null
 $earlyAccept26 = New-TaskAcceptanceEvent $earlyStopState 'early-26-accept' $earlySha26 -TaskId 26
 $earlyAdvance26 = Resume-ImplementerOnReviewerMessage $earlyStopState $earlyAccept26
 Assert-True ($earlyAdvance26.decision -eq 'advance_next_task' -and $earlyStopState.currentTaskIndex -eq 2 -and $earlyStopState.tasks[2].state -eq 'in_progress' -and $earlyStopState.implementationStartPending -and $earlyStopState.advancePending.acceptedTask -eq '#26' -and $earlyStopState.advancePending.acceptedRevision -eq $earlySha26 -and $earlyStopState.advancePending.nextTask -eq '#27') 'early-stop #26-to-#27 acceptance must preserve the next pending advancement marker'
-$earlyRecovery26 = Observe-HealthyReviewRecovery $earlyStopState
-Assert-True ($earlyRecovery26.decision -eq 'resume_missing_implementation' -and $earlyStopState.recoveryObservations[-1].advancePending.nextTask -eq '#27') 'early-stop #26-to-#27 recovery must resume the missing implementation start'
+$earlyReviewerActionCount26 = @($earlyStopState.actions | Where-Object { $_.worker -eq $earlyStopState.reviewer }).Count
+Stop-ImplementerTurnPrematurely $earlyStopState
+$earlyHeartbeatPacket26 = [ordered]@{
+    role = 'implementer'
+    task = '#27'
+    revision = $earlySha26
+    remaining = $earlyStopState.advancePending.remainingAction
+}
+$earlyHeartbeat26 = Resume-ImplementerOnHeartbeat $earlyStopState $earlyHeartbeatPacket26
+Assert-True ($earlyHeartbeat26.decision -eq 'resume_missing_implementation' -and $earlyStopState.turnStatus -eq 'active' -and $earlyStopState.currentTurnId -eq ($early26ReadyTurn + 2) -and $earlyStopState.implementationStartTurn -eq $earlyStopState.currentTurnId -and $earlyStopState.advancePending.nextTask -eq '#27' -and @($earlyStopState.actions | Where-Object { $_.worker -eq $earlyStopState.reviewer }).Count -eq $earlyReviewerActionCount26) 'early-stop #26-to-#27 heartbeat recovery must resume a second distinct implementer turn without waking the reviewer'
+Add-ImplementerAction $earlyStopState 'status_update' '#27' 'early-stop-27-status-only'
+Assert-True ($earlyStopState.advancePending.nextTask -eq '#27' -and $earlyStopState.implementationStartPending) 'status-only second heartbeat recovery must preserve the #27 marker'
 Add-ImplementerAction $earlyStopState 'source_edit' '#27' 'early-stop-27-first-edit'
 Assert-True ($null -eq $earlyStopState.advancePending -and -not $earlyStopState.implementationStartPending) 'early-stop #26-to-#27 concrete evidence must clear the pending advancement marker'
+Assert-True (@($earlyStopState.turns | Where-Object { $_.state -eq 'stopped' }).Count -eq 2 -and @($earlyStopState.turns | Where-Object { $_.handoff -eq 'interrupted' }).Count -eq 2) 'both early-stop transitions must record real interrupted turns before heartbeat recovery'
 
 Add-ImplementerAction $state 'source_edit' '#66' 'task-66-first-edit'
 Assert-True (-not $state.implementationStartPending -and @($state.implementationStartEvidence).Count -ge 2 -and [string]$state.implementationStartEvidence[-1].task -eq '#66' -and [string]$state.implementationStartEvidence[-1].kind -eq 'source_edit') 'next task must record task-bound concrete implementation-start evidence before review'
