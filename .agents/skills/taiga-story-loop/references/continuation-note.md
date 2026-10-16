@@ -69,10 +69,13 @@ task-scoped action. A status-only activation, announcement, plan, or intention
 does not clear it. The first same-turn source/documentation edit or scoped check
 with actual output clears it. If the implementer stops with this marker present,
 heartbeat recovery resumes that existing implementer for the missing concrete
-start; it does not wake a healthy reviewer or infer completion. An interrupted
-Taiga status/comment/checklist write is reconciled from current provider
-versions before it is repeated, and missing optional telemetry does not block
-otherwise valid advancement.
+start; it does not wake a healthy reviewer or infer completion. Persist an
+`advance_pending_continuation` pending-action outcome for every attempted
+continuation, including confirmed delivery, and hold a reconstructed heartbeat
+until concrete work is observed or the external outcome is reconciled. An
+interrupted Taiga status/comment/checklist write is reconciled from current
+provider versions before it is repeated, and missing optional telemetry does not
+block otherwise valid advancement.
 
 Add these current facts to the template:
 

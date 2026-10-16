@@ -689,7 +689,8 @@ function New-AdvancePendingRecoveryState {
         [Parameter(Mandatory)] [string] $Branch,
         [Parameter(Mandatory)] [string] $Worktree,
         [AllowNull()] [string] $DeliveryReference = $null,
-        [ValidateSet('delivered', 'rejected', 'unknown')] [string] $DeliveryOutcome = 'delivered'
+        [ValidateSet('delivered', 'rejected', 'unknown')] [string] $DeliveryOutcome = 'delivered',
+        [AllowNull()] [string] $NotePath = $null
     )
 
     [ordered]@{
@@ -700,9 +701,43 @@ function New-AdvancePendingRecoveryState {
         Worktree = $Worktree
         DeliveryReference = $DeliveryReference
         DeliveryOutcome = $DeliveryOutcome
+        NotePath = $NotePath
         ResumeInvocations = [System.Collections.Generic.List[object]]::new()
         Reconciliation = [System.Collections.Generic.List[object]]::new()
     }
+}
+
+function Set-AdvancePendingDelivery {
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $State,
+        [Parameter(Mandatory)] [psobject] $Parts,
+        [Parameter(Mandatory)] [ValidateSet('delivered', 'rejected', 'unknown')] [string] $Outcome,
+        [AllowNull()] [string] $DeliveryReference = $null
+    )
+
+    $delivery = if ([string]::IsNullOrWhiteSpace($DeliveryReference)) { 'none' } else { [string]$DeliveryReference }
+    $State.PlannerState.Snapshot['Pending action'] = "advance_pending_continuation | outcome: $Outcome | task: $($Parts.NextTaskRef) | revision: $($Parts.AcceptedRevision) | destination: implementer | delivery: $delivery | reconcile before retry"
+    if ([string]::IsNullOrWhiteSpace([string]$State.NotePath)) { return $true }
+    $write = & $writer -NotePath ([string]$State.NotePath) -Snapshot $State.PlannerState.Snapshot
+    if ($null -eq $write -or -not $write.Changed) {
+        throw 'advance pending delivery persistence did not replace the continuation snapshot'
+    }
+    $true
+}
+
+function Clear-AdvancePendingAfterConcreteWork {
+    param([Parameter(Mandatory)] [System.Collections.IDictionary] $State)
+
+    $parts = Get-AdvancePendingParts -Snapshot $State.PlannerState.Snapshot
+    if ($null -eq $parts -or $parts.Invalid) { return $false }
+    $State.PlannerState.Snapshot['Advance pending'] = 'none'
+    $State.PlannerState.Snapshot['Pending action'] = 'none'
+    if ([string]::IsNullOrWhiteSpace([string]$State.NotePath)) { return $true }
+    $write = & $writer -NotePath ([string]$State.NotePath) -Snapshot $State.PlannerState.Snapshot
+    if ($null -eq $write -or -not $write.Changed) {
+        throw 'concrete advance pending work did not replace the continuation snapshot'
+    }
+    $true
 }
 
 function Get-AdvancePendingRecoveryWorker {
@@ -759,13 +794,16 @@ function Invoke-AdvancePendingRecovery {
     }
     [void]$State.ResumeInvocations.Add([pscustomobject]$packet)
     if ([string]$State.DeliveryOutcome -ceq 'unknown' -or [string]::IsNullOrWhiteSpace([string]$State.DeliveryReference)) {
+        [void](Set-AdvancePendingDelivery -State $State -Parts $parts -Outcome unknown -DeliveryReference $State.DeliveryReference)
         [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_continuation_delivery_unknown'; Action = 'bounded_reconciliation' })
         return [pscustomobject]@{ Decision = 'delivery_unknown_reconcile'; Packet = $packet }
     }
     if ([string]$State.DeliveryOutcome -ceq 'rejected') {
+        [void](Set-AdvancePendingDelivery -State $State -Parts $parts -Outcome rejected -DeliveryReference $State.DeliveryReference)
         [void]$State.Reconciliation.Add([pscustomobject]@{ Reason = 'advance_pending_continuation_rejected'; Action = 'bounded_reconciliation' })
         return [pscustomobject]@{ Decision = 'delivery_rejected_reconcile'; Packet = $packet }
     }
+    [void](Set-AdvancePendingDelivery -State $State -Parts $parts -Outcome delivered -DeliveryReference $State.DeliveryReference)
     [pscustomobject]@{ Decision = 'continuation_delivered'; Packet = $packet }
 }
 
@@ -1455,7 +1493,7 @@ try {
     $advanceHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceRecoveryPath) -Workers $advanceStoppedWorkers -WaitResult $quietWait
     $advancePlan = Invoke-HealthyHeartbeatTick -State $advanceHeartbeat
     Assert-True ($advancePlan.Decision -eq 'advance_pending_eligible' -and $advancePlan.Targets.Count -eq 1 -and $advancePlan.Targets[0].Role -ceq 'implementer' -and $advancePlan.Targets[0].TaskRef -eq 26 -and $advancePlan.Targets[0].Revision -ceq 'revision-25' -and $advanceHeartbeat.WaitInvocations.Count -eq 0) 'persisted advance marker selects one stopped implementer without polling or waking the reviewer'
-    $advanceRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference 'advance-delivery-1' -DeliveryOutcome delivered
+    $advanceRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference 'advance-delivery-1' -DeliveryOutcome delivered -NotePath $advanceRecoveryPath
     $advanceResume = Invoke-AdvancePendingRecovery -State $advanceRecovery -Plan $advancePlan
     Assert-True ($advanceResume.Decision -eq 'continuation_delivered' -and $advanceResume.Packet.Action -ceq 'scoped_continuation' -and $advanceResume.Packet.Role -ceq 'implementer' -and $advanceResume.Packet.TaskRef -eq 26 -and $advanceResume.Packet.Revision -ceq 'revision-25' -and $advanceResume.Packet.Remaining.Contains('concrete task-scoped') -and $advanceRecovery.ResumeInvocations.Count -eq 1 -and @($advanceRecovery.ResumeInvocations | Where-Object { $_.Role -ceq 'reviewer' }).Count -eq 0) 'advance marker sends one authorized implementer continuation with the accepted revision and remaining action'
     Assert-True ((Read-Snapshot $advanceRecoveryPath)['Advance pending'] -ceq $advanceSnapshotToPersist['Advance pending']) 'delivery does not clear the persisted marker before concrete recovery work'
@@ -1467,10 +1505,14 @@ try {
         if ([string]$copy.Role -ceq 'implementer') { $copy.State = 'running' }
         $copy
     })
-    $advanceRunningHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceRecoveryPath) -Workers $advanceRunningWorkers -WaitResult $quietWait
+    $advanceRunningHeartbeat = New-HeartbeatPlannerState -Snapshot $advanceSnapshotToPersist -Workers $advanceRunningWorkers -WaitResult $quietWait
     $advanceRunningPlan = Invoke-HealthyHeartbeatTick -State $advanceRunningHeartbeat
     $advanceRunningResume = Invoke-AdvancePendingRecovery -State $advanceRecovery -Plan $advanceRunningPlan
     Assert-True ($advanceRunningPlan.Decision -ne 'advance_pending_eligible' -and $advanceRunningResume.Decision -ne 'continuation_delivered' -and $advanceRecovery.ResumeInvocations.Count -eq 1) 'a running implementer cannot trigger another advance continuation'
+    Assert-True ((Read-Snapshot $advanceRecoveryPath)['Pending action'].StartsWith('advance_pending_continuation | outcome: delivered |')) 'confirmed delivery persists a pending continuation outcome until concrete work is observed'
+    Assert-True (Clear-AdvancePendingAfterConcreteWork -State $advanceRecovery) 'concrete advance work clears the durable continuation marker'
+    $advanceClearedSnapshot = Read-Snapshot $advanceRecoveryPath
+    Assert-True ($advanceClearedSnapshot['Advance pending'] -ceq 'none' -and $advanceClearedSnapshot['Pending action'] -ceq 'none') 'concrete advance work clears both the marker and pending action in the continuation snapshot'
 
     $advanceGateHeartbeat = New-HeartbeatPlannerState -Snapshot (New-SyntheticAdvancePendingSnapshot -Gate 'trial | approval required') -Workers $advanceStoppedWorkers -WaitResult $quietWait
     $advanceGatePlan = Invoke-HealthyHeartbeatTick -State $advanceGateHeartbeat
@@ -1482,12 +1524,21 @@ try {
     $advancePendingPlan = Invoke-HealthyHeartbeatTick -State $advancePendingHeartbeat
     Assert-True ($advancePendingPlan.Decision -eq 'advance_pending_reconcile_required' -and $advancePendingHeartbeat.WaitInvocations.Count -eq 0) 'an unresolved external action holds advance recovery before any send'
 
-    $advanceUnknownHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceRecoveryPath) -Workers $advanceStoppedWorkers -WaitResult $quietWait
+    $advanceUnknownPath = Join-Path $fixtureRoot 'advance-unknown.md'
+    $advanceUnknownSnapshot = New-SyntheticAdvancePendingSnapshot
+    & $writer -NotePath $advanceUnknownPath -Snapshot $advanceUnknownSnapshot | Out-Null
+    $advanceUnknownHeartbeat = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceUnknownPath) -Workers $advanceStoppedWorkers -WaitResult $quietWait
     $advanceUnknownPlan = Invoke-HealthyHeartbeatTick -State $advanceUnknownHeartbeat
-    $advanceUnknownRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceUnknownHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference '' -DeliveryOutcome unknown
+    $advanceUnknownRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceUnknownHeartbeat -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference '' -DeliveryOutcome unknown -NotePath $advanceUnknownPath
     $advanceUnknownResume = Invoke-AdvancePendingRecovery -State $advanceUnknownRecovery -Plan $advanceUnknownPlan
     $advanceUnknownDuplicate = Invoke-AdvancePendingRecovery -State $advanceUnknownRecovery -Plan $advanceUnknownPlan
-    Assert-True ($advanceUnknownResume.Decision -eq 'delivery_unknown_reconcile' -and $advanceUnknownDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $advanceUnknownRecovery.ResumeInvocations.Count -eq 1 -and $advanceUnknownRecovery.Reconciliation.Count -eq 1) 'unknown advance delivery records one attempted destination and cannot retry blindly'
+    $advanceUnknownSaved = Read-Snapshot $advanceUnknownPath
+    Assert-True ($advanceUnknownResume.Decision -eq 'delivery_unknown_reconcile' -and $advanceUnknownDuplicate.Decision -eq 'duplicate_resume_suppressed' -and $advanceUnknownRecovery.ResumeInvocations.Count -eq 1 -and $advanceUnknownRecovery.Reconciliation.Count -eq 1 -and $advanceUnknownSaved['Advance pending'] -ceq $advanceUnknownSnapshot['Advance pending'] -and $advanceUnknownSaved['Pending action'].StartsWith('advance_pending_continuation | outcome: unknown |')) 'unknown advance delivery persists one attempted destination and cannot retry blindly in the same state'
+    $advanceUnknownRestartPlanner = New-HeartbeatPlannerState -Snapshot (Read-Snapshot $advanceUnknownPath) -Workers $advanceStoppedWorkers -WaitResult $quietWait
+    $advanceUnknownRestartPlan = Invoke-HealthyHeartbeatTick -State $advanceUnknownRestartPlanner
+    $advanceUnknownRestartRecovery = New-AdvancePendingRecoveryState -PlannerState $advanceUnknownRestartPlanner -WorkerEvidence $advanceStoppedWorkers -Authorization 'auth-synthetic-52' -Branch 'codex/story-52-synthetic' -Worktree 'C:\Synthetic\story' -DeliveryReference 'advance-delivery-retry' -DeliveryOutcome delivered -NotePath $advanceUnknownPath
+    $advanceUnknownRestart = Invoke-AdvancePendingRecovery -State $advanceUnknownRestartRecovery -Plan $advanceUnknownRestartPlan
+    Assert-True ($advanceUnknownRestartPlan.Decision -eq 'advance_pending_reconcile_required' -and $advanceUnknownRestart.Decision -eq 'advance_pending_reconcile_required' -and $advanceUnknownRestartRecovery.ResumeInvocations.Count -eq 0 -and (Read-Snapshot $advanceUnknownPath)['Pending action'].StartsWith('advance_pending_continuation | outcome: unknown |')) 'a reconstructed heartbeat holds persisted unknown continuation delivery before any second send'
 
     $pausedHeartbeat = New-HeartbeatPlannerState -Snapshot ([ordered]@{ Recovery = 'synthetic-heartbeat | schedule: PAUSED | target: none'; 'Worker cursors' = 'implementer impl-cursor-a1 | reviewer review-cursor-a1' }) -Workers $quietWorkers -WaitResult $quietWait
     $pausedTick = Invoke-HealthyHeartbeatTick -State $pausedHeartbeat
@@ -1857,7 +1908,7 @@ try {
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
-    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-wrong-worker.md', 'recovery-wrong-worker.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md', 'quota-unknown-restart.md', 'quota-unknown-restart.md.previous', 'advance-recovery.md', 'advance-recovery.md.previous')) {
+    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-wrong-worker.md', 'recovery-wrong-worker.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md', 'quota-unknown-restart.md', 'quota-unknown-restart.md.previous', 'advance-recovery.md', 'advance-recovery.md.previous', 'advance-unknown.md', 'advance-unknown.md.previous')) {
         $fixtureFile = Join-Path $fixtureRoot $name
         if ([IO.File]::Exists($fixtureFile)) { [IO.File]::Delete($fixtureFile) }
     }

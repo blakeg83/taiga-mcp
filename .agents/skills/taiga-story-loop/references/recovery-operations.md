@@ -68,8 +68,11 @@ When delivery, identity, schedule state, or an external action is unknown:
    concrete start, a status-only activation is not progress; the first
    task-scoped edit or check is. Keep this known action separate from a
    pending external operation with an unknown outcome; the latter still blocks
-   replay. If that worker is running or delivery is unknown, do not send a
-   duplicate continuation.
+   replay. Persist the continuation's delivery outcome in the existing
+   `Pending action` field before returning; a reconstructed heartbeat must hold
+   both unknown and confirmed-delivery outcomes until concrete work or
+   authoritative reconciliation clears them. If that worker is running or
+   delivery is unknown, do not send a duplicate continuation.
 5. Preserve all approval, input/trial, cancellation, PR/merge, and terminal
    gates. Wait for an authorized resolution instead of bypassing a gate.
 6. Record `wait_ended` only after a confirmed recovery boundary. Keep unknown
