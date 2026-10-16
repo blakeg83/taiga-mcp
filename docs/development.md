@@ -36,7 +36,11 @@ limitations describe that earlier work, not the current release. This
 documentation reconciliation checked source, schemas described in the reference,
 and links; it did not rerun application tests or validate a live deployment.
 
-For the repo-local coordinator skill/helper, see [agent implementation and review automation](goals/agent-review-automation/README.md) and the [automation operator guide](automation/README.md). Its nine baseline goals cover concurrent ordinary chats, fresh-base feature branches, reviewed PR delivery, and story/epic acceptance. The offline helper/fixtures are implemented outside the .NET server. A separately authorized trial exercised worker chats and review, then paused before publication. The [ticket-loop improvement batch](goals/ticket-loop-improvements/README.md) delivers six offline goals for coordinator boundaries, reliable evidence, efficient coordination, worker-owned verification, and cost-aware measurement; it makes no runtime changes by itself. Actual-host behavior, installation, publication, and live comparison remain separately authorized gates.
+The repository-local agent workflow is intentionally minimal and separate from
+the .NET server. `.agents/skills/taiga-story-loop-lite/SKILL.md` describes a
+single-story loop with exactly one Implementer and one Reviewer; it introduces
+no runtime dependency, persistence, telemetry, recovery service, or custom test
+harness.
 
 ## Verified cleanup baseline (2026-09-28)
 
@@ -227,10 +231,10 @@ Previous step: `c94eeb7`. `.editorconfig` defines four-space C#, UTF-8/final
 newlines and file-scoped namespaces. Formatting was restricted to C# files
 changed by this cleanup. `global.json` pins the baseline SDK 10.0.401 with
 latestPatch and no prereleases; target net8.0 and all package versions remain
-unchanged. CI installs that SDK plus .NET 8 (runtime needed by app/tests), uses
-Windows for the existing cmd.exe contamination fixture, and grants contents:read
-only. `git ls-remote --symref origin HEAD` confirmed refs/heads/master, matching
-pull-request and master-push workflow triggers. Remote CI has not run here.
+unchanged. The former hosted build workflow is no longer part of the repository;
+local build and test commands remain the verification path. Any repository
+branch-protection rules that require the removed checks need separate GitHub
+administrative review.
 
 The initial attempt to use installed SDK 8.0.131 triggered automatic mobile
 workload repair before tests: several local workload packages were installed by

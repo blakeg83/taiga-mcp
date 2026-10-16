@@ -2,9 +2,9 @@
 
 TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 35 tools identify the current account, list projects, project members, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/update/link/list/unlink epic relationships, and submit comments or read visible comments and field-change history on all four work-item kinds via Taiga’s REST API.
 
-The repository-local ticket-loop automation is documented in
-[docs/automation](docs/automation/README.md). It is offline-tested here but is
-not installed or activated by the server and does not perform live writes.
+The repository-local `.agents/skills/taiga-story-loop-lite/` skill provides a
+minimal, instruction-driven two-worker implementation/review workflow for one
+selected story. It is separate from the .NET MCP server.
 
 ## Features
 - `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
@@ -116,19 +116,16 @@ $env:TAIGA__PASSWORD = 'your-password'
 dotnet run --no-build
 ```
 
-Tests use fake HTTP and synthetic credentials. CI restores, builds and tests
-Release on Windows. Publish long-running MCP servers to a separate versioned
+Tests use fake HTTP and synthetic credentials. Run the local build and test
+commands from the [development guide](docs/development.md). Publish long-running MCP servers to a separate versioned
 directory, for example `dotnet publish TaigaMCP.csproj -c Release -o C:\TaigaMCP\published\v1`.
 If a server locks normal outputs, use a unique external output directory for
 build/tests; do not stop that server. See the developer guide for the exact command.
-## Implementation Planning
 
-- [Agent implementation and review automation](docs/goals/agent-review-automation/README.md): implemented repo-local separate-chat Luna implementation and exact `gpt-6.1-sol`/`high` review, concurrent tickets in isolated feature branches from a freshly fetched base, authorized PR delivery, and story/epic completion gates. Nine ordered goals include evidence records and offline fixtures. No subagents or automatic merging; operational actions require scoped authorization and per-run capability checks.
-- [Ticket-loop improvements](docs/goals/ticket-loop-improvements/README.md): planned follow-up to the first operational audit. Six goals and 24 commit checkpoints cover coordinator role boundaries, reliable receipts, scripted coordination, worker-owned verification, and measurement that distinguishes token usage from cost.
+## Reference documentation
+
 - [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
 - [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
-- [Completed first batch](docs/goals/first-batch/README.md): delivered scope for all 15 selected functions, with links to current source and tests.
-- [Second-batch agent goals](docs/goals/second-batch/README.md): ordered checklists and evidence for discovery, epic management, and conversation/history functions. Goals 11 and 12's comment/history reads are implemented; later functions remain planned.
 
 ## Debug Logging
 - Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.
@@ -154,13 +151,3 @@ such as Done/Archived never determine filtering. Issue lists use
 `status__is_closed=false` only: unsupported issue archive filtering and
 redundant status-exclusion requests were removed. These are behavior
 corrections, not behavior-preserving refactoring.
-## Agent ticket-loop automation
-
-The repository also ships an explicitly invoked, repo-local
-`.agents/skills/taiga-ticket-loop/` workflow for coordinating selected Taiga
-tickets and epics through ordinary implementation/review chats, isolated fresh
-base branches, bounded corrections, PR evidence, and recovery. It runs outside
-the .NET MCP server and does not activate external writes by itself. See the
-[automation operator guide](docs/automation/README.md) and run the offline
-PowerShell 7 fixtures with `pwsh -NoProfile -File
-tests/automation/Test-Automation.ps1`.

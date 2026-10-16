@@ -1,6 +1,0 @@
-interface:
-  display_name: "Taiga story loop"
-  short_description: "Run a scoped Taiga story or epic workflow"
-  default_prompt: "Use $taiga-story-loop to resolve project and story or epic scope, then show one setup confirmation."
-policy:
-  allow_implicit_invocation: false

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Taiga story loop lite"
+  short_description: "Run one Taiga story with two persistent workers"
+  default_prompt: "Use $taiga-story-loop-lite for one selected Taiga user story."
+policy:
+  allow_implicit_invocation: false
