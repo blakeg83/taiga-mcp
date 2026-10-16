@@ -13,6 +13,48 @@ Never use subagents in this workflow. This prohibition applies to every role
 and every phase, including setup, implementation, review, and validation. Never
 call `spawn_agent` or substitute a subagent for a conversation.
 
+## Web UI testing
+
+Use the built-in Codex browser for all web UI testing. Open the application in
+the in-app browser (`iab`) through `mcp__cua_repl`, for example with
+`cua.createBrowserTab("iab", applicationUrl, { visible: true })`, and use its
+supported browser APIs to inspect and interact with the UI. Do not invoke the
+computer-use skill or desktop automation for web UI testing. If the built-in
+browser cannot perform a required check, report the unavailable check and its
+limitation; do not silently substitute computer use or claim the check passed.
+
+## Taiga status ownership
+
+Resolve the project's existing story and task status IDs before implementation
+using `list_user_story_statuses` and `list_task_statuses`. Use the actual project
+statuses, never invented IDs. Resolve `Ready to Test` or `Ready for Test` to the
+project's existing equivalent. If a required mapping is missing or ambiguous,
+report the mapping blocker before proceeding.
+
+| Work item | Transition | Owner and trigger |
+| --- | --- | --- |
+| Story | In Progress | Coordinator, after setup succeeds and before implementation dispatch |
+| Task | In Progress | Implementer, when starting work on that task |
+| Task | Done (project's completed task status) | Implementer, after that task's work and relevant checks pass |
+| Story | Ready to Test / Ready for Test | Implementer, after all scoped tasks and story work are complete and relevant checks pass, before requesting review |
+| Story | Done | Coordinator, after reviewer approval and successful PR creation |
+
+The Implementer owns all task status changes, including reopening affected
+tasks for corrections and completing them again after verification. The
+Coordinator and Reviewer do not change task statuses. The Reviewer records
+findings and approval in comments; it does not own story status transitions.
+After corrections, the Implementer rechecks all scoped task statuses and
+confirms the story is Ready to Test before requesting re-review. When there are
+no child tasks, the same story completion and verification requirements apply.
+
+Read the current entity version before each versioned update. Inspect each
+write result and confirm the resulting status; a comment is not a status
+transition. Never blindly retry an ambiguous write or automatically refresh a
+conflicting version. Report failed or unconfirmed transitions as blockers and
+never claim they succeeded. Include confirmed task statuses and the story's
+Ready to Test status in the review handoff, and the confirmed Done status in
+the Coordinator's final report.
+
 ## Coordinator setup
 
 The originating chat is the Coordinator. Once the selected story's reference
@@ -54,17 +96,22 @@ from prompt text. If direct messaging or Coordinator wake/resume is unavailable,
 report the exact unavailable capability and path to the user and stop before
 implementation; do not poll, relay through a substitute, or create more workers.
 Dispatch the Implementer only after both probes and model settings are confirmed.
+After setup succeeds, set and confirm the story's In Progress status before
+dispatching implementation. Include the resolved status mappings and these
+ownership rules in both worker assignments.
 
 After dispatch, remain idle. Do not poll, monitor, relay routine messages,
-update Taiga, or participate in corrections. Resume only for final approval or
+update Taiga during routine work, or participate in corrections. Resume only for final approval or
 a blocker. The Coordinator alone performs Git and GitHub operations.
 
 ## Implementer
 
-Read the complete story and acceptance criteria. At the start, set the story to
-the project's existing In Progress status and add concise, meaningful progress
-updates in Taiga. Implement the whole story in the shared worktree and run the
-relevant local checks. Send the Reviewer a direct ready-for-review message with
+Read the complete story, acceptance criteria, and all scoped child tasks.
+Maintain every scoped task's status as specified above and add concise,
+meaningful progress updates in Taiga. Implement the whole story in the shared
+worktree and run the relevant local checks. Before handoff, confirm every scoped
+task is complete and set and confirm the story's Ready to Test status. Send the
+Reviewer a direct ready-for-review message with
 the changed files, a normalized content snapshot for every changed path
 (`path: present text <SHA-256>` for normalized text bytes,
 `path: present binary <SHA-256>` for raw binary bytes, and `path: deleted` for
@@ -93,23 +140,24 @@ normalized content snapshot from those files, using `path: present text
 binary bytes, and `path: deleted` for deletions; this snapshot is the identity
 of the reviewed contents, not just a file-name scope. For
 `CHANGES REQUESTED`, record concise actionable findings and the review phase in
-Taiga, then send the findings directly to the Implementer. Routine findings are
+a Taiga comment, then send the findings directly to the Implementer. Routine findings are
 not blockers.
 
 For `APPROVED`, confirm the criteria, exact reviewed file scope, content
 snapshot, and verification results in Taiga and in the approval message, freeze
 the reviewed workspace, and notify the Coordinator directly. Do not edit source
 files or run Git or GitHub commands. After the Coordinator supplies the PR URL
-and verified commit SHA, record both in Taiga; do not mark the story complete
-unless the project's workflow requires it.
+and verified commit SHA, record both in Taiga. The Coordinator owns the story's
+Done transition after PR creation.
 
 ## Blockers and delivery
 
 Either worker may send the Coordinator a `BLOCKED` message containing what is
 blocked, why work cannot continue, relevant attempted actions or technical
 details, and the decision or intervention required. Before sending it, that
-worker records the blocker in Taiga with the existing blocked/review status
-mapping and one concise comment. If the Taiga write is unavailable, include that
+worker records the blocker in Taiga with one concise comment; the Implementer
+also maintains any affected task's existing blocked status where applicable.
+Preserve the status ownership above. If the Taiga write is unavailable, include that
 failure in the blocker message rather than claiming it was recorded. The
 Coordinator reports it to the user and stops. Do not recover automatically,
 retry ambiguous actions, replace workers, change models, schedule a resume, or
@@ -133,7 +181,10 @@ independently computes the canonical snapshot from the resulting commit tree
 and verifies it again; any mismatch stops delivery and is reported. The
 Coordinator then verifies the commit, pushes, and creates a PR against the
 configured base branch (normally `master`). The PR includes the story
-reference, summary, and verification results. Send the PR URL and verified
+reference, summary, and verification results. After successful PR creation, the
+Coordinator sets and confirms the story's Done status and records the PR URL
+and verified commit SHA in Taiga. If this update fails, report the created PR
+and the outstanding status blocker without claiming the story is Done. Send the PR URL and verified
 commit SHA to the Reviewer for the final Taiga update and report the URL and
 summary to the user. Never merge automatically.
 
