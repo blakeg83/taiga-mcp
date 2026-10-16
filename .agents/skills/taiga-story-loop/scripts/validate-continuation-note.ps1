@@ -94,6 +94,57 @@ function New-AuthoritativePairState {
     }
 }
 
+function Get-AuthoritativeWorkerProperty {
+    param(
+        [AllowNull()] [object] $Worker,
+        [Parameter(Mandatory)] [string] $Name
+    )
+
+    if ($null -eq $Worker) { return $null }
+    $property = $Worker.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    $property.Value
+}
+
+function Resolve-AuthoritativeRecoveryWorker {
+    param(
+        [Parameter(Mandatory)] [object[]] $WorkerStates,
+        [Parameter(Mandatory)] [int] $ExpectedTask
+    )
+
+    $workers = @($WorkerStates | Where-Object {
+        $_.Confirmed -and [int]$_.TaskId -eq $ExpectedTask
+    })
+    $implementers = @($workers | Where-Object { $_.Role -ceq 'implementer' })
+    $reviewers = @($workers | Where-Object { $_.Role -ceq 'reviewer' })
+    if ($implementers.Count -ne 1 -or $reviewers.Count -ne 1) {
+        return [pscustomobject]@{
+            Ready = $false
+            Reason = 'authoritative recovery requires one confirmed implementer and reviewer for the next task'
+        }
+    }
+
+    # A stale continuation summary is only a pointer. A confirmed pending
+    # review/handoff action on either fixed worker is the authoritative target.
+    $pending = @($workers | Where-Object {
+        $pendingAction = [string](Get-AuthoritativeWorkerProperty -Worker $_ -Name 'PendingAction')
+        -not [string]::IsNullOrWhiteSpace($pendingAction) -and $pendingAction -cne 'none'
+    })
+    if ($pending.Count -gt 1) {
+        return [pscustomobject]@{ Ready = $false; Reason = 'conflicting authoritative pending worker actions' }
+    }
+
+    $selected = if ($pending.Count -eq 1) { $pending[0] } else { $implementers[0] }
+    $selectedAction = [string](Get-AuthoritativeWorkerProperty -Worker $selected -Name 'PendingAction')
+    if ([string]::IsNullOrWhiteSpace($selectedAction)) { $selectedAction = 'none' }
+    [pscustomobject]@{
+        Ready = $true
+        Worker = $selected
+        PendingAction = $selectedAction
+        ActionEvidence = [string](Get-AuthoritativeWorkerProperty -Worker $selected -Name 'ActionEvidence')
+    }
+}
+
 function Get-AuthoritativeRecoveryState {
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $Authoritative
@@ -170,22 +221,37 @@ function Get-AuthoritativeRecoveryState {
         return [pscustomobject]@{ Ready = $false; Reason = 'conflicting worker task state for next declared task' }
     }
     if ([string]::IsNullOrWhiteSpace([string]$implementer.Revision) -or
+        [string]::IsNullOrWhiteSpace([string]$reviewer.Revision) -or
         [string]::IsNullOrWhiteSpace([string]$implementer.Cursor) -or
         [string]::IsNullOrWhiteSpace([string]$reviewer.Cursor)) {
         return [pscustomobject]@{ Ready = $false; Reason = 'missing worker revision or cursor evidence' }
     }
 
-    $nextAction = if ($implementer.State -eq 'implementing') {
+    $workerSelection = Resolve-AuthoritativeRecoveryWorker -WorkerStates @($Authoritative['WorkerStates']) -ExpectedTask $expectedNextTask
+    if (-not $workerSelection.Ready) {
+        return [pscustomobject]@{ Ready = $false; Reason = $workerSelection.Reason }
+    }
+    $selectedWorker = $workerSelection.Worker
+    $nextAction = if ($workerSelection.PendingAction -cne 'none') {
+        "resume task #$expectedNextTask $($selectedWorker.Role) action $($workerSelection.PendingAction)"
+    } elseif ($selectedWorker.Role -ceq 'implementer' -and $selectedWorker.State -eq 'implementing') {
         "continue task #$expectedNextTask implementation"
     } else {
         "reconcile task #$expectedNextTask worker state"
     }
+    $actionEvidence = if ([string]::IsNullOrWhiteSpace($workerSelection.ActionEvidence)) {
+        ''
+    } else {
+        " | action:$($selectedWorker.Role)/$($workerSelection.PendingAction):$($workerSelection.ActionEvidence)"
+    }
     [pscustomobject]@{
         Ready = $true
-        Current = "story #$($Authoritative['StoryRef']) | task #$($implementer.TaskId)"
-        TaskState = "$($implementer.Revision) | $($implementer.State)"
+        Current = "story #$($Authoritative['StoryRef']) | task #$($selectedWorker.TaskId)"
+        TaskState = "$($selectedWorker.Revision) | $($selectedWorker.State)"
         Next = $nextAction
-        Evidence = "acceptance:$($acceptance.EvidenceRef) | write:$($write.EvidenceRef) | advancement:$($advancement.EvidenceRef) | workers:$($implementer.Cursor),$($reviewer.Cursor)"
+        ResumeRole = [string]$selectedWorker.Role
+        ResumeAction = [string]$workerSelection.PendingAction
+        Evidence = "acceptance:$($acceptance.EvidenceRef) | write:$($write.EvidenceRef) | advancement:$($advancement.EvidenceRef) | workers:$($implementer.Cursor),$($reviewer.Cursor) | selected-worker:$($selectedWorker.Role)$actionEvidence"
     }
 }
 
@@ -1024,6 +1090,31 @@ try {
     Assert-True (@($authoritative['ConfirmedWrites'] | ForEach-Object { $_.OperationId } | Select-Object -Unique).Count -eq $beforeTaigaWrites) 'recovery leaves Taiga write identities unique'
     Assert-True (@($authoritative['Advancements'] | ForEach-Object { $_.EventId } | Select-Object -Unique).Count -eq $beforeAdvancements) 'recovery leaves advancement identities unique'
 
+    # A stale implementer summary must not win over authoritative pending
+    # reviewer evidence. Both fixed workers are reconciled in one bounded
+    # status read, then the unfinished reviewer action is selected.
+    $wrongWorkerState = New-AuthoritativePairState
+    $wrongWorkerState['WorkerStates'][0].Revision = 'revision-stale-implementer-summary'
+    $wrongWorkerState['WorkerStates'][0].State = 'stale_summary'
+    $wrongWorkerState['WorkerStates'][0] | Add-Member -NotePropertyName PendingAction -NotePropertyValue 'none'
+    $wrongWorkerState['WorkerStates'][1].Revision = 'revision-review-b3'
+    $wrongWorkerState['WorkerStates'][1].State = 'blocked'
+    $wrongWorkerState['WorkerStates'][1] | Add-Member -NotePropertyName PendingAction -NotePropertyValue 'review_handoff_pending'
+    $wrongWorkerState['WorkerStates'][1] | Add-Member -NotePropertyName ActionEvidence -NotePropertyValue 'reviewer-blocked-ref'
+    $wrongWorkerDerived = Get-AuthoritativeRecoveryState -Authoritative $wrongWorkerState
+    Assert-True ($wrongWorkerDerived.Ready -and $wrongWorkerDerived.ResumeRole -ceq 'reviewer' -and $wrongWorkerDerived.ResumeAction -ceq 'review_handoff_pending' -and $wrongWorkerDerived.TaskState -ceq 'revision-review-b3 | blocked' -and $wrongWorkerDerived.Evidence.Contains('selected-worker:reviewer') -and $wrongWorkerDerived.Evidence.Contains('reviewer-blocked-ref')) 'stale implementer summary yields to one authoritative pending reviewer action'
+    $wrongWorkerSnapshot = [ordered]@{}
+    foreach ($key in $staleSnapshot.Keys) { $wrongWorkerSnapshot[$key] = $staleSnapshot[$key] }
+    $wrongWorkerSnapshot['Current'] = 'story #52 | task #78'
+    $wrongWorkerSnapshot['Task state'] = 'revision-stale-implementer-summary | stale_summary'
+    $wrongWorkerSnapshot['Next'] = 'continue task #78 implementation'
+    $wrongWorkerSnapshot['Evidence'] = 'stale-implementer-summary'
+    $wrongWorkerPath = Join-Path $fixtureRoot 'recovery-wrong-worker.md'
+    & $writer -NotePath $wrongWorkerPath -Snapshot $wrongWorkerSnapshot | Out-Null
+    $wrongWorkerRecovery = Invoke-StaleSnapshotRecovery -NotePath $wrongWorkerPath -StaleSnapshot $wrongWorkerSnapshot -Authoritative $wrongWorkerState
+    $wrongWorkerSaved = Read-Snapshot -NotePath $wrongWorkerPath
+    Assert-True ($wrongWorkerRecovery.SnapshotChanged -and $wrongWorkerSaved['Task state'] -ceq 'revision-review-b3 | blocked' -and $wrongWorkerSaved['Next'] -ceq 'resume task #78 reviewer action review_handoff_pending' -and $wrongWorkerSaved['Evidence'].Contains('reviewer-blocked-ref')) 'stale snapshot recovery records the actual unfinished reviewer without replaying the implementer'
+
     $missingEvidenceState = New-AuthoritativePairState
     [void]$missingEvidenceState['ConfirmedWrites'].Clear()
     $missingEvidencePath = Join-Path $fixtureRoot 'recovery-missing.md'
@@ -1470,11 +1561,11 @@ try {
         AttributableUsage = 'unknown'
         LiveHeartbeatBehavior = 'not exercised'
     } | ConvertTo-Json
-    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative stale-snapshot recovery, bounded heartbeat target selection, quiet unchanged ticks, cursor-only replacement, awaiting_review exclusion, paused/pending schedule guards, missing/unknown outcome holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
+    Write-Output 'Passed snapshot replacement, setup-authorization persistence, post-Start performance-pointer persistence, historical-note compatibility, authoritative two-worker stale-summary recovery, bounded heartbeat target selection, quiet unchanged ticks, cursor-only replacement, awaiting_review exclusion, paused/pending schedule guards, missing/unknown outcome holds, no-duplicate external actions, no-growth, no-op, evidence preservation, gate preservation, and invalid-input checks.'
 }
 finally {
     # Delete only known fixture files in the exact temporary directory we created.
-    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md', 'quota-unknown-restart.md', 'quota-unknown-restart.md.previous')) {
+    foreach ($name in @('current.md', 'current.md.previous', 'recovery.md', 'recovery.md.previous', 'recovery-wrong-worker.md', 'recovery-wrong-worker.md.previous', 'recovery-missing.md', 'recovery-missing.md.previous', 'recovery-conflicting.md', 'recovery-conflicting.md.previous', 'recovery-missing-acceptance.md', 'recovery-missing-acceptance.md.previous', 'recovery-unknown-write.md', 'recovery-unknown-write.md.previous', 'recovery-unconfirmed-worker.md', 'recovery-unconfirmed-worker.md.previous', 'legacy.md', 'quota-unknown-restart.md', 'quota-unknown-restart.md.previous')) {
         $fixtureFile = Join-Path $fixtureRoot $name
         if ([IO.File]::Exists($fixtureFile)) { [IO.File]::Delete($fixtureFile) }
     }

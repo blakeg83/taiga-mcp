@@ -55,11 +55,15 @@ When delivery, identity, schedule state, or an external action is unknown:
    branch, worktree, revision, authorization, gate, and pending-action fields.
 2. Inspect the same automation ID and provider-confirmed schedule. Do not make
    a replacement automation because a tick or send is missing.
-3. Verify the affected worker's exact thread and host and current state. An
-   idle or completed status alone does not prove interruption or non-delivery.
-4. Reconcile the current task/review stage and uncertain external action before
-   sending anything. If the worker is running or delivery is unknown, do not
-   send a duplicate continuation.
+3. Inspect both fixed worker records together in one bounded status call, then
+   verify the affected worker's exact thread, host, task, revision, and current
+   state. An idle or completed status alone does not prove interruption or
+   non-delivery.
+4. Reconcile the current task/review stage and any pending review or handoff
+   evidence before sending anything. A stale implementer summary does not
+   select the implementer: resume the one worker that owns the confirmed
+   unfinished action, or hold if the pair conflicts. If that worker is running
+   or delivery is unknown, do not send a duplicate continuation.
 5. Preserve all approval, input/trial, cancellation, PR/merge, and terminal
    gates. Wait for an authorized resolution instead of bypassing a gate.
 6. Record `wait_ended` only after a confirmed recovery boundary. Keep unknown
