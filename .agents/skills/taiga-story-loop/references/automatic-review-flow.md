@@ -15,6 +15,13 @@ change requirements, or merge a branch. `Start` already authorizes the
 scope-bound PR creation or update listed in setup; the review loop must not add
 another PR-creation confirmation.
 
+Automatic handoffs target existing worker chats. Their
+`mcp__codex_app__send_message_to_thread` calls omit both the `model` and
+`thinking` arguments so the recipient's assigned profile is preserved across
+review, correction, acceptance, and recovery. Creation-time profile selection
+remains a separate coordinator action and is not copied into follow-up message
+arguments.
+
 ## State carried by the run
 
 The continuation snapshot and authoritative worker/Taiga records together bind:

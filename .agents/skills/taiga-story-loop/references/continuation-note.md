@@ -4,8 +4,9 @@ Keep one short note per authorized story-loop run, outside the source
 worktrees. It is a pointer to authoritative systems, not a durable workflow
 engine. Store only the selected scope, ordered story/task sequence,
 branch/worktree lineage, worker chats, PR identity, current stage,
-approval/merge state, recovery reference, the optional compact quota-wait state,
-and the optional compact performance pointer. Keep performance history in the
+approval/merge state, recovery reference, the optional compact
+`Advance pending` transition marker, the optional compact quota-wait state, and
+the optional compact performance pointer. Keep performance history in the
 external event ledger.
 
 ## Template
@@ -34,6 +35,7 @@ Final review: <not_applicable/pending/findings/accepted> | profile: <model/effor
 Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha or pending>
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
+Advance pending: <none, or accepted task #<ref> @ <reviewed SHA> | next task #<ref> | remaining: <concrete task-scoped action>>
 Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
 Quota wait: <optional: waiting|delivered|unknown | worker: implementer|reviewer | stage: <stage> | evidence: <safe reference> | reset: <UTC estimate or unknown> | delivery: <none or safe reference>>
 Performance pointer: <none before Start, or schema=1 | run=<run-id> | project=<project-id> | story=<story-id>/<story-ref> | ledger=<external-ledger-path> | lastEvent=<event-id> | lastObservedUtc=<utc>
@@ -59,6 +61,21 @@ or repeated `Next` entries. Keep one value per template field. A correction
 replaces the current revision and task/review state, supersedes approval for
 the old HEAD, and replaces the next action. Preserve unresolved external
 operations and user gates until their authoritative outcome is known.
+
+When an accepted task is followed by an ordered next-task transition, keep
+`Advance pending` as one compact, replace-in-place fact containing the accepted
+task and exact reviewed SHA, the next task, and the remaining concrete
+task-scoped action. A status-only activation, announcement, plan, or intention
+does not clear it. The first same-turn source/documentation edit or scoped check
+with actual output clears it. If the implementer stops with this marker present,
+heartbeat recovery resumes that existing implementer for the missing concrete
+start; it does not wake a healthy reviewer or infer completion. Persist an
+`advance_pending_continuation` pending-action outcome for every attempted
+continuation, including confirmed delivery, and hold a reconstructed heartbeat
+until concrete work is observed or the external outcome is reconciled. An
+interrupted Taiga status/comment/checklist write is reconciled from current
+provider versions before it is repeated, and missing optional telemetry does not
+block otherwise valid advancement.
 
 Add these current facts to the template:
 
@@ -210,6 +227,18 @@ The heartbeat planner applies this order on every scheduled tick:
 5. If the target set is empty, end silently without a wait. The planner never
    rereads transcripts, tickets, source, or historical notes merely because a
    30-minute tick elapsed.
+
+When a continuation pointer is stale, reconcile the two fixed worker records
+in that same bounded status decision before choosing a recovery action. Treat
+the pointer's `Current`, `Task state`, and `Next` values as hints only: a
+confirmed unfinished review or handoff action on the reviewer (or implementer)
+selects that actual unfinished worker, while a conflicting pair holds for
+reconciliation. Keep that known unfinished action distinct from the snapshot's
+pending-action external operation with an unknown outcome; the latter still
+requires reconciliation and cannot authorize replay. Do not wake the implementer merely
+because its old summary was the last pointer; a successful eligible recovery
+sends one scoped continuation to the selected existing worker and leaves the
+other worker untouched.
 
 When the optional `Quota wait` field is present, apply the same schedule and
 gate/terminal precedence before the worker-identity checks. A `delivered` state

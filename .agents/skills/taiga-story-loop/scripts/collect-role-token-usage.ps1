@@ -644,6 +644,11 @@ if ($SessionLifetime) {
                 sessionId = [string] (Get-Value $session 'sessionId')
                 sourcePath = [string] (Get-Value $session 'sourcePath')
                 reportingScope = 'SESSION LIFETIME'
+                sampleWindow = [ordered]@{
+                    startUtc = if ($null -ne $latest) { [string] (Get-Value $latest 'sampledAtUtc') } else { $null }
+                    endUtc = if ($null -ne $latest) { [string] (Get-Value $latest 'sampledAtUtc') } else { $null }
+                    sampling = 'latest cumulative sample per unique bound session; no story lifecycle baseline'
+                }
                 tokenStream = [string] (Get-Value $session 'tokenStream')
                 state = $sampleState
                 latest = $latest
@@ -740,6 +745,7 @@ if ($rows.Count -eq 0) { throw [InvalidOperationException]::new('story_usage_bin
 $state = if (Test-Path -LiteralPath $StatePath -PathType Leaf) { Read-JsonFile -Path $StatePath } else { [pscustomobject][ordered]@{ schemaVersion = 1; kind = 'story_performance_usage_cursor'; sessions = @() } }
 $sessionStates = [System.Collections.Generic.List[object]]::new()
 $seenBindings = @{}
+$seenSessionIdentities = @{}
 foreach ($row in $rows) {
     $sourcePath = [string] (Get-Value $row 'sourcePath')
     $sessionId = [string] (Get-Value $row 'sessionId')
@@ -756,7 +762,17 @@ foreach ($row in $rows) {
         }
         continue
     }
+    if ($seenSessionIdentities.ContainsKey($sessionId)) {
+        $existingIdentity = $seenSessionIdentities[$sessionId]
+        if ([string] $existingIdentity.role -cne $role -or [string] $existingIdentity.scope -cne [string] (Get-Value $row 'scope')) {
+            Add-BindingDiagnostic -Category 'binding_conflict' -Role $role -SessionId $sessionId -SourcePath $sourcePath -Reason 'one verified session identity is bound to multiple roles or scopes'
+            throw [InvalidOperationException]::new("story_usage_binding_conflict: one session identity is bound to multiple roles or scopes ($sessionId)")
+        }
+        Add-BindingDiagnostic -Category 'binding_duplicate' -Role $role -SessionId $sessionId -SourcePath $sourcePath -Reason "duplicate verified source for session identity; retained $($existingIdentity.sourcePath)"
+        continue
+    }
     $seenBindings[$bindingKey] = $role
+    $seenSessionIdentities[$sessionId] = [pscustomobject]@{ role = $role; scope = [string] (Get-Value $row 'scope'); sourcePath = $sourcePath }
     $existing = @((Get-Value $state 'sessions') | Where-Object { [string] (Get-Value $_ 'sourcePath') -ceq $sourcePath -and [string] (Get-Value $_ 'sessionId') -ceq $sessionId }) | Select-Object -First 1
     $session = if ($null -ne $existing) { $existing } else { New-SessionState -Evidence $row }
     Read-SessionIncrement -State $session -StartUtc $boundaries.startUtc -EndUtc $boundaries.endUtc
@@ -782,6 +798,14 @@ foreach ($session in @($sessionStates)) {
             scope = [string] $session.scope
             sessionId = [string] $session.sessionId
             sourcePath = [string] $session.sourcePath
+            reportingScope = 'STORY WINDOW'
+            sampleWindow = [ordered]@{
+                startUtc = if ($null -ne $startSample) { [string] (Get-Value $startSample 'sampledAtUtc') } else { $null }
+                endUtc = if ($null -ne $endSample) { [string] (Get-Value $endSample 'sampledAtUtc') } else { $null }
+                requestedStartUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $boundaries.startUtc
+                requestedEndUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $boundaries.endUtc
+                sampling = 'actual complete JSONL sample times; requested story bounds are retained separately'
+            }
             state = $sampleStatus
             start = $startSample
             end = $endSample
@@ -798,6 +822,23 @@ foreach ($session in @($sessionStates)) {
     }
 }
 
+$roleCoverage = [ordered]@{}
+foreach ($role in @('coordinator', 'implementer', 'reviewer')) {
+    $roleSessions = @($sampleOutput | Where-Object { [string] (Get-Value $_ 'role') -ceq $role })
+    $roleState = Get-LifetimeRoleState -Sessions $roleSessions
+    $roleCoverage[$role] = [ordered]@{
+        state = $roleState
+        reportingScope = 'STORY WINDOW'
+        sessions = $roleSessions.Count
+        measuredSessions = @($roleSessions | Where-Object { [string] (Get-Value $_ 'state') -ceq 'measured' }).Count
+        partialSessions = @($roleSessions | Where-Object { [string] (Get-Value $_ 'state') -ceq 'partial' }).Count
+        unavailableSessions = @($roleSessions | Where-Object { [string] (Get-Value $_ 'state') -ceq 'unavailable' }).Count
+        counters = if ($roleTotals.Contains($role)) { $roleTotals[$role] } else { $null }
+        sourceBindings = @($roleSessions | ForEach-Object { [ordered]@{ sessionId = [string] (Get-Value $_ 'sessionId'); sourcePath = [string] (Get-Value $_ 'sourcePath'); scope = [string] (Get-Value $_ 'scope'); sampleWindow = Get-Value $_ 'sampleWindow' } })
+        missingData = if ($roleState -eq 'unavailable') { 'no valid attributable story-window delta was available for this role' } elseif ($roleState -eq 'partial') { 'one or more bound sessions require nearest-line coverage or have incomplete source evidence' } else { $null }
+    }
+}
+
 $stateOut = [ordered]@{ schemaVersion = 1; kind = 'story_performance_usage_cursor'; updatedAtUtc = Format-StoryPerformanceUtcTimestamp -Timestamp ([DateTimeOffset]::UtcNow); sessions = @($sessionStates) }
 $stateParent = Split-Path -Parent $StatePath
 if (-not [string]::IsNullOrWhiteSpace($stateParent)) { [IO.Directory]::CreateDirectory($stateParent) | Out-Null }
@@ -806,14 +847,17 @@ if (-not [string]::IsNullOrWhiteSpace($stateParent)) { [IO.Directory]::CreateDir
 $output = [ordered]@{
     schemaVersion = 1
     kind = 'story_performance_role_token_usage'
+    mode = 'story_window'
+    reportingScope = 'STORY WINDOW'
     runId = $boundaries.runId
     projectId = $boundaries.projectId
     storyId = $boundaries.storyId
     source = 'observed local Codex App session token_count cumulative counters'
-    counterSemantics = [ordered]@{ input = 'cumulative input_tokens'; cachedInput = 'cached_input_tokens is included in input_tokens'; output = 'cumulative output_tokens'; reasoning = 'reasoning_output_tokens is included in output_tokens'; aggregation = 'subtract one start boundary from one end boundary per bound session; never sum cumulative notifications' }
+    counterSemantics = [ordered]@{ input = 'cumulative input_tokens'; cachedInput = 'cached_input_tokens is included in input_tokens'; output = 'cumulative output_tokens'; reasoning = 'reasoning_output_tokens is included in output_tokens'; total = 'input_tokens plus output_tokens; cached input and reasoning are subsets, not additional total components'; aggregation = 'subtract one start boundary from one end boundary per bound session; never sum cumulative notifications' }
     boundary = [ordered]@{ startUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $boundaries.startUtc; endUtc = Format-StoryPerformanceUtcTimestamp -Timestamp $boundaries.endUtc; sampling = 'complete JSONL lines only; exact boundary when present, otherwise explicit nearest-line coverage' }
     sessions = @($sampleOutput)
     roleTotals = $roleTotals
+    roleCoverage = $roleCoverage
     bindingDiagnostics = @($script:BindingDiagnostics)
     coverage = if (@($sampleOutput | Where-Object state -eq 'measured').Count -eq $sampleOutput.Count -and $sampleOutput.Count -gt 0) { 'measured' } elseif (@($sampleOutput | Where-Object state -in @('measured','partial')).Count -gt 0) { 'partial' } else { 'unavailable' }
     limitations = @('session binding is required for every accepted token record', 'counter decreases and file truncation are reported as resets and do not produce a delta across the reset', 'account limits and cumulative notification counts are not used as usage evidence')

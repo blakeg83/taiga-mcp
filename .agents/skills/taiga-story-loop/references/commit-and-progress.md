@@ -107,6 +107,14 @@ documentation edit, or the first task-scoped check with actual output, is
 observable implementation-start evidence; a status-only write, plan, or
 intention is insufficient.
 
+Keep the continuation snapshot's compact `Advance pending` field until that
+same-turn concrete evidence exists. It records the accepted task and exact
+reviewed SHA, the next task, and the remaining source-edit or scoped-check
+action. A premature stop leaves the marker for heartbeat recovery to resume
+the existing implementer; it does not authorize duplicate status/comments or a
+reviewer wake. Reconcile current Taiga versions before repeating any uncertain
+write, and leave optional telemetry gaps as disclosed limitations.
+
 Record that evidence in one current-version parent-story comment:
 
 ```text

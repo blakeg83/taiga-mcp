@@ -69,10 +69,30 @@ $usage = (& $collector -ObservedEvidencePath $bindingPath -EventsPath $ledger -S
 Assert ($usage.coverage -eq 'partial' -and $usage.roleTotals.implementer.inputTokens -eq 2400) 'asynchronous real-format counters must produce a partial delta'
 $report = (& (Join-Path $runtime 'get-story-performance.ps1') -EventsPath $ledger -UsageMetadataPath $usagePath -TaskRefs @(1)) | ConvertFrom-Json -Depth 100
 Assert ($report.metrics.observedImplementerTokens.value -eq 2640 -and $report.metrics.observedImplementerTokens.state -eq 'partial') 'partial role delta must remain visible without double counting'
+$roleWindow = $report.metrics.observedImplementerTokens.sampleWindow
+Assert ($report.metrics.observedImplementerTokens.reportingScope -eq 'STORY WINDOW' -and $roleWindow.startUtc.ToUniversalTime() -eq [DateTime]::Parse('2026-10-14T10:00:10Z').ToUniversalTime() -and $roleWindow.endUtc.ToUniversalTime() -eq [DateTime]::Parse('2026-10-14T10:24:10Z').ToUniversalTime() -and $roleWindow.requestedStartUtc.ToUniversalTime() -eq [DateTime]::Parse('2026-10-14T10:00:00Z').ToUniversalTime() -and $roleWindow.requestedEndUtc.ToUniversalTime() -eq [DateTime]::Parse('2026-10-14T10:25:00Z').ToUniversalTime()) 'role totals must retain actual and requested story-window boundaries'
+Assert ($report.metrics.observedImplementerTokens.counters.inputTokens -eq 2400 -and $report.metrics.observedImplementerTokens.counters.cachedInputTokens -eq 480 -and $report.metrics.observedImplementerTokens.counters.outputTokens -eq 240 -and $report.metrics.observedImplementerTokens.counters.reasoningTokens -eq 120 -and $report.metrics.observedImplementerTokens.counters.totalTokens -eq 2640) 'role totals must retain input, subset counters, output, and input-plus-output total'
 Assert ($report.metrics.implementationTokens.knownSubtotal -eq 440) 'implementation and correction must each use separate inner sample windows'
 Assert ($report.metrics.reviewTokens.knownSubtotal -eq 660) 'initial review, re-review, and final review must use separate sample windows'
 Assert ($report.metrics.coordinationTokens.knownSubtotal -eq 220) 'explicit coordinator interval must use its own verified source'
 Assert ($report.metrics.implementationTokens.evidence[0].state -eq 'partial') 'asynchronous phase samples must never be labeled exact'
+
+# Independent story-window totals survive when per-task lifecycle events are absent.
+$windowOnlyLedger = Join-Path $runDirectory 'events-story-window-only.jsonl'
+$windowOnlyEvents = @($events | Where-Object { $_.eventType -in @('story_started', 'pr_ready') })
+[IO.File]::WriteAllLines($windowOnlyLedger, @($windowOnlyEvents | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }), [Text.UTF8Encoding]::new($false))
+$windowOnlyMarkdown = Join-Path $root 'story-window-only.md'
+$windowOnlyJson = & (Join-Path $runtime 'get-story-performance.ps1') -EventsPath $windowOnlyLedger -UsageMetadataPath $usagePath -TaskRefs @(1) -MarkdownPath $windowOnlyMarkdown
+$windowOnlyReport = $windowOnlyJson | ConvertFrom-Json -Depth 100
+Assert ($windowOnlyReport.kind -eq 'story_performance_report') 'story-window-only report should aggregate without per-task lifecycle events'
+Assert ($windowOnlyReport.metrics.observedImplementerTokens.value -eq 2640 -and $windowOnlyReport.metrics.observedImplementerTokens.state -eq 'partial' -and $windowOnlyReport.metrics.implementationTokens.state -eq 'unavailable') 'independent role totals must survive missing per-task lifecycle evidence while phase usage stays unavailable'
+$windowOnlyReportMarkdown = Get-Content -LiteralPath $windowOnlyMarkdown -Raw
+Assert ($windowOnlyReportMarkdown.Contains('Observed role token totals') -and $windowOnlyReportMarkdown.Contains('| implementer | STORY WINDOW |') -and $windowOnlyReportMarkdown.Contains('2400') -and $windowOnlyReportMarkdown.Contains('Cached input (subset)') -and $windowOnlyReportMarkdown.Contains('Reasoning (subset)') -and $windowOnlyReportMarkdown.Contains('STORY WINDOW')) 'Markdown must show role counters, subset semantics, and reporting scope'
+$profileMarkdownPath = Join-Path $root 'profiles.md'
+$profileReport = (& (Join-Path $runtime 'get-story-performance.ps1') -EventsPath $ledger -MetadataPath (Join-Path $runDirectory 'setup-metadata.json') -UsageMetadataPath $usagePath -TaskRefs @(1) -MarkdownPath $profileMarkdownPath) | ConvertFrom-Json -Depth 100
+Assert ($profileReport.metrics.modelsAndReasoning.assignedProfiles.Count -eq 3 -and $profileReport.metrics.modelsAndReasoning.observedProfiles.Count -eq 0 -and $profileReport.metrics.modelsAndReasoning.observedProfileState -eq 'unavailable' -and ([string] $profileReport.metrics.modelsAndReasoning.effectiveProfileProvenance.missingData).Contains('not runtime observation')) 'assigned and observed profile provenance must remain distinct and explicit'
+$profileMarkdown = Get-Content -LiteralPath $profileMarkdownPath -Raw
+Assert ($profileMarkdown.Contains('Assigned profile records') -and $profileMarkdown.Contains('Observed/effective profile state: unavailable')) 'Markdown must label assigned profiles separately from unavailable observed profiles'
 # Metadata counters cannot become numeric authority by claiming verification.
 $forgedSession = @($usage.sessions | Where-Object role -eq 'implementer')[0]
 $forgedSession.sourceSamples[3].counters.inputTokens = 999999
@@ -152,6 +172,21 @@ Assert (@($archived.rows | Where-Object sourcePath -Like '*archived_sessions*').
 Copy-Item -LiteralPath (Join-Path $store 'archived_sessions/rollout-test-impl.jsonl') -Destination (Join-Path $store 'sessions/rollout-copy-impl.jsonl')
 $ambiguous = (& $resolve -Bindings $bindings -OutputPath $bindingPath -CodexHome $store) | ConvertFrom-Json
 Assert ($ambiguous.rows.Count -eq 2 -and @($ambiguous.diagnostics | Where-Object category -eq 'binding_ambiguous').Count -eq 1) 'duplicate verified candidates must not be guessed'
+$duplicateBindingPath = Join-Path $runDirectory 'duplicate-bindings.json'
+$duplicateRows = @(
+    @{ role = 'implementer'; scope = 'story'; workerId = 'impl'; sessionId = 'impl'; sourcePath = (Join-Path $store 'archived_sessions/rollout-test-impl.jsonl') }
+    @{ role = 'implementer'; scope = 'story'; workerId = 'impl'; sessionId = 'impl'; sourcePath = (Join-Path $store 'sessions/rollout-copy-impl.jsonl') }
+)
+Write-Json $duplicateBindingPath @{ rows = $duplicateRows }
+$duplicateUsage = (& $collector -ObservedEvidencePath $duplicateBindingPath -EventsPath $ledger -StatePath (Join-Path $root 'duplicate-cursor.json') -OutputPath (Join-Path $root 'duplicate-usage.json')) | ConvertFrom-Json -Depth 100
+Assert ($duplicateUsage.roleTotals.implementer.inputTokens -eq 2400 -and $duplicateUsage.roleCoverage.implementer.sessions -eq 1 -and @($duplicateUsage.bindingDiagnostics | Where-Object category -eq 'binding_duplicate').Count -eq 1) 'duplicate verified session copies must be reconciled without double counting'
+$conflictingBindingPath = Join-Path $runDirectory 'conflicting-role-bindings.json'
+$conflictingRows = @($duplicateRows[0])
+$conflictingRows += @{ role = 'reviewer'; scope = 'story'; workerId = 'review'; sessionId = 'impl'; sourcePath = $conflictingRows[0].sourcePath }
+Write-Json $conflictingBindingPath @{ rows = $conflictingRows }
+$conflictThrown = $false
+try { $null = & $collector -ObservedEvidencePath $conflictingBindingPath -EventsPath $ledger -StatePath (Join-Path $root 'conflict-cursor.json') -OutputPath (Join-Path $root 'conflict-usage.json') } catch { $conflictThrown = $true }
+Assert $conflictThrown 'one verified session identity bound to multiple roles must be rejected'
 [IO.File]::WriteAllText((Join-Path $store 'sessions/rollout-test-review.jsonl'), '{"type":"session_meta","payload":{"id":"wrong"}}' + "`n")
 $mismatch = (& $resolve -Bindings $bindings -OutputPath $bindingPath -CodexHome $store) | ConvertFrom-Json
 Assert ($mismatch.rows.Count -eq 1) 'mismatched embedded identity must not bind'

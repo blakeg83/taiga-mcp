@@ -24,10 +24,26 @@ Markdown checksums, measured elapsed time, unavailable token sources, and reuse.
 Use `-ExampleArtifactRoot <absolute external directory>` to retain a synthetic
 example report; the fixture cleans only its own disposable files.
 
+Windows CI runs the complete skill-local offline story-loop regression matrix
+through `validate-performance-overhead.ps1`, then invokes the separate root
+`scripts/validate-performance-reporting.ps1` contract suite. The skill-local
+matrix invokes the checked-in recovery, handoff, review-flow, and skill-local
+reporting validators in fresh PowerShell processes and includes negative
+controls for unsafe workflow shortcuts; the existing Windows test job also
+runs the root token-discovery, finalization, and portability validators. These
+results are synthetic contract evidence only; they do not prove live provider
+writes, model behavior, token savings, or quota capacity.
+
 This guide turns the versioned performance contract into a safe operator
 runbook. It is the Task #160 documentation artifact for epic #140 and story
 #145. The examples are sanitized synthetic fixtures; they are not live Taiga,
 GitHub, Codex, provider, token, or release evidence.
+
+Recovery remains bounded by the existing 30-minute heartbeat. A successful
+eligible tick may resume the affected existing worker after authoritative
+reconciliation; elapsed reset time alone is not proof of capacity, and there is
+no uninterrupted-through-quota guarantee. Approval, terminal, cancellation,
+and uncertain-delivery gates still take precedence.
 
 The contract and capability boundary remain authoritative in
 [`performance-reporting.md`](../../.agents/skills/taiga-story-loop/references/performance-reporting.md).
@@ -312,6 +328,34 @@ whose `payload.type` is `token_count` and whose counter is
 boundary snapshots once per disjoint session, and
 marks nearest-line or incomplete boundaries as partial. It never sums
 cumulative notifications, uses account-limit windows, or exports prompt text.
+
+The published report keeps these independent role totals even when per-task
+implementation, correction, review, or handoff events are missing. Inspect the
+`Observed role token totals` Markdown table (and the matching metric fields in
+JSON) for the reporting scope, actual observed sample window, requested story
+bounds, bound session and source path, raw input/cached-input/output/reasoning
+counters, and total. When one role has multiple bound sessions, inspect each
+source binding's retained observed window rather than treating the requested
+story boundary as an observed sample time.
+Cached input is a subset of input and reasoning is a subset of output, so
+neither is added again to `totalTokens = inputTokens + outputTokens`. A missing
+role remains partial or unavailable; a known subtotal is not a zero for the
+missing role. Copied source files for one verified session identity are
+reconciled once; conflicting role/scope bindings are rejected. Session-lifetime
+output is explicitly labeled and must not be combined with story-window deltas.
+
+Phase usage is a separate, narrower measurement. It uses only verified inner
+samples inside the lifecycle interval: fewer than two samples are unavailable,
+nearest-line or source-reset coverage is partial, and no zero baseline,
+backdated boundary, or interpolation is fabricated. Elapsed story, phase, and
+supported wait metrics retain their own state and missing-data reasons.
+
+Profile output separates assigned records from observed/effective runtime
+profiles. Assignment metadata is not runtime observation. If no supported
+runtime observation is supplied, the report labels observed profile state as
+unavailable and explains that effective settings cannot be inferred; explicit
+profile changes retain their ranges and unknown provenance is not silently
+treated as observed.
 
 For live worker handoffs, use the type-aware constructor and transition-wrapper
 examples in [`worker-handoffs.md`](../../.agents/skills/taiga-story-loop/references/worker-handoffs.md).

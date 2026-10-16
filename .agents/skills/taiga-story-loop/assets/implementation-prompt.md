@@ -167,6 +167,17 @@ For each task:
    parent-story comment, and commit are recorded; preserve the exact revision
    for the final story review and do not claim task acceptance.
 
+During the acceptance-to-next-task transition, persist the compact
+`Advance pending` marker with the accepted task and exact reviewed SHA, the
+next task, and the remaining concrete source-edit or scoped-check action. A
+status-only activation, announcement, plan, or intention leaves this marker in
+place; the first same-turn task-scoped source/documentation edit or check with
+actual output clears it. If this turn stops early, heartbeat recovery resumes
+the existing implementer for that missing evidence after rereading current
+Taiga versions for any uncertain writes. Do not duplicate confirmed writes,
+wake the reviewer, or block valid progress because optional telemetry is
+missing.
+
 ## Ready-turn transaction
 
 Every review handoff uses the same terminal delivery boundary for an initial
@@ -390,3 +401,9 @@ push or merge unless the setup explicitly authorizes it, edit unrelated tasks,
 or invent reviewer acceptance. Return the exact task order processed, status
 transitions, checklist evidence, check results, commit SHAs, story-comment
 results, blockers, and the next required review action.
+
+For every message to an existing reviewer or coordinator, omit both the `model`
+and `thinking` arguments from `mcp__codex_app__send_message_to_thread`; preserve
+the recipient's assigned settings. Creation-time profile selection and any
+separately authorized user configuration are distinct from these follow-up
+messages.

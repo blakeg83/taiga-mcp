@@ -24,8 +24,14 @@ function Get-LocalIntervalUsage {
         return [pscustomobject] $Result
     }
     # Equal-time contradictory samples cannot define an authoritative boundary.
-    foreach ($group in @($samples | Group-Object sampledAtUtc)) {
-        if (@($group.Group | ForEach-Object { ConvertTo-CanonicalJson $_.counters } | Select-Object -Unique).Count -gt 1) { return $null }
+    # Keep this check linear: the validator and production contract forbid hidden
+    # grouping/sorting over the full sample input.
+    $countersBySampleTime = @{}
+    foreach ($sample in $samples) {
+        $sampleTime = ([DateTimeOffset]::Parse($sample.sampledAtUtc)).ToUniversalTime().ToString('o')
+        $counterJson = ConvertTo-CanonicalJson $sample.counters
+        if ($countersBySampleTime.ContainsKey($sampleTime) -and $countersBySampleTime[$sampleTime] -cne $counterJson) { return $null }
+        $countersBySampleTime[$sampleTime] = $counterJson
     }
     $delta = [ordered]@{}
     foreach ($name in @('inputTokens','cachedInputTokens','outputTokens','reasoningTokens')) {
@@ -36,7 +42,13 @@ function Get-LocalIntervalUsage {
     $Result.state = if ([DateTimeOffset]::Parse($first.sampledAtUtc) -eq $startTime -and [DateTimeOffset]::Parse($last.sampledAtUtc) -eq $endTime -and $session.invalidRecords -eq 0 -and $session.fileResetCount -eq 0) { 'measured' } else { 'partial' }
     $Result.value = [long] $delta.inputTokens + [long] $delta.outputTokens
     $Result.deltas = [pscustomobject] $delta
-    $Result.components = [pscustomobject]@{ input = $delta.inputTokens; output = $delta.outputTokens; total = $Result.value }
+    $Result.components = [pscustomobject]@{
+        input = $delta.inputTokens
+        cachedInputSubset = $delta.cachedInputTokens
+        output = $delta.outputTokens
+        reasoningSubset = $delta.reasoningTokens
+        total = $Result.value
+    }
     $Result.streamId = $session.sessionId
     $Result.sessionId = $session.sessionId
     $Result.workerId = $StartEvent.workerId
@@ -46,6 +58,7 @@ function Get-LocalIntervalUsage {
     $Result.counterSemantics = @{ cachedInput = 'included_in_input'; reasoning = 'included_in_output' }
     $Result.baselineAtUtc = $first.sampledAtUtc
     $Result.startSampledAtUtc = $first.sampledAtUtc; $Result.endSampledAtUtc = $last.sampledAtUtc
+    $Result.sampleWindow = [ordered]@{ startUtc = $first.sampledAtUtc; endUtc = $last.sampledAtUtc; requestedStartUtc = $Result.startUtc; requestedEndUtc = $Result.endUtc }
     $Result.startCounters = $first.counters; $Result.endCounters = $last.counters
     $Result.coverage = 'verified cumulative delta between inner phase samples; sampling times retained'
     $Result.missingData = if ($Result.state -eq 'partial') { 'activity between lifecycle boundaries and inner samples is unmeasured; no interpolation' } else { $null }

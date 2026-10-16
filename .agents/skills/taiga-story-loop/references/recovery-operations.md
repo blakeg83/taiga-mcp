@@ -28,6 +28,10 @@ For the optional `Quota wait` state:
   affected worker. Match the saved worker thread and host, task, stage,
   revision, branch, worktree, authorization, pending action, and external
   outcome before dispatch.
+- That continuation targets the existing worker with its assigned settings:
+  omit both the `model` and `thinking` arguments from the message. Recovery
+  does not select a replacement profile; creation-time profile selection and
+  separately authorized user configuration remain distinct.
 - Delivery and substantive progress are different observations. A stage-
   appropriate source edit, scoped check, review, reconciliation, or handoff
   must be observed before recovery is called successful.
@@ -48,14 +52,27 @@ is unknown, retain the open quota boundary and partial duration coverage.
 When delivery, identity, schedule state, or an external action is unknown:
 
 1. Read the current continuation snapshot. Preserve its run, pair, task, stage,
-   branch, worktree, revision, authorization, gate, and pending-action fields.
+   branch, worktree, revision, authorization, gate, pending-action, and
+   `Advance pending` fields.
 2. Inspect the same automation ID and provider-confirmed schedule. Do not make
    a replacement automation because a tick or send is missing.
-3. Verify the affected worker's exact thread and host and current state. An
-   idle or completed status alone does not prove interruption or non-delivery.
-4. Reconcile the current task/review stage and uncertain external action before
-   sending anything. If the worker is running or delivery is unknown, do not
-   send a duplicate continuation.
+3. Inspect both fixed worker records together in one bounded status call, then
+   verify the affected worker's exact thread, host, task, revision, and current
+   state. An idle or completed status alone does not prove interruption or
+   non-delivery.
+4. Reconcile the current task/review stage and any confirmed unfinished review
+   or handoff evidence before sending anything. A stale implementer summary
+   does not select the implementer: resume the one worker that owns the
+   confirmed unfinished action, or hold if the pair conflicts. When
+   `Advance pending` records an accepted task/SHA, next task, and remaining
+   concrete start, a status-only activation is not progress; the first
+   task-scoped edit or check is. Keep this known action separate from a
+   pending external operation with an unknown outcome; the latter still blocks
+   replay. Persist the continuation's delivery outcome in the existing
+   `Pending action` field before returning; a reconstructed heartbeat must hold
+   both unknown and confirmed-delivery outcomes until concrete work or
+   authoritative reconciliation clears them. If that worker is running or
+   delivery is unknown, do not send a duplicate continuation.
 5. Preserve all approval, input/trial, cancellation, PR/merge, and terminal
    gates. Wait for an authorized resolution instead of bypassing a gate.
 6. Record `wait_ended` only after a confirmed recovery boundary. Keep unknown

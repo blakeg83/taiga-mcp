@@ -44,6 +44,13 @@ advancement. In per-task mode, acceptance releases the next task; in
 story-end-only mode, retain task findings and defer acceptance to the final
 story review.
 
+All messages to the existing implementer or coordinator must omit both the
+`model` and `thinking` arguments from
+`mcp__codex_app__send_message_to_thread`; keep the recipient's assigned
+settings. Profile selection belongs to worker creation or separately
+authorized user configuration, not to review, correction, acceptance, or
+escalation sends.
+
 For each task, assess the declared reviewable endpoint before assessing the
 implementation: artifact, expected check outcome, deferred criteria and owner,
 and advancement gate. An expected-red checkpoint is acceptable only when every

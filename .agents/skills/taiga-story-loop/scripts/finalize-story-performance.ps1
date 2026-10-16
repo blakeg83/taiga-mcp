@@ -262,6 +262,7 @@ function Invoke-Finalization {
                 schemaVersion = 1; kind = 'story_performance_collection_attempt'; runId = $RunId
                 projectId = $start.projectId; storyId = $start.storyId; reviewedHead = $Delivery.reviewedHead
                 discoveryAttempted = $false; collectorInvoked = $false; status = 'source_unavailable'; reasonCode = 'source_unavailable'; reason = $null
+                reportingScope = $null; sampleWindow = $null; roleCoverage = $null
             }
             $defaultEvidencePath = Join-Path (Join-Path $ExternalRunRoot $RunId) 'observed-role-token-usage.json'
             if ([string]::IsNullOrWhiteSpace($ObservedEvidencePath)) { $ObservedEvidencePath = $defaultEvidencePath }
@@ -309,6 +310,9 @@ function Invoke-Finalization {
                     if (-not [string]::IsNullOrWhiteSpace($Scope)) { $collectorParameters.Scope = $Scope }
                     $null = & $CollectorPath @collectorParameters
                     $usage = Get-Content -LiteralPath $usagePath -Raw | ConvertFrom-Json -Depth 100 -DateKind String
+                    $attempt.reportingScope = if ($usage.PSObject.Properties['reportingScope']) { [string] $usage.reportingScope } else { 'STORY WINDOW' }
+                    $attempt.sampleWindow = $usage.boundary
+                    $attempt.roleCoverage = $usage.roleCoverage
                     if ($usage.kind -cne 'story_performance_role_token_usage' -or $usage.runId -cne $RunId -or $usage.projectId -ne $start.projectId -or $usage.storyId -ne $start.storyId) { throw 'invalid collector output identity' }
                     $attempt.status = if ($usage.coverage -eq 'unavailable') { 'source_unavailable' } elseif ($usage.coverage -eq 'measured' -and @($usage.roleTotals.PSObject.Properties).Count -eq 3) { 'measured' } else { 'partial' }
                     $attempt.reasonCode = Get-CollectionReasonCode -Status $attempt.status -Usage $usage
