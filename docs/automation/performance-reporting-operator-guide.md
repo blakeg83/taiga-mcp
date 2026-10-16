@@ -313,6 +313,23 @@ boundary snapshots once per disjoint session, and
 marks nearest-line or incomplete boundaries as partial. It never sums
 cumulative notifications, uses account-limit windows, or exports prompt text.
 
+The published report keeps these independent role totals even when per-task
+implementation, correction, review, or handoff events are missing. Inspect the
+`Observed role token totals` Markdown table (and the matching metric fields in
+JSON) for the reporting scope, exact or nearest-line UTC window, bound session
+and source path, raw input/cached-input/output/reasoning counters, and total.
+Cached input is a subset of input and reasoning is a subset of output, so
+neither is added again to `totalTokens = inputTokens + outputTokens`. A missing
+role remains partial or unavailable; a known subtotal is not a zero for the
+missing role. Session-lifetime output is explicitly labeled and must not be
+combined with story-window deltas.
+
+Phase usage is a separate, narrower measurement. It uses only verified inner
+samples inside the lifecycle interval: fewer than two samples are unavailable,
+nearest-line or source-reset coverage is partial, and no zero baseline,
+backdated boundary, or interpolation is fabricated. Elapsed story, phase, and
+supported wait metrics retain their own state and missing-data reasons.
+
 For live worker handoffs, use the type-aware constructor and transition-wrapper
 examples in [`worker-handoffs.md`](../../.agents/skills/taiga-story-loop/references/worker-handoffs.md).
 They show executable `New-StoryPerformanceEvent` calls for implementation-ready,

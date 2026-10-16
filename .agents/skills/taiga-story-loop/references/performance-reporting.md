@@ -490,6 +490,21 @@ Pass the resulting file to `get-story-performance.ps1` with
 event-level interval metrics. Account-limit windows are never accepted as a
 replacement for attributable session counters.
 
+The Markdown report also renders an `Observed role token totals` table. Each
+role row retains its reporting scope (`STORY WINDOW` for one story-start to
+confirmed-PR delta, or `SESSION LIFETIME` for one latest cumulative sample per
+bound session), UTC sample window, session/source binding, state, coverage, and
+missing-data reason. It shows `inputTokens`, `cachedInputTokens` as a subset of
+input, `outputTokens`, `reasoningTokens` as a subset of output, and
+`totalTokens = inputTokens + outputTokens`; cached input and reasoning are not
+added again. The all-roles row is partial or unavailable when a role is
+missing, and a known subtotal never represents an unavailable role as zero.
+
+Phase token rows use verified inner samples only. Fewer than two samples leave
+the phase unavailable, while nearest-line or incomplete source coverage stays
+partial. Phase rows do not backdate samples, invent a zero baseline, or replace
+the independent story-window role totals.
+
 The numeric role-total formula is defined only for these explicit source
 semantics:
 

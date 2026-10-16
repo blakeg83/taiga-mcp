@@ -69,10 +69,25 @@ $usage = (& $collector -ObservedEvidencePath $bindingPath -EventsPath $ledger -S
 Assert ($usage.coverage -eq 'partial' -and $usage.roleTotals.implementer.inputTokens -eq 2400) 'asynchronous real-format counters must produce a partial delta'
 $report = (& (Join-Path $runtime 'get-story-performance.ps1') -EventsPath $ledger -UsageMetadataPath $usagePath -TaskRefs @(1)) | ConvertFrom-Json -Depth 100
 Assert ($report.metrics.observedImplementerTokens.value -eq 2640 -and $report.metrics.observedImplementerTokens.state -eq 'partial') 'partial role delta must remain visible without double counting'
+$roleWindow = $report.metrics.observedImplementerTokens.sampleWindow
+Assert ($report.metrics.observedImplementerTokens.reportingScope -eq 'STORY WINDOW' -and $roleWindow.startUtc.ToUniversalTime() -eq [DateTime]::Parse('2026-10-14T10:00:00Z').ToUniversalTime() -and $roleWindow.endUtc.ToUniversalTime() -eq [DateTime]::Parse('2026-10-14T10:25:00Z').ToUniversalTime()) 'role totals must retain their story-window boundary'
+Assert ($report.metrics.observedImplementerTokens.counters.inputTokens -eq 2400 -and $report.metrics.observedImplementerTokens.counters.cachedInputTokens -eq 480 -and $report.metrics.observedImplementerTokens.counters.outputTokens -eq 240 -and $report.metrics.observedImplementerTokens.counters.reasoningTokens -eq 120 -and $report.metrics.observedImplementerTokens.counters.totalTokens -eq 2640) 'role totals must retain input, subset counters, output, and input-plus-output total'
 Assert ($report.metrics.implementationTokens.knownSubtotal -eq 440) 'implementation and correction must each use separate inner sample windows'
 Assert ($report.metrics.reviewTokens.knownSubtotal -eq 660) 'initial review, re-review, and final review must use separate sample windows'
 Assert ($report.metrics.coordinationTokens.knownSubtotal -eq 220) 'explicit coordinator interval must use its own verified source'
 Assert ($report.metrics.implementationTokens.evidence[0].state -eq 'partial') 'asynchronous phase samples must never be labeled exact'
+
+# Independent story-window totals survive when per-task lifecycle events are absent.
+$windowOnlyLedger = Join-Path $runDirectory 'events-story-window-only.jsonl'
+$windowOnlyEvents = @($events | Where-Object { $_.eventType -in @('story_started', 'pr_ready') })
+[IO.File]::WriteAllLines($windowOnlyLedger, @($windowOnlyEvents | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }), [Text.UTF8Encoding]::new($false))
+$windowOnlyMarkdown = Join-Path $root 'story-window-only.md'
+$windowOnlyJson = & (Join-Path $runtime 'get-story-performance.ps1') -EventsPath $windowOnlyLedger -UsageMetadataPath $usagePath -TaskRefs @(1) -MarkdownPath $windowOnlyMarkdown
+$windowOnlyReport = $windowOnlyJson | ConvertFrom-Json -Depth 100
+Assert ($windowOnlyReport.kind -eq 'story_performance_report') 'story-window-only report should aggregate without per-task lifecycle events'
+Assert ($windowOnlyReport.metrics.observedImplementerTokens.value -eq 2640 -and $windowOnlyReport.metrics.observedImplementerTokens.state -eq 'partial' -and $windowOnlyReport.metrics.implementationTokens.state -eq 'unavailable') 'independent role totals must survive missing per-task lifecycle evidence while phase usage stays unavailable'
+$windowOnlyReportMarkdown = Get-Content -LiteralPath $windowOnlyMarkdown -Raw
+Assert ($windowOnlyReportMarkdown.Contains('Observed role token totals') -and $windowOnlyReportMarkdown.Contains('| implementer | STORY WINDOW |') -and $windowOnlyReportMarkdown.Contains('2400') -and $windowOnlyReportMarkdown.Contains('Cached input (subset)') -and $windowOnlyReportMarkdown.Contains('Reasoning (subset)') -and $windowOnlyReportMarkdown.Contains('STORY WINDOW')) 'Markdown must show role counters, subset semantics, and reporting scope'
 # Metadata counters cannot become numeric authority by claiming verification.
 $forgedSession = @($usage.sessions | Where-Object role -eq 'implementer')[0]
 $forgedSession.sourceSamples[3].counters.inputTokens = 999999
