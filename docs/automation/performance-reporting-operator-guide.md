@@ -24,13 +24,15 @@ Markdown checksums, measured elapsed time, unavailable token sources, and reuse.
 Use `-ExampleArtifactRoot <absolute external directory>` to retain a synthetic
 example report; the fixture cleans only its own disposable files.
 
-Windows CI also runs the complete offline story-loop regression matrix through
-`validate-performance-overhead.ps1`. That matrix invokes the checked-in
-recovery, handoff, review-flow, reporting, token-discovery, finalization, and
-portability validators in fresh PowerShell processes, and includes negative
-controls for unsafe workflow shortcuts. Its results are synthetic contract
-evidence only; they do not prove live provider writes, model behavior, token
-savings, or quota capacity.
+Windows CI runs the complete skill-local offline story-loop regression matrix
+through `validate-performance-overhead.ps1`, then invokes the separate root
+`scripts/validate-performance-reporting.ps1` contract suite. The skill-local
+matrix invokes the checked-in recovery, handoff, review-flow, and skill-local
+reporting validators in fresh PowerShell processes and includes negative
+controls for unsafe workflow shortcuts; the existing Windows test job also
+runs the root token-discovery, finalization, and portability validators. These
+results are synthetic contract evidence only; they do not prove live provider
+writes, model behavior, token savings, or quota capacity.
 
 This guide turns the versioned performance contract into a safe operator
 runbook. It is the Task #160 documentation artifact for epic #140 and story

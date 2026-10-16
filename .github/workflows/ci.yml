@@ -69,3 +69,5 @@ jobs:
         run: |
           & pwsh -NoProfile -NonInteractive -File .agents/skills/taiga-story-loop/scripts/validate-performance-overhead.ps1
           if ($LASTEXITCODE -ne 0) { throw 'offline story-loop regression matrix failed' }
+          & pwsh -NoProfile -NonInteractive -File scripts/validate-performance-reporting.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'root performance-reporting regression failed' }
