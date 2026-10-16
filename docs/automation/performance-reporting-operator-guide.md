@@ -316,19 +316,30 @@ cumulative notifications, uses account-limit windows, or exports prompt text.
 The published report keeps these independent role totals even when per-task
 implementation, correction, review, or handoff events are missing. Inspect the
 `Observed role token totals` Markdown table (and the matching metric fields in
-JSON) for the reporting scope, exact or nearest-line UTC window, bound session
-and source path, raw input/cached-input/output/reasoning counters, and total.
+JSON) for the reporting scope, actual observed sample window, requested story
+bounds, bound session and source path, raw input/cached-input/output/reasoning
+counters, and total. When one role has multiple bound sessions, inspect each
+source binding's retained observed window rather than treating the requested
+story boundary as an observed sample time.
 Cached input is a subset of input and reasoning is a subset of output, so
 neither is added again to `totalTokens = inputTokens + outputTokens`. A missing
 role remains partial or unavailable; a known subtotal is not a zero for the
-missing role. Session-lifetime output is explicitly labeled and must not be
-combined with story-window deltas.
+missing role. Copied source files for one verified session identity are
+reconciled once; conflicting role/scope bindings are rejected. Session-lifetime
+output is explicitly labeled and must not be combined with story-window deltas.
 
 Phase usage is a separate, narrower measurement. It uses only verified inner
 samples inside the lifecycle interval: fewer than two samples are unavailable,
 nearest-line or source-reset coverage is partial, and no zero baseline,
 backdated boundary, or interpolation is fabricated. Elapsed story, phase, and
 supported wait metrics retain their own state and missing-data reasons.
+
+Profile output separates assigned records from observed/effective runtime
+profiles. Assignment metadata is not runtime observation. If no supported
+runtime observation is supplied, the report labels observed profile state as
+unavailable and explains that effective settings cannot be inferred; explicit
+profile changes retain their ranges and unknown provenance is not silently
+treated as observed.
 
 For live worker handoffs, use the type-aware constructor and transition-wrapper
 examples in [`worker-handoffs.md`](../../.agents/skills/taiga-story-loop/references/worker-handoffs.md).

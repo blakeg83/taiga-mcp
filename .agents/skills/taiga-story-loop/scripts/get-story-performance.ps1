@@ -1804,7 +1804,7 @@ function New-ObservedRoleUsageMetric {
     $mode = [string] (Get-PropertyValue $Metadata 'mode')
     $reportingScope = if ($mode -ceq 'session_lifetime' -or [string] (Get-PropertyValue $Metadata 'reportingScope') -ceq 'SESSION LIFETIME') { 'SESSION LIFETIME' } else { 'STORY WINDOW' }
     $boundary = Get-PropertyValue $Metadata 'boundary'
-    $sampleWindow = if ($null -ne $boundary) {
+    $requestedWindow = if ($null -ne $boundary) {
         [ordered]@{
             startUtc = Get-PropertyValue $boundary 'startUtc'
             endUtc = Get-PropertyValue $boundary 'endUtc'
@@ -1812,7 +1812,26 @@ function New-ObservedRoleUsageMetric {
         }
     }
     else {
+        $null
+    }
+    $sampleWindows = @($sessions | ForEach-Object { Get-PropertyValue $_ 'sampleWindow' } | Where-Object { $null -ne $_ })
+    $sampleWindow = if ($sampleWindows.Count -eq 1) {
+        $sampleWindows[0]
+    }
+    elseif ($sampleWindows.Count -gt 1) {
+        [ordered]@{
+            startUtc = $null
+            endUtc = $null
+            requestedStartUtc = Get-PropertyValue $requestedWindow 'startUtc'
+            requestedEndUtc = Get-PropertyValue $requestedWindow 'endUtc'
+            sampling = 'actual sample windows vary by bound session; see sampleWindows and sourceBindings'
+        }
+    }
+    elseif ($reportingScope -eq 'SESSION LIFETIME') {
         [ordered]@{ startUtc = $null; endUtc = $null; sampling = 'latest cumulative sample per unique bound session; no story lifecycle baseline' }
+    }
+    else {
+        [ordered]@{ startUtc = $null; endUtc = $null; requestedStartUtc = Get-PropertyValue $requestedWindow 'startUtc'; requestedEndUtc = Get-PropertyValue $requestedWindow 'endUtc'; sampling = 'no attributable sample window was available' }
     }
     $sourceBindings = @($sessions | ForEach-Object {
             [ordered]@{
@@ -1822,6 +1841,7 @@ function New-ObservedRoleUsageMetric {
                 sourcePath = [string] (Get-PropertyValue $_ 'sourcePath')
                 state = [string] (Get-PropertyValue $_ 'state')
                 coverage = [string] (Get-PropertyValue $_ 'coverage')
+                sampleWindow = Get-PropertyValue $_ 'sampleWindow'
             }
         })
     $measured = @($sessions | Where-Object { [string] (Get-PropertyValue $_ 'state') -ceq 'measured' })
@@ -1849,6 +1869,8 @@ function New-ObservedRoleUsageMetric {
     $metric | Add-Member -NotePropertyName sessionCount -NotePropertyValue $sessions.Count -Force
     $metric | Add-Member -NotePropertyName reportingScope -NotePropertyValue $reportingScope -Force
     $metric | Add-Member -NotePropertyName sampleWindow -NotePropertyValue $sampleWindow -Force
+    $metric | Add-Member -NotePropertyName requestedWindow -NotePropertyValue $requestedWindow -Force
+    $metric | Add-Member -NotePropertyName sampleWindows -NotePropertyValue $sampleWindows -Force
     $metric | Add-Member -NotePropertyName sourceBindings -NotePropertyValue $sourceBindings -Force
     $metric | Add-Member -NotePropertyName counterSemantics -NotePropertyValue ([ordered]@{
             input = 'inputTokens'
@@ -1879,6 +1901,8 @@ function New-ObservedTotalUsageMetric {
     $firstRoleMetric = @($RoleMetrics | Where-Object { $null -ne (Get-PropertyValue $_ 'reportingScope') } | Select-Object -First 1)
     $metric | Add-Member -NotePropertyName reportingScope -NotePropertyValue $(if ($firstRoleMetric.Count -eq 1) { [string] (Get-PropertyValue $firstRoleMetric[0] 'reportingScope') } else { $null }) -Force
     $metric | Add-Member -NotePropertyName sampleWindow -NotePropertyValue $(if ($firstRoleMetric.Count -eq 1) { Get-PropertyValue $firstRoleMetric[0] 'sampleWindow' } else { $null }) -Force
+    $metric | Add-Member -NotePropertyName requestedWindow -NotePropertyValue $(if ($firstRoleMetric.Count -eq 1) { Get-PropertyValue $firstRoleMetric[0] 'requestedWindow' } else { $null }) -Force
+    $metric | Add-Member -NotePropertyName sampleWindows -NotePropertyValue @($RoleMetrics | ForEach-Object { @((Get-PropertyValue $_ 'sampleWindows')) }) -Force
     $metric | Add-Member -NotePropertyName sourceBindings -NotePropertyValue @($RoleMetrics | ForEach-Object { @((Get-PropertyValue $_ 'sourceBindings')) }) -Force
     $knownCounters = @($RoleMetrics | ForEach-Object { Get-PropertyValue $_ 'counters' } | Where-Object { $null -ne $_ })
     if ($knownCounters.Count -gt 0) {
@@ -2075,9 +2099,37 @@ function ConvertTo-Markdown {
         $metric = $row.metric
         $counters = if ($null -ne $metric) { Get-PropertyValue $metric 'counters' } else { $null }
         $window = if ($null -ne $metric) { Get-PropertyValue $metric 'sampleWindow' } else { $null }
-        $windowText = if ($null -eq $window) { 'unknown' } elseif ([string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $window 'startUtc'))) { [string] (Get-PropertyValue $metric 'reportingScope') } else { "$(Get-PropertyValue $window 'startUtc') to $(Get-PropertyValue $window 'endUtc')" }
+        $requestedWindow = if ($null -ne $metric) { Get-PropertyValue $metric 'requestedWindow' } else { $null }
+        $windowText = if ($null -eq $window) {
+            'unknown'
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $window 'startUtc'))) {
+            $observedText = "observed $(Get-PropertyValue $window 'startUtc') to $(Get-PropertyValue $window 'endUtc')"
+            $requestedStart = Get-PropertyValue $window 'requestedStartUtc'
+            $requestedEnd = Get-PropertyValue $window 'requestedEndUtc'
+            if ([string]::IsNullOrWhiteSpace([string] $requestedStart) -and $null -ne $requestedWindow) {
+                $requestedStart = Get-PropertyValue $requestedWindow 'startUtc'
+                $requestedEnd = Get-PropertyValue $requestedWindow 'endUtc'
+            }
+            if ([string]::IsNullOrWhiteSpace([string] $requestedStart)) { $observedText } else { "$observedText; requested $requestedStart to $requestedEnd" }
+        }
+        elseif ($null -ne $requestedWindow -and -not [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $requestedWindow 'startUtc'))) {
+            "observed window varies by bound session; requested $(Get-PropertyValue $requestedWindow 'startUtc') to $(Get-PropertyValue $requestedWindow 'endUtc')"
+        }
+        else {
+            [string] (Get-PropertyValue $metric 'reportingScope')
+        }
         $bindings = if ($null -eq $metric) { @() } else { @((Get-PropertyValue $metric 'sourceBindings')) }
-        $bindingText = if (@($bindings).Count -eq 0) { 'unknown' } else { ((@($bindings) | ForEach-Object { "$(Get-PropertyValue $_ 'sessionId') -> $(Get-PropertyValue $_ 'sourcePath')" }) -join '<br>') }
+        $bindingText = if (@($bindings).Count -eq 0) {
+            'unknown'
+        }
+        else {
+            ((@($bindings) | ForEach-Object {
+                        $bindingWindow = Get-PropertyValue $_ 'sampleWindow'
+                        $bindingRange = if ($null -ne $bindingWindow -and -not [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $bindingWindow 'startUtc'))) { "; observed $(Get-PropertyValue $bindingWindow 'startUtc') to $(Get-PropertyValue $bindingWindow 'endUtc')" } else { '' }
+                        "$(Get-PropertyValue $_ 'sessionId') -> $(Get-PropertyValue $_ 'sourcePath')$bindingRange"
+                    }) -join '<br>')
+        }
         $knownTotal = if ($null -ne $counters) { Get-PropertyValue $counters 'totalTokens' } elseif ($null -ne $metric) { Get-PropertyValue $metric 'knownSubtotal' } else { $null }
         $coverage = if ($null -eq $metric) { 'unknown' } else { "$(Get-PropertyValue $metric 'coverage')$(if (-not [string]::IsNullOrWhiteSpace([string] (Get-PropertyValue $metric 'missingData'))) { '; ' + (Get-PropertyValue $metric 'missingData') })" }
         [void] $lines.Add("| $(ConvertTo-MarkdownCell $row.name) | $(ConvertTo-MarkdownCell (Get-PropertyValue $metric 'reportingScope')) | $(ConvertTo-MarkdownCell $windowText) | $(ConvertTo-MarkdownCell $bindingText) | $(ConvertTo-MarkdownCell (Get-PropertyValue $metric 'state')) | $(ConvertTo-MarkdownCell (Get-PropertyValue $counters 'inputTokens')) | $(ConvertTo-MarkdownCell (Get-PropertyValue $counters 'cachedInputTokens')) | $(ConvertTo-MarkdownCell (Get-PropertyValue $counters 'outputTokens')) | $(ConvertTo-MarkdownCell (Get-PropertyValue $counters 'reasoningTokens')) | $(ConvertTo-MarkdownCell $knownTotal) | $(ConvertTo-MarkdownCell $coverage) |")
@@ -2109,15 +2161,22 @@ function ConvertTo-Markdown {
     [void] $lines.Add("- Lines deleted: $(Get-MarkdownMetricSummary (Get-ContainerValue -Container $Report.comparison -Name 'linesDeleted'))")
     $modelsMetric = Get-ContainerValue -Container $Report.metrics -Name 'modelsAndReasoning'
     $modelsValue = if ($null -eq $modelsMetric) { $null } else { Get-PropertyValue -Object $modelsMetric -Name 'value' }
+    [void] $lines.Add('')
+    [void] $lines.Add('## Role profiles')
+    [void] $lines.Add('')
+    $assignedProfiles = if ($null -eq $modelsMetric) { @() } else { @((Get-PropertyValue $modelsMetric 'assignedProfiles')) }
+    $observedProfiles = if ($null -eq $modelsMetric) { @() } else { @((Get-PropertyValue $modelsMetric 'observedProfiles')) }
+    $observedProfileState = if ($null -eq $modelsMetric) { 'unavailable' } else { [string] (Get-PropertyValue $modelsMetric 'observedProfileState') }
+    $effectiveProfileProvenance = if ($null -eq $modelsMetric) { $null } else { Get-PropertyValue $modelsMetric 'effectiveProfileProvenance' }
+    [void] $lines.Add("- Assigned profile records: $(@($assignedProfiles).Count); source=worker_assignment (assignment is not runtime observation).")
+    [void] $lines.Add("- Observed/effective profile state: $(ConvertTo-MarkdownCell $observedProfileState); source=$(ConvertTo-MarkdownCell (Get-PropertyValue $effectiveProfileProvenance 'source')); coverage=$(ConvertTo-MarkdownCell (Get-PropertyValue $effectiveProfileProvenance 'coverage')); missing=$(ConvertTo-MarkdownCell (Get-PropertyValue $effectiveProfileProvenance 'missingData'))")
     if ($null -ne $modelsValue -and @($modelsValue).Count -gt 0) {
-        [void] $lines.Add('')
-        [void] $lines.Add('## Role profiles')
-        [void] $lines.Add('')
         foreach ($profile in @($modelsValue)) {
             $change = if ([string]::IsNullOrWhiteSpace([string] $profile.changeId)) { 'initial' } else { [string] $profile.changeId }
             $range = if ([string]::IsNullOrWhiteSpace([string] $profile.effectiveToUtc)) { "from $($profile.effectiveFromUtc)" } else { "$($profile.effectiveFromUtc) to $($profile.effectiveToUtc)" }
             $profileProvenance = Get-PropertyValue -Object $profile -Name 'provenance'
-            [void] $lines.Add("- $(ConvertTo-MarkdownCell $profile.role): worker=$(ConvertTo-MarkdownCell $profile.workerId), model=$(ConvertTo-MarkdownCell $profile.model), effort=$(ConvertTo-MarkdownCell $profile.effort), change=$(ConvertTo-MarkdownCell $change), $range, source=$(ConvertTo-MarkdownCell (Get-PropertyValue -Object $profileProvenance -Name 'source'))")
+            $profileClass = if ([string] (Get-PropertyValue $profileProvenance 'source') -ceq 'worker_assignment') { 'assigned' } elseif ([string] (Get-PropertyValue $profileProvenance 'source') -in @('runtime_profile_observation', 'observed_profile', 'worker_runtime_observation')) { 'observed' } else { 'unknown provenance' }
+            [void] $lines.Add("- $(ConvertTo-MarkdownCell $profileClass) $(ConvertTo-MarkdownCell $profile.role): worker=$(ConvertTo-MarkdownCell $profile.workerId), model=$(ConvertTo-MarkdownCell $profile.model), effort=$(ConvertTo-MarkdownCell $profile.effort), change=$(ConvertTo-MarkdownCell $change), $range, source=$(ConvertTo-MarkdownCell (Get-PropertyValue -Object $profileProvenance -Name 'source'))")
         }
     }
     [void] $lines.Add('')
@@ -3502,7 +3561,12 @@ function Get-TotalUsageMetric {
 }
 
 function New-UnavailableMetadataMetric {
-    return New-Metric -State 'unavailable' -Value $null -Unit 'metadata records' -Source 'setup/host provenance' -Calculation 'copy exact role/model/reasoning profile records' -Coverage 'the v1 event envelope exposes no model or reasoning-effort profile fields' -MissingData 'models and reasoning profiles were not source-backed for this run'
+    $metric = New-Metric -State 'unavailable' -Value $null -Unit 'metadata records' -Source 'setup/host provenance' -Calculation 'copy exact role/model/reasoning profile records' -Coverage 'the v1 event envelope exposes no model or reasoning-effort profile fields' -MissingData 'models and reasoning profiles were not source-backed for this run'
+    $metric | Add-Member -NotePropertyName assignedProfiles -NotePropertyValue @() -Force
+    $metric | Add-Member -NotePropertyName observedProfiles -NotePropertyValue @() -Force
+    $metric | Add-Member -NotePropertyName observedProfileState -NotePropertyValue 'unavailable' -Force
+    $metric | Add-Member -NotePropertyName effectiveProfileProvenance -NotePropertyValue ([ordered]@{ state = 'unavailable'; source = 'runtime profile observation'; coverage = 'no observed profile evidence was supplied'; missingData = 'assigned profile metadata is not runtime observation' }) -Force
+    return $metric
 }
 
 function New-SetupMetadataMetric {
@@ -3514,10 +3578,38 @@ function New-SetupMetadataMetric {
     $records = @($SetupMetadata.records)
     $roles = @(Get-UniqueValuesLinear -Values @($records | ForEach-Object { [string] $_.role }))
     $changes = @($records | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_.changeId) })
+    $assignedProfiles = @()
+    $observedProfiles = @()
+    $unknownProvenanceProfiles = @()
+    foreach ($record in $records) {
+        $profileProvenance = Get-PropertyValue $record 'provenance'
+        $profileSource = [string] (Get-PropertyValue $profileProvenance 'source')
+        if ($profileSource -ceq 'worker_assignment') {
+            $assignedProfiles += $record
+        }
+        elseif ($profileSource -in @('runtime_profile_observation', 'observed_profile', 'worker_runtime_observation')) {
+            $observedProfiles += $record
+        }
+        else {
+            $unknownProvenanceProfiles += $record
+        }
+    }
+    $observedProfileState = if ($observedProfiles.Count -gt 0 -and $unknownProvenanceProfiles.Count -eq 0) { 'measured' } elseif ($observedProfiles.Count -gt 0 -or $unknownProvenanceProfiles.Count -gt 0) { 'partial' } else { 'unavailable' }
+    $observedProfileMissing = if ($observedProfileState -eq 'unavailable') { 'assigned profile metadata is not runtime observation; no observed profile evidence was supplied' } elseif ($unknownProvenanceProfiles.Count -gt 0) { 'one or more profile records have unknown provenance and cannot establish effective runtime settings' } else { $null }
+    $effectiveProfileProvenance = [ordered]@{
+        state = $observedProfileState
+        source = 'runtime profile observation'
+        coverage = if ($observedProfiles.Count -gt 0) { "$($observedProfiles.Count) explicitly observed profile record(s)" } else { 'no explicitly observed profile records' }
+        missingData = $observedProfileMissing
+    }
     $metric = New-Metric -State ([string] $SetupMetadata.state) -Value $records -Unit 'metadata records' -Source ([string] $SetupMetadata.source) -Calculation 'retain exact role/worker/model/effort records and ordered profile changes' -Coverage ([string] $SetupMetadata.coverage) -MissingData ([string] $SetupMetadata.missingData)
     $metric | Add-Member -NotePropertyName roleCount -NotePropertyValue $roles.Count -Force
     $metric | Add-Member -NotePropertyName changeCount -NotePropertyValue $changes.Count -Force
     $metric | Add-Member -NotePropertyName missingRoles -NotePropertyValue @((Get-PropertyValue $SetupMetadata 'missingRoles')) -Force
+    $metric | Add-Member -NotePropertyName assignedProfiles -NotePropertyValue $assignedProfiles -Force
+    $metric | Add-Member -NotePropertyName observedProfiles -NotePropertyValue $observedProfiles -Force
+    $metric | Add-Member -NotePropertyName observedProfileState -NotePropertyValue $observedProfileState -Force
+    $metric | Add-Member -NotePropertyName effectiveProfileProvenance -NotePropertyValue $effectiveProfileProvenance -Force
     return $metric
 }
 

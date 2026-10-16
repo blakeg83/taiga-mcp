@@ -493,17 +493,28 @@ replacement for attributable session counters.
 The Markdown report also renders an `Observed role token totals` table. Each
 role row retains its reporting scope (`STORY WINDOW` for one story-start to
 confirmed-PR delta, or `SESSION LIFETIME` for one latest cumulative sample per
-bound session), UTC sample window, session/source binding, state, coverage, and
-missing-data reason. It shows `inputTokens`, `cachedInputTokens` as a subset of
+bound session), the actual observed sample window, requested story bounds when
+applicable, session/source binding, state, coverage, and missing-data reason.
+When a role has multiple bound sessions, each source binding retains its own
+actual window and the row says to inspect those per-session windows. It shows
+`inputTokens`, `cachedInputTokens` as a subset of
 input, `outputTokens`, `reasoningTokens` as a subset of output, and
 `totalTokens = inputTokens + outputTokens`; cached input and reasoning are not
-added again. The all-roles row is partial or unavailable when a role is
+added again. A verified session identity is counted once even if copied source
+files are supplied; a conflicting role/scope binding is rejected. The all-roles row is partial or unavailable when a role is
 missing, and a known subtotal never represents an unavailable role as zero.
 
 Phase token rows use verified inner samples only. Fewer than two samples leave
 the phase unavailable, while nearest-line or incomplete source coverage stays
 partial. Phase rows do not backdate samples, invent a zero baseline, or replace
 the independent story-window role totals.
+
+The role-profile metric separates `assignedProfiles` from
+`observedProfiles`. Assignment metadata is not runtime observation; when no
+supported observed profile evidence exists, `observedProfileState` is
+`unavailable` and effective-profile provenance states that limitation. Profile
+changes retain their effective ranges and are marked unknown when their source
+cannot establish runtime attribution.
 
 The numeric role-total formula is defined only for these explicit source
 semantics:
