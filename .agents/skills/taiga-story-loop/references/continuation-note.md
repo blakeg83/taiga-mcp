@@ -4,8 +4,9 @@ Keep one short note per authorized story-loop run, outside the source
 worktrees. It is a pointer to authoritative systems, not a durable workflow
 engine. Store only the selected scope, ordered story/task sequence,
 branch/worktree lineage, worker chats, PR identity, current stage,
-approval/merge state, recovery reference, the optional compact quota-wait state,
-and the optional compact performance pointer. Keep performance history in the
+approval/merge state, recovery reference, the optional compact
+`Advance pending` transition marker, the optional compact quota-wait state, and
+the optional compact performance pointer. Keep performance history in the
 external event ledger.
 
 ## Template
@@ -34,6 +35,7 @@ Final review: <not_applicable/pending/findings/accepted> | profile: <model/effor
 Final delivery: <not_ready/ready/created/unknown> | base: <master> | head: <sha or pending>
 Merge: <pending/merged/closed_unmerged/unknown>
 Next: <one concrete action>
+Advance pending: <none, or accepted task #<ref> @ <reviewed SHA> | next task #<ref> | remaining: <concrete task-scoped action>>
 Recovery: <automation-id or none> | schedule: <ACTIVE/PAUSED/pending> | target: <none or ACTIVE/PAUSED>
 Quota wait: <optional: waiting|delivered|unknown | worker: implementer|reviewer | stage: <stage> | evidence: <safe reference> | reset: <UTC estimate or unknown> | delivery: <none or safe reference>>
 Performance pointer: <none before Start, or schema=1 | run=<run-id> | project=<project-id> | story=<story-id>/<story-ref> | ledger=<external-ledger-path> | lastEvent=<event-id> | lastObservedUtc=<utc>
@@ -59,6 +61,18 @@ or repeated `Next` entries. Keep one value per template field. A correction
 replaces the current revision and task/review state, supersedes approval for
 the old HEAD, and replaces the next action. Preserve unresolved external
 operations and user gates until their authoritative outcome is known.
+
+When an accepted task is followed by an ordered next-task transition, keep
+`Advance pending` as one compact, replace-in-place fact containing the accepted
+task and exact reviewed SHA, the next task, and the remaining concrete
+task-scoped action. A status-only activation, announcement, plan, or intention
+does not clear it. The first same-turn source/documentation edit or scoped check
+with actual output clears it. If the implementer stops with this marker present,
+heartbeat recovery resumes that existing implementer for the missing concrete
+start; it does not wake a healthy reviewer or infer completion. An interrupted
+Taiga status/comment/checklist write is reconciled from current provider
+versions before it is repeated, and missing optional telemetry does not block
+otherwise valid advancement.
 
 Add these current facts to the template:
 

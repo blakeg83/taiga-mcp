@@ -81,6 +81,17 @@ first source/documentation edit or first task-scoped check with actual output.
 A status-only write, plan, or intention is not evidence that the next task
 started.
 
+Persist a compact `Advance pending` continuation entry while this transition is
+unfinished: `accepted task #<ref> @ <reviewed SHA> | next task #<ref> |
+remaining: <concrete task-scoped action>`. Keep it through status-only
+activation or announcement and clear it only after same-turn source/
+documentation work or a scoped check with actual output. If the resumed turn
+ends early, heartbeat recovery resumes the existing implementer for that
+missing evidence; it does not duplicate provider writes or wake the reviewer.
+Reread current Taiga versions before repeating an uncertain write, and treat
+missing optional telemetry as a limitation rather than a reason to block valid
+progress.
+
 Record the durable start with a current-version parent-story comment using the
 idempotency marker:
 

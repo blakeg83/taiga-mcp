@@ -882,6 +882,7 @@ try {
         'Final review' = 'not_applicable | profile: none | head: pending'
         'Merge' = 'pending'
         'Next' = 'wait for correction of task #77'
+        'Advance pending' = 'none'
         'Recovery' = 'automation-id | schedule: PAUSED | target: none'
         'Performance pointer' = 'schema=1 | run=synthetic-run-52 | project=12 | story=725/52 | ledger=C:\Synthetic\performance\synthetic-run-52\events.jsonl | lastEvent=synthetic-run-52-story-started | lastObservedUtc=2026-10-10T10:00:00Z'
         'Worker cursors' = 'implementer cursor-000 | reviewer cursor-000'
@@ -894,6 +895,16 @@ try {
     $created = & $writer -NotePath $path -Snapshot $snapshot
     Assert-True $created.Changed 'creates initial complete snapshot'
     Assert-True (-not [IO.File]::Exists($path + '.previous')) 'initial creation has no invented previous snapshot'
+
+    $advanceSnapshot = [ordered]@{}
+    foreach ($key in $snapshot.Keys) { $advanceSnapshot[$key] = $snapshot[$key] }
+    $advanceSnapshot['Advance pending'] = 'accepted task #25 @ revision-25 | next task #26 | remaining: concrete task-scoped source_edit or scoped_check'
+    $advanceResult = & $writer -NotePath $path -Snapshot $advanceSnapshot
+    Assert-True $advanceResult.Changed 'advance pending snapshot round-trips through the writer'
+    $advanceText = [IO.File]::ReadAllText($path)
+    Assert-True ($advanceText.Contains('Advance pending: ' + $advanceSnapshot['Advance pending']) -and
+        (Read-Snapshot $path)['Advance pending'] -ceq $advanceSnapshot['Advance pending']) 'advance pending preserves accepted task, next task, and remaining action as one compact field'
+    & $writer -NotePath $path -Snapshot $snapshot | Out-Null
 
     # Quota waits are optional compact state. Older snapshots omit this field;
     # new snapshots retain the normal identity and gate fields while carrying

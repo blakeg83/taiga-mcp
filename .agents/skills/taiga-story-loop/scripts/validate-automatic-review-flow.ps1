@@ -23,7 +23,21 @@ function Assert-Throws {
 }
 
 function New-StoryState {
-    param([ValidateSet('per_task', 'story_end_only')] [string] $ReviewMode)
+    param(
+        [ValidateSet('per_task', 'story_end_only')] [string] $ReviewMode,
+        [int[]] $TaskIds = @(65, 66)
+    )
+
+    $taskRows = @()
+    for ($index = 0; $index -lt $TaskIds.Count; $index++) {
+        $taskRows += [ordered]@{
+            taskId = [int]$TaskIds[$index]
+            ref = "#$($TaskIds[$index])"
+            state = if ($index -eq 0) { 'in_progress' } else { 'not_started' }
+            pendingSha = $null
+            acceptedSha = $null
+        }
+    }
 
     return [ordered]@{
         reviewMode = $ReviewMode
@@ -36,10 +50,7 @@ function New-StoryState {
         reviewer = 'reviewer-story-87'
         coordinator = 'coordinator-story-87'
         currentTaskIndex = 0
-        tasks = @(
-            [ordered]@{ taskId = 65; ref = '#65'; state = 'in_progress'; pendingSha = $null; acceptedSha = $null },
-            [ordered]@{ taskId = 66; ref = '#66'; state = 'not_started'; pendingSha = $null; acceptedSha = $null }
-        )
+        tasks = $taskRows
         pendingReview = $null
         pendingEscalations = @()
         consumedEvents = @()
@@ -51,6 +62,7 @@ function New-StoryState {
         implementationStartPending = $false
         implementationStartTurn = $null
         implementationStartEvidence = @()
+        advancePending = $null
         currentTurnId = 1
         turnStatus = 'active'
         finalReviewRevision = $null
@@ -67,6 +79,27 @@ function New-StoryState {
 function Get-CurrentTask {
     param([System.Collections.IDictionary] $State)
     return $State.tasks[$State.currentTaskIndex]
+}
+
+function Set-AdvancePending {
+    param(
+        [System.Collections.IDictionary] $State,
+        [System.Collections.IDictionary] $AcceptedTask,
+        [string] $AcceptedRevision,
+        [System.Collections.IDictionary] $NextTask
+    )
+
+    $State.advancePending = [ordered]@{
+        acceptedTask = [string]$AcceptedTask.ref
+        acceptedRevision = $AcceptedRevision
+        nextTask = [string]$NextTask.ref
+        remainingAction = 'concrete task-scoped source_edit or scoped_check in the same resumed turn'
+    }
+}
+
+function Clear-AdvancePending {
+    param([System.Collections.IDictionary] $State)
+    $State.advancePending = $null
 }
 
 function Add-Unique {
@@ -173,6 +206,7 @@ function Add-ImplementerAction {
     }
     if ($Kind -in @('source_edit', 'scoped_check') -and $State.implementationStartPending) {
         $State.implementationStartPending = $false
+        Clear-AdvancePending $State
         $State.implementationStartEvidence = @($State.implementationStartEvidence) + [ordered]@{
             task = $TaskRef
             kind = $Kind
@@ -414,6 +448,7 @@ function Observe-HealthyReviewRecovery {
             decision = 'resume_missing_implementation'
             task = [string](Get-CurrentTask $State).ref
             implementerAction = 'missing_implementation_start'
+            advancePending = $State.advancePending
         }
         return [ordered]@{ decision = 'resume_missing_implementation'; state = $State }
     }
@@ -543,6 +578,7 @@ function Apply-Event {
             $State.currentTaskIndex = [int]$State.currentTaskIndex + 1
             $next = Get-CurrentTask $State
             $next.state = 'in_progress'
+            Set-AdvancePending $State $task ([string]$Event.revision) $next
             $State.implementationStartPending = $true
             $State.implementationStartTurn = [int]$State.currentTurnId
             $created = Add-Action $State 'advance_next_task' $next.ref 'pending' $State.implementer $State.implementer
@@ -627,9 +663,12 @@ function Apply-Event {
 }
 
 function New-ReconciliationState {
-    param([ValidateSet('per_task', 'story_end_only')] [string] $ReviewMode)
+    param(
+        [ValidateSet('per_task', 'story_end_only')] [string] $ReviewMode,
+        [int[]] $TaskIds = @(65, 66)
+    )
 
-    $state = New-StoryState $ReviewMode
+    $state = New-StoryState -ReviewMode $ReviewMode -TaskIds $TaskIds
     $state.repository = 'C:\Projects\TaigaMCP'
     $state.worktree = 'C:\Projects\TaigaMCP'
     $state.scopeHash = 'scope-87'
@@ -670,7 +709,7 @@ function New-ReconciliationState {
         }
     }
 
-    foreach ($taskId in @(65, 66)) {
+    foreach ($taskId in $TaskIds) {
         $state.provider.tasks[[string]$taskId] = [ordered]@{
             id = $taskId
             version = 1
@@ -1213,6 +1252,7 @@ function Reconcile-TaskAcceptance {
     $State.currentTaskIndex = [int]$State.currentTaskIndex + 1
     $next = Get-CurrentTask $State
     $next.state = 'in_progress'
+    Set-AdvancePending $State $task ([string]$Event.revision) $next
     $State.implementationStartPending = $true
     $State.implementationStartTurn = [int]$State.currentTurnId
     [void](Add-Action $State 'advance_next_task' $next.ref 'pending' $State.implementer $State.implementer)
@@ -1678,8 +1718,9 @@ Complete-ReviewHandoff $statusOnlyState @{ eventId = 'status-only-ready'; kind =
 $statusOnlyAcceptance = New-TaskAcceptanceEvent $statusOnlyState 'status-only-accept' $statusOnlySha
 $statusOnlyAdvance = Resume-ImplementerOnReviewerMessage $statusOnlyState $statusOnlyAcceptance
 Assert-True ($statusOnlyAdvance.decision -eq 'advance_next_task' -and $statusOnlyState.tasks[1].state -eq 'in_progress' -and $statusOnlyState.implementationStartPending) 'acceptance must activate the next task but hold its review until concrete work starts'
+Assert-True ($statusOnlyState.advancePending.acceptedTask -eq '#65' -and $statusOnlyState.advancePending.acceptedRevision -eq $statusOnlySha -and $statusOnlyState.advancePending.nextTask -eq '#66' -and $statusOnlyState.advancePending.remainingAction -eq 'concrete task-scoped source_edit or scoped_check in the same resumed turn') 'acceptance must retain a compact advance_pending marker until concrete next-task evidence exists'
 $statusOnlyRecovery = Observe-HealthyReviewRecovery $statusOnlyState
-Assert-True ($statusOnlyRecovery.decision -eq 'resume_missing_implementation' -and $statusOnlyState.recoveryObservations[-1].implementerAction -eq 'missing_implementation_start') 'interrupted advancement must resume only the missing implementation start, not wake a healthy review wait'
+Assert-True ($statusOnlyRecovery.decision -eq 'resume_missing_implementation' -and $statusOnlyState.recoveryObservations[-1].implementerAction -eq 'missing_implementation_start' -and $statusOnlyState.recoveryObservations[-1].advancePending.nextTask -eq '#66') 'interrupted advancement must resume only the missing implementation start, not wake a healthy review wait'
 $statusOnlyActionCount = @($statusOnlyState.implementerActions).Count
 $statusOnlyDispatchCount = @($statusOnlyState.actions | Where-Object kind -eq 'review').Count
 $statusOnlyStopped = $false
@@ -1694,6 +1735,7 @@ $emptyCheckRejected = $false
 try { Add-ImplementerAction $statusOnlyState 'scoped_check' '#66' ' ' } catch { $emptyCheckRejected = $true }
 Assert-True ($wrongTaskStartRejected -and $emptyCheckRejected -and $statusOnlyState.implementationStartPending -and @($statusOnlyState.implementationStartEvidence).Count -eq 0) 'wrong-task and empty implementation-start evidence must not clear the next-task gate'
 Add-ImplementerAction $statusOnlyState 'source_edit' '#66' 'status-only-recovered-first-edit'
+Assert-True ($null -eq $statusOnlyState.advancePending) 'same-turn concrete next-task evidence must clear advance_pending'
 $statusOnlyReview = Complete-ReviewHandoff $statusOnlyState @{ eventId = 'status-only-after-work'; kind = 'ready_for_review'; taskId = 66; revision = ('c' * 40); reviewerId = $statusOnlyState.reviewer; authorization = $statusOnlyState.authorization }
 Assert-True ($statusOnlyReview.decision -eq 'dispatch_review' -and -not $statusOnlyState.implementationStartPending) 'concrete next-task work must release its review handoff'
 $scopedCheckState = New-ReconciliationState 'per_task'
@@ -1702,13 +1744,38 @@ Complete-ReviewHandoff $scopedCheckState @{ eventId = 'scoped-check-ready'; kind
 $scopedCheckAcceptance = New-TaskAcceptanceEvent $scopedCheckState 'scoped-check-accept' $scopedCheckSha
 $scopedCheckAdvance = Resume-ImplementerOnReviewerMessage $scopedCheckState $scopedCheckAcceptance
 Assert-True ($scopedCheckAdvance.decision -eq 'advance_next_task' -and $scopedCheckState.implementationStartPending) 'scoped-check continuation must begin behind the next-task gate'
+Assert-True ($scopedCheckState.advancePending.nextTask -eq '#66' -and $scopedCheckState.advancePending.acceptedRevision -eq $scopedCheckSha) 'scoped-check continuation must retain the accepted revision and next task until concrete work starts'
 Add-ImplementerAction $scopedCheckState 'scoped_check' '#66' 'task-66-focused-check'
-Assert-True (-not $scopedCheckState.implementationStartPending -and @($scopedCheckState.implementationStartEvidence)[0].kind -eq 'scoped_check' -and [string]@($scopedCheckState.implementationStartEvidence)[0].task -eq '#66') 'a nonblank current-task scoped check in the resumed turn must release the next-task gate'
+Assert-True (-not $scopedCheckState.implementationStartPending -and $null -eq $scopedCheckState.advancePending -and @($scopedCheckState.implementationStartEvidence)[0].kind -eq 'scoped_check' -and [string]@($scopedCheckState.implementationStartEvidence)[0].task -eq '#66') 'a nonblank current-task scoped check in the resumed turn must release the next-task gate'
 $scopedCheckReview = Complete-ReviewHandoff $scopedCheckState @{ eventId = 'scoped-check-dispatch'; kind = 'ready_for_review'; taskId = 66; revision = ('e' * 40); reviewerId = $scopedCheckState.reviewer; authorization = $scopedCheckState.authorization }
 Assert-True ($scopedCheckReview.decision -eq 'dispatch_review' -and @($scopedCheckState.actions | Where-Object kind -eq 'review').Count -eq 2) 'scoped-check continuation must dispatch exactly one next-task review'
 $scopedCheckTurn = @($scopedCheckState.turns)[1]
 $scopedCheckTrace = @($scopedCheckState.implementerActions | Where-Object { [int]$_.turn -eq [int]$scopedCheckTurn.turn })
 Assert-True (($scopedCheckTrace | ForEach-Object { [string]$_.kind }) -join ',' -eq 'reviewer_message_resume,taiga_reconcile,advance_next_task,scoped_check,send_review_handoff,final_response' -and $scopedCheckTurn.ended -and $scopedCheckTurn.lastAction -eq 'final_response') 'scoped-check continuation must preserve the terminal review handoff trace'
+
+# Reproduce the early-stop pattern across two consecutive transitions: a
+# reviewer acceptance activates #26/#27, but a status-only resumed turn leaves
+# advance_pending until the first concrete scoped check in that same turn.
+$earlyStopState = New-ReconciliationState 'per_task' -TaskIds @(25, 26, 27)
+$earlySha25 = ('f' * 40)
+Complete-ReviewHandoff $earlyStopState @{ eventId = 'early-25-ready'; kind = 'ready_for_review'; taskId = 25; revision = $earlySha25; reviewerId = $earlyStopState.reviewer; authorization = $earlyStopState.authorization } | Out-Null
+$earlyAccept25 = New-TaskAcceptanceEvent $earlyStopState 'early-25-accept' $earlySha25 -TaskId 25
+$earlyAdvance25 = Resume-ImplementerOnReviewerMessage $earlyStopState $earlyAccept25
+Assert-True ($earlyAdvance25.decision -eq 'advance_next_task' -and $earlyStopState.tasks[1].state -eq 'in_progress' -and $earlyStopState.implementationStartPending -and $earlyStopState.advancePending.acceptedTask -eq '#25' -and $earlyStopState.advancePending.nextTask -eq '#26') 'early-stop #25-to-#26 acceptance must preserve the pending advancement marker'
+$earlyRecovery25 = Observe-HealthyReviewRecovery $earlyStopState
+Assert-True ($earlyRecovery25.decision -eq 'resume_missing_implementation' -and $earlyStopState.recoveryObservations[-1].advancePending.nextTask -eq '#26') 'early-stop #25-to-#26 recovery must resume the missing implementation start'
+Add-ImplementerAction $earlyStopState 'scoped_check' '#26' 'early-stop-26-first-check'
+Assert-True ($null -eq $earlyStopState.advancePending -and -not $earlyStopState.implementationStartPending) 'early-stop #25-to-#26 concrete evidence must clear the pending advancement marker'
+$earlySha26 = ('a' * 40)
+Complete-ReviewHandoff $earlyStopState @{ eventId = 'early-26-ready'; kind = 'ready_for_review'; taskId = 26; revision = $earlySha26; reviewerId = $earlyStopState.reviewer; authorization = $earlyStopState.authorization } | Out-Null
+$earlyAccept26 = New-TaskAcceptanceEvent $earlyStopState 'early-26-accept' $earlySha26 -TaskId 26
+$earlyAdvance26 = Resume-ImplementerOnReviewerMessage $earlyStopState $earlyAccept26
+Assert-True ($earlyAdvance26.decision -eq 'advance_next_task' -and $earlyStopState.currentTaskIndex -eq 2 -and $earlyStopState.tasks[2].state -eq 'in_progress' -and $earlyStopState.implementationStartPending -and $earlyStopState.advancePending.acceptedTask -eq '#26' -and $earlyStopState.advancePending.acceptedRevision -eq $earlySha26 -and $earlyStopState.advancePending.nextTask -eq '#27') 'early-stop #26-to-#27 acceptance must preserve the next pending advancement marker'
+$earlyRecovery26 = Observe-HealthyReviewRecovery $earlyStopState
+Assert-True ($earlyRecovery26.decision -eq 'resume_missing_implementation' -and $earlyStopState.recoveryObservations[-1].advancePending.nextTask -eq '#27') 'early-stop #26-to-#27 recovery must resume the missing implementation start'
+Add-ImplementerAction $earlyStopState 'source_edit' '#27' 'early-stop-27-first-edit'
+Assert-True ($null -eq $earlyStopState.advancePending -and -not $earlyStopState.implementationStartPending) 'early-stop #26-to-#27 concrete evidence must clear the pending advancement marker'
+
 Add-ImplementerAction $state 'source_edit' '#66' 'task-66-first-edit'
 Assert-True (-not $state.implementationStartPending -and @($state.implementationStartEvidence).Count -ge 2 -and [string]$state.implementationStartEvidence[-1].task -eq '#66' -and [string]$state.implementationStartEvidence[-1].kind -eq 'source_edit') 'next task must record task-bound concrete implementation-start evidence before review'
 $nextReady = Complete-ReviewHandoff $state @{ eventId = 'ready-next-task-per_task'; kind = 'ready_for_review'; taskId = 66; revision = 'sha-b1'; reviewerId = 'reviewer-story-87'; authorization = 'start-87' }
@@ -1864,6 +1931,7 @@ $interruptedDescription = Merge-ProviderChecklist $interruptedBefore.description
 $null = Confirm-ProviderTaskWrite $interruptedState $interruptedJournal $interruptedAcceptance $interruptedBefore $interruptedDescription
 $interruptedRecovered = Reconcile-TaskAcceptance $interruptedState $interruptedAcceptance
 Assert-True ($interruptedRecovered.decision -eq 'advance_next_task' -and @($interruptedState.provider.taskWrites).Count -eq 1 -and @($interruptedState.provider.storyWrites).Count -eq 1) 'resume after an interrupted task/comment sequence must finish only the missing progress write'
+Assert-True ($interruptedState.currentTaskIndex -eq 1 -and $interruptedState.implementationStartPending -and $interruptedState.advancePending.acceptedTask -eq '#65' -and $interruptedState.advancePending.acceptedRevision -eq $interruptedSha -and $interruptedState.advancePending.nextTask -eq '#66') 'interrupted acceptance reconciliation must complete before leaving a durable pending next-task transition'
 
 $finalTaskState = New-ReconciliationState 'per_task'
 $firstFinalSha = ('1' * 40)
