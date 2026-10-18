@@ -84,6 +84,27 @@ levels. Never assume creation or model configuration succeeded. Give both
 workers the complete story requirements, shared worktree path, repository/base
 branch, their role, and the other worker's conversation identity.
 
+Before dispatch, independently read the selected story and inspect its optional
+epic relationship metadata. For every linked epic, use its positive internal ID
+with `get_epic` and read the full description; include each epic identity and
+the relevant requirements or constraints in both worker assignments. Explicitly
+record when the story has no linked epics. An unusable relationship identity, an
+inaccessible linked epic, or a material epic/story conflict is a specific
+blocker before dependent work; do not silently omit context, guess, or expand
+scope to sibling stories.
+
+Before dispatch, discover all scoped child tasks with
+`list_tasks(projectId, userStoryId, includeClosed=true)`, follow its pagination,
+and use `get_task` for each task's full requirements. Establish one explicit
+sequence for every scoped task: use an explicit sequence stated in the
+story/task requirements, or otherwise use unambiguous numeric prefixes in task
+titles and numeric order (for example `01`, `02`, `10`). If multiple remaining
+tasks lack a clear sequence or the instructions conflict, report the ambiguity
+as a blocker before task work; never infer order from response position or task
+refs. Include the agreed sequence and the completed/incomplete status of each
+task in both worker assignments. A zero-task story has an empty sequence and
+still requires the normal story work and verification.
+
 Use `mcp__codex_app__send_message_to_thread` with the actual conversation
 identities for worker handoffs, corrections, approvals, and blockers. Preserve
 the assigned model and reasoning settings throughout the same conversation pair.
@@ -98,7 +119,8 @@ implementation; do not poll, relay through a substitute, or create more workers.
 Dispatch the Implementer only after both probes and model settings are confirmed.
 After setup succeeds, set and confirm the story's In Progress status before
 dispatching implementation. Include the resolved status mappings and these
-ownership rules in both worker assignments.
+ownership rules, epic context, and agreed task sequence in both worker
+assignments.
 
 After dispatch, remain idle. Do not poll, monitor, relay routine messages,
 update Taiga during routine work, or participate in corrections. Resume only for final approval or
@@ -106,17 +128,45 @@ a blocker. The Coordinator alone performs Git and GitHub operations.
 
 ## Implementer
 
-Read the complete story, acceptance criteria, and all scoped child tasks.
-Maintain every scoped task's status as specified above and add concise,
-meaningful progress updates in Taiga. Implement the whole story in the shared
-worktree and run the relevant local checks. Before handoff, confirm every scoped
-task is complete and set and confirm the story's Ready to Test status. Send the
-Reviewer a direct ready-for-review message with
+Independently read the complete story and acceptance criteria. Inspect its epic
+relationship metadata and, for every linked epic, use `get_epic` to read the
+full requirements before implementation. A story with no linked epic proceeds
+normally. Treat an unusable relationship identity, inaccessible epic, or
+material epic/story conflict as a specific blocker before dependent work; do
+not guess or expand scope to sibling stories.
+
+Discover all scoped child tasks with `list_tasks(projectId, userStoryId,
+includeClosed=true)`, follow pagination, and use `get_task` for full task
+requirements. Independently establish one explicit sequence: use an explicit
+sequence in the story/task requirements, or otherwise unambiguous numeric task
+title prefixes in numeric order. If multiple remaining tasks have no clear
+sequence or instructions conflict, report the ambiguity before starting task
+work; never use API response order or task refs as priority. Account for
+already completed tasks without reopening them unnecessarily.
+
+Work through the sequence strictly. For each incomplete task, read its current
+version, transition it to In Progress, inspect and confirm that transition,
+complete its work and relevant checks, then read its current version before
+transitioning it to the project's completed task status and inspect and confirm
+Done. A blocked or failed task prevents starting later tasks. The zero-task
+case skips task transitions but still requires story work and verification.
+The required sequential handling remains inside this single story workflow;
+it does not create a per-task review loop. Maintain every scoped task's status
+as specified above and add concise, meaningful progress updates in Taiga.
+
+Implement the whole story in the shared worktree and run the relevant local
+checks. Before handoff, confirm every scoped task is complete and set and
+confirm the story's Ready to Test status. Send the Reviewer a direct
+ready-for-review message with
 the changed files, a normalized content snapshot for every changed path
 (`path: present text <SHA-256>` for normalized text bytes,
 `path: present binary <SHA-256>` for raw binary bytes, and `path: deleted` for
-deletions), the summary, and verification results, then stop editing while
-review is pending.
+deletions), the epic context (or explicit no-epic result), the agreed task
+sequence, confirmed status for every scoped task, the summary, and verification
+results. Include a concise record of the required scenario walkthroughs,
+identifying which were inspected locally versus exercised with native runtime
+capabilities; do not call a walkthrough runtime exercise. Then stop editing
+while review is pending.
 
 For every snapshot in this workflow, use the repository `.gitattributes` text
 rules (including `text=auto` detection) to classify files consistently as text
@@ -125,20 +175,36 @@ text files; hash raw bytes for binary files. Use this same canonicalization for
 the Implementer, Reviewer, Coordinator working-tree preflight, and
 post-commit verification.
 
-On a direct `CHANGES REQUESTED` message, make the requested corrections, rerun
-relevant checks, update Taiga, and send the same Reviewer a new review request.
-Use the same conversation for every correction round.
+On a direct `CHANGES REQUESTED` message, reopen only the affected tasks using
+fresh versions and complete corrections in the established relative sequence;
+do not bypass an affected predecessor. Rerun relevant checks, update Taiga,
+reconfirm every scoped task and the story's Ready to Test status, and send the
+same Reviewer a new review request. Use the same conversation for every
+correction round.
 Never run Git or GitHub commands, even for status or diff inspection. Never
 contact the Coordinator for routine progress.
 
 ## Reviewer
 
-Independently read the story and inspect the actual shared-worktree files. Check
-the complete acceptance criteria and relevant local verification. Recompute a
-normalized content snapshot from those files, using `path: present text
-<SHA-256>` for normalized text bytes, `path: present binary <SHA-256>` for raw
-binary bytes, and `path: deleted` for deletions; this snapshot is the identity
-of the reviewed contents, not just a file-name scope. For
+Independently read the story and inspect the actual shared-worktree files.
+Inspect its epic relationship metadata and, for every linked epic, use
+`get_epic` to read the full requirements before review. A no-epic result is
+valid. If an epic relationship identity is unusable, a linked epic is
+inaccessible, or the epic and story materially conflict, record one concise
+blocker comment in Taiga, send `BLOCKED` to the Coordinator through the
+existing blocker path, and stop dependent review and delivery; do not silently
+accept or downgrade an actual context failure to a review finding. Ordinary
+missing-context or out-of-order implementation findings remain
+`CHANGES REQUESTED` to the Implementer.
+Check the complete acceptance criteria, the agreed child-task sequence, every
+scoped task's requirements and confirmed status, and relevant local
+verification. Recompute a normalized content snapshot from those files, using
+`path: present text <SHA-256>` for normalized text bytes, `path: present binary
+<SHA-256>` for raw binary bytes, and `path: deleted` for deletions; this
+snapshot is the identity of the reviewed contents, not just a file-name scope.
+Verify that task execution was sequential, that completed predecessors were not
+needlessly reopened, and that corrections preserve the established relative
+order. For
 `CHANGES REQUESTED`, record concise actionable findings and the review phase in
 a Taiga comment, then send the findings directly to the Implementer. Routine findings are
 not blockers.
@@ -167,10 +233,17 @@ add a heartbeat.
 
 Exercise the essential paths with native runtime capabilities when available:
 first-pass approval, at least one correction and re-review, and a genuine or
-controlled blocker. Record each outcome and the capability evidence in the
-Coordinator's final report. This skill adds no synthetic runner or recovery
-framework. If a host cannot exercise a path, report the exact unavailable
-capability and the resulting unverified path; never present it as passed.
+controlled blocker. For each story walkthrough, record whether it was inspected
+from read-only examples/local instructions or actually exercised with native
+runtime capabilities: linked and no-epic stories, multiple linked epics,
+inaccessible or conflicting epic context, tasks returned out of sequence such
+as `01`, `02`, `10`, an already completed predecessor, ambiguous order, a
+blocked predecessor, ordered corrections, and zero- or one-task stories. A
+walkthrough does not prove runtime execution. Record each outcome and the
+capability evidence in the Coordinator's final report. This skill adds no
+synthetic runner or recovery framework. If a host cannot exercise a path,
+report the exact unavailable capability and the resulting unverified path;
+never present it as passed.
 
 After explicit reviewer approval, the Coordinator confirms the Implementer is
 idle, inspects status and the complete diff, and computes the same canonical
@@ -188,7 +261,9 @@ and the outstanding status blocker without claiming the story is Done. Send the 
 commit SHA to the Reviewer for the final Taiga update and report the URL and
 summary to the user. Never merge automatically.
 
-This skill is instruction-driven only. It must not add telemetry, token or
-performance tracking, event ledgers, persistent workflow state, continuation
-files, background monitoring, recovery infrastructure, per-task or epic loops,
-additional workers, custom test runners, CI workflows, or helper scripts.
+This skill is instruction-driven only. The required sequential handling of the
+selected story's scoped tasks remains within this one workflow; it must not add
+telemetry, token or performance tracking, event ledgers, persistent workflow
+state, continuation files, background monitoring, recovery infrastructure,
+per-task review loops, epic orchestration, additional workers, custom test
+runners, CI workflows, or helper scripts.
