@@ -186,8 +186,29 @@ public sealed class ProjectApi
         {
             Id = ReadRequiredPositiveInt(role, "id", "project role"),
             Name = ReadRequiredString(role, "name", "project role"),
-            Computable = ReadRequiredBoolean(role, "computable", "project role")
+            Computable = ReadRequiredBoolean(role, "computable", "project role"),
+            Permissions = ReadRolePermissions(role)
         };
+    }
+
+    private static IReadOnlyList<string>? ReadRolePermissions(JsonElement role)
+    {
+        if (!role.TryGetProperty("permissions", out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid project role permissions data.");
+
+        var permissions = new List<string>();
+        foreach (var permission in value.EnumerateArray())
+        {
+            if (permission.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(permission.GetString()))
+                throw new TaigaRequestException("Taiga returned invalid project role permissions data.");
+
+            permissions.Add(permission.GetString()!);
+        }
+
+        return permissions;
     }
 
     private static int ReadRequiredPositiveInt(JsonElement element, string propertyName, string resource)

@@ -61,7 +61,7 @@ public sealed class ProjectTools
     });
 
     [McpServerTool(Name = "list_project_roles")]
-    [Description("List one page of the project roles used by Taiga's native story-point estimation system. Returns pagination metadata and items with ID, name, and computable estimation flag.")]
+    [Description("List one page of project roles with ID, name, computable estimation flag, and permission codenames when supplied by Taiga. Match a membership's role_id to check role permissions; absent permissions are unknown, while an empty array grants none. Returns pagination metadata.")]
     public async Task<string> ListProjectRoles(
         [Description("Positive internal project ID, not a slug.")] int projectId,
         [Description("Page number, starting at 1; requests one page only.")] int page = 1,

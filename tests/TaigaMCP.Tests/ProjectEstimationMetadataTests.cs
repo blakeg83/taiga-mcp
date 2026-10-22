@@ -60,7 +60,7 @@ public sealed class ProjectEstimationMetadataTests
     }
 
     [Fact]
-    public async Task ListProjectRolesAsync_MapsEstimationFlagsAndOmitsPrivateFields()
+    public async Task ListProjectRolesAsync_MapsEstimationFlagsAndPermissionsAndOmitsMemberCounts()
     {
         var handler = new FakeHttpMessageHandler()
             .AddJsonRoute(
@@ -102,9 +102,61 @@ public sealed class ProjectEstimationMetadataTests
             var items = serialized.GetProperty("items");
             Assert.Equal(7, items[0].GetProperty("id").GetInt32());
             Assert.True(items[0].GetProperty("computable").GetBoolean());
-            Assert.False(items[0].TryGetProperty("permissions", out _));
+            Assert.Equal("view_project", Assert.Single(items[0].GetProperty("permissions").EnumerateArray()).GetString());
+            Assert.False(items[1].TryGetProperty("permissions", out _));
             Assert.False(items[0].TryGetProperty("members_count", out _));
             Assert.Equal("?project=123&page=1", handler.Requests.Last(item => item.Uri.AbsolutePath.EndsWith("/roles")).Uri.Query);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(",\"permissions\":null")]
+    [InlineData(",\"permissions\":[]")]
+    [InlineData(",\"permissions\":[\"add_us\",\"modify_us\",\"future_permission\"]")]
+    public async Task ListProjectRolesAsync_PreservesUnknownEmptyAndExplicitPermissions(string permissionsField)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/roles",
+                "[{\"id\":7,\"name\":\"Developer\",\"computable\":true" + permissionsField + "}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var json = JsonSerializer.Deserialize<JsonElement>(await new ProjectTools(NewApi(handler, auth)).ListProjectRoles(123));
+            var role = json.GetProperty("items")[0];
+            if (permissionsField.Length == 0 || permissionsField.Contains("null"))
+            {
+                Assert.False(role.TryGetProperty("permissions", out _));
+            }
+            else
+            {
+                var permissions = role.GetProperty("permissions").EnumerateArray().Select(item => item.GetString()).ToArray();
+                Assert.Equal(permissionsField.Contains("add_us")
+                    ? new[] { "add_us", "modify_us", "future_permission" }
+                    : Array.Empty<string>(), permissions);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("true")]
+    [InlineData("\"add_us\"")]
+    [InlineData("{}")]
+    [InlineData("[null]")]
+    [InlineData("[42]")]
+    [InlineData("[\"\"]")]
+    [InlineData("[\" \"]")]
+    [InlineData("[\"add_us\",{\"secret\":\"private-value\"}]")]
+    public async Task ListProjectRolesAsync_RejectsMalformedPermissionsWithoutLeakingValues(string permissions)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/roles",
+                "[{\"id\":7,\"name\":\"Developer\",\"computable\":true,\"permissions\":" + permissions + "}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() => NewApi(handler, auth).ListProjectRolesAsync(123));
+            Assert.Equal("Taiga returned invalid project role permissions data.", exception.Message);
         }
     }
 
