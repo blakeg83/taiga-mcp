@@ -10,6 +10,71 @@ namespace TaigaMCP.Tests;
 public sealed class McpIntegrationTests
 {
     [Fact]
+    public async Task ProductionServer_EstimationMetadataTools_AreDiscoverableAndBound()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var assembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [assembly], CreateEnvironment(taiga), Path.GetDirectoryName(assembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        var pointsTool = Assert.Single(tools, tool => tool.Name == "list_points");
+        var rolesTool = Assert.Single(tools, tool => tool.Name == "list_project_roles");
+        Assert.Contains("projectId", pointsTool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        Assert.Contains("projectId", rolesTool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        Assert.Contains("page", pointsTool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+        Assert.Contains("page", rolesTool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
+
+        var points = await client.CallToolAsync(
+            "list_points",
+            new Dictionary<string, object?> { ["projectId"] = 123 },
+            cancellationToken: timeout.Token);
+        Assert.False(points.IsError == true, GetText(points));
+        var pointsEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(points));
+        Assert.Equal(1, pointsEnvelope.GetProperty("page").GetInt32());
+        Assert.Equal(2, pointsEnvelope.GetProperty("total").GetInt32());
+        Assert.Equal(2, pointsEnvelope.GetProperty("next_page").GetInt32());
+        Assert.True(pointsEnvelope.GetProperty("has_more").GetBoolean());
+        var pointsJson = pointsEnvelope.GetProperty("items");
+        Assert.Equal(JsonValueKind.Null, pointsJson[0].GetProperty("value").ValueKind);
+        Assert.Equal(0.5, pointsJson[1].GetProperty("value").GetDouble());
+        Assert.Equal("/api/v1/points?project=123&page=1", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/points?", StringComparison.Ordinal)).PathAndQuery);
+
+        var roles = await client.CallToolAsync(
+            "list_project_roles",
+            new Dictionary<string, object?> { ["projectId"] = 123 },
+            cancellationToken: timeout.Token);
+        Assert.False(roles.IsError == true, GetText(roles));
+        var rolesEnvelope = JsonSerializer.Deserialize<JsonElement>(GetText(roles));
+        Assert.Equal(1, rolesEnvelope.GetProperty("page").GetInt32());
+        Assert.Equal(2, rolesEnvelope.GetProperty("total").GetInt32());
+        Assert.Equal(2, rolesEnvelope.GetProperty("next_page").GetInt32());
+        Assert.True(rolesEnvelope.GetProperty("has_more").GetBoolean());
+        var rolesJson = rolesEnvelope.GetProperty("items");
+        Assert.Equal(7, rolesJson[0].GetProperty("id").GetInt32());
+        Assert.True(rolesJson[0].GetProperty("computable").GetBoolean());
+        Assert.False(rolesJson[0].TryGetProperty("permissions", out _));
+        Assert.Equal("/api/v1/roles?project=123&page=1", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/roles?", StringComparison.Ordinal)).PathAndQuery);
+
+        taiga.PointsResponseBody = "[{\"id\":21,\"project\":123,\"name\":\"Overflow\",\"order\":0,\"value\":1e999}]";
+        var overflow = await client.CallToolAsync(
+            "list_points",
+            new Dictionary<string, object?> { ["projectId"] = 123 },
+            cancellationToken: timeout.Token);
+        Assert.True(overflow.IsError);
+        Assert.Contains("project point value", GetText(overflow), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Infinity", GetText(overflow), StringComparison.OrdinalIgnoreCase);
+
+        var invalid = await client.CallToolAsync(
+            "list_points",
+            new Dictionary<string, object?> { ["projectId"] = 0 },
+            cancellationToken: timeout.Token);
+        Assert.True(invalid.IsError);
+        Assert.Contains("projectId must be positive", GetText(invalid));
+    }
+
+    [Fact]
     public async Task ProductionServer_CurrentUserBoundary_IsSafeForOptionalFieldsAndErrors()
     {
         await using var taiga = FakeTaigaHttpServer.Start();
@@ -796,7 +861,7 @@ public sealed class McpIntegrationTests
                 => await client.CallToolAsync(name, arguments, cancellationToken: protocolDeadline.Token);
 
             var tools = await client.ListToolsAsync(cancellationToken: protocolDeadline.Token);
-            Assert.Equal(41, tools.Count);
+            Assert.Equal(43, tools.Count);
             var expectedNames = new[]
             {
                 "add_work_item_comment",
@@ -822,8 +887,10 @@ public sealed class McpIntegrationTests
                 "list_issue_statuses",
                 "list_issue_types",
                 "list_issues",
-                 "list_project_members",
-                 "list_projects",
+                "list_points",
+                "list_project_members",
+                "list_project_roles",
+                "list_projects",
                  "list_sprints",
                  "list_task_statuses",
                 "list_tasks",

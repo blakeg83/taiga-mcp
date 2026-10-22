@@ -45,6 +45,16 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode SprintStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public HttpStatusCode PointsStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public string PointsResponseBody { get; set; } =
+        "[{\"id\":21,\"project\":123,\"name\":\"Not estimated\",\"order\":0,\"value\":null},{\"id\":22,\"project\":123,\"name\":\"Half\",\"order\":1,\"value\":0.5}]";
+
+    public HttpStatusCode RolesStatusCode { get; set; } = HttpStatusCode.OK;
+
+    public string RolesResponseBody { get; set; } =
+        "[{\"id\":7,\"project\":123,\"name\":\"Developer\",\"computable\":true},{\"id\":8,\"project\":123,\"name\":\"Reviewer\",\"computable\":false}]";
+
     public HttpStatusCode CurrentUserStatusCode { get; set; } = HttpStatusCode.OK;
 
     public HttpStatusCode AttachmentStatusCode { get; set; } = HttpStatusCode.OK;
@@ -355,6 +365,44 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                     ["Taiga-Info-Total-Opened-Milestones"] = "1",
                     ["Taiga-Info-Total-Closed-Milestones"] = "1"
                 });
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/points")
+        {
+            await RespondAsync(
+                context.Response,
+                PointsStatusCode,
+                PointsStatusCode == HttpStatusCode.OK
+                    ? PointsResponseBody
+                    : "{\"detail\":\"synthetic points secret\"}",
+                PointsStatusCode == HttpStatusCode.OK
+                    ? new Dictionary<string, string>
+                    {
+                        ["x-paginated"] = "true",
+                        ["x-pagination-count"] = "2",
+                        ["x-pagination-next"] = "/api/v1/points?project=123&page=2"
+                    }
+                    : null);
+            return;
+        }
+
+        if (request.HttpMethod == HttpMethod.Get.Method && path == "/api/v1/roles")
+        {
+            await RespondAsync(
+                context.Response,
+                RolesStatusCode,
+                RolesStatusCode == HttpStatusCode.OK
+                    ? RolesResponseBody
+                    : "{\"detail\":\"synthetic roles secret\"}",
+                RolesStatusCode == HttpStatusCode.OK
+                    ? new Dictionary<string, string>
+                    {
+                        ["x-paginated"] = "true",
+                        ["x-pagination-count"] = "2",
+                        ["x-pagination-next"] = "/api/v1/roles?project=123&page=2"
+                    }
+                    : null);
             return;
         }
 
