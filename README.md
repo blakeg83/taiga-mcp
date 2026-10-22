@@ -55,6 +55,45 @@ wire filters and envelope fields, including the current-user identity contract.
 - Taiga account and credentials
 
 ## Build and Run
+
+On Windows, install or update the MCP server and both Codex skills with:
+
+```powershell
+pwsh -File .\scripts\Install-Codex.ps1
+```
+
+Requires PowerShell 7.3+, the .NET SDK selected by `global.json`, and Codex CLI
+on PATH. The script publishes this checkout to a new self-contained release
+under `%LOCALAPPDATA%\TaigaMCP`, backs up Codex configuration, and re-registers
+`taiga` with its existing environment variables. On first setup it uses
+`TAIGA__USERNAME`/`TAIGA__PASSWORD` from the process environment or prompts
+(the password is hidden). `TAIGA__BASEURL` defaults to Taiga Cloud; set it
+before first setup for a self-hosted server. Credentials are saved in the
+local Codex configuration, as with manual setup.
+
+Both complete skill folders are copied to `%USERPROFILE%\.agents\skills`;
+existing copies under the Codex home `skills` directory are updated there
+instead. `CODEX_HOME` is respected. Restart Codex afterward. No Taiga data is
+read or changed during installation.
+
+Other Codex settings and connections are retained. Re-registering `taiga`
+resets its custom tool filters, timeouts, and other server options to Codex
+defaults. Environment variables previously inherited through `env_vars` are
+saved with their current values. Old releases remain available for rollback;
+running servers are not stopped. To choose a different publish location:
+
+```powershell
+pwsh -File .\scripts\Install-Codex.ps1 -InstallRoot C:\Tools\TaigaMCP
+```
+
+Pull the desired repository version before running the script; it publishes
+the current checkout without changing branches or pulling automatically.
+Codex's [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
+and [skill discovery](https://learn.chatgpt.com/docs/build-skills) documentation
+describe the installation locations.
+
+For manual development runs:
+
 ```bash
 dotnet restore && dotnet build -c Release
 TAIGA__USERNAME=you@example.com TAIGA__PASSWORD=secret \
