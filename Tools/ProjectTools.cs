@@ -43,6 +43,40 @@ public sealed class ProjectTools
             result.HasMore);
     });
 
+    [McpServerTool(Name = "list_points")]
+    [Description("List one page of the configured story-point options for a project. Returns pagination metadata and items with ID, name, numeric value, ordering, and project ID when supplied by Taiga; null values represent unestimated work and fractional values are preserved.")]
+    public async Task<string> ListPoints(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _projects.ListPointsPageAsync(projectId, page, cancellationToken);
+        return ToolResponseJson.SerializePage(
+            result.Items,
+            result.Page,
+            result.Total,
+            result.NextPage,
+            result.HasMore);
+    });
+
+    [McpServerTool(Name = "list_project_roles")]
+    [Description("List one page of the project roles used by Taiga's native story-point estimation system. Returns pagination metadata and items with ID, name, and computable estimation flag.")]
+    public async Task<string> ListProjectRoles(
+        [Description("Positive internal project ID, not a slug.")] int projectId,
+        [Description("Page number, starting at 1; requests one page only.")] int page = 1,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var result = await _projects.ListProjectRolesPageAsync(projectId, page, cancellationToken);
+        return ToolResponseJson.SerializePage(
+            result.Items,
+            result.Page,
+            result.Total,
+            result.NextPage,
+            result.HasMore);
+    });
+
     [McpServerTool(Name = "resolve_project")]
     [Description("Resolve an exact project slug to its internal project ID.")]
     public async Task<string> ResolveProject(

@@ -8,9 +8,10 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 41 tools:
+The current server exposes 43 tools:
 
-- 3 project tools: `list_projects`, `list_project_members`, and `resolve_project`.
+- 5 project tools: `list_projects`, `list_project_members`, `list_points`,
+  `list_project_roles`, and `resolve_project`.
 - 1 sprint tool: `list_sprints`.
 - 1 identity tool: `get_current_user`.
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
@@ -761,6 +762,8 @@ show the JSON contents, not an MCP `content` wrapper.
 | `resolve_work_item` | `projectId`, `kind`, and `ref` required; `kind` is one of `issue`, `user_story`, `task`, or `epic` | `{ kind, id, ref, project, subject?, version? }`; identity is checked against the requested project/ref. |
 | `get_current_user` | No arguments | One identity object with required positive `id` and optional `username`, `full_name`, and `is_active`. |
 | `list_project_members` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; member items expose `membership_id`, `project`, optional `user_id`, `role_id`, `role_name`, `full_name`, `is_user_active`, `is_admin`, and `is_owner`. |
+| `list_points` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; point items expose `{ id, name, value, order, project? }` from the requested project. `value` is nullable for unestimated work and preserves fractional numbers; `project` is included when Taiga supplies it. One upstream page is requested per call. |
+| `list_project_roles` | `projectId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`; role items expose `{ id, name, computable }` from the requested project. `computable` identifies roles participating in native story-point estimation; private permission and member-count fields are excluded. One upstream page is requested per call. |
 | `list_sprints` | `projectId` integer, required; `page` integer, default `1`; `closed` boolean?, default `null` | `{ items, page, total, next_page, has_more }`; sprint items expose `{ id, project, name, slug, estimated_start, estimated_finish, closed }`. Omitted/null `closed` sends no filter; false selects open milestones and true selects closed milestones. Use `id` as `milestoneId`; nested stories, point aggregates, statistics, and date filters are not included. |
 | `list_issues` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `typeId`, `priorityId`, `severityId`, `tags`, `query`, `includeClosed=false`, `includePageInfo=false` optional | Bare array by default; when `includePageInfo=true`, `{ items, page, total, next_page, has_more }`. Classification IDs accompany labels. |
 | `get_issue` | `issueId` integer, required | `{ "issue": <issue>, "comments": <visible comments> }`. |

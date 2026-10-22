@@ -72,12 +72,190 @@ public sealed class ProjectApi
         return new ProjectMemberListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);
     }
 
+    public async Task<IReadOnlyList<PointOptionDto>> ListPointsAsync(
+        int projectId,
+        CancellationToken cancellationToken = default)
+        => (await ListPointsPageAsync(projectId, 1, cancellationToken)).Items;
+
+    public async Task<IReadOnlyList<PointOptionDto>> ListPointsAsync(
+        int projectId,
+        int page,
+        CancellationToken cancellationToken = default)
+        => (await ListPointsPageAsync(projectId, page, cancellationToken)).Items;
+
+    internal async Task<ProjectPointListPage> ListPointsPageAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
+
+        var projectValue = Uri.EscapeDataString(projectId.ToString(CultureInfo.InvariantCulture));
+        var pageValue = Uri.EscapeDataString(page.ToString(CultureInfo.InvariantCulture));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"points?project={projectValue}&page={pageValue}");
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid project point list data.");
+
+        var items = new List<PointOptionDto>(32);
+        foreach (var point in document.RootElement.EnumerateArray())
+        {
+            var mapped = MapPoint(point);
+            if (mapped.Project.HasValue && mapped.Project.Value != projectId)
+                throw new TaigaRequestException("Taiga returned project point data for a different project.");
+
+            items.Add(mapped);
+        }
+
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new ProjectPointListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);
+    }
+
+    public async Task<IReadOnlyList<ProjectRoleDto>> ListProjectRolesAsync(
+        int projectId,
+        CancellationToken cancellationToken = default)
+        => (await ListProjectRolesPageAsync(projectId, 1, cancellationToken)).Items;
+
+    public async Task<IReadOnlyList<ProjectRoleDto>> ListProjectRolesAsync(
+        int projectId,
+        int page,
+        CancellationToken cancellationToken = default)
+        => (await ListProjectRolesPageAsync(projectId, page, cancellationToken)).Items;
+
+    internal async Task<ProjectRoleListPage> ListProjectRolesPageAsync(
+        int projectId,
+        int page = 1,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(projectId, nameof(projectId));
+        InputValidation.Positive(page, nameof(page));
+
+        var projectValue = Uri.EscapeDataString(projectId.ToString(CultureInfo.InvariantCulture));
+        var pageValue = Uri.EscapeDataString(page.ToString(CultureInfo.InvariantCulture));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"roles?project={projectValue}&page={pageValue}");
+        using var response = await _transport.ReadWithHeadersAsync(request, cancellationToken);
+        using var document = response.Document;
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new TaigaRequestException("Taiga returned invalid project role list data.");
+
+        var items = new List<ProjectRoleDto>(32);
+        foreach (var role in document.RootElement.EnumerateArray())
+        {
+            var mapped = MapProjectRole(role);
+            if (TryReadOptionalPositiveInt(role, "project", "project role") is { } roleProject && roleProject != projectId)
+                throw new TaigaRequestException("Taiga returned project role data for a different project.");
+
+            items.Add(mapped);
+        }
+
+        var pageInfo = TaigaPagination.Parse(response.Headers, response.RequestUri);
+        return new ProjectRoleListPage(items, page, pageInfo.Total, pageInfo.NextPage, pageInfo.HasMore);
+    }
+
     public async Task<int> ResolveProjectIdAsync(string slug, CancellationToken cancellationToken = default)
     {
         InputValidation.Required(slug, nameof(slug));
         using var req = new HttpRequestMessage(HttpMethod.Get, $"resolver?project={Uri.EscapeDataString(slug)}");
         using var doc = await _transport.ReadAsync(req, cancellationToken);
         return doc.RootElement.GetProperty("project").GetInt32();
+    }
+
+    private static PointOptionDto MapPoint(JsonElement point)
+    {
+        if (point.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid project point data.");
+
+        return new PointOptionDto
+        {
+            Id = ReadRequiredPositiveInt(point, "id", "project point"),
+            Name = ReadRequiredString(point, "name", "project point"),
+            Value = ReadOptionalDouble(point, "value", "project point"),
+            Order = ReadRequiredInt(point, "order", "project point"),
+            Project = TryReadOptionalPositiveInt(point, "project", "project point")
+        };
+    }
+
+    private static ProjectRoleDto MapProjectRole(JsonElement role)
+    {
+        if (role.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid project role data.");
+
+        return new ProjectRoleDto
+        {
+            Id = ReadRequiredPositiveInt(role, "id", "project role"),
+            Name = ReadRequiredString(role, "name", "project role"),
+            Computable = ReadRequiredBoolean(role, "computable", "project role")
+        };
+    }
+
+    private static int ReadRequiredPositiveInt(JsonElement element, string propertyName, string resource)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid {resource} {propertyName} data.");
+
+        return number;
+    }
+
+    private static int ReadRequiredInt(JsonElement element, string propertyName, string resource)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number))
+            throw new TaigaRequestException($"Taiga returned invalid {resource} {propertyName} data.");
+
+        return number;
+    }
+
+    private static string ReadRequiredString(JsonElement element, string propertyName, string resource)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(value.GetString()))
+            throw new TaigaRequestException($"Taiga returned invalid {resource} {propertyName} data.");
+
+        return value.GetString()!;
+    }
+
+    private static bool ReadRequiredBoolean(JsonElement element, string propertyName, string resource)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
+            throw new TaigaRequestException($"Taiga returned invalid {resource} {propertyName} data.");
+
+        return value.GetBoolean();
+    }
+
+    private static double? ReadOptionalDouble(JsonElement element, string propertyName, string resource)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetDouble(out var number) ||
+            !double.IsFinite(number))
+            throw new TaigaRequestException($"Taiga returned invalid {resource} {propertyName} data.");
+
+        return number;
+    }
+
+    private static int? TryReadOptionalPositiveInt(JsonElement element, string propertyName, string resource)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (value.ValueKind != JsonValueKind.Number ||
+            !value.TryGetInt32(out var number) ||
+            number <= 0)
+            throw new TaigaRequestException($"Taiga returned invalid {resource} {propertyName} data.");
+
+        return number;
     }
 
     private static ProjectMemberDto MapProjectMember(JsonElement member)
@@ -151,6 +329,20 @@ public sealed class ProjectApi
 
 internal sealed record ProjectMemberListPage(
     IReadOnlyList<ProjectMemberDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
+
+internal sealed record ProjectPointListPage(
+    IReadOnlyList<PointOptionDto> Items,
+    int Page,
+    int? Total,
+    int? NextPage,
+    bool? HasMore);
+
+internal sealed record ProjectRoleListPage(
+    IReadOnlyList<ProjectRoleDto> Items,
     int Page,
     int? Total,
     int? NextPage,
