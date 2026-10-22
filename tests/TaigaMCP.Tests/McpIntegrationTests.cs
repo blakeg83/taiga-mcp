@@ -91,7 +91,8 @@ public sealed class McpIntegrationTests
         var rolesJson = rolesEnvelope.GetProperty("items");
         Assert.Equal(7, rolesJson[0].GetProperty("id").GetInt32());
         Assert.True(rolesJson[0].GetProperty("computable").GetBoolean());
-        Assert.False(rolesJson[0].TryGetProperty("permissions", out _));
+        Assert.Equal("add_us", Assert.Single(rolesJson[0].GetProperty("permissions").EnumerateArray()).GetString());
+        Assert.False(rolesJson[1].TryGetProperty("permissions", out _));
         Assert.Equal("/api/v1/roles?project=123&page=1", taiga.Requests.Last(request => request.Method == "GET" && request.PathAndQuery.StartsWith("/api/v1/roles?", StringComparison.Ordinal)).PathAndQuery);
 
         taiga.PointsResponseBody = "[{\"id\":21,\"project\":123,\"name\":\"Overflow\",\"order\":0,\"value\":1e999}]";

@@ -170,9 +170,16 @@ Perform all of the following before creating anything:
    supplied. Membership proves project association, but it is not by itself
    proof of write or assignment authority. Accept an administrative/owner
    flag as sufficient project-level evidence when the connection exposes it;
-   otherwise require an explicit connection-provided permission capability for
-   the member's role. If the connection cannot establish assignment/write
-   authority or returns conflicting evidence, stop with a no-write blocker.
+   otherwise match the membership's `role_id` to `list_project_roles.id` and
+   inspect that role's `permissions`. For the normal epic/story/task workflow,
+   require `view_epics`, `add_epic`, `modify_epic` (link stories), `view_us`,
+   `add_us`, `modify_us` (estimates), `view_tasks`, and `add_task`. Check only
+   capabilities used by the approved plan. Self-assignment uses the confirmed
+   active membership and these create permissions; do not require an invented
+   assignment permission or administrative status. The estimation role may
+   differ from the member's role and does not grant the member authority.
+   Missing/null permissions are unknown; an empty array grants none. If the
+   required permissions are absent or evidence conflicts, stop and name them.
    Never use a trial mutation to discover permissions and never guess another
    assignee after a permission rejection.
 4. Read every page of `list_project_roles` and `list_points`. Select exactly
@@ -182,14 +189,13 @@ Perform all of the following before creating anything:
    point mapping is ambiguous.
 5. Confirm the required tool set listed above is available. Do not infer tool
    availability from documentation or from a previous invocation.
-6. Check for possible duplicates before any create operation. For every
-   planned epic, story, and task, use the corresponding project-scoped list
+6. Check for possible duplicates before any create operation. For each
+   needed work-item type, use the corresponding project-scoped list
    operation with closed/archived coverage and no unrelated restrictive
    filters: `list_epics(includeClosed=true)`,
    `list_user_stories(includeClosed=true, includeArchived=true,
-   includePageInfo=true)`, and `list_tasks(includeClosed=true)`. A subject
-   query may narrow the candidate set, but it must remain project-scoped and
-   exact/near matches must still be compared locally. Follow every positive
+   includePageInfo=true)`, and `list_tasks(includeClosed=true)`. Compare all
+   planned subjects against these results locally. Follow every positive
    `next_page` until the server reports completion. If `next_page` is null and
    `has_more` is true, or if `total` proves that returned pages are incomplete,
    stop with an inconsistent-pagination blocker. If the available metadata is
@@ -206,6 +212,10 @@ Perform all of the following before creating anything:
 7. Validate that all planned stories have an unambiguous target epic and all
    planned tasks have an unambiguous parent story. Preserve the plan's order;
    do not infer missing relationships from subject text.
+
+Fetch each metadata list once per publication, following its pages, and reuse
+it for all items. Scan each needed work-item type once for the project and
+compare all planned subjects locally; do not repeat full scans for each item.
 
 A preflight failure is a no-write result. A preflight success is not a claim
 that Taiga has accepted a future write; it only authorizes the ordered
@@ -257,6 +267,17 @@ configured role/point IDs from preflight:
    the selected point-option ID and that the story's returned project and
    assignment remain correct. Verify the selected numeric value from the
    configured point option, not from an untrusted total alone.
+5. Reconcile the entire returned `points` mapping against `list_points`:
+   resolve every non-null point-option ID and sum all configured numeric
+   values across roles, including non-computable roles. Null mappings and
+   options with `value: null` contribute no numeric value; zero remains zero.
+   Compare this sum with the returned `total_points` (allow normal floating
+   point rounding). No numeric contributions means unestimated, not zero.
+   Unknown point IDs, missing mappings/totals, or a mismatched server total
+   leave the total unverified. If another role contributes points, report the
+   selected role's estimate and the whole-story total separately. Flag a total
+   that differs from the approved estimate and mark publication partial;
+   never clear or overwrite another role's points to force agreement.
 
 An estimate is not confirmed by a successful tool response alone; it is
 confirmed only by the authoritative read-back. Undefined estimates remain
@@ -280,25 +301,32 @@ After the ordered writes and estimate updates, verify every result:
 - Reconcile the verified entities against the approved plan. Any missing,
   mismatched, or unreadable field is unverified; do not present it as success.
 
+Reuse the post-estimate story read for final story verification when no later
+write affects that story; avoid a second identical detail read.
+
 Produce a concise report with separate sections for:
 
 - preflight inputs and results;
 - created epics, stories, links, tasks, and their Taiga references;
 - confirmed assignments and native estimates;
-- story-point totals calculated only from confirmed configured numeric values;
+- selected-role estimate totals and reconciled whole-story totals, clearly
+  distinguished when other roles contribute; never include unverified totals;
 - failed, ambiguous, or unverified operations and whether a write may have
   applied; and
 - direct Taiga UI links for every created item when the UI origin is known.
 
 Construct links only from a known Taiga UI origin and the authoritative
-project slug/reference (for example, the Taiga project epic, user-story, and
-task routes). Never turn an API `/api/v1/` URL into a UI link by guesswork. If
-the UI origin is unavailable, include the project slug and references and mark
-the link as unavailable rather than fabricating one.
+project slug/reference: `/project/{slug}/epic/{ref}`,
+`/project/{slug}/us/{ref}`, and `/project/{slug}/task/{ref}`. Use displayed
+references, not internal IDs. Never turn an API `/api/v1/` URL into a UI link
+by guesswork. If the UI origin is unavailable, include the project slug and
+references and mark the link as unavailable rather than fabricating one.
 
 The report is a success only when all intended items, relationships,
-assignments, estimates, and required links are confirmed. Otherwise label it
-partial or blocked and list the exact next decision needed from the user.
+assignments, and estimates are confirmed. An unavailable UI origin alone does
+not invalidate verified publication; report references with links unavailable.
+Otherwise label it partial or blocked and list the exact next decision needed
+from the user.
 
 ## Invocation and expected output
 
@@ -314,77 +342,7 @@ totals, direct UI links when available, and any failed or unverified step.
 Do not treat a plan, a successful preflight, or a create response without
 authoritative read-back as a completed publication.
 
-## Local validation expectations
+## Skill maintenance
 
-Validate this skill with a focused local/mock review, never with live Taiga
-publishing writes:
-
-- exercise a structured plan containing multiple stories and ordered tasks;
-- exercise a less structured plan and confirm conservative hierarchy
-  interpretation, preserved requirements, and deterministic task prefixes;
-- inspect missing configuration, ambiguous role selection, exact duplicate
-  candidates, partial write failure, and an ambiguous write outcome;
-- confirm that a planning-only request performs no Taiga writes;
-- confirm that publication uses the required preflight, creation, estimate,
-  and authoritative read-back sequence; and
-- confirm compatibility with `taiga-story-loop-lite`: no agents, no
-  implementation/review/PR workflow, and numeric task ordering is preserved.
-
-Record which checks were inspected from local instructions/examples and which
-were actually exercised through native runtime capabilities. A read-only
-walkthrough is not evidence that live publication succeeded.
-
-### Concrete transient mock scenario
-
-For a focused local/mock exercise, use this deterministic fixture in memory;
-do not add a runner or helper to the repository and do not call live Taiga
-write tools:
-
-- Input project: slug `taiga-mcp`, ID `12`; known UI origin
-  `https://taiga.example`; authenticated user ID `42`, active.
-- Membership response: one active membership for user `42`, with
-  `is_admin=true`; project roles contain one computable role `{ id: 7 }`;
-  point options contain `{ id: 21, value: 1 }`, `{ id: 22, value: 3 }`, and
-  `{ id: 23, value: 5 }`.
-- Approved plan: epic `Release 1`; story `Import API` estimated at `3`, with
-  tasks `01 Add endpoint` and `02 Add tests`; story `Verify UI` estimated at
-  `5`, with task `01 Add browser check`.
-- Duplicate scans return empty closed/archived-aware pages with
-  `next_page=null` and `has_more=false`. Synthetic writes return epic
-  `id=100, ref=50`, stories `id=200/ref=60` and `id=201/ref=61`, and tasks
-  `id=300/ref=70`, `id=301/ref=71`, and `id=302/ref=72`, all assigned to `42`.
-  Relationship writes return confirmed links. Estimate read-backs return
-  role `7` mapped to point IDs `22` and `23`; relationship verification
-  returns all story IDs.
-
-The exercise must assert the exact safe sequence
-`preflight → epic → stories → links → ordered tasks → fresh story reads →
-estimate writes → estimate reads → relationship/identity/assignment reads`,
-by consuming the supplied responses to decide whether each next action is
-allowed. Do not assign an expected event list or report as a constant: record
-each receipt from the response, stop when a response is blocking or ambiguous,
-and derive the report fields from those receipts. Every assignment must be
-`42`, no duplicate write may occur, and the generated report must include
-fixture-backed direct links such as:
-
-```text
-Publication: SUCCESS
-Project: taiga-mcp (12)
-User: 42
-Epic: Release 1 (#50) assigned_to=42 https://taiga.example/project/taiga-mcp/epic/50
-Stories: Import API (#60)=3 points https://taiga.example/project/taiga-mcp/user-story/60; Verify UI (#61)=5 points https://taiga.example/project/taiga-mcp/user-story/61
-Tasks: #70 https://taiga.example/project/taiga-mcp/task/70; #71 https://taiga.example/project/taiga-mcp/task/71; #72 https://taiga.example/project/taiga-mcp/task/72 — all assigned_to=42 and attached to their planned stories
-Confirmed story-point total: 8
-```
-
-Then alter one supplied response at a time and expose the derived trace and
-report: missing point/role configuration or two equally eligible computable
-roles must stop at preflight with `BLOCKED` and zero create calls; an exact
-matching closed or archived candidate must stop after the duplicate scan with
-`BLOCKED` and zero create calls; and an ambiguous task-create transport result
-must make exactly one attempted create, stop dependent work, and produce
-`PARTIAL` with a note that the write may have applied. Record these mock
-results separately from static inspection and native runtime execution. The
-fixture is validation evidence only; it is not a publisher runtime, retry
-framework, or recovery mechanism.
-
+When changing or validating this skill, use [the local validation fixture](references/validation.md).
+It is maintenance guidance; do not load or run it during ordinary publication.

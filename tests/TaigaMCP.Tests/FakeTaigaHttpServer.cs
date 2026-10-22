@@ -53,7 +53,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
     public HttpStatusCode RolesStatusCode { get; set; } = HttpStatusCode.OK;
 
     public string RolesResponseBody { get; set; } =
-        "[{\"id\":7,\"project\":123,\"name\":\"Developer\",\"computable\":true},{\"id\":8,\"project\":123,\"name\":\"Reviewer\",\"computable\":false}]";
+        "[{\"id\":7,\"project\":123,\"name\":\"Developer\",\"computable\":true,\"permissions\":[\"add_us\"]},{\"id\":8,\"project\":123,\"name\":\"Reviewer\",\"computable\":false}]";
 
     public HttpStatusCode CurrentUserStatusCode { get; set; } = HttpStatusCode.OK;
 

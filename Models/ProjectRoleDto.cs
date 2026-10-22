@@ -12,4 +12,7 @@ public sealed record ProjectRoleDto
 
     [JsonPropertyName("computable")]
     public bool Computable { get; init; }
+
+    [JsonPropertyName("permissions")]
+    public IReadOnlyList<string>? Permissions { get; init; }
 }
