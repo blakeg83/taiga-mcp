@@ -1,0 +1,6 @@
+interface:
+  display_name: "Taiga backlog publisher"
+  short_description: "Plan or publish a verified Taiga backlog"
+  default_prompt: "Use $taiga-backlog-publisher to interpret this plan and, when explicitly requested, publish and verify its Taiga backlog."
+policy:
+  allow_implicit_invocation: false
