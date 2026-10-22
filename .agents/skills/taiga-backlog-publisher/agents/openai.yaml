@@ -1,0 +1,4 @@
+interface:
+  display_name: "Taiga backlog publisher"
+  short_description: "Interpret and estimate Taiga backlog plans"
+  default_prompt: "Use $taiga-backlog-publisher to turn this implementation plan into an estimated Taiga publishing plan."
