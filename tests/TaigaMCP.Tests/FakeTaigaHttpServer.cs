@@ -88,6 +88,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode UserStoryUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public string? UserStoryUpdateResponseOverride { get; set; }
+
     public string UserStory102ResponseBody
     {
         get
@@ -812,10 +814,22 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
                 }
                 else
                 {
-                    foreach (var field in new[] { "subject", "description", "status", "assigned_to", "tags", "milestone" })
+                    foreach (var field in new[] { "subject", "description", "status", "assigned_to", "tags", "milestone", "points" })
                     {
                         if (patch.ContainsKey(field))
-                            story[field] = patch[field]?.DeepClone();
+                        {
+                            if (field == "points" && patch[field] is JsonObject patchPoints)
+                            {
+                                var storyPoints = story[field] as JsonObject ?? new JsonObject();
+                                foreach (var point in patchPoints)
+                                    storyPoints[point.Key] = point.Value?.DeepClone();
+                                story[field] = storyPoints;
+                            }
+                            else
+                            {
+                                story[field] = patch[field]?.DeepClone();
+                            }
+                        }
                     }
 
                     if (patch.TryGetPropertyValue("status", out var statusNode) && statusNode is not null)
@@ -835,6 +849,8 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
             if (responseStatus == HttpStatusCode.OK)
                 RecordComment(path, patch);
+            if (responseStatus == HttpStatusCode.OK && UserStoryUpdateResponseOverride is not null)
+                responseBody = UserStoryUpdateResponseOverride;
             await RespondAsync(context.Response, responseStatus, responseBody);
             return;
         }

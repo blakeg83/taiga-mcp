@@ -231,6 +231,92 @@ public sealed class UserStoryApi
         }
     }
 
+    public async Task<UserStoryDetailDto> SetUserStoryEstimatesAsync(
+        int userStoryId,
+        int version,
+        IReadOnlyList<UserStoryEstimateEntry> rolePoints,
+        CancellationToken cancellationToken = default)
+    {
+        InputValidation.Positive(userStoryId, nameof(userStoryId));
+        InputValidation.Nonnegative(version, nameof(version));
+        if (rolePoints is null || rolePoints.Count == 0)
+            throw new ArgumentException("rolePoints must contain one or more role estimates.");
+
+        var points = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var entry in rolePoints)
+        {
+            if (entry is null)
+                throw new ArgumentException("rolePoints cannot contain null entries.");
+
+            InputValidation.Positive(entry.RoleId, "roleId");
+            InputValidation.Positive(entry.PointId, "pointId");
+            var roleId = entry.RoleId.ToString(CultureInfo.InvariantCulture);
+            if (!points.TryAdd(roleId, entry.PointId))
+                throw new ArgumentException($"rolePoints contains duplicate role ID {entry.RoleId}.");
+        }
+
+        var payload = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["points"] = points,
+            ["version"] = version
+        };
+        var json = JsonSerializer.Serialize(payload);
+
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"userstories/{userStoryId}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+
+        using var document = await _transport.ReadAsync(request, cancellationToken);
+        try
+        {
+            var userStory = document.RootElement;
+            ValidateEstimateUpdateResponse(userStory, userStoryId);
+            var project = ReadDetailOptionalInt(userStory, "project");
+            var statusId = ReadDetailOptionalInt(userStory, "status");
+            var storyStatus = ReadStatusExtraInfoName(userStory);
+            if (storyStatus is null && statusId.HasValue && project is > 0)
+            {
+                var statusMap = await LoadStatusMapAsync(project.Value, cancellationToken);
+                storyStatus = statusMap.GetValueOrDefault(statusId.Value);
+            }
+
+            return MapUserStoryDetail(userStory, project, statusId, storyStatus);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new OperationCanceledException(
+                "Taiga write may already have applied; response enrichment was cancelled. Read the entity before retrying.",
+                cancellationToken);
+        }
+        catch (TaigaRequestException exception)
+        {
+            throw new TaigaRequestException(
+                $"Taiga write may already have applied; response enrichment failed: {exception.Message} Read the entity before retrying.");
+        }
+        catch (Exception)
+        {
+            throw new TaigaRequestException(
+                "Taiga write may already have applied; response enrichment failed. Read the entity before retrying.");
+        }
+    }
+
+    private static void ValidateEstimateUpdateResponse(JsonElement userStory, int expectedUserStoryId)
+    {
+        if (userStory.ValueKind != JsonValueKind.Object ||
+            !userStory.TryGetProperty("id", out var idElement) ||
+            idElement.ValueKind != JsonValueKind.Number ||
+            !idElement.TryGetInt32(out var id) ||
+            id <= 0 ||
+            id != expectedUserStoryId)
+            throw new TaigaRequestException("Taiga returned invalid user story estimate update identity data.");
+
+        if (!userStory.TryGetProperty("points", out var points) ||
+            points.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid user story estimate update points data.");
+    }
+
     public Task<int> AddCommentAsync(
         int userStoryId,
         int version,
