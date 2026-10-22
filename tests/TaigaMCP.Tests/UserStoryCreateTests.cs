@@ -82,6 +82,8 @@ public sealed class UserStoryCreateTests
             Assert.Equal(7, story.StatusId);
             Assert.Equal(42, story.AssignedTo);
             Assert.Equal(55, story.Milestone);
+            Assert.Equal(23, story.Points![7]);
+            Assert.Equal(5.5, story.TotalPoints);
 
             var request = Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/userstories"));
             using var body = JsonDocument.Parse(request.Body);
@@ -261,6 +263,28 @@ public sealed class UserStoryCreateTests
 
             Assert.Contains("may already have applied", exception.Message);
             Assert.Single(handler.Requests, item => item.Method == HttpMethod.Post && item.Uri.AbsolutePath.EndsWith("/userstories"));
+        }
+    }
+
+    [Fact]
+    public async Task CreateUserStoryAsync_ReportsMalformedEstimateAsPotentiallyAppliedWithSafeDetail()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Post,
+                "/api/v1/userstories",
+                """{"id":102,"version":4,"points":[]}""",
+                HttpStatusCode.Created);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth))
+                    .CreateUserStoryAsync(12, "Allow saved searches"));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.Contains("points data", exception.Message);
+            Assert.DoesNotContain("[]", exception.Message);
         }
     }
 

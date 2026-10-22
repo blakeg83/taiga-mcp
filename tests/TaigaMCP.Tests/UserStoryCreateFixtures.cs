@@ -33,6 +33,8 @@ internal static class UserStoryCreateFixtures
           "assigned_to":42,
           "tags":[["search","#336699"],["saved",null]],
           "milestone":55,
+          "points":{"7":23},
+          "total_points":5.5,
           "modified_date":"2026-09-28T12:00:00Z",
           "version":4
         }

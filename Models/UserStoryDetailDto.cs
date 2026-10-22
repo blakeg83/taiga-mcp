@@ -41,6 +41,12 @@ public sealed record UserStoryDetailDto
     [JsonPropertyName("version")]
     public int Version { get; init; }
 
+    [JsonPropertyName("points")]
+    public IReadOnlyDictionary<int, int>? Points { get; init; }
+
+    [JsonPropertyName("total_points")]
+    public double? TotalPoints { get; init; }
+
     [JsonPropertyName("origin_issue")]
     public JsonElement? OriginIssue { get; init; }
 

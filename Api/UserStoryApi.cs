@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text;
+using System.Globalization;
 using TaigaMCP.Models;
 
 namespace TaigaMCP.Api;
@@ -140,6 +141,11 @@ public sealed class UserStoryApi
                 "Taiga write may already have applied; response enrichment was cancelled. Read the entity before retrying.",
                 cancellationToken);
         }
+        catch (TaigaRequestException exception)
+        {
+            throw new TaigaRequestException(
+                $"Taiga write may already have applied; response enrichment failed: {exception.Message} Read the entity before retrying.");
+        }
         catch (Exception)
         {
             throw new TaigaRequestException(
@@ -212,6 +218,11 @@ public sealed class UserStoryApi
             throw new OperationCanceledException(
                 "Taiga write may already have applied; response enrichment was cancelled. Read the entity before retrying.",
                 cancellationToken);
+        }
+        catch (TaigaRequestException exception)
+        {
+            throw new TaigaRequestException(
+                $"Taiga write may already have applied; response enrichment failed: {exception.Message} Read the entity before retrying.");
         }
         catch (Exception)
         {
@@ -440,7 +451,9 @@ public sealed class UserStoryApi
             AssignedTo = ReadOptionalInt(userStory, "assigned_to"),
             Modified = ReadOptionalString(userStory, "modified_date"),
             Milestone = ReadOptionalInt(userStory, "milestone"),
-            Version = ReadOptionalInt(userStory, "version")
+            Version = ReadOptionalInt(userStory, "version"),
+            Points = ReadEstimatePoints(userStory),
+            TotalPoints = ReadTotalPoints(userStory)
         };
     }
 
@@ -471,6 +484,8 @@ public sealed class UserStoryApi
             Milestone = ReadDetailOptionalInt(userStory, "milestone"),
             Modified = ReadDetailOptionalString(userStory, "modified_date"),
             Version = version,
+            Points = ReadEstimatePoints(userStory),
+            TotalPoints = ReadTotalPoints(userStory),
             OriginIssue = ReadDetailOptionalJson(userStory, "origin_issue"),
             OriginTask = ReadDetailOptionalJson(userStory, "origin_task"),
             Epics = ReadDetailOptionalJson(userStory, "epics")
@@ -547,6 +562,52 @@ public sealed class UserStoryApi
             return null;
 
         return value.Clone();
+    }
+
+    private static IReadOnlyDictionary<int, int>? ReadEstimatePoints(JsonElement userStory)
+    {
+        if (!userStory.TryGetProperty("points", out var points) ||
+            points.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (points.ValueKind != JsonValueKind.Object)
+            throw new TaigaRequestException("Taiga returned invalid user story points data.");
+
+        var mapped = new Dictionary<int, int>();
+        foreach (var property in points.EnumerateObject())
+        {
+            if (!int.TryParse(
+                    property.Name,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var roleId) ||
+                roleId <= 0)
+                throw new TaigaRequestException("Taiga returned invalid user story points role id data.");
+
+            if (property.Value.ValueKind != JsonValueKind.Number ||
+                !property.Value.TryGetInt32(out var pointId) ||
+                pointId <= 0)
+                throw new TaigaRequestException("Taiga returned invalid user story points point id data.");
+
+            if (!mapped.TryAdd(roleId, pointId))
+                throw new TaigaRequestException("Taiga returned invalid user story points duplicate role id data.");
+        }
+
+        return mapped;
+    }
+
+    private static double? ReadTotalPoints(JsonElement userStory)
+    {
+        if (!userStory.TryGetProperty("total_points", out var totalPoints) ||
+            totalPoints.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (totalPoints.ValueKind != JsonValueKind.Number ||
+            !totalPoints.TryGetDouble(out var value) ||
+            !double.IsFinite(value))
+            throw new TaigaRequestException("Taiga returned invalid user story total_points data.");
+
+        return value;
     }
 
     private static int ReadInt(JsonElement element, string propertyName)
