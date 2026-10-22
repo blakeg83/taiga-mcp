@@ -30,6 +30,8 @@ public sealed class UserStoryUpdateTests
 
             Assert.Equal(8, story.Version);
             Assert.Equal("Server subject", story.Subject);
+            Assert.Equal(23, story.Points![7]);
+            Assert.Equal(5.5, story.TotalPoints);
             var patch = Assert.Single(handler.Requests, request => request.Method == HttpMethod.Patch);
             using var body = JsonDocument.Parse(patch.Body);
             var root = body.RootElement;
@@ -296,13 +298,34 @@ public sealed class UserStoryUpdateTests
         }
     }
 
+    [Fact]
+    public async Task UpdateUserStoryAsync_ReportsMalformedEstimateAsPotentiallyAppliedWithSafeDetail()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Patch,
+                "/api/v1/userstories/102",
+                """{"id":102,"version":8,"points":{"bad":23}}""");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth))
+                    .UpdateUserStoryAsync(102, version: 7, status: 1));
+
+            Assert.Contains("may already have applied", exception.Message);
+            Assert.Contains("role id", exception.Message);
+            Assert.DoesNotContain("bad", exception.Message);
+        }
+    }
+
     private static FakeHttpMessageHandler CreateUpdateHandler()
         => new FakeHttpMessageHandler()
             .AddJsonRoute(
                 HttpMethod.Patch,
                 "/api/v1/userstories/102",
                 """
-                {"id":102,"ref":18,"project":12,"subject":"Server subject","description":"Server description","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"tags":[["search","#336699"]],"milestone":55,"modified_date":"2026-09-28T12:30:00Z","version":8}
+                {"id":102,"ref":18,"project":12,"subject":"Server subject","description":"Server description","status":7,"status_extra_info":{"name":"Ready"},"assigned_to":42,"tags":[["search","#336699"]],"milestone":55,"points":{"7":23},"total_points":5.5,"modified_date":"2026-09-28T12:30:00Z","version":8}
                 """);
 
     private static HttpResponseMessage JsonResponse(string json)

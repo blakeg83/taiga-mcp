@@ -88,6 +88,20 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
 
     public HttpStatusCode UserStoryUpdateStatusCode { get; set; } = HttpStatusCode.OK;
 
+    public string UserStory102ResponseBody
+    {
+        get
+        {
+            lock (_storyLock)
+                return _userStory102;
+        }
+        set
+        {
+            lock (_storyLock)
+                _userStory102 = value;
+        }
+    }
+
     public HttpStatusCode TaskCreateStatusCode { get; set; } = HttpStatusCode.Created;
 
     public HttpStatusCode TaskUpdateStatusCode { get; set; } = HttpStatusCode.OK;

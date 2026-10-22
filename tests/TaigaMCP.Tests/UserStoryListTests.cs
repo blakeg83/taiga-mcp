@@ -71,7 +71,7 @@ public sealed class UserStoryListTests
     public async Task ListUserStoriesPage_MapsFiltersFieldsAndTrustedPagination()
     {
         var handler = StoryRoutes(
-            "[{\"id\":90,\"ref\":12,\"project\":123,\"subject\":\"Ship & fix\",\"status\":10,\"assigned_to\":42,\"modified_date\":\"2026-09-28T12:02:00Z\",\"milestone\":55,\"version\":7}]",
+            "[{\"id\":90,\"ref\":12,\"project\":123,\"subject\":\"Ship & fix\",\"status\":10,\"assigned_to\":42,\"modified_date\":\"2026-09-28T12:02:00Z\",\"milestone\":55,\"version\":7,\"points\":{\"7\":23,\"8\":24},\"total_points\":5.5}]",
             new Dictionary<string, string>
             {
                 ["x-paginated"] = "true",
@@ -99,6 +99,10 @@ public sealed class UserStoryListTests
             Assert.Equal(55, story.Milestone);
             Assert.Equal(7, story.Version);
             Assert.Equal("Ready", story.Status);
+            Assert.Equal(new[] { 7, 8 }, story.Points!.Keys.OrderBy(key => key));
+            Assert.Equal(23, story.Points[7]);
+            Assert.Equal(24, story.Points[8]);
+            Assert.Equal(5.5, story.TotalPoints);
             Assert.Equal(4, page.Total);
             Assert.Equal(3, page.NextPage);
             Assert.True(page.HasMore);
@@ -106,6 +110,24 @@ public sealed class UserStoryListTests
             Assert.Equal(
                 "?project=123&page=2&status=10%2C11&assigned_to=42&milestone=55&tags=a%26b%2Ctwo%20words&q=fix%20%26%20revisi%C3%B3n",
                 request.Uri.Query);
+            Assert.DoesNotContain(handler.Requests, item => item.Uri.AbsolutePath.EndsWith("/userstories/90"));
+        }
+    }
+
+    [Fact]
+    public async Task ListUserStoriesTool_SerializesNativeEstimatesWithoutDetailReads()
+    {
+        var handler = StoryRoutes("[{\"id\":90,\"ref\":12,\"project\":123,\"status\":10,\"points\":{\"7\":23},\"total_points\":0}]");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            using var json = JsonDocument.Parse(await tools.ListUserStories(123));
+            var story = json.RootElement[0];
+            Assert.Equal(23, story.GetProperty("points").GetProperty("7").GetInt32());
+            Assert.Equal(0, story.GetProperty("total_points").GetDouble());
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath.EndsWith("/userstories/90"));
         }
     }
 

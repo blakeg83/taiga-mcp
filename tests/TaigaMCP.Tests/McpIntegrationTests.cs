@@ -10,6 +10,43 @@ namespace TaigaMCP.Tests;
 public sealed class McpIntegrationTests
 {
     [Fact]
+    public async Task ProductionServer_UserStoryNativeEstimatesAreMappedAndMalformedEstimatesAreSafeErrors()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        taiga.UserStory102ResponseBody =
+            "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Estimated story\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"points\":{\"7\":23,\"8\":24},\"total_points\":5.5,\"version\":4}";
+        var assembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [assembly], CreateEnvironment(taiga), Path.GetDirectoryName(assembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        var valid = await client.CallToolAsync(
+            "get_user_story",
+            new Dictionary<string, object?> { ["userStoryId"] = 102 },
+            cancellationToken: timeout.Token);
+        Assert.False(valid.IsError == true, GetText(valid));
+        var validJson = JsonSerializer.Deserialize<JsonElement>(GetText(valid));
+        Assert.Equal(23, validJson.GetProperty("points").GetProperty("7").GetInt32());
+        Assert.Equal(24, validJson.GetProperty("points").GetProperty("8").GetInt32());
+        Assert.Equal(5.5, validJson.GetProperty("total_points").GetDouble());
+
+        taiga.UserStory102ResponseBody =
+            "{\"id\":102,\"ref\":18,\"project\":123,\"subject\":\"Malformed story\",\"status\":1,\"status_extra_info\":{\"name\":\"Ready\"},\"points\":{\"7\":23,\"07\":24},\"version\":4}";
+        var malformed = await client.CallToolAsync(
+            "get_user_story",
+            new Dictionary<string, object?> { ["userStoryId"] = 102 },
+            cancellationToken: timeout.Token);
+        Assert.True(malformed.IsError);
+        Assert.Contains("duplicate role id", GetText(malformed), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("23", GetText(malformed));
+        Assert.DoesNotContain("24", GetText(malformed));
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
+    [Fact]
     public async Task ProductionServer_EstimationMetadataTools_AreDiscoverableAndBound()
     {
         await using var taiga = FakeTaigaHttpServer.Start();

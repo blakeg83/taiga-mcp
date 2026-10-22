@@ -66,6 +66,130 @@ public sealed class UserStoryDetailTests
     }
 
     [Fact]
+    public async Task GetUserStoryAsync_MapsSingleAndMultipleNativeRoleEstimates()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                """
+                {
+                  "id":102,
+                  "project":12,
+                  "status":7,
+                  "status_extra_info":{"name":"Ready"},
+                  "points":{"7":23,"8":24},
+                  "total_points":5.5,
+                  "version":4
+                }
+                """);
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var story = await new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth))
+                .GetUserStoryAsync(102);
+
+            Assert.NotNull(story.Points);
+            Assert.Equal(2, story.Points!.Count);
+            Assert.Equal(23, story.Points[7]);
+            Assert.Equal(24, story.Points[8]);
+            Assert.Equal(5.5, story.TotalPoints);
+        }
+    }
+
+    [Fact]
+    public async Task GetUserStoryTool_SerializesNativeEstimateFields()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                """{"id":102,"project":12,"status":7,"status_extra_info":{"name":"Ready"},"points":{"7":23},"total_points":0.5,"version":4}""");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var tools = new UserStoryTools(new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)));
+
+            using var json = JsonDocument.Parse(await tools.GetUserStory(102));
+            var story = json.RootElement;
+            Assert.Equal(23, story.GetProperty("points").GetProperty("7").GetInt32());
+            Assert.Equal(0.5, story.GetProperty("total_points").GetDouble());
+        }
+    }
+
+    [Fact]
+    public async Task GetUserStoryAsync_DistinguishesUnestimatedAndZeroPointTotals()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                """{"id":102,"project":12,"status":7,"status_extra_info":{"name":"Ready"},"points":{"7":21},"total_points":null,"version":1}""")
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/103",
+                """{"id":103,"project":12,"status":7,"status_extra_info":{"name":"Ready"},"points":{"7":22},"total_points":0,"version":1}""");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var api = new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth));
+
+            var unestimated = await api.GetUserStoryAsync(102);
+            var zeroPoint = await api.GetUserStoryAsync(103);
+
+            Assert.Null(unestimated.TotalPoints);
+            Assert.Equal(0, zeroPoint.TotalPoints);
+            Assert.Equal(21, unestimated.Points![7]);
+            Assert.Equal(22, zeroPoint.Points![7]);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"7\":23,\"7\":24}")]
+    [InlineData("{\"7\":23,\"07\":24}")]
+    public async Task GetUserStoryAsync_RejectsDuplicateOrCollidingNativeRoleIds(string pointsJson)
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                $"{{\"id\":102,\"version\":1,\"points\":{pointsJson}}}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)).GetUserStoryAsync(102));
+
+            Assert.Contains("duplicate role id", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("23", exception.Message);
+            Assert.DoesNotContain("24", exception.Message);
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"points\":[]}", "points data")]
+    [InlineData("{\"points\":{\"bad\":21}}", "role id")]
+    [InlineData("{\"points\":{\"7\":\"21\"}}", "point id")]
+    [InlineData("{\"total_points\":\"5\"}", "total_points")]
+    public async Task GetUserStoryAsync_RejectsMalformedNativeEstimateData(string estimateJson, string expectedMessage)
+    {
+        var estimate = JsonDocument.Parse(estimateJson).RootElement.EnumerateObject().Single();
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(
+                HttpMethod.Get,
+                "/api/v1/userstories/102",
+                $"{{\"id\":102,\"version\":1,\"{estimate.Name}\":{estimate.Value.GetRawText()}}}");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var exception = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                new UserStoryApi(new TaigaTransport(new TestHttpClientFactory(handler), auth)).GetUserStoryAsync(102));
+
+            Assert.Contains(expectedMessage, exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public async Task GetUserStoryAsync_UsesProjectStatusLookupWhenExtraInfoIsAbsent()
     {
         var handler = new FakeHttpMessageHandler()
@@ -113,6 +237,8 @@ public sealed class UserStoryDetailTests
             Assert.False(story.TryGetProperty("milestone", out _));
             Assert.False(story.TryGetProperty("origin_issue", out _));
             Assert.False(story.TryGetProperty("epics", out _));
+            Assert.False(story.TryGetProperty("points", out _));
+            Assert.False(story.TryGetProperty("total_points", out _));
         }
     }
 
