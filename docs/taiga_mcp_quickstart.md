@@ -12,6 +12,21 @@ This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C
 - Codex CLI installed
 - A Taiga account
 
+## Windows setup script
+
+With PowerShell 7.3+, the pinned .NET SDK, and Codex CLI on PATH, run:
+
+```powershell
+pwsh -File .\scripts\Install-Codex.ps1
+```
+
+It publishes the current checkout to a new per-user release, registers the
+MCP server, and installs both skills. Existing credentials are reused;
+first-time setup prompts if they are absent from the process environment.
+Restart Codex after installation. See [Windows setup in the README](../README.md#build-and-run)
+for paths, overrides, and the settings reset when re-registering `taiga`.
+The remaining sections describe manual setup.
+
 ---
 
 ## 1. Build the existing server
