@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using TaigaMCP.Api;
+using TaigaMCP.Models;
 using ModelContextProtocol.Server;
 
 namespace TaigaMCP.Tools;
@@ -77,6 +78,23 @@ public sealed class UserStoryTools
             milestoneId,
             comment,
             clearFields,
+            cancellationToken);
+        return ToolResponseJson.Serialize(story);
+    });
+
+    [McpServerTool(Name = "set_user_story_estimates")]
+    [Description("Set one or more native user-story role estimates using configured point-option IDs. rolePoints is a required array of explicit {roleId, pointId} entries; omitted roles remain unchanged, point IDs may select the configured unestimated option, and the supplied version is forwarded unchanged. Duplicate roles, invalid IDs, conflicts, and ambiguous writes are not retried.")]
+    public async Task<string> SetUserStoryEstimates(
+        [Description("Positive internal user story ID, not the displayed #ref.")] int userStoryId,
+        [Description("Required current story version, zero or greater; forwarded unchanged to Taiga.")] int version,
+        [Description("One or more explicit role-to-point-option assignments. roleId is a project role ID and pointId is a configured point-option ID; they are distinct identifiers.")] UserStoryEstimateEntry[] rolePoints,
+        CancellationToken cancellationToken = default)
+    => await ToolErrors.RunAsync(async () =>
+    {
+        var story = await _userStories.SetUserStoryEstimatesAsync(
+            userStoryId,
+            version,
+            rolePoints,
             cancellationToken);
         return ToolResponseJson.Serialize(story);
     });

@@ -1,6 +1,6 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 35 tools identify the current account, list projects, project members, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, create/list/read/update/link/list/unlink epic relationships, and submit comments or read visible comments and field-change history on all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 44 tools identify the current account, list projects, project members, points, roles, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, safely update native story estimates, create/list/read/update/link/list/unlink epic relationships, and submit comments or read visible comments and field-change history on all four work-item kinds via Taiga’s REST API.
 
 The repository-local `.agents/skills/taiga-story-loop-lite/` skill provides a
 minimal, instruction-driven two-worker implementation/review workflow for one
@@ -48,6 +48,7 @@ wire filters and envelope fields, including the current-user identity contract.
 - `get_user_story(userStoryId)`: Retrieve a story by its positive internal ID (not its displayed `#ref`), including its authoritative version, Markdown description, status/assignment, tags, sprint, and available epic/source relationships.
 - `create_user_story(projectId, subject, description?, status?, assigned_to?, tags?, milestoneId?)`: Create one backlog or sprint story. Put acceptance criteria in `description`; omitted optional fields use Taiga project defaults, and the result includes the server-generated ID, ref, and version.
 - `update_user_story(userStoryId, version, subject?, description?, status?, assigned_to?, tags?, milestoneId?, comment?, clearFields?)`: Versioned story update. Omitted fields stay unchanged; use `clearFields=["assigned_to"]` to unassign or `clearFields=["milestone"]` to return a story to the backlog. Empty description/tags are explicit clears.
+- `set_user_story_estimates(userStoryId, version, rolePoints[{ roleId, pointId }])`: Versioned native story-point update. Sends only the supplied role-to-configured-point assignments and version, preserves omitted roles, supports configured unestimated point options, and returns authoritative estimate state without automatic conflict or ambiguous-write retries.
 
 ## Requirements
 - SDK selected by `global.json` (10.0.401, latest patch within that feature band) and .NET 8 runtime

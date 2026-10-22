@@ -3,7 +3,7 @@
 ## Current state (2026-10-02)
 
 All 15 selected first-batch functions are implemented within their documented
-scope. The server exposes 43 tools; see the [tool reference](taiga_tools_reference.md)
+scope. The server exposes 44 tools; see the [tool reference](taiga_tools_reference.md)
 for exact contracts and the [completed-batch summary](goals/first-batch/README.md)
 for source/test pointers. The [second batch](goals/second-batch/README.md) has
 delivered `get_current_user`, `list_project_members`, `resolve_work_item`,
@@ -27,7 +27,8 @@ and entity version conflicts are not automatically retried.
 Issue/story lists preserve legacy arrays and offer opt-in page envelopes;
 task/epic lists always use envelopes. Page metadata preserves unknown nulls,
 while resource DTOs omit null properties. Versioned updates support explicit
-assignee clearing; story updates can also clear the milestone. See current
+assignee clearing; story updates can also clear the milestone, and native story
+estimate writes use a separate role-to-point partial update. See current
 reference contracts before extending these features.
 
 The sections below retain the historical foundation cleanup record. Their

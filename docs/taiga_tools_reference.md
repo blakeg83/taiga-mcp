@@ -8,7 +8,7 @@ preserve.
 
 ## Implemented versus planned
 
-The current server exposes 43 tools:
+The current server exposes 44 tools:
 
 - 5 project tools: `list_projects`, `list_project_members`, `list_points`,
   `list_project_roles`, and `resolve_project`.
@@ -17,8 +17,9 @@ The current server exposes 43 tools:
 - 8 issue tools: `list_issues`, `get_issue`, `create_issue`, `update_issue`,
   `list_issue_statuses`, `list_issue_severities`, `list_issue_types`, and
   `list_issue_priorities`.
-- 5 user-story tools: `list_user_stories`, `list_user_story_statuses`,
-  `get_user_story`, `create_user_story`, and `update_user_story`.
+- 6 user-story tools: `list_user_stories`, `list_user_story_statuses`,
+  `get_user_story`, `create_user_story`, `update_user_story`, and
+  `set_user_story_estimates`.
 - 5 task tools: `list_tasks`, `list_task_statuses`, `get_task`, `create_task`, and `update_task`.
 - 8 epic tools: `list_epics`, `list_epic_statuses`, `get_epic`, `create_epic`,
   `update_epic`, `link_user_story_to_epic`, `list_epic_user_stories`, and
@@ -48,6 +49,43 @@ to the story and Taiga determines any effects on child tasks; the MCP tool does
 not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
 unsupported clear names, and set/clear collisions fail before HTTP; write
 failures are not replayed.
+
+### `set_user_story_estimates` contract
+
+The signature is `set_user_story_estimates(userStoryId, version, rolePoints)`.
+`rolePoints` is a required nonempty array of explicit objects, each containing
+one positive `roleId` and one positive `pointId`:
+
+```json
+{
+  "userStoryId": 102,
+  "version": 4,
+  "rolePoints": [
+    {"roleId": 7, "pointId": 21},
+    {"roleId": 8, "pointId": 22}
+  ]
+}
+```
+
+`roleId` is a project role ID and `pointId` is a configured Taiga point-option
+ID; they are distinct identifier spaces. A point option whose configured value
+is null can be selected for an unestimated role. Duplicate role entries,
+null/empty entries, nonpositive IDs, and negative versions fail before HTTP.
+The tool sends exactly one authenticated
+`PATCH /api/v1/userstories/{userStoryId}` with only the native `points` role-ID
+to point-ID mapping and the supplied `version`:
+
+```json
+{"points":{"7":21,"8":22},"version":4}
+```
+
+Roles omitted from `rolePoints` remain unchanged. The result is the
+authoritative updated story detail, including Taiga's returned `points`,
+nullable `total_points`, and version. Version conflicts, permission and other
+HTTP failures retain the established safe error behavior; ambiguous writes and
+conflicts are never automatically retried. The command does not calculate
+point totals, store estimates outside Taiga, update unrelated story fields, or
+refresh a stale version.
 
 The shared comment command is implemented for all four work-item kinds and is
 documented below.
@@ -792,6 +830,7 @@ or infer estimates, and list operations do not issue per-story detail reads.
 | `get_user_story` | `userStoryId` integer, required | One detail object with `{ id, ref?, project?, subject?, description?, status_id?, status?, assigned_to?, tags?, milestone?, modified?, version, points?, total_points?, origin_issue?, origin_task?, epics? }`. `points` maps role IDs to point-option IDs; `total_points` is Taiga's nullable numeric total. `userStoryId` is the internal ID, not displayed `#ref`; comments and tasks are not loaded. |
 | `create_user_story` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `tags`, and `milestoneId` optional and default null | One server-created story detail with authoritative `id`, `ref`, `version`, and any estimate fields returned by Taiga. `description` is the place for acceptance criteria; `milestoneId` selects a sprint, while omitted optional fields let Taiga apply project defaults. |
 | `update_user_story` | `userStoryId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `tags`, `milestoneId`, `comment`, and `clearFields` optional | One authoritative updated story detail including any estimate fields returned by Taiga. Omitted fields stay unchanged; `clearFields` accepts only `assigned_to` and `milestone` and emits explicit JSON null. Only the primary `assigned_to` field is supported; multiple assignees remain planned. |
+| `set_user_story_estimates` | `userStoryId`, `version`, and nonempty `rolePoints[{ roleId, pointId }]` required | One authoritative story detail after a native partial PATCH containing only `points` and `version`; role IDs and point-option IDs are distinct, omitted roles remain unchanged, configured unestimated point options are supported, and conflicts/ambiguous writes are not retried. |
 | `list_tasks` | `projectId` integer, required; `page` integer, default `1`; `userStoryId`, `milestoneId`, `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with task items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, user_story?, milestone?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `list_epics` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with epic items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, color?, tags?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_epic` | `epicId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, color?, tags?, modified?, is_closed?, is_blocked?, blocked_note?, client_requirement?, team_requirement?, user_stories_counts?, version }`. `epicId` is the internal ID, not displayed `#ref`; related stories and computed progress are not loaded. |
