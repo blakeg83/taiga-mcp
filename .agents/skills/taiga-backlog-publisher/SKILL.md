@@ -14,8 +14,14 @@ estimates explicit.
 When the user explicitly requests publication and a configured Taiga MCP
 connection is available, execute the publication workflow in this document.
 Planning-only requests never mutate Taiga. A publication is successful only
-when the created hierarchy, assignments, relationships, and native estimates
+when the published hierarchy, assignments, relationships, and native estimates
 have been read back and verified.
+
+Publication can target either a new backlog hierarchy or a caller-identified
+existing user story. An existing-story request such as “flesh out this ticket”
+enters enrichment mode: retain that story as the mutation target, derive and
+create only its missing implementation tasks, and never create a replacement
+story merely because the story already exists.
 
 ## Boundaries
 
@@ -28,27 +34,36 @@ have been read back and verified.
   delete Taiga work items. Read-only project metadata may be used only when it
   is available and needed to select configured estimation options.
 - Publication requires an explicit user request, a complete target project,
-  and all required MCP tools. Do not silently change an approved plan to make
-  it publishable.
+  and all required MCP tools. Do not silently change user-supplied
+  requirements, acceptance criteria, or existing task content to make a plan
+  publishable.
 - Do not invent IDs, point values, roles, project permissions, requirements,
-  acceptance criteria, task order, or ticket links. Record an ambiguity or
-  blocker instead.
+  acceptance criteria, or ticket links. When an explicit publication or
+  enrichment request supplies requirements but no implementation tasks, derive
+  only the minimum tasks needed to satisfy those requirements, mark them as
+  inferred, and record any material ambiguity or blocker instead.
 - Never retry a write whose outcome is ambiguous. Read the relevant entity and
   report its state before a user decides whether to continue.
 
 ## Interpret the plan
 
-1. Identify the source plan's epics, user stories, tasks, acceptance criteria,
-   architectural decisions, ordering, dependencies, and explicit exclusions.
-   Recognize common Markdown conventions such as headings, numbered sections,
-   tables, and task checklists.
+1. Identify whether the request is planning-only or explicitly asks to publish,
+   create, flesh out, expand, or complete a story. Also identify any
+   caller-supplied existing story target, such as a project slug plus `#ref`.
+   Then identify the source plan's epics, user stories, tasks, acceptance
+   criteria, architectural decisions, ordering, dependencies, and explicit
+   exclusions. Recognize common Markdown conventions such as headings,
+   numbered sections, tables, and task checklists.
 2. Preserve an existing hierarchy and wording. Keep task descriptions and
    checklist items intact, including completion markers where relevant. Keep
    acceptance criteria attached to their story; do not turn them into task
    estimates or new requirements.
-3. For an unstructured plan, organize only what is present into a conservative
-   epic/story/task hierarchy. Mark inferred boundaries or titles as inferred
-   and explain the evidence. Keep source order unless the plan explicitly
+3. For an unstructured plan, organize what is present into a conservative
+   epic/story/task hierarchy. For an explicit publication or enrichment request,
+   derive missing implementation tasks from the story's requirements,
+   acceptance criteria, architecture, and checklist content when those tasks
+   are needed to satisfy the story. Mark every derived task as inferred and
+   explain the evidence. Keep source order unless the plan explicitly
    specifies another order.
 4. Give tasks deterministic two-digit numeric prefixes (`01`, `02`, `03`, ...)
    within each story. Prefer an explicit order from the source; otherwise use
@@ -58,6 +73,46 @@ have been read back and verified.
    ambiguous story boundary, an unresolved dependency, contradictory
    architecture, or an unavailable project estimation configuration. Do not
    silently resolve a material ambiguity.
+
+### Derive missing implementation tasks
+
+Derive tasks before publication whenever a user explicitly asks to publish,
+create, flesh out, expand, or complete a story and its requirements imply
+implementation work but the source has no complete task breakdown. A checklist
+in a story description is evidence for the derivation; it is not itself a set
+of Taiga child tasks and never satisfies task completeness by itself.
+
+Use this sequence:
+
+1. Read the story's requirements, acceptance criteria, architecture, and
+   checklist content, then read all existing child tasks for the story.
+2. Preserve every existing task. Identify the smallest ordered set of
+   implementation, integration, and verification tasks needed to satisfy the
+   requirements. Do not create a task for a purely descriptive checklist item
+   unless it represents actual work.
+3. Compare the required task set with existing child tasks. An exact or
+   clearly equivalent task under the target story satisfies that requirement;
+   create only missing tasks. A near match is not silently reused when its
+   scope, parent, or completion meaning is uncertain.
+4. Keep explicit source order where available. Assign deterministic two-digit
+   prefixes to derived tasks according to their final order, while preserving
+   existing task subjects unless the user explicitly authorizes renaming.
+5. Treat a story as intentionally task-free only when the source or user says
+   so explicitly. Otherwise, insufficient requirements to derive a reliable
+   task set are a blocker, not permission to report a checklist as complete.
+
+For a clearly identified existing story, resolve and read that story first and
+use it as the enrichment target. It is not a duplicate candidate. Other exact
+story matches remain duplicate blockers, and an exact task match under another
+parent is not evidence that the target story is complete. If a task match is
+ambiguous between existing work and a missing requirement, stop before the
+task write and report the candidates and the decision needed.
+If the existing story cannot be resolved to exactly one authoritative target,
+stop with a blocker; do not select a target by subject similarity alone.
+
+Planning-only requests may include this derived task breakdown in the proposed
+plan, but they never create or update Taiga items. An explicit publication or
+enrichment request may create the missing tasks after preflight succeeds.
 
 ## Estimate stories
 
@@ -136,15 +191,15 @@ the input when a section is genuinely empty:
 1. **Source fidelity and blockers** — source format, preserved decisions,
    inferred structure, unresolved gaps, and explicit exclusions.
 2. **Hierarchy** — each epic, story, acceptance-criteria block, and ordered
-   task list. Keep task descriptions/checklists and show deterministic
-   prefixes.
+   task list. Keep task descriptions/checklists, show deterministic prefixes,
+   and label any derived tasks as inferred.
 3. **Story estimates** — one row or entry per story containing the complexity
    rationale, each relevant role-to-point mapping, the reconciled whole-story
    total, and any split or uncertainty flag. Never list task points.
 4. **Publication inputs and verification** — the read-only data still needed
-   before publication, the intended creation/linking order, and checks that a
-   later publisher should perform, including assignment and read-back
-   verification.
+   before publication, the intended creation/linking/enrichment order, and
+   checks that a later publisher should perform, including assignment,
+   complete child-task coverage, and read-back verification.
 
 For a planning-only request, make the no-write result explicit. If required
 configuration is absent, the plan may still describe the hierarchy, but the
@@ -154,13 +209,16 @@ values for native Taiga estimates.
 
 ## Publication mode
 
-Publication mode is entered only after the user explicitly asks to publish the
-approved plan. Treat the plan as immutable input. Preserve its epic/story/task
-hierarchy, descriptions, acceptance criteria, checklist text, task order, and
-chosen story estimates. Before any write, return or internally assemble a
-preflight record containing the target project, authenticated user, selected
-roles per story, point options, duplicate findings, required tools, and
-blockers.
+Publication mode is entered only after the user explicitly asks to publish,
+create, flesh out, expand, or complete the approved plan. Preserve all
+user-supplied epic/story/task data, descriptions, acceptance criteria,
+checklist text, task order, and chosen story estimates. If the request
+explicitly calls for enrichment and tasks are missing, the derived task set is
+an explicit part of the publication plan; do not invent unrelated work.
+Before any write, return or internally assemble a preflight record containing
+the target project, authenticated user, selected roles per story, point
+options, existing-story targets, derived and existing task coverage, duplicate
+findings, required tools, and blockers.
 
 ### Required tools
 
@@ -175,6 +233,14 @@ the selected plan before the first write. The normal publish path requires:
 - `get_epic`, `get_user_story`, `get_task`, and
   `list_epic_user_stories` for authoritative verification; and
 - `set_user_story_estimates` for native story-point persistence.
+
+For an existing story identified by a project-local `#ref`, also require
+`resolve_work_item`; validate the resolved target with `get_user_story` before
+using it for enrichment.
+
+For enrichment that explicitly changes story fields, also require
+`update_user_story`; task-only enrichment does not require a replacement story
+write.
 
 If a required operation is unavailable, stop before writing and report the
 exact missing tool. Do not replace a native estimate write with a comment,
@@ -211,42 +277,53 @@ Perform all of the following before creating anything:
    Never use a trial mutation to discover permissions and never guess another
    assignee after a permission rejection.
 4. Read every page of `list_project_roles` and `list_points`. For each planned
-   story, identify all relevant configured computable roles from its
-   requirements, acceptance criteria, architecture, and planned tasks, then
-   map each role's estimate to an existing point-option ID. The authenticated
-   user's membership role is used for access and permissions only, never to
-   choose estimate roles. Preserve `value: null` as unestimated and
-   distinguish it from a configured numeric zero. No write may begin while a
-   story's relevant-role analysis or point mapping is ambiguous.
+   story, derive and reconcile its required task set when publication or
+   enrichment mode permits task derivation. Then identify all relevant
+   configured computable roles from its requirements, acceptance criteria,
+   architecture, and complete task set, and map each role's estimate to an
+   existing point-option ID. The authenticated user's membership role is used
+   for access and permissions only, never to choose estimate roles. Preserve
+   `value: null` as unestimated and distinguish it from a configured numeric
+   zero. No write may begin while a story's task coverage, relevant-role
+   analysis, or point mapping is ambiguous.
 5. Confirm the required tool set listed above is available. Do not infer tool
    availability from documentation or from a previous invocation.
-6. Check for possible duplicates before any create operation. For each
+6. Check for possible duplicates before any create operation. First resolve any
+   caller-identified existing story and mark it as the enrichment target; that
+   exact story is reusable and is not a duplicate blocker. For each other
    needed work-item type, use the corresponding project-scoped list
    operation with closed/archived coverage and no unrelated restrictive
    filters: `list_epics(includeClosed=true)`,
    `list_user_stories(includeClosed=true, includeArchived=true,
    includePageInfo=true)`, and `list_tasks(includeClosed=true)`. Compare all
-   planned subjects against these results locally. Follow every positive
-   `next_page` until the server reports completion. If `next_page` is null and
-   `has_more` is true, or if `total` proves that returned pages are incomplete,
-   stop with an inconsistent-pagination blocker. If the available metadata is
-   unknown (`next_page`, `has_more`, and `total` are all null), do not claim a
-   complete duplicate scan; treat it as a no-write blocker unless the active
-   connection contract explicitly defines null `next_page` as terminal.
+   planned or derived subjects against these results locally. For tasks, an
+   exact match satisfies a requirement only when its authoritative parent is
+   the target story; an exact match with another or unknown parent is a
+   blocker. Follow every positive `next_page` until the server reports
+   completion. If `next_page` is null and `has_more` is true, or if `total`
+   proves that returned pages are incomplete, stop with an inconsistent-
+   pagination blocker. If the available metadata is unknown (`next_page`,
+   `has_more`, and `total` are all null), do not claim a complete duplicate
+   scan; treat it as a no-write blocker unless the active connection contract
+   explicitly defines null `next_page` as terminal.
    Report exact and near matches separately. An exact existing candidate is a
-   blocker unless the user explicitly supplies a safe reuse decision; never
-   create a second item merely because its reference differs.
+   blocker unless it is the caller-identified story target or an equivalent
+   task already attached to that target story. Never create a second item
+   merely because its reference differs.
    When a list row cannot establish the intended parent story or epic, read the
    candidate with `get_user_story` or `get_task` and inspect the relevant epic
    relationship with `list_epic_user_stories` before deciding whether it is a
    duplicate. Do not infer a relationship from subject text.
 7. Validate that all planned stories have an unambiguous target epic and all
-   planned tasks have an unambiguous parent story. Preserve the plan's order;
-   do not infer missing relationships from subject text.
+   planned or derived tasks have an unambiguous parent story. For every story,
+   reconcile the required task set against its existing children and record
+   which tasks are reused, missing, or intentionally absent. Preserve the
+   plan's order; do not infer missing relationships from subject text.
 
 Fetch each metadata list once per publication, following its pages, and reuse
 it for all items. Scan each needed work-item type once for the project and
-compare all planned subjects locally; do not repeat full scans for each item.
+compare all planned or derived subjects locally; do not repeat full scans for
+each item.
 
 A preflight failure is a no-write result. A preflight success is not a claim
 that Taiga has accepted a future write; it only authorizes the ordered
@@ -261,25 +338,33 @@ Create only after preflight succeeds, in this order:
    color, and explicitly selected status values. Capture the authoritative
    internal ID, project, displayed reference, assignment, and version from
    each response.
-2. Create each story with `create_user_story`, supplying the authenticated
+2. Create each new story with `create_user_story`, supplying the authenticated
    user's ID through `assigned_to`. Preserve its subject, description,
-   acceptance criteria, tags, and sprint placement when present. Capture the
-   authoritative ID, reference, project, assignment, version, and estimate
-   fields returned by Taiga.
+   acceptance criteria, tags, and sprint placement when present. For a
+   caller-identified existing story, retain that authoritative story as the
+   target and do not create a replacement. Apply only explicitly requested
+   story-field updates through `update_user_story` when that tool was included
+   in preflight. Capture the authoritative ID, reference, project, assignment,
+   version, and estimate fields returned by Taiga or the target read.
 3. Link every created story to its intended created epic with
    `link_user_story_to_epic`, using the captured internal IDs and the plan's
    explicit relationship order when supplied. A relationship response must be
    captured; do not treat story creation as proof of the link.
-4. Create tasks in each story's deterministic numeric order with
+4. Create only missing tasks in each story's deterministic numeric order with
    `create_task`, supplying `userStoryId` and the authenticated user's ID
-   through `assigned_to`. Preserve task descriptions, checklist text, tags,
-   and the parent story. Do not add task estimates. Capture each authoritative
-   ID, reference, project, parent, assignment, and version.
+   through `assigned_to`. Preserve existing child tasks and their content;
+   preserve task descriptions, checklist text, tags, and the parent story for
+   created tasks. Do not add task estimates. Capture each authoritative ID,
+   reference, project, parent, assignment, and version. An explicitly
+   task-free story has zero task creations, but that exception must be recorded
+   and verified rather than inferred from an empty checklist.
 
 After a failed or ambiguous write, stop dependent publication, do not repeat
 the operation, and produce a partial-completion report. Already-created
 independent items may be reported, but do not continue in a way that could
-create children without a confirmed parent or relationship.
+create children without a confirmed parent or relationship. A successful task
+write response alone is not enough; the required task set must be verified
+before publication can be reported as successful.
 
 ### Native estimate persistence
 
@@ -336,8 +421,12 @@ After the ordered writes and estimate updates, verify every result:
   positive `next_page` across the complete relationship listing; if pagination
   is inconsistent or its metadata is unknown, mark the relationship check
   incomplete and do not report the backlog as verified.
-- `get_task` each created task and confirm identity, project, subject,
-  authenticated assignment, and intended parent story.
+- `get_task` every required task, both reused and created, and confirm
+  identity, project, subject, authenticated assignment, and intended parent
+  story. Reconcile the complete required task set against the authoritative
+  children: missing, extra-ambiguous, or unreadable tasks are unverified. An
+  explicitly task-free story succeeds only when the story is verified to have
+  no required child tasks and that decision was explicit.
 - Reconcile the verified entities against the approved plan. Any missing,
   mismatched, or unreadable field is unverified; do not present it as success.
 
@@ -348,6 +437,8 @@ Produce a concise report with separate sections for:
 
 - preflight inputs and results;
 - created epics, stories, links, tasks, and their Taiga references;
+- reused existing story/task targets and complete required-task coverage,
+  including any explicit task-free exception;
 - confirmed assignments and native role estimates;
 - per-role estimate values and reconciled whole-story totals, clearly
   distinguished when preserved or other-role contributions exist; never include
@@ -364,8 +455,10 @@ by guesswork. If the UI origin is unavailable, include the project slug and
 references and mark the link as unavailable rather than fabricating one.
 
 The report is a success only when all intended items, relationships,
-assignments, and estimates are confirmed. An unavailable UI origin alone does
-not invalidate verified publication; report references with links unavailable.
+assignments, estimates, and required child tasks are confirmed. An unavailable
+UI origin alone does not invalidate verified publication; report references
+with links unavailable. A checklist without verified child tasks is never a
+successful publication result.
 Otherwise label it partial or blocked and list the exact next decision needed
 from the user.
 
@@ -373,12 +466,13 @@ from the user.
 
 Invoke the skill with `$taiga-backlog-publisher` followed by the approved
 implementation plan and, for publication, an explicit instruction such as
-"publish this plan to project `<slug>`". A planning request returns the four
-publishing-plan sections and an explicit no-write statement. A publication
-request returns the preflight result first, then either a blocked/no-write
-result or a report containing every created epic/story/task, relationship,
-authenticated assignment, confirmed native estimate, numeric story-point
-totals, direct UI links when available, and any failed or unverified step.
+"publish this plan to project `<slug>`" or "flesh out story `#123`". A
+planning request returns the four publishing-plan sections and an explicit
+no-write statement. A publication or enrichment request returns the preflight
+result first, then either a blocked/no-write result or a report containing
+every created/reused epic/story/task, relationship, authenticated assignment,
+confirmed native estimate, complete task coverage, numeric story-point totals,
+direct UI links when available, and any failed or unverified step.
 
 Do not treat a plan, a successful preflight, or a create response without
 authoritative read-back as a completed publication.

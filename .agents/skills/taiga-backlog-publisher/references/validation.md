@@ -6,8 +6,11 @@ publishing writes:
 - exercise a structured plan containing multiple stories and ordered tasks;
 - exercise a less structured plan and confirm conservative hierarchy
   interpretation, preserved requirements, and deterministic task prefixes;
+- exercise explicit missing-task derivation and existing-story enrichment,
+  including task completeness and the intentional task-free exception;
 - inspect missing configuration, story-scope role selection, exact duplicate
-  candidates, partial write failure, and an ambiguous write outcome;
+  candidates, ambiguous task matches, partial write failure, and an ambiguous
+  write outcome;
 - confirm that a planning-only request performs no Taiga writes;
 - confirm that publication uses the required preflight, creation, estimate,
   and authoritative read-back sequence; and
@@ -17,6 +20,43 @@ publishing writes:
 Record which checks were inspected from local instructions/examples and which
 were actually exercised through native runtime capabilities. A read-only
 walkthrough is not evidence that live publication succeeded.
+
+### Missing-task and existing-story regression scenarios
+
+Inspect or exercise each scenario with local/mock responses only. Record the
+derived task set, reused tasks, attempted writes, verification reads, and final
+status; do not treat a static expected report as evidence.
+
+1. **New story with requirements but no planned tasks.** Derive the minimum
+   ordered implementation, integration, and verification tasks from the
+   requirements and acceptance criteria, mark them inferred, assign `01`,
+   `02`, ... prefixes, and create each as a separate child task. A checklist
+   is input evidence, not a substitute for those child entities.
+2. **Existing story with a checklist but no child tasks.** Resolve the
+   caller-identified story, retain it as the mutation target, derive the
+   missing tasks, and create them with the story's `userStoryId`. Do not create
+   a duplicate story. Verify every created task's parent and report the
+   checklist-only condition as incomplete until those reads succeed.
+3. **Existing story with some, but not all, required tasks.** Match existing
+   children by authoritative parent and equivalent scope, preserve them, and
+   create only the missing tasks in deterministic order. Never duplicate an
+   existing equivalent task because its reference or prefix differs.
+4. **Existing story with all required tasks already present.** Create no
+   tasks, verify every required child, and report success only after complete
+   task coverage is read back.
+5. **Explicitly intentional zero-task story.** Do not invent tasks when the
+   user or source explicitly says the story is task-free. Record the explicit
+   exception and verify that no required child tasks exist; an empty checklist
+   alone does not establish this exception.
+6. **Ambiguous or duplicate task matches.** If a candidate is near-matching,
+   attached to another story, or cannot be assigned an unambiguous parent,
+   stop before the task write with `BLOCKED` and list the candidate and the
+   decision needed. Do not silently reuse it or create a second task.
+
+For the existing-story cases, the trace must distinguish the resolved target
+story from unrelated exact story candidates. A resolved target is reusable;
+another exact story candidate remains a duplicate blocker. A task exact match
+counts only when its authoritative parent is the target story.
 
 ### Concrete transient mock scenario
 
