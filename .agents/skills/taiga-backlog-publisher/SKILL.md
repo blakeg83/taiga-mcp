@@ -117,11 +117,16 @@ Distinguish all of these states in the output:
   contribution. A story's estimate is the complete role-to-option mapping plus
   its reconciled whole-story total; do not collapse it to one role or value.
 
-If a story is at or beyond the largest supported value, flag it as a split
-candidate and explain the uncertainty or integration risk. A 13-point story
-may still be reported as 13 when that option exists, but must carry the
-decomposition recommendation. Do not lower a large estimate merely to avoid
-the flag.
+Evaluate decomposition at both the role and story levels. If an individual
+role's contribution is at or beyond the largest supported configured value,
+flag that role's work as a split candidate and explain the uncertainty or
+integration risk. Also consider decomposition when the aggregate story is
+too broad, cross-role coordination is substantial, or several individual
+contributions are independently large. A multi-role story is not automatically
+a split candidate merely because its combined total exceeds the largest
+configured single-role value. A 13-point contribution may still be reported
+when that option exists, but must carry the decomposition recommendation; do
+not lower a large role estimate merely to avoid the flag.
 
 ## Publishing-plan output
 
@@ -346,7 +351,7 @@ Produce a concise report with separate sections for:
 - confirmed assignments and native role estimates;
 - per-role estimate values and reconciled whole-story totals, clearly
   distinguished when preserved or other-role contributions exist; never include
-- unverified totals;
+  unverified totals;
 - failed, ambiguous, or unverified operations and whether a write may have
   applied; and
 - direct Taiga UI links for every created item when the UI origin is known.

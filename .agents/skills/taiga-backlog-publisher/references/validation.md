@@ -31,11 +31,14 @@ write tools:
   computable roles `{ id: 7, name: Back }`, `{ id: 8, name: Front }`, and
   `{ id: 9, name: Design }`, plus non-computable `{ id: 10, name: Product Owner }`.
   Point options contain `{ id: 21, value: 1 }`, `{ id: 22, value: 3 }`,
-  `{ id: 23, value: 5 }`, and `{ id: 24, value: 0 }`.
+  `{ id: 23, value: 5 }`, `{ id: 24, value: 0 }`, and `{ id: 25, value: null }`.
 - Approved plan: epic `Release 1`; story `Import API` is backend-only and maps
-   Back to `3`, with tasks `01 Add endpoint` and `02 Add tests`; story
-   `Verify UI` requires frontend and design work and maps Front to `5` and
-   Design to `3`, with task `01 Add browser check`.
+  Back to `3`, with tasks `01 Add endpoint` and `02 Add tests`; story
+  `Verify UI` requires frontend and design work and maps Front to `5` and
+  Design to `3`, with task `01 Add browser check`.
+- Before estimate writes, the fresh `Verify UI` read returns
+  `points={"10":21}`. This is the unrelated Product Owner estimate that the
+  partial multi-role update must preserve.
 - Duplicate scans return empty closed/archived-aware pages with
   `next_page=null` and `has_more=false`. Synthetic writes return epic
   `id=100, ref=50`, stories `id=200/ref=60` and `id=201/ref=61`, and tasks
