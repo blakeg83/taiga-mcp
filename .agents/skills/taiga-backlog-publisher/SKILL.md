@@ -75,17 +75,37 @@ these values:
 | 8 | Complex work involving meaningful integration or uncertainty |
 | 13 | Very large story; recommend decomposition |
 
-Before selecting a point value, discover the project's configured estimation
+Before selecting point values, discover the project's configured estimation
 point options and computable roles through read-only Taiga metadata or
-caller-provided configuration. Use the configured option's actual value and
+caller-provided configuration. Use each configured option's actual value and
 ID; never invent an ID or a value. If the configured scale differs from the
 default rubric, map the same relative complexity to the closest supported
 configured value and state the mapping.
 
-Select exactly one role for a computable estimate. Prefer an unambiguous role
-associated with the caller or explicitly configured for the project. If more
-than one role is equally eligible, or no computable role is available, report
-the ambiguity and leave the estimate unresolved rather than guessing.
+Select estimation roles from the story's work, never from the authenticated
+user's project membership. For every story:
+
+1. Analyze the requirements, acceptance criteria, architecture, and planned
+   implementation tasks.
+2. Identify every configured `computable` role with meaningful work in the
+   story. A single-discipline story has one role mapping; a story spanning
+   backend, frontend, design, testing, or other configured disciplines has one
+   mapping for each relevant role.
+3. Estimate each role's independent contribution, including role-specific
+   implementation, integration, testing, and expected correction effort.
+   Avoid double-counting work shared across roles.
+4. Map each role to an existing configured point-option ID. Do not treat the
+   existence of multiple computable roles as an ambiguity by itself.
+
+Use role names only as semantic guidance and use the actual configured role and
+point IDs. For example, API/business-logic/database/integration work generally
+maps to a configured Back role; client UI/browser work to Front; UX or visual
+design work to Design; and dedicated test infrastructure to QA/Testing when
+that role is configured and relevant. If a story requires backend, frontend,
+and design work, estimate all three when those configured roles are computable.
+Ask for clarification only when the requirements are genuinely insufficient to
+identify the relevant roles or estimate their work reliably, or when no
+configured computable role reasonably matches.
 
 Distinguish all of these states in the output:
 
@@ -93,13 +113,20 @@ Distinguish all of these states in the output:
   estimate can be selected;
 - `0`: the project explicitly provides a zero-point option and the story is
   intentionally assigned it; and
-- a supported positive option: the selected configured value and its ID.
+- a supported positive option: the configured value and ID for one role's
+  contribution. A story's estimate is the complete role-to-option mapping plus
+  its reconciled whole-story total; do not collapse it to one role or value.
 
-If a story is at or beyond the largest supported value, flag it as a split
-candidate and explain the uncertainty or integration risk. A 13-point story
-may still be reported as 13 when that option exists, but must carry the
-decomposition recommendation. Do not lower a large estimate merely to avoid
-the flag.
+Evaluate decomposition at both the role and story levels. If an individual
+role's contribution is at or beyond the largest supported configured value,
+flag that role's work as a split candidate and explain the uncertainty or
+integration risk. Also consider decomposition when the aggregate story is
+too broad, cross-role coordination is substantial, or several individual
+contributions are independently large. A multi-role story is not automatically
+a split candidate merely because its combined total exceeds the largest
+configured single-role value. A 13-point contribution may still be reported
+when that option exists, but must carry the decomposition recommendation; do
+not lower a large role estimate merely to avoid the flag.
 
 ## Publishing-plan output
 
@@ -112,8 +139,8 @@ the input when a section is genuinely empty:
    task list. Keep task descriptions/checklists and show deterministic
    prefixes.
 3. **Story estimates** — one row or entry per story containing the complexity
-   rationale, configured point value, point-option ID, selected role, and any
-   split or uncertainty flag. Never list task points.
+   rationale, each relevant role-to-point mapping, the reconciled whole-story
+   total, and any split or uncertainty flag. Never list task points.
 4. **Publication inputs and verification** — the read-only data still needed
    before publication, the intended creation/linking order, and checks that a
    later publisher should perform, including assignment and read-back
@@ -132,7 +159,8 @@ approved plan. Treat the plan as immutable input. Preserve its epic/story/task
 hierarchy, descriptions, acceptance criteria, checklist text, task order, and
 chosen story estimates. Before any write, return or internally assemble a
 preflight record containing the target project, authenticated user, selected
-role, point options, duplicate findings, required tools, and blockers.
+roles per story, point options, duplicate findings, required tools, and
+blockers.
 
 ### Required tools
 
@@ -182,11 +210,14 @@ Perform all of the following before creating anything:
    required permissions are absent or evidence conflicts, stop and name them.
    Never use a trial mutation to discover permissions and never guess another
    assignee after a permission rejection.
-4. Read every page of `list_project_roles` and `list_points`. Select exactly
-   one computable role and map each planned numeric estimate to an existing
-   point-option ID. Preserve `value: null` as unestimated and distinguish it
-   from a configured numeric zero. No write may begin while role selection or
-   point mapping is ambiguous.
+4. Read every page of `list_project_roles` and `list_points`. For each planned
+   story, identify all relevant configured computable roles from its
+   requirements, acceptance criteria, architecture, and planned tasks, then
+   map each role's estimate to an existing point-option ID. The authenticated
+   user's membership role is used for access and permissions only, never to
+   choose estimate roles. Preserve `value: null` as unestimated and
+   distinguish it from a configured numeric zero. No write may begin while a
+   story's relevant-role analysis or point mapping is ambiguous.
 5. Confirm the required tool set listed above is available. Do not infer tool
    availability from documentation or from a previous invocation.
 6. Check for possible duplicates before any create operation. For each
@@ -252,21 +283,26 @@ create children without a confirmed parent or relationship.
 
 ### Native estimate persistence
 
-For every created story, use the estimate selected during planning and the
-configured role/point IDs from preflight:
+For every created story, use the complete role-to-point mapping selected during
+planning and the configured role/point IDs from preflight:
 
 1. Call `get_user_story` immediately before the estimate update and use its
    authoritative current version. Never assume the version in the create
-   response is still current.
-2. Call `set_user_story_estimates` with exactly one selected computable role
-   and its configured point-option ID. The supplied version must be the fresh
-   version read in step 1.
+   response is still current. Capture the returned `points` mapping as the
+   baseline for roles outside the requested scope; if it is unavailable, do
+   not claim that unrelated estimates were preserved.
+2. Call `set_user_story_estimates` once with a `rolePoints` array containing
+   one entry for every relevant computable role and no entries for roles
+   outside the requested scope. The supplied version must be the fresh version
+   read in step 1. This single partial update must preserve existing estimates
+   for unrelated roles.
 3. On any non-success or ambiguous result, do not retry or refresh-and-retry.
    Record the story as estimate-unverified and stop dependent estimate work.
-4. Call `get_user_story` after the write. Verify that the selected role maps to
-   the selected point-option ID and that the story's returned project and
-   assignment remain correct. Verify the selected numeric value from the
-   configured point option, not from an untrusted total alone.
+4. Call `get_user_story` after the write. Verify every submitted role maps to
+   its submitted point-option ID and that each numeric value matches the
+   configured point option, not an untrusted total alone. Verify that every
+   role outside the requested scope is unchanged from the pre-write baseline,
+   and verify that the story's returned project and assignment remain correct.
 5. Reconcile the entire returned `points` mapping against `list_points`:
    resolve every non-null point-option ID and sum all configured numeric
    values across roles, including non-computable roles. Null mappings and
@@ -274,14 +310,18 @@ configured role/point IDs from preflight:
    Compare this sum with the returned `total_points` (allow normal floating
    point rounding). No numeric contributions means unestimated, not zero.
    Unknown point IDs, missing mappings/totals, or a mismatched server total
-   leave the total unverified. If another role contributes points, report the
-   selected role's estimate and the whole-story total separately. Flag a total
-   that differs from the approved estimate and mark publication partial;
-   never clear or overwrite another role's points to force agreement.
+   leave the total unverified. Report every relevant role's estimate and the
+   whole-story total separately, including preserved estimates from roles
+   outside the requested scope. Flag any role value that differs from the
+   approved mapping or any total that differs from the complete returned role
+   mapping, and mark publication partial; never clear or overwrite another
+   role's points to force agreement.
 
 An estimate is not confirmed by a successful tool response alone; it is
-confirmed only by the authoritative read-back. Undefined estimates remain
-undefined and are reported as blockers rather than silently assigned.
+confirmed only when every submitted role mapping, every preserved unrelated
+mapping, and the reconciled whole-story total pass authoritative read-back.
+Undefined role estimates remain undefined and are reported as blockers rather
+than silently assigned.
 
 ### Authoritative verification and report
 
@@ -308,9 +348,10 @@ Produce a concise report with separate sections for:
 
 - preflight inputs and results;
 - created epics, stories, links, tasks, and their Taiga references;
-- confirmed assignments and native estimates;
-- selected-role estimate totals and reconciled whole-story totals, clearly
-  distinguished when other roles contribute; never include unverified totals;
+- confirmed assignments and native role estimates;
+- per-role estimate values and reconciled whole-story totals, clearly
+  distinguished when preserved or other-role contributions exist; never include
+  unverified totals;
 - failed, ambiguous, or unverified operations and whether a write may have
   applied; and
 - direct Taiga UI links for every created item when the UI origin is known.
