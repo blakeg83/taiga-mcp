@@ -38,9 +38,10 @@ status; do not treat a static expected report as evidence.
    a duplicate story. Verify every created task's parent and report the
    checklist-only condition as incomplete until those reads succeed.
 3. **Existing story with some, but not all, required tasks.** Match existing
-   children by authoritative parent and equivalent scope, preserve them, and
-   create only the missing tasks in deterministic order. Never duplicate an
-   existing equivalent task because its reference or prefix differs.
+   children only by authoritative parent and equivalent scope, preserve them,
+   and create only the missing tasks in deterministic order. Never duplicate
+   an existing equivalent task because its reference or prefix differs.
+   Identical names under another story are unrelated.
 4. **Existing story with all required tasks already present.** Create no
    tasks, verify every required child, and report success only after complete
    task coverage is read back.
@@ -49,14 +50,27 @@ status; do not treat a static expected report as evidence.
    exception and verify that no required child tasks exist; an empty checklist
    alone does not establish this exception.
 6. **Ambiguous or duplicate task matches.** If a candidate is near-matching,
-   attached to another story, or cannot be assigned an unambiguous parent,
-   stop before the task write with `BLOCKED` and list the candidate and the
-   decision needed. Do not silently reuse it or create a second task.
+   cannot be assigned an unambiguous parent, or is an exact match whose parent
+   is the target story but whose scope is uncertain, stop before the task write
+   with `BLOCKED` and list the candidate and the decision needed. An exact
+   match attached to another story is unrelated and must not block creation.
+   Do not silently reuse an ambiguous candidate or create a second task under
+   an unresolved parent.
+
+7. **Identical task names in different stories.** Exercise a mock publication
+   with new stories `Import API` and `Verify UI`, each requiring a task named
+   `01 Add unit tests`. Treat the Taiga child-task set as empty for both new
+   stories and create two tasks with different `userStoryId` values. Also replay
+   the case with an existing `01 Add unit tests` under `Verify UI` while
+   enriching `Import API`; the other story's task is neither reused nor a
+   duplicate blocker. The trace must contain no cross-story duplicate failure.
 
 For the existing-story cases, the trace must distinguish the resolved target
 story from unrelated exact story candidates. A resolved target is reusable;
-another exact story candidate remains a duplicate blocker. A task exact match
-counts only when its authoritative parent is the target story.
+another exact story candidate remains a story-level duplicate blocker. A task
+exact match counts only when its authoritative parent is the target story.
+Created tasks must be assigned to the authenticated user; reused tasks retain
+their existing assignee.
 
 ### Concrete transient mock scenario
 

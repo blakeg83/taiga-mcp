@@ -19,9 +19,10 @@ have been read back and verified.
 
 Publication can target either a new backlog hierarchy or a caller-identified
 existing user story. An existing-story request such as “flesh out this ticket”
-enters enrichment mode: retain that story as the mutation target, derive and
-create only its missing implementation tasks, and never create a replacement
-story merely because the story already exists.
+enters limited enrichment mode: retain that story as the mutation target,
+derive and create only its missing implementation tasks, and never create a
+replacement story merely because the story already exists. This does not turn
+the publisher into a general story-editing workflow.
 
 ## Boundaries
 
@@ -85,14 +86,19 @@ of Taiga child tasks and never satisfies task completeness by itself.
 Use this sequence:
 
 1. Read the story's requirements, acceptance criteria, architecture, and
-   checklist content, then read all existing child tasks for the story.
-2. Preserve every existing task. Identify the smallest ordered set of
+   checklist content. For an existing-story target, then read all existing
+   child tasks for that story. For a new story, treat Taiga's existing child
+   task set as empty and do not query child tasks before the story exists.
+2. Preserve every supplied task and, for an existing-story target, every
+   existing child task. Identify the smallest ordered set of
    implementation, integration, and verification tasks needed to satisfy the
    requirements. Do not create a task for a purely descriptive checklist item
    unless it represents actual work.
-3. Compare the required task set with existing child tasks. An exact or
-   clearly equivalent task under the target story satisfies that requirement;
-   create only missing tasks. A near match is not silently reused when its
+3. For an existing-story target, compare the required task set with that
+   story's children. An exact or clearly equivalent task under the target story
+   satisfies that requirement; create only missing tasks. For a new story,
+   every required task is missing from Taiga and is eligible for creation
+   after the story is created. A near match is not silently reused when its
    scope, parent, or completion meaning is uncertain.
 4. Keep explicit source order where available. Assign deterministic two-digit
    prefixes to derived tasks according to their final order, while preserving
@@ -103,10 +109,13 @@ Use this sequence:
 
 For a clearly identified existing story, resolve and read that story first and
 use it as the enrichment target. It is not a duplicate candidate. Other exact
-story matches remain duplicate blockers, and an exact task match under another
-parent is not evidence that the target story is complete. If a task match is
-ambiguous between existing work and a missing requirement, stop before the
-task write and report the candidates and the decision needed.
+story matches remain story-level duplicate blockers. Evaluate task duplicates
+only within the intended parent story: an identically named task attached to
+another story is unrelated and is neither reused nor a blocker. If a task
+candidate's parent cannot be established authoritatively, do not reuse it; a
+task-coverage check that remains unresolved is a blocker before task writes.
+If a task match is ambiguous between existing work and a missing requirement,
+stop before the task write and report the candidates and the decision needed.
 If the existing story cannot be resolved to exactly one authoritative target,
 stop with a blocker; do not select a target by subject similarity alone.
 
@@ -227,7 +236,8 @@ the selected plan before the first write. The normal publish path requires:
 
 - `resolve_project`, `get_current_user`, and `list_project_members`;
 - `list_points` and `list_project_roles`;
-- `list_epics`, `list_user_stories`, and `list_tasks` for duplicate checks;
+- `list_epics` and `list_user_stories` for story/epic duplicate checks;
+- `list_tasks` for child-task coverage when enriching an existing story;
 - `create_epic`, `create_user_story`, `link_user_story_to_epic`, and
   `create_task`;
 - `get_epic`, `get_user_story`, `get_task`, and
@@ -237,10 +247,6 @@ the selected plan before the first write. The normal publish path requires:
 For an existing story identified by a project-local `#ref`, also require
 `resolve_work_item`; validate the resolved target with `get_user_story` before
 using it for enrichment.
-
-For enrichment that explicitly changes story fields, also require
-`update_user_story`; task-only enrichment does not require a replacement story
-write.
 
 If a required operation is unavailable, stop before writing and report the
 exact missing tool. Do not replace a native estimate write with a comment,
@@ -277,8 +283,10 @@ Perform all of the following before creating anything:
    Never use a trial mutation to discover permissions and never guess another
    assignee after a permission rejection.
 4. Read every page of `list_project_roles` and `list_points`. For each planned
-   story, derive and reconcile its required task set when publication or
-   enrichment mode permits task derivation. Then identify all relevant
+   story, derive its required task set when publication or enrichment mode
+   permits task derivation. For a new story, treat the existing Taiga child
+   task set as empty. For an existing-story target, read and reconcile its
+   authoritative child tasks. Then identify all relevant
    configured computable roles from its requirements, acceptance criteria,
    architecture, and complete task set, and map each role's estimate to an
    existing point-option ID. The authenticated user's membership role is used
@@ -290,40 +298,45 @@ Perform all of the following before creating anything:
    availability from documentation or from a previous invocation.
 6. Check for possible duplicates before any create operation. First resolve any
    caller-identified existing story and mark it as the enrichment target; that
-   exact story is reusable and is not a duplicate blocker. For each other
-   needed work-item type, use the corresponding project-scoped list
-   operation with closed/archived coverage and no unrelated restrictive
-   filters: `list_epics(includeClosed=true)`,
+   exact story is reusable and is not a story duplicate blocker. For each other
+   needed work-item type, use the corresponding project-scoped list operation
+   with closed/archived coverage and no unrelated restrictive filters:
+   `list_epics(includeClosed=true)` and
    `list_user_stories(includeClosed=true, includeArchived=true,
-   includePageInfo=true)`, and `list_tasks(includeClosed=true)`. Compare all
-   planned or derived subjects against these results locally. For tasks, an
-   exact match satisfies a requirement only when its authoritative parent is
-   the target story; an exact match with another or unknown parent is a
-   blocker. Follow every positive `next_page` until the server reports
-   completion. If `next_page` is null and `has_more` is true, or if `total`
-   proves that returned pages are incomplete, stop with an inconsistent-
-   pagination blocker. If the available metadata is unknown (`next_page`,
-   `has_more`, and `total` are all null), do not claim a complete duplicate
-   scan; treat it as a no-write blocker unless the active connection contract
-   explicitly defines null `next_page` as terminal.
-   Report exact and near matches separately. An exact existing candidate is a
-   blocker unless it is the caller-identified story target or an equivalent
-   task already attached to that target story. Never create a second item
-   merely because its reference differs.
+   includePageInfo=true)`. Compare planned or derived epic/story subjects
+   against these results locally. For an existing-story target, list its child
+   tasks with `list_tasks(includeClosed=true, userStoryId=targetStoryId)` and
+   compare task subjects only within that parent. A same-named task under
+   another story is unrelated and must not block creation. For a new story,
+   there is no existing Taiga parent to scan, so treat its child-task set as
+   empty and do not use project-wide task names as duplicates. Follow every
+   positive `next_page` until each applicable stream reports completion. If
+   `next_page` is null and `has_more` is true, or if `total` proves that
+   returned pages are incomplete, stop with an inconsistent-pagination
+   blocker. If applicable pagination metadata is unknown (`next_page`,
+   `has_more`, and `total` are all null), do not claim a complete scan; treat
+   it as a no-write blocker unless the active connection contract explicitly
+   defines null `next_page` as terminal.
+   Report exact and near matches separately. An exact story candidate is a
+   blocker unless it is the caller-identified story target. An exact task
+   candidate is reusable only when its authoritative parent is the intended
+   story; a candidate under another story is neither reusable nor a blocker.
    When a list row cannot establish the intended parent story or epic, read the
    candidate with `get_user_story` or `get_task` and inspect the relevant epic
    relationship with `list_epic_user_stories` before deciding whether it is a
    duplicate. Do not infer a relationship from subject text.
 7. Validate that all planned stories have an unambiguous target epic and all
    planned or derived tasks have an unambiguous parent story. For every story,
-   reconcile the required task set against its existing children and record
-   which tasks are reused, missing, or intentionally absent. Preserve the
-   plan's order; do not infer missing relationships from subject text.
+   reconcile the required task set against its existing children when the story
+   already exists. For a new story, record that the existing child set is empty
+   and that every required task will be created after its parent. Record which
+   tasks are reused, missing, or intentionally absent. Preserve the plan's
+   order; do not infer missing relationships from subject text.
 
-Fetch each metadata list once per publication, following its pages, and reuse
-it for all items. Scan each needed work-item type once for the project and
-compare all planned or derived subjects locally; do not repeat full scans for
-each item.
+Fetch each project metadata list once per publication, following its pages, and
+reuse it for all items. Fetch child-task pages once per existing target story
+and compare task subjects only within that parent; do not use a project-wide
+task-name scan as a duplicate decision.
 
 A preflight failure is a no-write result. A preflight success is not a claim
 that Taiga has accepted a future write; it only authorizes the ordered
@@ -342,9 +355,9 @@ Create only after preflight succeeds, in this order:
    user's ID through `assigned_to`. Preserve its subject, description,
    acceptance criteria, tags, and sprint placement when present. For a
    caller-identified existing story, retain that authoritative story as the
-   target and do not create a replacement. Apply only explicitly requested
-   story-field updates through `update_user_story` when that tool was included
-   in preflight. Capture the authoritative ID, reference, project, assignment,
+   target and do not create a replacement. This enrichment path only creates
+   and verifies missing child tasks; it does not perform general story-field
+   edits. Capture the authoritative ID, reference, project, assignment,
    version, and estimate fields returned by Taiga or the target read.
 3. Link every created story to its intended created epic with
    `link_user_story_to_epic`, using the captured internal IDs and the plan's
@@ -357,7 +370,8 @@ Create only after preflight succeeds, in this order:
    created tasks. Do not add task estimates. Capture each authoritative ID,
    reference, project, parent, assignment, and version. An explicitly
    task-free story has zero task creations, but that exception must be recorded
-   and verified rather than inferred from an empty checklist.
+   and verified rather than inferred from an empty checklist. Never reassign or
+   otherwise mutate a reused existing task.
 
 After a failed or ambiguous write, stop dependent publication, do not repeat
 the operation, and produce a partial-completion report. Already-created
@@ -422,11 +436,13 @@ After the ordered writes and estimate updates, verify every result:
   is inconsistent or its metadata is unknown, mark the relationship check
   incomplete and do not report the backlog as verified.
 - `get_task` every required task, both reused and created, and confirm
-  identity, project, subject, authenticated assignment, and intended parent
-  story. Reconcile the complete required task set against the authoritative
-  children: missing, extra-ambiguous, or unreadable tasks are unverified. An
-  explicitly task-free story succeeds only when the story is verified to have
-  no required child tasks and that decision was explicit.
+  identity, project, subject, and intended parent story. For created tasks,
+  require assignment to the authenticated user. For reused tasks, verify the
+  authoritative existing assignment and preserve it; it need not match the
+  authenticated user. Reconcile the complete required task set against the
+  authoritative children: missing, extra-ambiguous, or unreadable tasks are
+  unverified. An explicitly task-free story succeeds only when the story is
+  verified to have no required child tasks and that decision was explicit.
 - Reconcile the verified entities against the approved plan. Any missing,
   mismatched, or unreadable field is unverified; do not present it as success.
 
@@ -439,7 +455,8 @@ Produce a concise report with separate sections for:
 - created epics, stories, links, tasks, and their Taiga references;
 - reused existing story/task targets and complete required-task coverage,
   including any explicit task-free exception;
-- confirmed assignments and native role estimates;
+- confirmed created-task assignments, preserved reused-task assignments, and
+  native role estimates;
 - per-role estimate values and reconciled whole-story totals, clearly
   distinguished when preserved or other-role contributions exist; never include
   unverified totals;
