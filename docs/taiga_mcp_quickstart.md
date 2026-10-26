@@ -6,7 +6,8 @@ This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C
 ---
 
 ## Prerequisites
-- SDK selected by `global.json` (10.0.401 with latestPatch) and .NET 8 runtime
+- SDK selected by `global.json` (10.0.401 with latestPatch), .NET 8 runtime, and ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`) for framework-dependent app and test runs. The shared framework is required in both STDIO and HTTP modes because the HTTP companion package is part of the application.
+- Self-contained publishes include the required .NET and ASP.NET Core runtime components on the target; framework-dependent launches and tests do not.
 - Windows PowerShell or a Linux/WSL shell (the test contamination fixture currently requires Windows)
 - Node.js (for MCP Inspector)
 - Codex CLI installed
@@ -44,6 +45,25 @@ dotnet test -c Debug
 configuration, named HTTP clients, the shared transport, domain APIs, cache and
 MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
 See the [implemented tool reference](taiga_tools_reference.md) for all 44 tools.
+
+The server uses STDIO by default for Codex. To run Streamable HTTP on a private
+loopback listener, configure the process before starting it:
+
+```powershell
+$env:MCP__TRANSPORT = 'http'
+$env:MCP__ADDRESS = '127.0.0.1'
+$env:MCP__PORT = '3001'
+$env:MCP__PATH = '/mcp'
+dotnet run --no-build
+```
+
+The endpoint is then `http://127.0.0.1:3001/mcp`. Address, port, and path are
+validated at startup. Keep the listener private and configure any Secure MCP
+Tunnel separately; this story does not verify ChatGPT connectivity or tunnel
+setup.
+
+For the external compatibility and access prerequisites that were checked for
+this story, see the dated source record in the [developer guide](development.md).
 
 For long-running MCP use, publish to a separate versioned directory. Keeping the
 published server apart from development outputs avoids executable/DLL locks.
@@ -562,6 +582,11 @@ You now have:
 `TAIGA__BASEURL` is an absolute HTTP/HTTPS API URL without embedded credentials,
 query, or fragment. Optional `TAIGA__METADATATTLSECONDS` is a positive integer
 (default 300). Startup rejects invalid configuration.
+
+`MCP__TRANSPORT` is `stdio` by default and also accepts `http` for Streamable
+HTTP. For HTTP, `MCP__ADDRESS` defaults to `127.0.0.1`, `MCP__PORT` to `3001`,
+and `MCP__PATH` to `/mcp`; all three are validated at startup. STDIO remains the
+default for existing Codex configurations.
 
 Use positive internal project/entity IDs and pages >= 1. For an update of only
 description/tags, omit `subject` and pass the current `version`; use

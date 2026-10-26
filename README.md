@@ -51,8 +51,13 @@ wire filters and envelope fields, including the current-user identity contract.
 - `set_user_story_estimates(userStoryId, version, rolePoints[{ roleId, pointId }])`: Versioned native story-point update. Sends only the supplied role-to-configured-point assignments and version, preserves omitted roles, supports configured unestimated point options, and returns authoritative estimate state without automatic conflict or ambiguous-write retries.
 
 ## Requirements
-- SDK selected by `global.json` (10.0.401, latest patch within that feature band) and .NET 8 runtime
+- SDK selected by `global.json` (10.0.401, latest patch within that feature band), plus the .NET 8 runtime and ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`) for framework-dependent app and test runs. The ASP.NET Core companion package is loaded for both HTTP and STDIO modes.
 - Taiga account and credentials
+
+Self-contained publishing (for example, `dotnet publish --self-contained true`)
+includes the required .NET and ASP.NET Core runtime components on the target, so
+the shared frameworks do not need to be installed there. Framework-dependent
+launches and tests do require both shared frameworks.
 
 ## Build and Run
 
@@ -113,6 +118,27 @@ Set environment variables for the server process:
 - `TAIGA__USERNAME`
 - `TAIGA__PASSWORD`
 - `TAIGA__METADATATTLSECONDS` (optional positive integer, default 300)
+- `MCP__TRANSPORT` (optional, `stdio` by default; set to `http` for Streamable HTTP)
+- `MCP__ADDRESS` (optional HTTP listener address, `127.0.0.1` by default)
+- `MCP__PORT` (optional HTTP listener port, `3001` by default)
+- `MCP__PATH` (optional HTTP MCP endpoint path, `/mcp` by default)
+
+STDIO remains the default and preserves the existing Codex launch behavior. For
+an HTTP launch, keep the listener private unless a separately secured tunnel
+needs to reach it, for example:
+
+```powershell
+$env:MCP__TRANSPORT = 'http'
+$env:MCP__ADDRESS = '127.0.0.1'
+$env:MCP__PORT = '3001'
+$env:MCP__PATH = '/mcp'
+dotnet run --no-build
+```
+
+The HTTP transport is provided by the same-version `ModelContextProtocol.AspNetCore`
+package and exposes Streamable HTTP through the configured MCP path. Taiga
+credentials remain server-side; this story does not configure a public tunnel or
+claim ChatGPT end-to-end connectivity.
 
 For Codex CLI, point the MCP server `command` to the published binary and pass the env vars. See the quickstart for a full `config.toml` example.
 
@@ -136,11 +162,13 @@ Notes:
 
 ## Development Notes
 
-`Program.cs` creates the host; `Hosting/ServiceCollectionExtensions.cs` registers
-options, APIs and tools. Tools use concrete domain APIs and a shared transport
-with cancellation, safe errors and explicit disposal. Auth token state and the
-expiring metadata cache are singleton services; named HTTP clients are obtained
-per operation. STDIO carries MCP messages only; logging goes to stderr.
+`Program.cs` selects STDIO or Streamable HTTP from shared configuration;
+`Hosting/ServiceCollectionExtensions.cs` registers the shared Taiga services and
+MCP tools, while transport-specific hosting stays in `Program.cs`. Tools use
+concrete domain APIs and a shared transport with cancellation, safe errors and
+explicit disposal. Auth token state and the expiring metadata cache are singleton
+services; named HTTP clients are obtained per operation. STDIO carries MCP
+messages only; logging goes to stderr.
 
 See the [developer guide](docs/development.md) for current architecture and the
 historical foundation cleanup record, and the [completed first batch](docs/goals/first-batch/README.md) for delivered scope.

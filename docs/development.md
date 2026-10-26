@@ -25,6 +25,51 @@ Cancellation flows through every asynchronous layer. No aggregate API facade
 is present. A received 401 permits one authentication replay; ambiguous writes
 and entity version conflicts are not automatically retried.
 
+## MCP transport selection
+
+`Program.cs` selects the server transport from the `Mcp` configuration section.
+`stdio` is the default and keeps the existing Codex launch behavior. Set
+`MCP__TRANSPORT=http` to use the SDK's Streamable HTTP transport; the default
+listener is `http://127.0.0.1:3001/mcp`. `MCP__ADDRESS`, `MCP__PORT`, and
+`MCP__PATH` configure the listener address, port, and endpoint path. The default
+loopback binding is intentionally narrow; a private Secure MCP Tunnel may be
+configured separately when a remote client needs access. Taiga credentials stay
+in the server process.
+
+The referenced `ModelContextProtocol` 0.3.0-preview.4 package supplies the
+existing STDIO/stream hosting APIs. Its same-version
+`ModelContextProtocol.AspNetCore` companion supplies `WithHttpTransport()` and
+`MapMcp()` for Streamable HTTP on net8.0, so the base SDK version remains
+unchanged. Shared Taiga services and tool discovery are registered once, and
+only the selected transport is attached by `Program.cs`.
+
+### Secure MCP Tunnel compatibility and access record (checked 2026-10-26)
+
+The official [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels?site_locale=en)
+states that a private MCP server can remain non-public: `tunnel-client` runs
+inside the private network, opens outbound HTTPS to OpenAI, and must also reach
+the configured private MCP server locally. It documents `api.openai.com:443`
+over HTTPS by default (or `mtls.api.openai.com:443` when control-plane mTLS is
+configured). For an HTTP MCP server, the guide's documented option is
+`--mcp-server-url https://mcp.internal.example.com/mcp` in place of
+`--mcp-command`; the actual tunnel identity and private URL are deployment
+inputs, not values this repository can invent.
+
+The official [MCP server deployment guide](https://developers.openai.com/plugins/build/mcp-server)
+requires Streamable HTTP at a stable URL, typically ending in `/mcp`, for a
+public plugin endpoint and explicitly distinguishes Secure MCP Tunnel as the
+private-server path. The official [connect and test guide](https://developers.openai.com/plugins/deploy/connect-chatgpt)
+states that a tunnel may reach a configured stdio or HTTP MCP server and that
+the tunnel client must remain running for discovery and tool calls; it also
+calls out workspace/tunnel access and authentication checks.
+
+These are authoritative compatibility and access prerequisites inspected on the
+date above, not proof of a live deployment. No tunnel ID, OpenAI organization or
+workspace permission, outbound firewall path, or ChatGPT connection was
+available to exercise here. This story therefore records the HTTP SDK and local
+configuration evidence only; tunnel setup and ChatGPT discovery/read/write
+verification remain later epic work.
+
 Issue/story lists preserve legacy arrays and offer opt-in page envelopes;
 task/epic lists always use envelopes. Page metadata preserves unknown nulls,
 while resource DTOs omit null properties. Versioned updates support explicit
@@ -63,9 +108,10 @@ xunit.runner.visualstudio 2.8.2. No version upgrades are planned.
 
 ## Layers and intended lifetimes
 
-Program creates the host; Hosting/ServiceCollectionExtensions owns DI and
-STDIO registration. Tools own public signatures and JSON responses. Domain
-APIs own routes, request payloads and mapping. Models define wire properties.
+Program selects the transport and creates the host;
+Hosting/ServiceCollectionExtensions owns shared DI and MCP tool registration.
+Tools own public signatures and JSON responses. Domain APIs own routes, request
+payloads and mapping. Models define wire properties.
 The cleanup will introduce a shared transport owning HTTP sends, response
 checks and JSON reads. AuthClient will remain singleton token state with an
 async login/refresh gate; it will use operation-scoped factory clients rather
