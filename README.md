@@ -97,6 +97,7 @@ dotnet restore
 dotnet build -c Debug
 $env:TAIGA__USERNAME = 'your-user'
 $env:TAIGA__PASSWORD = 'your-password'
+$env:MCP__TRANSPORT = 'stdio'
 dotnet run --no-build
 ```
 
@@ -105,9 +106,11 @@ messages go to stdout while normal host logs go to stderr. To select Streamable
 HTTP, set `MCP__TRANSPORT=http`; the default private listener is
 `http://127.0.0.1:3001/mcp`. Configure `MCP__ADDRESS`, `MCP__PORT`, and
 `MCP__PATH` for another listener address, port, or endpoint path. See the
-[developer guide](docs/development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26)
-for the dated tunnel compatibility and access prerequisites; this repository
-does not claim a live tunnel or ChatGPT connection.
+[quickstart's Secure MCP Tunnel section](docs/taiga_mcp_quickstart.md#secure-mcp-tunnel-and-chatgpt-web)
+for the private ChatGPT Web setup, the `tunnel-client` profile example, and
+the documented discovery/read/write checks. The [developer guide](docs/development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26)
+records the dated compatibility and runtime evidence without storing tunnel
+IDs, runtime keys, or Taiga credentials.
 
 ## Configuration
 
@@ -131,7 +134,9 @@ normalized. The transport must be `stdio` or `http`; HTTP address, port, and
 path are also validated. Prefer HTTPS when sending credentials over a network.
 
 TaigaMCP logs in to Taiga itself and keeps bearer/refresh tokens in process
-memory. Application-token authentication is not implemented. Never commit
+memory. Application-token authentication is not implemented. In HTTP/tunnel
+mode, Taiga credentials remain in the TaigaMCP server process; ChatGPT sees
+MCP tool schemas and results, not the Taiga login or bearer token. Never commit
 credentials or a populated client configuration to the repository.
 
 Attachment paths refer to the filesystem visible to the **server process**.

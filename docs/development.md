@@ -29,15 +29,23 @@ framework reference, including for STDIO launches and tests.
 
 ### Secure MCP Tunnel compatibility and access record (checked 2026-10-26)
 
-The official [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels?site_locale=en)
+The official [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
 states that a private MCP server can remain non-public: `tunnel-client` runs
 inside the private network, opens outbound HTTPS to OpenAI, and must also reach
 the configured private MCP server locally. It documents `api.openai.com:443`
 over HTTPS by default (or `mtls.api.openai.com:443` when control-plane mTLS is
-configured). For an HTTP MCP server, the guide's documented option is
-`--mcp-server-url https://mcp.internal.example.com/mcp` in place of
-`--mcp-command`; the actual tunnel identity and private URL are deployment
-inputs, not values this repository can invent.
+configured). For an HTTP MCP server, use
+`--mcp-server-url http://private-host:3001/mcp` in place of
+`--mcp-command`; the tunnel identity and private URL remain deployment inputs.
+
+The prerequisite verification for story #271 exercised this shape with a
+loopback-only TaigaMCP HTTP listener and tunnel-client v0.0.18. The verified
+run used `127.0.0.1:61060` for MCP and a loopback tunnel admin listener on
+`127.0.0.1:8081`; both `/healthz` and `/readyz` returned 200. The profile used
+an environment-only `CONTROL_PLANE_API_KEY` reference and a loopback
+`--mcp-server-url`; no Taiga credentials or key values were stored in the
+profile or documentation. The client reported healthy/readiness state and
+successful control-plane polling.
 
 The official [MCP server deployment guide](https://developers.openai.com/plugins/build/mcp-server)
 requires Streamable HTTP at a stable URL, typically ending in `/mcp`, for a
@@ -47,12 +55,13 @@ states that a tunnel may reach a configured stdio or HTTP MCP server and that
 the tunnel client must remain running for discovery and tool calls; it also
 calls out workspace/tunnel access and authentication checks.
 
-These are authoritative compatibility and access prerequisites inspected on the
-date above, not proof of a live deployment. No tunnel ID, OpenAI organization
-or workspace permission, outbound firewall path, or ChatGPT connection was
-available to exercise here. This story records the HTTP SDK and local
-configuration evidence only; tunnel setup and ChatGPT discovery/read/write
-verification remain later epic work.
+Runtime evidence recorded for #271 included discovery of all 44 Taiga tools,
+real read-only `get_current_user` and `list_projects` calls, and a user-attested
+ChatGPT Web comment write that followed an explicit confirmation prompt. The
+write was not repeated by this story and its target is intentionally omitted
+from repository documentation. The evidence verifies the integration shape;
+it does not grant permission for future live writes or replace the operator's
+workspace, tunnel, firewall, and account checks.
 
 ## Architecture and lifetimes
 
