@@ -12,6 +12,7 @@ public sealed class WorkItemAttachmentListTests
     [InlineData("epic", "/api/v1/epics/attachments")]
     [InlineData("user_story", "/api/v1/userstories/attachments")]
     [InlineData("task", "/api/v1/tasks/attachments")]
+    [InlineData("issue", "/api/v1/issues/attachments")]
     public async Task ListPage_UsesSharedRouteAndAllowlistedFilters(string kind, string path)
     {
         var handler = new FakeHttpMessageHandler()
@@ -79,7 +80,7 @@ public sealed class WorkItemAttachmentListTests
     }
 
     [Theory]
-    [InlineData("issue", "kind")]
+    [InlineData("wiki", "kind")]
     [InlineData("", "kind")]
     [InlineData("task", "id")]
     public async Task ListPage_RejectsUnsupportedKindOrNonpositiveIdBeforeHttp(string kind, string _)

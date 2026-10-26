@@ -12,6 +12,7 @@ public sealed class WorkItemAttachmentDeleteApiTests
     [InlineData("epic", "/api/v1/epics/attachments/901")]
     [InlineData("user_story", "/api/v1/userstories/attachments/901")]
     [InlineData("task", "/api/v1/tasks/attachments/901")]
+    [InlineData("issue", "/api/v1/issues/attachments/901")]
     public async Task DeleteAsync_UsesKindSpecificRouteAndReturnsReceipt(string kind, string path)
     {
         var handler = new FakeHttpMessageHandler().AddRoute(
@@ -36,7 +37,7 @@ public sealed class WorkItemAttachmentDeleteApiTests
     }
 
     [Theory]
-    [InlineData("issue", 901)]
+    [InlineData("wiki", 901)]
     [InlineData("task", 0)]
     public async Task DeleteAsync_RejectsInvalidInputBeforeHttp(string kind, int attachmentId)
     {

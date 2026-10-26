@@ -12,7 +12,7 @@ The public command is:
 download_work_item_attachment(kind, attachmentId, destination)
 ```
 
-`kind` is exactly `epic`, `user_story`, or `task`; `attachmentId` is a
+`kind` is exactly `epic`, `user_story`, `task`, or `issue`; `attachmentId` is a
 positive internal attachment ID. The server first performs the kind-specific,
 authenticated detail GET. The response's `url` is the preferred binary source.
 When `url` is absent, `attached_file` is accepted only as an absolute HTTP/HTTPS
@@ -70,5 +70,5 @@ leave a pre-existing destination unchanged. The final receipt contains the
 confirmed destination path, byte count, and available attachment metadata; it
 does not contain binary content, bearer tokens, or raw upstream error bodies.
 
-Issue attachments, preview downloads, bulk retrieval, overwrite controls,
+Preview downloads, bulk retrieval, overwrite controls,
 directory creation, and attachment mutation are outside this command.

@@ -39,15 +39,18 @@ public sealed class WorkItemAttachmentDownloadTests
     }
 
     [Theory]
-    [InlineData("expired")]
-    [InlineData(null)]
-    public async Task DownloadAsync_RefreshesRejectedMediaUrlWithoutRefreshingApiAuthentication(string? token)
+    [InlineData("task", "expired")]
+    [InlineData("issue", "expired")]
+    [InlineData("task", null)]
+    [InlineData("issue", null)]
+    public async Task DownloadAsync_RefreshesRejectedMediaUrlWithoutRefreshingApiAuthentication(string kind, string? token)
     {
         var metadataReads = 0;
+        var detailPath = kind == "issue" ? "/api/v1/issues/attachments/901" : "/api/v1/tasks/attachments/901";
         var originalUrl = "https://files.example/protected.bin" + (token is null ? "" : $"?token={token}");
         const string freshUrl = "https://files.example/protected.bin?token=fresh%2Bsignature#_taiga-refresh:901";
         var handler = new FakeHttpMessageHandler()
-            .AddRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", _ => new HttpResponseMessage(HttpStatusCode.OK)
+            .AddRoute(HttpMethod.Get, detailPath, _ => new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(DownloadFixtures.DetailWithUrl(++metadataReads == 1 ? originalUrl : freshUrl, size: 3))
             })
@@ -60,7 +63,7 @@ public sealed class WorkItemAttachmentDownloadTests
         {
             try
             {
-                var result = await NewApi(handler, auth).DownloadAsync("task", 901, destination);
+                var result = await NewApi(handler, auth).DownloadAsync(kind, 901, destination);
 
                 Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(destination));
                 Assert.Equal(freshUrl, result.Attachment.Url);
@@ -133,6 +136,7 @@ public sealed class WorkItemAttachmentDownloadTests
     [InlineData("epic", "/api/v1/epics/attachments/901")]
     [InlineData("user_story", "/api/v1/userstories/attachments/901")]
     [InlineData("task", "/api/v1/tasks/attachments/901")]
+    [InlineData("issue", "/api/v1/issues/attachments/901")]
     public async Task DownloadAsync_UsesMetadataAndWritesExactBytesForEveryKind(string kind, string detailPath)
     {
         var bytes = new byte[] { 0, 1, 127, 128, 254, 255, 13, 10 };

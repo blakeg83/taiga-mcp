@@ -2388,6 +2388,68 @@ public sealed class McpIntegrationTests
     }
 
     [Fact]
+    public async Task ProductionServer_IssueAttachments_SupportsDownloadAndMutationTools()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        taiga.AttachmentDetailResponseBody =
+            $$"""{"id":901,"project":123,"object_id":42,"name":"issue.bin","size":6,"url":"{{taiga.BaseUrl}}media/901.bin"}""";
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start("dotnet", [serverAssembly], CreateEnvironment(taiga), Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        foreach (var name in new[] { "list_work_item_attachments", "get_work_item_attachment", "download_work_item_attachment", "upload_work_item_attachment", "update_work_item_attachment", "delete_work_item_attachment" })
+        {
+            var tool = Assert.Single(tools, candidate => candidate.Name == name);
+            Assert.Contains("issue", tool.JsonSchema.GetProperty("properties").GetProperty("kind").GetProperty("description").GetString());
+        }
+
+        async Task<JsonElement> Call(string name, Dictionary<string, object?> arguments)
+        {
+            arguments["kind"] = "issue";
+            var result = await client.CallToolAsync(name, arguments, cancellationToken: timeout.Token);
+            Assert.False(result.IsError == true, GetText(result));
+            return JsonSerializer.Deserialize<JsonElement>(GetText(result));
+        }
+
+        var source = Path.Combine(Path.GetTempPath(), $"taiga-issue-upload-{Guid.NewGuid():N}.bin");
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-issue-download-{Guid.NewGuid():N}.bin");
+        await File.WriteAllBytesAsync(source, taiga.AttachmentDownloadResponseBody);
+        try
+        {
+            var upload = await Call("upload_work_item_attachment", new() { ["id"] = 42, ["projectId"] = 123, ["file"] = source });
+            Assert.Equal(901, upload.GetProperty("id").GetInt32());
+            var download = await Call("download_work_item_attachment", new() { ["attachmentId"] = 901, ["destination"] = destination });
+            Assert.Equal(6, download.GetProperty("bytes").GetInt64());
+            Assert.Equal(taiga.AttachmentDownloadResponseBody, await File.ReadAllBytesAsync(destination));
+            var update = await Call("update_work_item_attachment", new()
+            {
+                ["attachmentId"] = 901,
+                ["fields"] = new Dictionary<string, object?> { ["order"] = 0, ["is_deprecated"] = false }
+            });
+            Assert.Equal(0, update.GetProperty("order").GetInt32());
+            var delete = await Call("delete_work_item_attachment", new() { ["attachmentId"] = 901 });
+            Assert.Equal("issue", delete.GetProperty("kind").GetString());
+            Assert.True(delete.GetProperty("deleted").GetBoolean());
+
+            var requests = taiga.Requests.Where(request => request.PathAndQuery.Contains("/issues/attachments", StringComparison.Ordinal)).ToArray();
+            Assert.Equal(new[] { "POST", "GET", "PATCH", "DELETE" }, requests.Select(request => request.Method));
+            Assert.All(requests, request => Assert.Equal("Bearer integration-token", request.Authorization));
+            Assert.Equal("/api/v1/issues/attachments", requests[0].PathAndQuery);
+            Assert.All(requests.Skip(1), request => Assert.Equal("/api/v1/issues/attachments/901", request.PathAndQuery));
+        }
+        finally
+        {
+            File.Delete(source);
+            File.Delete(destination);
+        }
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+    }
+
+    [Fact]
     public async Task ProductionServer_ListWorkItemAttachments_ListsEverySupportedKind()
     {
         await using var taiga = FakeTaigaHttpServer.Start();
@@ -2402,7 +2464,7 @@ public sealed class McpIntegrationTests
             new[] { "kind", "id", "projectId", "page" },
             tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
 
-        foreach (var kind in new[] { "epic", "user_story", "task" })
+        foreach (var kind in new[] { "epic", "user_story", "task", "issue" })
         {
             var result = await client.CallToolAsync(
                 "list_work_item_attachments",
@@ -2427,7 +2489,8 @@ public sealed class McpIntegrationTests
             {
                 "/api/v1/epics/attachments?object_id=42&project=123&page=2",
                 "/api/v1/userstories/attachments?object_id=42&project=123&page=2",
-                "/api/v1/tasks/attachments?object_id=42&project=123&page=2"
+                "/api/v1/tasks/attachments?object_id=42&project=123&page=2",
+                "/api/v1/issues/attachments?object_id=42&project=123&page=2"
             },
             taiga.Requests
                 .Where(request => request.Method == "GET" && request.PathAndQuery.Contains("/attachments?", StringComparison.Ordinal))
@@ -2453,7 +2516,7 @@ public sealed class McpIntegrationTests
             new[] { "kind", "attachmentId" },
             tool.JsonSchema.GetProperty("properties").EnumerateObject().Select(property => property.Name));
 
-        foreach (var kind in new[] { "epic", "user_story", "task" })
+        foreach (var kind in new[] { "epic", "user_story", "task", "issue" })
         {
             var result = await client.CallToolAsync(
                 "get_work_item_attachment",
@@ -2477,7 +2540,8 @@ public sealed class McpIntegrationTests
             {
                 "/api/v1/epics/attachments/901",
                 "/api/v1/userstories/attachments/901",
-                "/api/v1/tasks/attachments/901"
+                "/api/v1/tasks/attachments/901",
+                "/api/v1/issues/attachments/901"
             },
             taiga.Requests
                 .Where(request => request.Method == "GET" && request.PathAndQuery.Contains("/attachments/901", StringComparison.Ordinal))

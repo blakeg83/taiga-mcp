@@ -12,6 +12,7 @@ public sealed class WorkItemAttachmentUpdateTests
     [InlineData("epic", "/api/v1/epics/attachments/901")]
     [InlineData("user_story", "/api/v1/userstories/attachments/901")]
     [InlineData("task", "/api/v1/tasks/attachments/901")]
+    [InlineData("issue", "/api/v1/issues/attachments/901")]
     public async Task UpdateAsync_UsesKindSpecificPatchAndPreservesExplicitValues(string kind, string path)
     {
         var handler = new FakeHttpMessageHandler()

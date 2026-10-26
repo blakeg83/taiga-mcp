@@ -1,6 +1,6 @@
 # Development guide
 
-## Current state (2026-10-02)
+## Current state (2026-10-26)
 
 All 15 selected first-batch functions are implemented within their documented
 scope. The server exposes 44 tools; see the [tool reference](taiga_tools_reference.md)
@@ -14,7 +14,8 @@ delivered `get_current_user`, `list_project_members`, `resolve_work_item`,
 `upload_work_item_attachment`, `download_work_item_attachment`,
 `update_work_item_attachment`, and `delete_work_item_attachment` for the
 selected attachment workflows. These tools are implemented within their
-documented scope.
+documented scope. All six shared attachment tools also accept `kind="issue"`,
+routed to `issues/attachments`; existing parameters and response shapes are unchanged.
 
 Tools inject concrete domain APIs and use ToolResponseJson/ToolErrors.
 TaigaTransport owns responses and obtains a factory client per operation;
