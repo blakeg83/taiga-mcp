@@ -8,7 +8,7 @@ REST API over a local **stdio** connection.
 
 New to Taiga? Visit the [Taiga homepage](https://taiga.io/) or browse its
 [GitHub repositories](https://github.com/taigaio), including the
-[backend/API repository](https://github.com/taigaio/taiga-back).
+[docker build](https://github.com/taigaio/taiga-docker).
 
 Use it to triage issues, plan epics and user stories, manage tasks and sprints,
 assign work, set native story estimates, read history, post comments, and
