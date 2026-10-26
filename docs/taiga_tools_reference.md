@@ -90,10 +90,21 @@ refresh a stale version.
 The shared comment command is implemented for all four work-item kinds and is
 documented below.
 
+Issue attachment support was added on 2026-10-26 across all six shared attachment
+tools. `kind="issue"` selects `issues/attachments` and the same DTOs, validation,
+file limits, authentication boundaries, and error handling as the other kinds.
+The route and permissions were checked against the pinned backend
+[router](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/routers.py),
+[attachment view sets](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/api.py),
+and [permissions](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/permissions.py).
+For issue #240 in project 12, list with `kind="issue", id=472, projectId=12`;
+then pass the returned attachment ID to the download tool with an explicit local
+destination. The displayed issue ref is not the parent ID or attachment ID.
+
 ### `list_work_item_attachments` contract
 
 The signature is `list_work_item_attachments(kind, id, projectId, page=1)`.
-The supported kinds are exactly `epic`, `user_story`, and `task`; `id` is the
+The supported kinds are exactly `epic`, `user_story`, `task`, and `issue`; `id` is the
 positive internal parent ID, `projectId` is the positive internal project ID,
 and `page` is positive and defaults to 1. The tool requests exactly one page
 from the kind-specific route:
@@ -103,6 +114,7 @@ from the kind-specific route:
 | `epic` | `/api/v1/epics/attachments` | `object_id={id}&project={projectId}&page={page}` |
 | `user_story` | `/api/v1/userstories/attachments` | `object_id={id}&project={projectId}&page={page}` |
 | `task` | `/api/v1/tasks/attachments` | `object_id={id}&project={projectId}&page={page}` |
+| `issue` | `/api/v1/issues/attachments` | `object_id={id}&project={projectId}&page={page}` |
 
 The response is always the standard `{ items, page, total, next_page,
 has_more }` envelope. Each item can expose verified attachment metadata and
@@ -126,7 +138,7 @@ For example:
 Invalid kinds, nonpositive IDs/pages, malformed required attachment identities,
 malformed list data, permission failures, and transport failures become safe
 MCP errors. The command does not read parent details, fetch later pages,
-download file content, or mutate attachments. Issue attachments and attachment
+download file content, or mutate attachments. Attachment
 detail/upload/update/delete/download commands remain outside this list command.
 
 This contract was checked on 2026-10-02 against the official [epic](https://github.com/taigaio/taiga-doc/blob/main/api/epics/list-attachments.adoc),
@@ -142,7 +154,7 @@ not a deployed-version claim.
 ### `get_work_item_attachment` contract
 
 The signature is `get_work_item_attachment(kind, attachmentId)`. The supported
-kinds are exactly `epic`, `user_story`, and `task`; `attachmentId` is the
+kinds are exactly `epic`, `user_story`, `task`, and `issue`; `attachmentId` is the
 positive internal attachment ID, not a work-item or displayed `#ref` ID. The
 tool requests exactly one authenticated detail resource and does not accept a
 project or parent ID:
@@ -152,6 +164,7 @@ project or parent ID:
 | `epic` | `/api/v1/epics/attachments/{attachmentId}` |
 | `user_story` | `/api/v1/userstories/attachments/{attachmentId}` |
 | `task` | `/api/v1/tasks/attachments/{attachmentId}` |
+| `issue` | `/api/v1/issues/attachments/{attachmentId}` |
 
 The response is one attachment object with required positive `id`, `project`,
 and `object_id` values. It can include `owner`, `name`, `description`, `order`,
@@ -176,7 +189,7 @@ For example:
 Invalid kinds, nonpositive IDs, malformed JSON or identity, permission/not-found
 responses, transport failures, and cancellation become the established safe
 MCP errors. The tool performs no parent-detail, relationship, list, or content
-download request. Issue attachments and upload/update/delete/download
+download request. Upload/update/delete/download
 operations remain outside this command.
 
 This contract is recorded in
@@ -190,8 +203,8 @@ set. This is pinned source evidence, not a deployed-version claim.
 ### `upload_work_item_attachment` contract
 
 The signature is `upload_work_item_attachment(kind, id, projectId, file,
-description?)`. The supported kinds are exactly `epic`, `user_story`, and
-`task`; `id` and `projectId` are positive internal IDs. `file` is a required
+description?)`. The supported kinds are exactly `epic`, `user_story`, `task`, and
+`issue`; `id` and `projectId` are positive internal IDs. `file` is a required
 absolute local path visible to the stdio server process. URLs, relative paths,
 directories, wildcards, and bulk selection are rejected before any HTTP
 request. The default maximum file size is 10 MiB and can be changed with the
@@ -206,6 +219,7 @@ The client sends one authenticated multipart POST to the kind-specific route:
 | `epic` | `/api/v1/epics/attachments` | `object_id`, `project`, `attached_file` |
 | `user_story` | `/api/v1/userstories/attachments` | `object_id`, `project`, `attached_file` |
 | `task` | `/api/v1/tasks/attachments` | `object_id`, `project`, `attached_file` |
+| `issue` | `/api/v1/issues/attachments` | `object_id`, `project`, `attached_file` |
 
 `description` is an optional text part; it is omitted when absent and empty
 text is preserved. The tool does not expose server-defaulted `is_deprecated`
@@ -228,7 +242,7 @@ responses, association mismatches, permission failures, and transport errors
 become safe MCP errors. The upload is streamed from disk; the one permitted
 401 replay creates a fresh file stream, while ambiguous POST failures are not
 retried. If a successful POST cannot be read or mapped, the error states that
-the upload may already have applied. Issue attachments, update,
+the upload may already have applied. Update,
 delete, and bulk upload remain outside this command.
 
 This contract is recorded in
@@ -242,8 +256,7 @@ source evidence, not a deployed-version claim.
 ### `download_work_item_attachment` contract
 
 The signature is `download_work_item_attachment(kind, attachmentId,
-destination)`. The supported kinds are exactly `epic`, `user_story`, and
-`task`; `attachmentId` is the positive internal attachment ID. The server
+destination)`. The supported kinds are exactly `epic`, `user_story`, `task`, and `issue`; `attachmentId` is the positive internal attachment ID. The server
 first performs the kind-specific authenticated attachment detail GET, then
 uses its `url` as the preferred binary source or an absolute HTTP/HTTPS
 `attached_file` URL when `url` is absent. Storage paths are rejected rather
@@ -289,15 +302,14 @@ the authoritative attachment metadata:
 }
 ```
 
-Binary content, bearer tokens, raw upstream bodies, issue attachments,
-overwrite controls, directory creation, and attachment mutation remain out
+Binary content, bearer tokens, raw upstream bodies, overwrite controls, directory creation, and attachment mutation remain out
 of scope. See [attachment_download_contract.md](attachment_download_contract.md)
 for the source and filesystem evidence record.
 
 ### `update_work_item_attachment` contract
 
 The signature is `update_work_item_attachment(kind, attachmentId, fields)`.
-The supported kinds are exactly `epic`, `user_story`, and `task`; the positive
+The supported kinds are exactly `epic`, `user_story`, `task`, and `issue`; the positive
 `attachmentId` is the internal attachment ID. `fields` is a required JSON
 object with at least one of these exact allowlisted properties:
 
@@ -314,6 +326,7 @@ The client sends exactly one authenticated JSON PATCH to the selected route:
 | `epic` | `/api/v1/epics/attachments/{attachmentId}` |
 | `user_story` | `/api/v1/userstories/attachments/{attachmentId}` |
 | `task` | `/api/v1/tasks/attachments/{attachmentId}` |
+| `issue` | `/api/v1/issues/attachments/{attachmentId}` |
 
 Omitted fields remain unchanged. Null, unknown, duplicate, and empty fields
 objects fail before HTTP. The request never includes attachment bytes,
@@ -340,7 +353,7 @@ failures, and cancellation become safe MCP errors. Only a received 401 can
 replay the request through shared authentication; ambiguous writes and
 conflicts are never retried. If a successful PATCH cannot be mapped, the
 error says the update may already have applied and directs the caller to read
-the attachment before retrying. Issue attachments, delete, bulk reordering,
+the attachment before retrying. Delete, bulk reordering,
 file replacement, and project/parent changes remain outside this command.
 
 This contract is recorded in
@@ -355,7 +368,7 @@ deployed-version claim.
 ### `delete_work_item_attachment` contract
 
 The signature is `delete_work_item_attachment(kind, attachmentId)`. The
-supported kinds are exactly `epic`, `user_story`, and `task`; `attachmentId`
+supported kinds are exactly `epic`, `user_story`, `task`, and `issue`; `attachmentId`
 is the positive internal attachment ID selected by the caller. The client
 sends exactly one authenticated `DELETE` to the selected route:
 
@@ -364,6 +377,7 @@ sends exactly one authenticated `DELETE` to the selected route:
 | `epic` | `/api/v1/epics/attachments/{attachmentId}` |
 | `user_story` | `/api/v1/userstories/attachments/{attachmentId}` |
 | `task` | `/api/v1/tasks/attachments/{attachmentId}` |
+| `issue` | `/api/v1/issues/attachments/{attachmentId}` |
 
 Only a confirmed HTTP 204 response returns the receipt
 `{"kind":"task","attachment_id":901,"deleted":true}`. The shared transport
@@ -374,7 +388,7 @@ Unexpected successful statuses, permission failures, transport failures, and
 cancellation remain safe errors; ambiguous DELETE failures are never retried,
 while the shared one-401 authentication replay remains allowed. The tool does
 not fetch the parent, list or mutate siblings, change epic relationships, or
-delete a local downloaded file. Issue attachments remain outside scope.
+delete a local downloaded file.
 
 This contract is recorded in
 [attachment_delete_contract.md](attachment_delete_contract.md) and was checked
@@ -825,9 +839,9 @@ or infer estimates, and list operations do not issue per-story detail reads.
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId` and `version` required; `subject`, `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One issue object returned by Taiga after the PATCH. |
 | `add_work_item_comment` | `kind`, `id`, `version`, and `text` required; `kind` is one of `issue`, `user_story`, `task`, or `epic`; `id` is positive; `version` is nonnegative; `text` is nonblank | `{ "kind": "task", "id": 203, "version": 3, "comment_submitted": true }` after one confirmed comment-only PATCH. |
-| `download_work_item_attachment` | `kind`, `attachmentId`, and `destination` required; `kind` is one of `epic`, `user_story`, or `task` | `{ destination, bytes, attachment }`; streams bounded binary bytes to a new explicit absolute destination after metadata inspection, with origin-scoped authentication, manual redirects, atomic placement, and cleanup on failure. |
+| `download_work_item_attachment` | `kind`, `attachmentId`, and `destination` required; `kind` is one of `epic`, `user_story`, `task`, or `issue` | `{ destination, bytes, attachment }`; streams bounded binary bytes to a new explicit absolute destination after metadata inspection, with origin-scoped authentication, manual redirects, atomic placement, and cleanup on failure. |
 | `update_work_item_attachment` | `kind`, `attachmentId`, and `fields` required; `fields` is a nonempty object containing only `description`, `order`, and/or `is_deprecated` | One authoritative attachment object after one JSON PATCH; omitted fields stay unchanged, empty/zero/false values are preserved, no attachment version is sent, and only a received 401 is replayed. |
-| `delete_work_item_attachment` | `kind` and `attachmentId` required; `kind` is one of `epic`, `user_story`, or `task` | `{ kind, attachment_id, deleted: true }` only after one confirmed HTTP 204 DELETE; 404/repeated deletion is an error and ambiguous writes are not retried. |
+| `delete_work_item_attachment` | `kind` and `attachmentId` required; `kind` is one of `epic`, `user_story`, `task`, or `issue` | `{ kind, attachment_id, deleted: true }` only after one confirmed HTTP 204 DELETE; 404/repeated deletion is an error and ambiguous writes are not retried. |
 | `list_issue_statuses` | `projectId` integer, required | Array of `{ id, name, slug, is_closed }`. |
 | `list_issue_severities` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |
 | `list_issue_types` | `projectId` integer, required | Array of `{ id, name, slug, color }`. |

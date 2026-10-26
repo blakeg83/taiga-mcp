@@ -220,14 +220,14 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         }
 
         if (request.HttpMethod == HttpMethod.Post.Method &&
-            path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments")
+            path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments" or "/api/v1/issues/attachments")
         {
             await RespondAsync(context.Response, AttachmentUploadStatusCode, AttachmentUploadResponseBody);
             return;
         }
 
         if (request.HttpMethod == HttpMethod.Patch.Method &&
-            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901")
+            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901" or "/api/v1/issues/attachments/901")
         {
             await RespondAsync(
                 context.Response,
@@ -239,7 +239,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         }
 
         if (request.HttpMethod == HttpMethod.Delete.Method &&
-            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901")
+            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901" or "/api/v1/issues/attachments/901")
         {
             if (AttachmentDeleteStatusCode == HttpStatusCode.NoContent)
                 await RespondNoContentAsync(context.Response);
@@ -249,7 +249,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         }
 
         if (request.HttpMethod == HttpMethod.Get.Method &&
-            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901")
+            path is "/api/v1/epics/attachments/901" or "/api/v1/userstories/attachments/901" or "/api/v1/tasks/attachments/901" or "/api/v1/issues/attachments/901")
         {
             if (AttachmentDetailStatusCode != HttpStatusCode.OK)
             {
@@ -262,7 +262,7 @@ public sealed class FakeTaigaHttpServer : IAsyncDisposable
         }
 
         if (request.HttpMethod == HttpMethod.Get.Method &&
-            path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments")
+            path is "/api/v1/epics/attachments" or "/api/v1/userstories/attachments" or "/api/v1/tasks/attachments" or "/api/v1/issues/attachments")
         {
             if (AttachmentStatusCode != HttpStatusCode.OK)
             {

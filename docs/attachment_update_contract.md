@@ -8,7 +8,7 @@ not a claim about every deployed Taiga instance.
 
 ## Supported kinds and routes
 
-The public kind set is exactly `epic`, `user_story`, and `task`. Each kind has
+The public kind set is exactly `epic`, `user_story`, `task`, and `issue`. Each kind has
 its own attachment endpoint, selected internally from the closed route map:
 
 | kind | partial-update route | backend content type |
@@ -16,16 +16,17 @@ its own attachment endpoint, selected internally from the closed route map:
 | `epic` | `/api/v1/epics/attachments/{attachmentId}` | `epics.epic` |
 | `user_story` | `/api/v1/userstories/attachments/{attachmentId}` | `userstories.userstory` |
 | `task` | `/api/v1/tasks/attachments/{attachmentId}` | `tasks.task` |
+| `issue` | `/api/v1/issues/attachments/{attachmentId}` | `issues.issue` |
 
 The update operation uses one authenticated JSON `PATCH`. Taiga documents a
 `200 OK` response containing the authoritative attachment detail object. The
 client does not list the attachment first, fetch its parent, or follow a file
-URL. Issue attachments are outside this goal.
+URL.
 
 ## Verified editable allowlist
 
 Taiga's common `BaseAttachmentViewSet` and `AttachmentValidator` are shared by
-the three supported kinds. The public contract therefore exposes the same
+the four supported kinds. The public contract therefore exposes the same
 allowlist for each kind:
 
 | field | JSON type | semantics |

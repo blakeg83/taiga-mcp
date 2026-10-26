@@ -15,6 +15,7 @@ Taiga documents one list route per supported resource:
 | `epic` | `epics/attachments` | `project`, `object_id` | `epics.epic` |
 | `user_story` | `userstories/attachments` | `project`, `object_id` | `userstories.userstory` |
 | `task` | `tasks/attachments` | `project`, `object_id` | `tasks.task` |
+| `issue` | `issues/attachments` | `project`, `object_id` | `issues.issue` |
 
 The client adds the positive `page` selector for the documented server
 pagination convention. The outgoing query is limited to these three names,
@@ -34,11 +35,11 @@ Evidence:
 
 ## Client scope and validation
 
-- The public kind set is exactly `epic`, `user_story`, and `task`. `issue` is
-  intentionally deferred to a later extension.
+- The public kind set is exactly `epic`, `user_story`, `task`, and `issue`.
+  Issue attachments use the same shared contract.
 - `kind`, `id`, `projectId`, and `page` are validated before HTTP. IDs and page
   must be positive; kind comparison is ordinal and case-sensitive.
-- The route mapping is shared and closed over the three supported kinds. It
+- The route mapping is shared and closed over the four supported kinds. It
   must not accept a caller-provided route or query name.
 - The list operation performs no parent detail lookup, relationship expansion,
   status lookup, or all-page traversal. `project` and `object_id` are sent to
@@ -68,5 +69,5 @@ MCP wrapper remains thin and serializes the standard page envelope.
 ## Explicit non-goals
 
 This contract does not include attachment detail, upload, update, delete,
-download-to-destination, file-content access, issue attachments, or bulk
+download-to-destination, file-content access, or bulk
 export. A caller must request later pages explicitly.

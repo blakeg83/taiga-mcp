@@ -8,7 +8,7 @@ not a claim about every deployed Taiga instance.
 
 ## Supported kinds and routes
 
-The public kind set is exactly `epic`, `user_story`, and `task`. The caller
+The public kind set is exactly `epic`, `user_story`, `task`, and `issue`. The caller
 selects one positive internal attachment ID; the client selects the route and
 does not require a parent work-item ID or project ID:
 
@@ -17,10 +17,11 @@ does not require a parent work-item ID or project ID:
 | `epic` | `/api/v1/epics/attachments/{attachmentId}` | `epics.epic` |
 | `user_story` | `/api/v1/userstories/attachments/{attachmentId}` | `userstories.userstory` |
 | `task` | `/api/v1/tasks/attachments/{attachmentId}` | `tasks.task` |
+| `issue` | `/api/v1/issues/attachments/{attachmentId}` | `issues.issue` |
 
 The operation is one authenticated `DELETE` with no request body. It does not
 list attachments, fetch the parent work item, inspect sibling attachments, or
-follow a file URL. Issue attachments are outside this contract.
+follow a file URL.
 
 ## Permission and server-side behavior
 
@@ -32,6 +33,7 @@ permission or the attachment owner:
 | `epic` | `modify_epic` | attachment owner |
 | `user_story` | `modify_us` | attachment owner |
 | `task` | `modify_task` | attachment owner |
+| `issue` | `modify_issue` | attachment owner |
 
 The server resolves the selected attachment within the kind-specific view set,
 deletes that attachment record, and runs its attachment deletion history hook.

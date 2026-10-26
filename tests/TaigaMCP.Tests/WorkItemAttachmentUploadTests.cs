@@ -15,6 +15,7 @@ public sealed class WorkItemAttachmentUploadTests
     [InlineData("epic", "/api/v1/epics/attachments")]
     [InlineData("user_story", "/api/v1/userstories/attachments")]
     [InlineData("task", "/api/v1/tasks/attachments")]
+    [InlineData("issue", "/api/v1/issues/attachments")]
     public async Task UploadAsync_UsesKindRouteAndStreamsMultipartFields(string kind, string path)
     {
         var handler = new FakeHttpMessageHandler()
@@ -111,7 +112,7 @@ public sealed class WorkItemAttachmentUploadTests
         try
         {
             await Assert.ThrowsAsync<ArgumentException>(() =>
-                NewApi(handler, auth).UploadAsync("issue", 42, 123, file));
+                NewApi(handler, auth).UploadAsync("wiki", 42, 123, file));
             await Assert.ThrowsAsync<ArgumentException>(() =>
                 NewApi(handler, auth).UploadAsync("task", 0, 123, file));
             await Assert.ThrowsAsync<ArgumentException>(() =>

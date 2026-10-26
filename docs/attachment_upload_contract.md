@@ -8,7 +8,7 @@ not a claim about every deployed Taiga instance.
 
 ## Supported kinds and routes
 
-The public kind set is exactly `epic`, `user_story`, and `task`. The client
+The public kind set is exactly `epic`, `user_story`, `task`, and `issue`. The client
 selects the route internally:
 
 | kind | POST route | `object_id` content type |
@@ -16,6 +16,7 @@ selects the route internally:
 | `epic` | `/api/v1/epics/attachments` | epic ID |
 | `user_story` | `/api/v1/userstories/attachments` | user story ID |
 | `task` | `/api/v1/tasks/attachments` | task ID |
+| `issue` | `/api/v1/issues/attachments` | issue ID |
 
 Each request is one authenticated `multipart/form-data` POST. The required
 parts are:
@@ -72,5 +73,5 @@ reported as possibly applied.
 - [Pinned attachment serializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/serializers.py)
 
 Binary-content, disposal, cancellation, and real MCP binding tests are task
-#35. Download, update, delete, issue attachments, and bulk upload remain out
+#35. Download, update, delete, and bulk upload remain out
 of scope.

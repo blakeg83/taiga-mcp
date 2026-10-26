@@ -8,7 +8,7 @@ not a claim about every deployed Taiga instance.
 
 ## Detail routes and kind mapping
 
-The public kind is closed to `epic`, `user_story`, and `task`. The detail route
+The public kind is closed to `epic`, `user_story`, `task`, and `issue`. The detail route
 is selected internally and the caller supplies only the positive attachment
 ID:
 
@@ -17,6 +17,7 @@ ID:
 | `epic` | `epics/attachments/{attachmentId}` | `epics.epic` |
 | `user_story` | `userstories/attachments/{attachmentId}` | `userstories.userstory` |
 | `task` | `tasks/attachments/{attachmentId}` | `tasks.task` |
+| `issue` | `issues/attachments/{attachmentId}` | `issues.issue` |
 
 The request is one authenticated `GET`. It does not list attachments, fetch
 the parent work item, expand relationships, or follow a returned file URL.
@@ -59,4 +60,4 @@ present empty strings remain meaningful values.
 ## Explicit non-goals
 
 This contract does not include binary download, URL refresh, upload, update,
-delete, issue attachments, parent-detail enrichment, or bulk retrieval.
+delete, parent-detail enrichment, or bulk retrieval.

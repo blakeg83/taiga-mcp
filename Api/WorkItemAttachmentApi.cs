@@ -337,7 +337,8 @@ internal static class WorkItemAttachmentRoutes
             "epic" => "epics/attachments",
             "user_story" => "userstories/attachments",
             "task" => "tasks/attachments",
-            _ => throw new ArgumentException("kind must be one of: epic, user_story, task.", nameof(kind))
+            "issue" => "issues/attachments",
+            _ => throw new ArgumentException("kind must be one of: epic, user_story, task, issue.", nameof(kind))
         };
 }
 
