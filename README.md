@@ -2,8 +2,13 @@
 
 TaigaMCP is a .NET 8 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
 server that lets Codex and other local MCP clients work with
-[Taiga](https://taiga.io/). It connects to Taiga Cloud or a self-hosted Taiga
+[Taiga](https://taiga.io/), an open-source project management tool for Scrum,
+Kanban, and issue tracking. It connects to Taiga Cloud or a self-hosted Taiga
 REST API over a local **stdio** connection.
+
+New to Taiga? Visit the [Taiga homepage](https://taiga.io/) or browse its
+[GitHub repositories](https://github.com/taigaio), including the
+[backend/API repository](https://github.com/taigaio/taiga-back).
 
 Use it to triage issues, plan epics and user stories, manage tasks and sprints,
 assign work, set native story estimates, read history, post comments, and
