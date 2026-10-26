@@ -2,7 +2,8 @@
 
 This guide connects a local TaigaMCP stdio server to Codex by default. Other
 MCP clients can use the same executable and environment variables, including
-the configurable Streamable HTTP transport. See the
+the configurable Streamable HTTP transport and a private OpenAI Secure MCP Tunnel
+connection for ChatGPT Web. See the
 [README](../README.md#requirements) for build/runtime requirements and the
 [configuration table](../README.md#configuration) for all settings.
 
@@ -61,6 +62,27 @@ Self-contained publishing includes the runtime. It avoids building at MCP
 startup; it does **not** eliminate .NET JIT compilation. The SDK pin does not
 change the application's `net8.0` target or its package versions.
 
+### STDIO / Codex (default)
+
+STDIO is the default transport and preserves the existing Codex launch
+behavior. No `MCP__*` variables are required. For a direct local smoke test,
+set only the Taiga credentials in the server process and launch the published
+executable; it waits for MCP JSON-RPC messages on stdin and writes protocol
+messages to stdout:
+
+```powershell
+$env:TAIGA__USERNAME = 'your-user'
+$env:TAIGA__PASSWORD = 'enter-locally-with-a-secret-store'
+$env:TAIGA__BASEURL = 'https://api.taiga.io/api/v1/'
+$env:MCP__TRANSPORT = 'stdio'
+& C:\Tools\TaigaMCP\v1\TaigaMCP.exe
+```
+
+For Codex, use the same executable and server-process environment in the
+[configuration example](#2-configure-codex) below. Do not add HTTP listener
+settings to a STDIO registration; the default listener address, port, and path
+apply only when `MCP__TRANSPORT=http`.
+
 ### Streamable HTTP mode
 
 STDIO remains the default for Codex. To select Streamable HTTP on a private
@@ -75,11 +97,95 @@ dotnet run --no-build
 ```
 
 The endpoint is then `http://127.0.0.1:3001/mcp`; address, port, and path are
-validated at startup. Keep the listener private and configure any Secure MCP
-Tunnel separately. The dated official compatibility and access prerequisites,
-including the documented `--mcp-server-url` option form, are recorded in the
-[developer guide](development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26).
-This story does not claim a live tunnel or ChatGPT connection.
+validated at startup. For STDIO, omit the `MCP__*` variables (or set
+`MCP__TRANSPORT=stdio`); no HTTP listener is started.
+
+### Secure MCP Tunnel and ChatGPT Web
+
+Use this path when ChatGPT must reach TaigaMCP without making Taiga or the MCP
+listener public. Run `tunnel-client` in the same private trust boundary as the
+MCP server. It needs outbound HTTPS to the OpenAI control plane and local
+reachability to the configured MCP URL; it does not need inbound Internet
+access. The tunnel identity, workspace association, and runtime key are
+deployment inputs and are intentionally not included here.
+
+Prerequisites:
+
+- A current `tunnel-client` binary from the OpenAI Platform tunnel settings or
+  the latest public release.
+- A tunnel ID associated with the target ChatGPT workspace and an account with
+  the required tunnel permissions. The ChatGPT operator needs tunnel use
+  access; creating or editing a tunnel may require additional organization
+  permissions.
+- .NET 8 plus ASP.NET Core 8 when running a framework-dependent server, or a
+  self-contained publish as described above.
+- Taiga credentials available only to the TaigaMCP server process. Do not put
+  `TAIGA__USERNAME`, `TAIGA__PASSWORD`, or a Taiga bearer token in ChatGPT,
+  tunnel arguments, screenshots, or committed configuration.
+
+Start the HTTP server in one terminal. This example uses the documented
+loopback defaults; use a private interface address only when the tunnel client
+runs on another host that cannot reach loopback:
+
+```powershell
+$env:TAIGA__USERNAME = 'your-user'
+$env:TAIGA__PASSWORD = 'enter-locally-with-a-secret-store'
+$env:TAIGA__BASEURL = 'https://api.taiga.io/api/v1/'
+$env:MCP__TRANSPORT = 'http'
+$env:MCP__ADDRESS = '127.0.0.1'
+$env:MCP__PORT = '3001'
+$env:MCP__PATH = '/mcp'
+& C:\Tools\TaigaMCP\v1\TaigaMCP.exe
+```
+
+In a second terminal, enter the control-plane key locally and initialize a
+named profile. The `sample_mcp_remote_no_auth` sample is the verified
+no-client-auth shape for a TaigaMCP server whose Taiga credentials stay
+server-side:
+
+```powershell
+$env:CONTROL_PLANE_API_KEY = '<enter-the-runtime-key-locally>'
+tunnel-client init `
+  --sample sample_mcp_remote_no_auth `
+  --profile taiga-mcp `
+  --tunnel-id '<tunnel_id_from_platform_settings>' `
+  --mcp-server-url 'http://127.0.0.1:3001/mcp'
+tunnel-client doctor --profile taiga-mcp --explain
+tunnel-client run --profile taiga-mcp
+```
+
+Keep `tunnel-client run` and TaigaMCP running during discovery and tool calls.
+Use the client's local `doctor` result and loopback health/readiness endpoints
+to confirm that the private process is ready before testing ChatGPT. Do not
+publish the admin endpoints. The official [Secure MCP Tunnel guide]
+documents the `--mcp-server-url` form, outbound-only networking, profile
+setup, and current client download location.
+
+In ChatGPT Web, open Plugins, choose **Add custom MCP server**, select
+**Connection: Tunnel**, and select or enter the same tunnel ID. For this
+repository's no-client-auth setup, select the no-auth option for the MCP
+endpoint; tunnel access and the server's private Taiga credentials are separate
+boundaries. Accept the risk warning and create the plugin. Then exercise the
+path in this order:
+
+1. Call `get_current_user` and confirm a real, positive account ID without
+   exposing password or token fields.
+2. Call `list_projects` with `page=1` as a read-only discovery check.
+3. For a write demonstration, select a disposable target, state the intended
+   change, approve ChatGPT's confirmation prompt explicitly, and record the
+   result. Do not perform a live write merely to test connectivity, and do not
+   promise cleanup unless it is separately authorized.
+
+The prerequisite verification for this repository reached 44 Taiga tools,
+completed real read-only identity/project calls, and recorded a user-approved
+controlled comment write. The sanitized run used a TaigaMCP listener on
+`127.0.0.1:61060`, a loopback tunnel admin listener on `127.0.0.1:8081`, and
+HTTP health/readiness responses of 200. It used tunnel-client v0.0.18 and
+.NET/ASP.NET Core 8.0.33; those are evidence versions, not a pin for future
+deployments. See the [developer guide's verification record](development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26)
+for the limits of that evidence.
+
+[Secure MCP Tunnel guide]: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
 
 ### 2. Configure Codex
 
