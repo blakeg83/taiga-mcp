@@ -1,7 +1,6 @@
 # Work-item attachment detail contract
 
-This contract supports story #22, task #30, and the shared attachment API
-boundary. It was checked on 2026-10-02 against the Taiga endpoint
+This document defines the implemented attachment-detail boundary. It was checked on 2026-10-02 against the Taiga endpoint
 documentation at `main` and Taiga backend revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`. The revision is source evidence,
 not a claim about every deployed Taiga instance.
@@ -57,7 +56,7 @@ required `project` or `object_id` values are also rejected safely. Optional
 null properties remain null internally and are omitted from public tool JSON;
 present empty strings remain meaningful values.
 
-## Explicit non-goals
+## Scope of this operation
 
-This contract does not include binary download, URL refresh, upload, update,
+This operation does not include binary download, URL refresh, upload, update,
 delete, parent-detail enrichment, or bulk retrieval.

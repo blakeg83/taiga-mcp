@@ -1,7 +1,13 @@
-# Taiga Application Token Authentication Plan
+# Application-token authentication proposal (not implemented)
+
+> **Status:** Unimplemented design proposal. The running server accepts only the
+> settings in the [README](README.md#configuration). `TAIGA__USEAPPLICATIONTOKEN`,
+> `TAIGA__APPLICATIONID`, and `TAIGA__APPLICATIONKEY` have no implemented effect.
+> Endpoint/crypto details below are design assumptions requiring upstream
+> verification before implementation. This is not a setup guide.
 
 ## Goals & Use Case
-- Problem: Codex CLI caches MCP bearer tokens that expire after ~24h. After expiry, Codex keeps sending the stale token, defeating the MCP server’s bearer refresh logic.
+- Motivation: explore an alternative to username/password bootstrap. The original hypothesis about Codex caching Taiga bearer tokens was not established. In this stdio server, AuthClient owns Taiga tokens and refreshes after a received 401; Codex does not supply the upstream bearer token.
 - Goal: Use Taiga “Application tokens” for MCP→Taiga calls. These are long-lived, tied to an application+user, and sent via `Authorization: Application {token}`.
 - Outcome: Reliable, long-lived auth for the MCP server with no behavior change unless opted in.
 
@@ -123,6 +129,5 @@
 
 ## Operational Notes
 - First run after enabling will perform the one-time exchange.
-- Subsequent calls use the Application token; expect fewer auth-related failures in Codex due to token caching.
+- Subsequent calls would use the Application token; evaluate reliability against the current AuthClient before claiming an improvement.
 - If Taiga rotates the application key, reconfigure `TAIGA__APPLICATIONKEY` and restart the MCP server.
-

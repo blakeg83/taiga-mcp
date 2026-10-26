@@ -1,7 +1,6 @@
 # Work-item attachment deletion contract
 
-This contract supports story #26, task #42, and the shared attachment API
-boundary. It was checked on 2026-10-02 against the Taiga endpoint inventories
+This document defines the implemented attachment-delete boundary. It was checked on 2026-10-02 against the Taiga endpoint inventories
 at `main` and Taiga backend revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`. The revision is source evidence,
 not a claim about every deployed Taiga instance.
