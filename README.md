@@ -164,6 +164,58 @@ the MCP server:
   coordinate implementation and review for one selected story using separate
   Codex chats.
 
+### Example prompts
+
+Replace the project slug, story reference, repository path, and base branch
+below with your own values. Paste your approved implementation plan where
+indicated.
+
+**Backlog publisher — plan without publishing:**
+
+```text
+$taiga-backlog-publisher Turn the approved implementation plan below into an
+ordered epic/story/task backlog for project my-project. Preserve its requirements
+and acceptance criteria, and estimate stories using the project's configured
+roles and point options. Do not write to Taiga.
+
+[Paste the approved implementation plan here.]
+```
+
+**Backlog publisher — publish an approved plan:**
+
+```text
+$taiga-backlog-publisher Publish the approved implementation plan below to
+project my-project. Create the required epics, stories, and ordered tasks,
+assign new items to my authenticated account, and persist native story
+estimates for each relevant configured role. Check for duplicates before
+creating items and read back the results to verify publication.
+
+[Paste the approved implementation plan here.]
+```
+
+**Backlog publisher — flesh out an existing story:**
+
+```text
+$taiga-backlog-publisher Flesh out user story #123 in project my-project.
+Read its requirements and existing child tasks, derive and create only the
+missing implementation tasks, and set native story estimates for the relevant
+configured roles. Preserve existing task content and assignments, and verify
+the completed task coverage. Keep the existing story as the target.
+```
+
+**Story loop lite — implement and review one story:**
+
+```text
+$taiga-story-loop-lite Implement user story #123 in project my-project using
+repository C:\Projects\MyApp and base branch master. Use this chat as the
+Coordinator and create the separate Implementer and Reviewer chats required
+by the skill. Follow the story's linked epic requirements and ordered child
+tasks, run the relevant checks, and maintain Taiga statuses and comments.
+I authorize worker handoff and review messages between these chats. After
+reviewer approval, commit the reviewed changes, push the story branch, and
+create a PR against master. Do not merge it.
+```
+
 For manual skill discovery and client configuration, see the official
 [Codex skills](https://learn.chatgpt.com/docs/build-skills) and
 [MCP setup](https://learn.chatgpt.com/docs/extend/mcp) documentation.
