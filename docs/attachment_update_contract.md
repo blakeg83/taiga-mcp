@@ -1,7 +1,6 @@
 # Work-item attachment update contract
 
-This contract supports story #25, task #39, and the shared attachment API
-boundary. It was checked on 2026-10-02 against the Taiga documentation at
+This document defines the implemented attachment-update boundary. It was checked on 2026-10-02 against the Taiga documentation at
 `main` and Taiga backend revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`. The revision is source evidence,
 not a claim about every deployed Taiga instance.

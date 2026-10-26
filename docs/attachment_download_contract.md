@@ -1,7 +1,6 @@
 # Work-item attachment download contract
 
-This contract supports story #24, task #36, and the shared attachment API
-boundary. It builds on the authoritative attachment detail response used by
+This document defines the implemented attachment-download boundary. It builds on the authoritative attachment detail response used by
 `get_work_item_attachment`.
 
 ## Inputs and source selection
