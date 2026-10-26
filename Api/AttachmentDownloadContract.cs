@@ -69,11 +69,17 @@ internal static class AttachmentDownloadContract
 
     private static Uri ResolveSourceUri(WorkItemAttachmentDto attachment, Uri baseUri)
     {
-        var source = !string.IsNullOrWhiteSpace(attachment.Url)
+        var hasUrl = !string.IsNullOrWhiteSpace(attachment.Url);
+        var source = hasUrl
             ? attachment.Url
             : attachment.AttachedFile;
         if (string.IsNullOrWhiteSpace(source))
             throw new TaigaRequestException("Taiga attachment has no usable download location.");
+
+        // attached_file can be a storage name, which cannot be resolved without
+        // the server's media configuration (and may require a signed token).
+        if (!hasUrl && (!Uri.TryCreate(source, UriKind.Absolute, out var fallback) || !IsHttpScheme(fallback)))
+            throw new TaigaRequestException("Taiga attachment provided a storage path without a usable download URL; a fresh media URL is required.");
 
         if (!Uri.TryCreate(source, UriKind.Absolute, out var absolute))
         {

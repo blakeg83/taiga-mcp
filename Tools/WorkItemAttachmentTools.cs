@@ -16,7 +16,7 @@ public sealed class WorkItemAttachmentTools
     }
 
     [McpServerTool(Name = "get_work_item_attachment")]
-    [Description("Retrieve one file attachment's metadata and available download locations for an epic, user story, or task. The kind is closed to epic, user_story, and task; issue attachments, binary download, parent-detail enrichment, and attachment mutation are not included. The response is one authoritative attachment object and nullable fields are omitted.")]
+    [Description("Retrieve one file attachment's metadata and available download locations for an epic, user story, or task. To read file contents, use download_work_item_attachment and inspect its local destination; metadata URLs may contain expiring signed tokens and must not be reused as durable links. The kind is closed to epic, user_story, and task; issue attachments, binary download, parent-detail enrichment, and attachment mutation are not included. The response is one authoritative attachment object and nullable fields are omitted.")]
     public async Task<string> GetWorkItemAttachment(
         [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
         [Description("Positive internal attachment ID, not a work-item or displayed #ref ID.")] int attachmentId,
@@ -53,7 +53,7 @@ public sealed class WorkItemAttachmentTools
     });
 
     [McpServerTool(Name = "download_work_item_attachment")]
-    [Description("Download one epic, user story, or task attachment to an explicit absolute local destination. The server retrieves authoritative metadata first, applies the configured attachment size limit, never overwrites an existing file, keeps bearer authentication on the configured Taiga origin, and does not include binary data or secrets in the receipt.")]
+    [Description("Download one epic, user story, or task attachment to an explicit absolute local destination. Use this tool to read attachment contents, then inspect the local destination. The server retrieves fresh metadata, refreshes it once after a media 403 and retries only with a changed URL, applies the configured attachment size limit, never overwrites an existing file, keeps bearer authentication on the configured Taiga origin, and does not include binary data or secrets in the receipt.")]
     public async Task<string> DownloadWorkItemAttachment(
         [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
         [Description("Positive internal attachment ID, not a work-item or displayed #ref ID.")] int attachmentId,
@@ -66,7 +66,7 @@ public sealed class WorkItemAttachmentTools
     });
 
     [McpServerTool(Name = "list_work_item_attachments")]
-    [Description("List one page of file attachments for an epic, user story, or task. The kind is closed to epic, user_story, and task; issue attachments, all-page export, file-content download, parent-detail fan-out, and attachment mutation are not included. The result always uses the items/page/total/next_page/has_more envelope and preserves unknown pagination values as null.")]
+    [Description("List one page of file attachments for an epic, user story, or task. To read selected file contents, pass its attachment ID to download_work_item_attachment and inspect the local destination; metadata URLs may contain expiring signed tokens. The kind is closed to epic, user_story, and task; issue attachments, all-page export, file-content download, parent-detail fan-out, and attachment mutation are not included. The result always uses the items/page/total/next_page/has_more envelope and preserves unknown pagination values as null.")]
     public async Task<string> ListWorkItemAttachments(
         [Description("Attachment parent kind: epic, user_story, or task; issue is not supported by this tool.")] string kind,
         [Description("Positive internal work-item ID, not the displayed #ref.")] int id,

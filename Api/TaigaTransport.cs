@@ -115,6 +115,10 @@ public sealed class TaigaTransport(IHttpClientFactory clients, AuthClient auth)
                     continue;
                 }
 
+                if (response.StatusCode == HttpStatusCode.Forbidden)
+                    throw new TaigaRequestException(
+                        "Taiga attachment download HTTP 403: media access denied. The media URL may be missing a valid signed token or media permissions may deny access.",
+                        response.StatusCode);
                 await EnsureSuccessAsync(response, cancellationToken);
                 var contentLength = response.Content.Headers.ContentLength;
                 if (contentLength.HasValue && contentLength.Value > plan.MaximumBytes)

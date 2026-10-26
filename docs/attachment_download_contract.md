@@ -15,8 +15,9 @@ download_work_item_attachment(kind, attachmentId, destination)
 `kind` is exactly `epic`, `user_story`, or `task`; `attachmentId` is a
 positive internal attachment ID. The server first performs the kind-specific,
 authenticated detail GET. The response's `url` is the preferred binary source.
-When `url` is absent, `attached_file` is resolved as an API-relative source
-against the configured Taiga base URL. `preview_url` and
+When `url` is absent, `attached_file` is accepted only as an absolute HTTP/HTTPS
+URL. A storage path cannot be resolved without the server's media configuration
+and is rejected instead of being appended to the API base URL. `preview_url` and
 `thumbnail_card_url` are never used for downloads.
 
 Only `http` and `https` sources are accepted. A source on the configured Taiga
@@ -29,6 +30,21 @@ bearer. Redirects to unsupported schemes are rejected.
 Malformed URLs, unsupported schemes, and an attachment without a usable source
 are safe request errors. The upstream URL, query, and response body are not
 copied into tool errors.
+
+Use this command to access attachment contents, then inspect the local destination.
+URLs returned by metadata tools may carry expiring signed tokens; the frontend's
+`#_taiga-refresh` fragment does not refresh them for an HTTP client. The token
+query is preserved when downloading. After a binary HTTP 403, the server fetches
+metadata once more and retries the download only if its source URL changed.
+A second media 403, or unchanged URL, ends recovery. This does not refresh API
+authentication on a 403 or retry writes. Metadata errors identify the metadata
+stage; binary 403 errors identify media access denial without claiming that
+token expiry is the only possible cause. Bodies, URLs and tokens are omitted.
+
+This behavior follows the official [attachment serializer](https://github.com/taigaio/taiga-back/blob/main/taiga/projects/attachments/serializers.py)
+and [protected storage URL generation](https://github.com/taigaio/taiga-contrib-protected/blob/main/taiga_contrib_protected/storage.py),
+reviewed on 2026-10-26. Local tests use synthetic tokens and fake media responses;
+they do not confirm a deployed server's configuration.
 
 ## Destination and file safety
 

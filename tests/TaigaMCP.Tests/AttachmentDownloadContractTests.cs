@@ -36,17 +36,33 @@ public sealed class AttachmentDownloadContractTests
         Assert.False(plan.RequiresAuthentication);
     }
 
+    [Theory]
+    [InlineData("media/901.bin")]
+    [InlineData("attachments/901.bin")]
+    [InlineData("/media/901.bin")]
+    public void CreatePlan_RejectsStoragePathWhenUrlIsMissing(string source)
+    {
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var error = Assert.Throws<TaigaRequestException>(() => AttachmentDownloadContract.CreatePlan(
+            new WorkItemAttachmentDto { AttachedFile = source },
+            destination,
+            Options.Create(OptionsWithBaseUrl())));
+
+        Assert.Contains("storage path", error.Message);
+        Assert.DoesNotContain(source, error.Message);
+    }
+
     [Fact]
-    public void CreatePlan_ResolvesAttachedFileWhenUrlIsMissing()
+    public void CreatePlan_AcceptsAbsoluteAttachedFileUrlWhenUrlIsMissing()
     {
         var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
         var plan = AttachmentDownloadContract.CreatePlan(
-            new WorkItemAttachmentDto { AttachedFile = "media/901.bin" },
+            new WorkItemAttachmentDto { AttachedFile = "https://files.example/901?token=synthetic" },
             destination,
             Options.Create(OptionsWithBaseUrl()));
 
-        Assert.Equal("https://fake.taiga.test/api/v1/media/901.bin", plan.SourceUri.AbsoluteUri);
-        Assert.True(plan.RequiresAuthentication);
+        Assert.Equal("?token=synthetic", plan.SourceUri.Query);
+        Assert.False(plan.RequiresAuthentication);
     }
 
     [Fact]

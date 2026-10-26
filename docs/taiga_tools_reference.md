@@ -245,9 +245,18 @@ The signature is `download_work_item_attachment(kind, attachmentId,
 destination)`. The supported kinds are exactly `epic`, `user_story`, and
 `task`; `attachmentId` is the positive internal attachment ID. The server
 first performs the kind-specific authenticated attachment detail GET, then
-uses its `url` as the preferred binary source or resolves `attached_file`
-against the configured Taiga base URL when `url` is absent. Preview and
+uses its `url` as the preferred binary source or an absolute HTTP/HTTPS
+`attached_file` URL when `url` is absent. Storage paths are rejected rather
+than resolved against the API base URL. Preview and
 thumbnail URLs are never download sources.
+
+Use this tool and inspect its local destination to read file contents. Metadata
+URLs can carry expiring signed tokens; the frontend refresh fragment does not
+refresh URLs for agents. On a binary HTTP 403, metadata is fetched once more;
+only a changed source URL permits one further download attempt. Unchanged URLs
+and repeated media 403s fail safely, without refreshing API authentication.
+Errors distinguish metadata requests from binary media access denial and do
+not expose signed URLs, tokens, or raw bodies.
 
 Only HTTP and HTTPS sources are accepted. A source on the configured Taiga
 origin uses the Taiga bearer token. An external storage or signed URL is
