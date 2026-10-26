@@ -1,221 +1,261 @@
 # TaigaMCP
 
-TaigaMCP is a .NET 8 Model Context Protocol (MCP) server that connects Codex CLI (and other MCP clients) to Taiga.io. Its 44 tools identify the current account, list projects, project members, points, roles, and sprints, resolve project and work-item references, discover story, task, and epic workflow statuses, manage issues, create/read/list/update user stories and tasks, safely update native story estimates, create/list/read/update/link/list/unlink epic relationships, and submit comments or read visible comments and field-change history on all four work-item kinds via Taiga’s REST API.
+TaigaMCP is a .NET 8 [Model Context Protocol (MCP)](https://modelcontextprotocol.io/)
+server that lets Codex and other local MCP clients work with
+[Taiga](https://taiga.io/), an open-source project management tool for Scrum,
+Kanban, and issue tracking. It connects to Taiga Cloud or a self-hosted Taiga
+REST API over local **stdio** by default, with configurable Streamable HTTP for
+clients that need a network transport.
 
-The repository-local `.agents/skills/taiga-story-loop-lite/` skill provides a
-minimal, instruction-driven two-worker implementation/review workflow for one
-selected story. It is separate from the .NET MCP server.
+New to Taiga? Visit the [Taiga homepage](https://taiga.io/) or browse its
+[GitHub repositories](https://github.com/taigaio), including the
+[docker build](https://github.com/taigaio/taiga-docker).
 
-## Features
-- `list_projects(member?, page)`: List projects without a member filter by default; pass an explicit numeric member ID to filter.
-- `resolve_project(slug)`: Resolve a Taiga project slug to its numeric ID.
-- `resolve_work_item(projectId, kind, ref)`: Resolve a numeric project-local `ref` for a known `issue`, `user_story`, `task`, or `epic` to its internal ID plus available subject/version. Use that ID with the matching `get_*` tool before editing; the ref is not the internal ID.
-- `get_current_user()`: Identify the authenticated account and return its positive numeric ID plus available identity fields. Private profile fields are omitted.
-- `list_project_members(projectId, page)`: List one page of project membership records. Use `user_id` from an active member as an assignee ID; `membership_id` identifies the membership record, and pending/inactive records remain visible without exposing email or invitation text.
-- `list_sprints(projectId, page, closed?)`: List one page of Taiga milestones with date-only start/finish values and closure state. Omit or pass `null` for all sprints, `false` for open only, or `true` for closed only; use a returned `id` as `milestoneId` when scheduling a story or standalone task.
-- `list_issues(projectId, page, statusIds?, assignedTo?, typeId?, priorityId?, severityId?, tags?, query?, includeClosed?, includePageInfo?)`: Triage one page of issues with allowlisted filters. It returns the legacy array by default and an opt-in pagination envelope with `includePageInfo=true`.
-- `get_issue(issueId)`: Retrieve a single issue by its id.
-- `create_issue(projectId, subject, …)`: Create a new issue.
-- `update_issue(issueId, version, subject?, ..., clearFields?)`: Partially update an issue via PATCH; `subject` is optional, and `clearFields=["assigned_to"]` explicitly unassigns while omitted/null `assigned_to` leaves it unchanged.
-- `add_work_item_comment(kind, id, version, text)`: Submit a Markdown/mention-preserving comment to an `issue`, `user_story`, `task`, or `epic` using the supplied version. Returns the server's resulting version and `comment_submitted=true`.
-- `list_work_item_comments(kind, id, page?)`: Read one page of visible nonblank comments from a work-item history stream. Returns opaque history-entry IDs, raw Markdown/text, timestamps, safe actor identity, edit dates, and upstream pagination metadata; hidden/deleted comments are omitted without filling from later pages.
-- `get_work_item_history(kind, id, page?)`: Read one page of visible field changes and comments from a work-item history stream. Returns opaque IDs, numeric event types, timestamps, safe actors, structured `diff`/`values_diff`, edit/delete metadata, and `is_snapshot`; hidden entries and deleted comment text are suppressed without filling from later pages.
-- `list_issue_statuses(projectId)`: List available issue statuses for a project.
-- `list_issue_severities(projectId)`: List available issue severities for a project.
-- `list_issue_types(projectId)`: List available issue types for a project.
-- `list_issue_priorities(projectId)`: List available issue priorities for a project.
+Use it to triage issues, plan epics and user stories, manage tasks and sprints,
+assign work, set native story estimates, read history, post comments, and
+upload or download attachments. The server exposes **44 tools**; the
+[tool reference](docs/taiga_tools_reference.md#current-tool-contracts) lists
+every signature and response shape.
 
-Issue list filters use internal Taiga IDs. The default view is open issues;
-provide nonempty `statusIds` or `includeClosed=true` to include closed work.
-See the [implemented tool reference](docs/taiga_tools_reference.md) for the
-wire filters and envelope fields, including the current-user identity contract.
+## What it supports
 
-- `list_user_stories(projectId, page, statusIds?, assignedTo?, milestoneId?, backlogOnly?, tags?, query?, includeClosed?, includeArchived?, includePageInfo?)`: List one page of backlog or sprint stories with explicit status/assignment/text filters; the default is an array and `includePageInfo` opts into pagination metadata.
-- `list_user_story_statuses(projectId, page)`: List one page of every selectable story workflow status, including closed and archived choices, with project/resource-specific IDs and available order, color, and WIP metadata. Use a returned `id` with `create_user_story` or `update_user_story`.
-- `list_task_statuses(projectId, page)`: List one page of every selectable task workflow status, including open and closed choices, with project/resource-specific IDs and available name, slug, order, color, and closure metadata. Use a returned `id` with `create_task` or `update_task`; task statuses do not include story-only archive or WIP fields.
-- `list_tasks(projectId, page, userStoryId?, milestoneId?, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of standalone or story-linked tasks. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
-- `list_epics(projectId, page, statusIds?, assignedTo?, tags?, query?, includeClosed?)`: List one page of project epics with verified status, assignee, tag, and text filters. It always returns a pagination envelope; explicit status IDs override the default open-only filter.
-- `list_epic_statuses(projectId, page)`: List one page of every selectable epic workflow status, including open and closed choices, with project/resource-specific IDs and available name, slug, order, color, and closure metadata. Use a returned `id` with `create_epic` or `update_epic`; epic statuses do not expose story-only archive or WIP fields.
-- `get_epic(epicId)`: Retrieve one epic by its positive internal ID, including authoritative identity/version, Markdown description, status, assignment, color, tags, and available server summaries. It does not fetch related stories or compute progress.
-- `create_epic(projectId, subject, description?, status?, assigned_to?, color?, tags?)`: Create one epic and return its authoritative detail. Omitted optional fields use Taiga project defaults; story linking and requirement flags remain separate operations.
-- `update_epic(epicId, version, subject?, description?, status?, assigned_to?, color?, tags?, comment?, clearFields?)`: Versioned epic edits for content, status, primary assignment, color, tags, and comments. Omitted fields stay unchanged; empty description/tags are explicit, and `clearFields=["assigned_to"]` unassigns. Use a status returned by `list_epic_statuses` to close or reopen an epic.
-- `link_user_story_to_epic(epicId, userStoryId, order?)`: Associate an existing story with an epic. Repeated calls return the existing server order with `created=false` and do not change it; Taiga decides whether accessible cross-project links are permitted.
-- `list_epic_user_stories(epicId, page)`: List one page of an epic's existing relationship identities and server order as `{ epic_id, user_story_id, order }`. Use `get_user_story` for selected full details; this does not create, modify, expand, or calculate progress for the epic.
-- `unlink_user_story_from_epic(epicId, userStoryId)`: Remove exactly one epic/story relationship and return `{ epic_id, user_story_id, removed: true }` after Taiga confirms HTTP 204. This preserves both work items and other links; a repeated unlink may return a safe 404 and is not treated as already successful.
-- `get_task(taskId)`: Retrieve one task detail object by its positive internal ID, including the authoritative version, Markdown description, status/assignment, parent story, sprint, tags, due-date, and blocking fields.
-- `create_task(projectId, subject, userStoryId?, milestoneId?, description?, status?, assigned_to?, tags?)`: Create one standalone or story-linked task. A story-linked task validates its parent and inherits the parent's sprint; a matching `milestoneId` is redundant. Omitted optional fields use Taiga project defaults.
-- `update_task(taskId, version, subject?, description?, status?, assigned_to?, tags?, isBlocked?, blockedNote?, comment?, clearFields?)`: Versioned task edits for content, status, primary assignment, tags, blocking, and comments. Omitted fields stay unchanged; empty values are explicit, `clearFields=["assigned_to"]` unassigns, and Taiga clears `blocked_note` whenever the saved task is unblocked.
-- `get_user_story(userStoryId)`: Retrieve a story by its positive internal ID (not its displayed `#ref`), including its authoritative version, Markdown description, status/assignment, tags, sprint, and available epic/source relationships.
-- `create_user_story(projectId, subject, description?, status?, assigned_to?, tags?, milestoneId?)`: Create one backlog or sprint story. Put acceptance criteria in `description`; omitted optional fields use Taiga project defaults, and the result includes the server-generated ID, ref, and version.
-- `update_user_story(userStoryId, version, subject?, description?, status?, assigned_to?, tags?, milestoneId?, comment?, clearFields?)`: Versioned story update. Omitted fields stay unchanged; use `clearFields=["assigned_to"]` to unassign or `clearFields=["milestone"]` to return a story to the backlog. Empty description/tags are explicit clears.
-- `set_user_story_estimates(userStoryId, version, rolePoints[{ roleId, pointId }])`: Versioned native story-point update. Sends only the supplied role-to-configured-point assignments and version, preserves omitted roles, supports configured unestimated point options, and returns authoritative estimate state without automatic conflict or ambiguous-write retries.
+| Area | Available operations |
+| --- | --- |
+| Discovery | Current account, projects and slugs, project members, roles, point options, sprints, and workflow statuses |
+| Issues | List, read, create, and update; discover types, priorities, and severities |
+| User stories | List, read, create, update, schedule in a sprint, and set role-based story estimates |
+| Tasks | List, read, create, and update standalone or story-linked tasks, including blocking state |
+| Epics | List, read, create, update, and link/list/unlink existing stories |
+| Shared work-item tools | Resolve displayed references, add/read comments, read field-change history, and list/read/upload/download/update/delete attachments for issues, stories, tasks, and epics |
+
+The server acts with your Taiga account's permissions. It includes write and
+attachment-deletion tools, so give your MCP client clear instructions about
+which changes you want. It does not implement the entire Taiga API; the
+[command inventory](docs/taiga_command_inventory.md) separates delivered
+features from proposed coverage.
 
 ## Requirements
-- SDK selected by `global.json` (10.0.401, latest patch within that feature band), plus the .NET 8 runtime and ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`) for framework-dependent app and test runs. The ASP.NET Core companion package is loaded for both HTTP and STDIO modes.
-- Taiga account and credentials
+- To build: the SDK selected by [global.json](global.json), currently
+  **10.0.401 with `latestPatch` roll-forward** (10.0.4xx feature band).
+- To run a framework-dependent build or the tests: the **.NET 8 runtime** and
+  the **ASP.NET Core 8 shared framework** (`Microsoft.AspNetCore.App`). The
+  ASP.NET Core companion package is loaded in both HTTP and STDIO modes.
+- A self-contained published server includes both required runtimes and shared
+  frameworks on the target; framework-dependent launches and tests require them.
+- A Taiga account with username/password authentication and access to the
+  target projects.
+- An MCP client that supports local stdio servers or Streamable HTTP. Codex
+  setup is documented below; other clients can launch the same published
+  executable with the same environment variables.
 
-Self-contained publishing (for example, `dotnet publish --self-contained true`)
-includes the required .NET and ASP.NET Core runtime components on the target, so
-the shared frameworks do not need to be installed there. Framework-dependent
-launches and tests do require both shared frameworks.
+The Windows installer additionally needs PowerShell **7.3+** and Codex CLI on
+`PATH`. Manual publish commands are provided for Windows and Linux/WSL in the
+[quickstart](docs/taiga_mcp_quickstart.md). The complete test suite currently
+requires Windows because one protocol-contamination test uses `cmd.exe`.
 
-## Build and Run
+## Build and run
 
-On Windows, install or update the MCP server and both Codex skills with:
+Clone this repository and open a terminal in its root directory.
+
+### Windows: install into Codex
 
 ```powershell
 pwsh -File .\scripts\Install-Codex.ps1
 ```
 
-Requires PowerShell 7.3+, the .NET SDK selected by `global.json`, and Codex CLI
-on PATH. The script publishes this checkout to a new self-contained release
-under `%LOCALAPPDATA%\TaigaMCP`, backs up Codex configuration, and re-registers
-`taiga` with its existing environment variables. On first setup it uses
-`TAIGA__USERNAME`/`TAIGA__PASSWORD` from the process environment or prompts
-(the password is hidden). `TAIGA__BASEURL` defaults to Taiga Cloud; set it
-before first setup for a self-hosted server. Credentials are saved in the
-local Codex configuration, as with manual setup.
+The script publishes the current checkout as a self-contained executable to a
+new release under `%LOCALAPPDATA%\TaigaMCP`, registers the `taiga` MCP server,
+and installs the two bundled Codex skills. It reuses the existing server's
+environment values. On first setup, it uses `TAIGA__USERNAME` and
+`TAIGA__PASSWORD` from the process environment or prompts for them (the
+password prompt is hidden). Set `TAIGA__BASEURL` before first setup if you use
+a self-hosted server. Restart Codex and open a new chat afterward.
 
-Both complete skill folders are copied to `%USERPROFILE%\.agents\skills`;
-existing copies under the Codex home `skills` directory are updated there
-instead. `CODEX_HOME` is respected. Restart Codex afterward. No Taiga data is
-read or changed during installation.
-
-Other Codex settings and connections are retained. Re-registering `taiga`
-resets its custom tool filters, timeouts, and other server options to Codex
-defaults. Environment variables previously inherited through `env_vars` are
-saved with their current values. Old releases remain available for rollback;
-running servers are not stopped. To choose a different publish location:
+Credentials are stored in the local Codex configuration. Existing config
+backups also contain those values; keep both private. The script preserves
+other Codex connections/settings, but re-registering `taiga` resets its custom
+tool filters, timeouts, and other server options to Codex defaults. Values
+previously inherited through `env_vars` are saved with their current values.
+It does not contact Taiga or stop running servers. Old published releases
+remain on disk. To change the install location:
 
 ```powershell
 pwsh -File .\scripts\Install-Codex.ps1 -InstallRoot C:\Tools\TaigaMCP
 ```
 
-Pull the desired repository version before running the script; it publishes
-the current checkout without changing branches or pulling automatically.
-Codex's [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
-and [skill discovery](https://learn.chatgpt.com/docs/build-skills) documentation
-describe the installation locations.
+Pull your desired repository version before running the script; it publishes
+the current checkout without changing branches or pulling updates.
 
-For manual development runs:
+### Manual setup or other MCP clients
 
-```bash
-dotnet restore && dotnet build -c Release
-TAIGA__USERNAME=you@example.com TAIGA__PASSWORD=secret \
-  TAIGA__BASEURL=https://api.taiga.io/api/v1/ \
-  dotnet run
-```
-
-Publish a single-file binary (recommended for MCP clients):
-```bash
-dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
-# Binary: ./bin/Release/net8.0/linux-x64/publish/TaigaMCP
-```
-
-## Configuration
-Set environment variables for the server process:
-- `TAIGA__BASEURL` (optional, default: `https://api.taiga.io/api/v1/`)
-- `TAIGA__USERNAME`
-- `TAIGA__PASSWORD`
-- `TAIGA__METADATATTLSECONDS` (optional positive integer, default 300)
-- `MCP__TRANSPORT` (optional, `stdio` by default; set to `http` for Streamable HTTP)
-- `MCP__ADDRESS` (optional HTTP listener address, `127.0.0.1` by default)
-- `MCP__PORT` (optional HTTP listener port, `3001` by default)
-- `MCP__PATH` (optional HTTP MCP endpoint path, `/mcp` by default)
-
-STDIO remains the default and preserves the existing Codex launch behavior. For
-an HTTP launch, keep the listener private unless a separately secured tunnel
-needs to reach it, for example:
-
-```powershell
-$env:MCP__TRANSPORT = 'http'
-$env:MCP__ADDRESS = '127.0.0.1'
-$env:MCP__PORT = '3001'
-$env:MCP__PATH = '/mcp'
-dotnet run --no-build
-```
-
-The HTTP transport is provided by the same-version `ModelContextProtocol.AspNetCore`
-package and exposes Streamable HTTP through the configured MCP path. Taiga
-credentials remain server-side; this story does not configure a public tunnel or
-claim ChatGPT end-to-end connectivity.
-
-For Codex CLI, point the MCP server `command` to the published binary and pass the env vars. See the quickstart for a full `config.toml` example.
-
-## Codex CLI config.toml
-Add an MCP server entry pointing to the published binary:
-
-```toml
-[mcp_servers.taiga]
-command = "/home/you/src/taiga-mcp/bin/Release/net8.0/linux-x64/publish/TaigaMCP"
-args = []
-env = { TAIGA__BASEURL = "https://api.taiga.io/api/v1/", TAIGA__USERNAME = "you@example.com", TAIGA__PASSWORD = "yourpass" }
-
-# Optional: trust local projects for Codex (example paths)
-[projects]
-"/home/you/src/taiga-mcp" = { trust_level = "trusted" }
-```
-
-Notes:
-- Keep the `env = { ... }` inline table on one line (TOML requirement).
-- Use the absolute path to your published binary for `command`.
-
-## Development Notes
-
-`Program.cs` selects STDIO or Streamable HTTP from shared configuration;
-`Hosting/ServiceCollectionExtensions.cs` registers the shared Taiga services and
-MCP tools, while transport-specific hosting stays in `Program.cs`. Tools use
-concrete domain APIs and a shared transport with cancellation, safe errors and
-explicit disposal. Auth token state and the expiring metadata cache are singleton
-services; named HTTP clients are obtained per operation. STDIO carries MCP
-messages only; logging goes to stderr.
-
-See the [developer guide](docs/development.md) for current architecture and the
-historical foundation cleanup record, and the [completed first batch](docs/goals/first-batch/README.md) for delivered scope.
-
-Windows PowerShell:
+Follow the [quickstart](docs/taiga_mcp_quickstart.md) to publish an executable,
+configure credentials, and verify the connection with read-only calls. For
+local development in PowerShell:
 
 ```powershell
 dotnet restore
 dotnet build -c Debug
-dotnet test -c Debug
 $env:TAIGA__USERNAME = 'your-user'
 $env:TAIGA__PASSWORD = 'your-password'
 dotnet run --no-build
 ```
 
-Tests use fake HTTP and synthetic credentials. Run the local build and test
-commands from the [development guide](docs/development.md). Publish long-running MCP servers to a separate versioned
-directory, for example `dotnet publish TaigaMCP.csproj -c Release -o C:\TaigaMCP\published\v1`.
-If a server locks normal outputs, use a unique external output directory for
-build/tests; do not stop that server. See the developer guide for the exact command.
+STDIO is the default: the server waits for MCP messages on stdin, and protocol
+messages go to stdout while normal host logs go to stderr. To select Streamable
+HTTP, set `MCP__TRANSPORT=http`; the default private listener is
+`http://127.0.0.1:3001/mcp`. Configure `MCP__ADDRESS`, `MCP__PORT`, and
+`MCP__PATH` for another listener address, port, or endpoint path. See the
+[developer guide](docs/development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26)
+for the dated tunnel compatibility and access prerequisites; this repository
+does not claim a live tunnel or ChatGPT connection.
 
-## Reference documentation
+## Configuration
 
-- [Implemented tool reference](docs/taiga_tools_reference.md): current tool names, signatures, JSON shapes, and compatibility notes.
-- [Command inventory](docs/taiga_command_inventory.md): proposed coverage for issues, epics, user stories, and tasks.
+Set these variables in the **server process's environment**:
 
-## Debug Logging
-- Enable debug logs to stderr by setting: `Logging__LogLevel__Default=Debug`.
-- Example:
-  - `Logging__LogLevel__Default=Debug TAIGA__USERNAME=you@example.com TAIGA__PASSWORD=secret dotnet run`
-- These logs include auth refresh/relogin breadcrumbs without exposing secrets.
+| Variable | Required | Default / meaning |
+| --- | --- | --- |
+| `TAIGA__USERNAME` | Yes | Nonblank Taiga login |
+| `TAIGA__PASSWORD` | Yes | Nonblank Taiga password |
+| `TAIGA__BASEURL` | No | `https://api.taiga.io/api/v1/`; include the API path for self-hosted Taiga |
+| `TAIGA__METADATATTLSECONDS` | No | `300`; positive metadata-cache lifetime in seconds |
+| `TAIGA__MAXATTACHMENTBYTES` | No | `10485760` (10 MiB); positive upload/download size limit |
+| `MCP__TRANSPORT` | No | `stdio`; use `http` for Streamable HTTP |
+| `MCP__ADDRESS` | No | `127.0.0.1`; HTTP listener address |
+| `MCP__PORT` | No | `3001`; HTTP listener port |
+| `MCP__PATH` | No | `/mcp`; HTTP MCP endpoint path |
 
-## Quickstart & Examples
-For end-to-end setup (Codex config, MCP Inspector, troubleshooting), see:
+Startup validates these settings. The base URL must be absolute HTTP/HTTPS
+without embedded credentials, a query, or a fragment; a trailing slash is
+normalized. The transport must be `stdio` or `http`; HTTP address, port, and
+path are also validated. Prefer HTTPS when sending credentials over a network.
 
-- docs/taiga_mcp_quickstart.md
+TaigaMCP logs in to Taiga itself and keeps bearer/refresh tokens in process
+memory. Application-token authentication is not implemented. Never commit
+credentials or a populated client configuration to the repository.
 
-## Intentional list behavior changes
+Attachment paths refer to the filesystem visible to the **server process**.
+Uploads require an explicit absolute file path. Downloads require an absolute
+destination whose parent directory already exists and never overwrite an
+existing file. Use the download tool to access file contents: metadata URLs
+can contain expiring signed tokens and should be treated as sensitive.
 
-`list_projects` now defaults to `member=null` (no member filter). To retain the
-previous account-specific selection, call `list_projects(member="6")`, or send
-`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
-Story lists use Taiga's `status__is_closed=false` and
-`status__is_archived=false` by default; nonempty status IDs override both,
-and include flags selectively remove them. `backlogOnly=true` uses
-`milestone__isnull=true`, while `milestoneId` selects a sprint. English labels
-such as Done/Archived never determine filtering. Issue lists use
-`status__is_closed=false` only: unsupported issue archive filtering and
-redundant status-exclusion requests were removed. These are behavior
-corrections, not behavior-preserving refactoring.
+## Using the tools
+
+Start with a read-only request such as:
+
+```text
+Identify my Taiga account, then list the projects I belong to.
+```
+
+`get_current_user` returns your account ID. To filter `list_projects` to that
+account, pass it as the `member` string; the default has no member filter.
+Use `resolve_project` for a known slug and `resolve_work_item` for a displayed
+project-local `#ref`. Detail and update tools take internal IDs, not `#ref`.
+
+Before an edit, read the item and use its returned `version`. Status IDs are
+specific to each project and work-item kind; discover them rather than guessing
+from names. Ordinary omitted/null update fields stay unchanged. Supported
+`clearFields` values deliberately clear assignment or a story's sprint.
+
+Lists return one upstream page per call. Issue/story lists default to arrays
+and offer `includePageInfo=true`; task/epic and most discovery lists return
+page envelopes. Unknown pagination metadata stays `null`. Work-item lists
+default to open work, with story lists also excluding archived work; use the
+documented status filters or include flags when you need completed items.
+
+Only a received HTTP 401 permits one authentication replay. Version conflicts
+and ambiguous writes are not automatically retried. If an error says a change
+may already have applied, inspect the item before deciding to repeat it.
+
+## Optional Codex skills
+
+The Windows installer copies both complete skill folders to
+`%USERPROFILE%\.agents\skills`, or updates an existing copy under the Codex
+home's `skills` directory. `CODEX_HOME` is respected for the latter location
+and Codex configuration. These instruction-based workflows are separate from
+the MCP server:
+
+- [Taiga backlog publisher](.agents/skills/taiga-backlog-publisher/SKILL.md):
+  turn a plan into an estimated backlog and publish it when explicitly requested.
+- [Taiga story loop lite](.agents/skills/taiga-story-loop-lite/SKILL.md):
+  coordinate implementation and review for one selected story using separate
+  Codex chats.
+
+### Example prompts
+
+Replace the project slug, story reference, repository path, and base branch
+below with your own values. Paste your approved implementation plan where
+indicated.
+
+**Backlog publisher — plan without publishing:**
+
+```text
+$taiga-backlog-publisher Turn the approved implementation plan below into an
+ordered epic/story/task backlog for project my-project. Preserve its requirements
+and acceptance criteria, and estimate stories using the project's configured
+roles and point options. Do not write to Taiga.
+
+[Paste the approved implementation plan here.]
+```
+
+**Backlog publisher — publish an approved plan:**
+
+```text
+$taiga-backlog-publisher Publish the approved implementation plan below to
+project my-project. Create the required epics, stories, and ordered tasks,
+assign new items to my authenticated account, and persist native story
+estimates for each relevant configured role. Check for duplicates before
+creating items and read back the results to verify publication.
+
+[Paste the approved implementation plan here.]
+```
+
+**Backlog publisher — flesh out an existing story:**
+
+```text
+$taiga-backlog-publisher Flesh out user story #123 in project my-project.
+Read its requirements and existing child tasks, derive and create only the
+missing implementation tasks, and set native story estimates for the relevant
+configured roles. Preserve existing task content and assignments, and verify
+the completed task coverage. Keep the existing story as the target.
+```
+
+**Story loop lite — implement and review one story:**
+
+```text
+$taiga-story-loop-lite Implement user story #123 in project my-project using
+repository C:\Projects\MyApp and base branch master. Use this chat as the
+Coordinator and create the separate Implementer and Reviewer chats required
+by the skill. Follow the story's linked epic requirements and ordered child
+tasks, run the relevant checks, and maintain Taiga statuses and comments.
+I authorize worker handoff and review messages between these chats. After
+reviewer approval, commit the reviewed changes, push the story branch, and
+create a PR against master. Do not merge it.
+```
+
+For manual skill discovery and client configuration, see the official
+[Codex skills](https://learn.chatgpt.com/docs/build-skills) and
+[MCP setup](https://learn.chatgpt.com/docs/extend/mcp) documentation.
+
+## Documentation and contributing
+
+- [Quickstart](docs/taiga_mcp_quickstart.md): publishing, client configuration,
+  connection checks, and troubleshooting.
+- [Work-item examples](docs/work_item_examples.md): discovery and editing workflows
+  with sample tool arguments and responses.
+- [Tool reference](docs/taiga_tools_reference.md): all implemented contracts.
+- [Developer guide](docs/development.md): architecture, build/test commands,
+  and contribution conventions.
+- [Command inventory](docs/taiga_command_inventory.md): delivered versus proposed
+  coverage; proposed commands are not promises of availability.
+
+For bugs, include the tool name, sanitized arguments, expected/actual behavior,
+and safe error text. Remove credentials, signed URLs, and private project
+content before sharing logs or examples. For contributions, read the developer
+guide and [AGENTS.md](AGENTS.md), keep changes focused, and run the relevant
+fake-HTTP and MCP tests. No live Taiga credentials are needed for tests.
+
+## License
+
+Licensed under the [MIT License](LICENSE).

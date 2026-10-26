@@ -1,53 +1,70 @@
-# Taiga MCP Quickstart Guide
+# Taiga MCP quickstart
 
-## Overview
-This guide shows how to connect **Codex CLI** to **Taiga.io** using a custom **C# MCP server**. The server exposes tools for reading, creating, and updating issues; resolving project-local work-item references; discovering sprints and story/task/epic workflow statuses; reading and creating user stories; creating, reading, and listing tasks; creating, listing, reading, linking, and inspecting epic relationships; and discovering project members before assignment.
+This guide connects a local TaigaMCP stdio server to Codex by default. Other
+MCP clients can use the same executable and environment variables, including
+the configurable Streamable HTTP transport. See the
+[README](../README.md#requirements) for build/runtime requirements and the
+[configuration table](../README.md#configuration) for all settings.
 
----
+Framework-dependent launches and tests require both the .NET 8 runtime and the
+ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`), including for
+STDIO because the HTTP companion package is part of the application.
+Self-contained publishing includes both frameworks on the target.
 
-## Prerequisites
-- SDK selected by `global.json` (10.0.401 with latestPatch), .NET 8 runtime, and ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`) for framework-dependent app and test runs. The shared framework is required in both STDIO and HTTP modes because the HTTP companion package is part of the application.
-- Self-contained publishes include the required .NET and ASP.NET Core runtime components on the target; framework-dependent launches and tests do not.
-- Windows PowerShell or a Linux/WSL shell (the test contamination fixture currently requires Windows)
-- Node.js (for MCP Inspector)
-- Codex CLI installed
-- A Taiga account
+## Windows installer
 
-## Windows setup script
-
-With PowerShell 7.3+, the pinned .NET SDK, and Codex CLI on PATH, run:
+From the repository root, with PowerShell 7.3+, the SDK selected by
+`global.json`, and Codex CLI on `PATH`:
 
 ```powershell
 pwsh -File .\scripts\Install-Codex.ps1
 ```
 
-It publishes the current checkout to a new per-user release, registers the
-MCP server, and installs both skills. Existing credentials are reused;
-first-time setup prompts if they are absent from the process environment.
-Restart Codex after installation. See [Windows setup in the README](../README.md#build-and-run)
-for paths, overrides, and the settings reset when re-registering `taiga`.
-The remaining sections describe manual setup.
+This publishes the current checkout, registers `taiga`, and installs both
+bundled skills. Existing credentials are reused; first setup prompts when
+credentials are absent from the process environment. For self-hosted Taiga,
+set `TAIGA__BASEURL` before first setup. Restart Codex and open a new chat.
 
----
+Read the [installer notes](../README.md#windows-install-into-codex) for saved
+credentials, backups, install paths, and the server settings reset during
+registration. You can then skip to **Verify the connection** below.
 
-## 1. Build the existing server
+## Manual setup
 
-Clone this repository and run from its root; do not recreate the project or
-upgrade its pinned packages as part of setup.
+### 1. Publish the server
+
+Clone the repository and run these commands from its root. Publish to a
+versioned directory separate from development build outputs.
+
+Windows x64, PowerShell:
 
 ```powershell
 dotnet restore
-dotnet build -c Debug
-dotnet test -c Debug
+dotnet publish .\TaigaMCP.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o C:\Tools\TaigaMCP\v1
 ```
 
-`Program.cs` creates the host. `Hosting/ServiceCollectionExtensions.cs` registers
-configuration, named HTTP clients, the shared transport, domain APIs, cache and
-MCP tool discovery. Tool classes live in `Tools/` with file-scoped namespaces.
-See the [implemented tool reference](taiga_tools_reference.md) for all 44 tools.
+Use `win-arm64` for Windows ARM64. The executable in this example is
+`C:\Tools\TaigaMCP\v1\TaigaMCP.exe`.
 
-The server uses STDIO by default for Codex. To run Streamable HTTP on a private
-loopback listener, configure the process before starting it:
+Linux x64 / WSL, Bash:
+
+```bash
+dotnet restore
+dotnet publish ./TaigaMCP.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o "$HOME/.local/share/TaigaMCP/v1"
+```
+
+Use `linux-arm64` for Linux ARM64. The executable in this example is
+`~/.local/share/TaigaMCP/v1/TaigaMCP`. Other .NET-supported platforms need the
+appropriate runtime identifier; this guide does not claim they were tested.
+
+Self-contained publishing includes the runtime. It avoids building at MCP
+startup; it does **not** eliminate .NET JIT compilation. The SDK pin does not
+change the application's `net8.0` target or its package versions.
+
+### Streamable HTTP mode
+
+STDIO remains the default for Codex. To select Streamable HTTP on a private
+loopback listener, configure the server process before starting it:
 
 ```powershell
 $env:MCP__TRANSPORT = 'http'
@@ -57,526 +74,127 @@ $env:MCP__PATH = '/mcp'
 dotnet run --no-build
 ```
 
-The endpoint is then `http://127.0.0.1:3001/mcp`. Address, port, and path are
+The endpoint is then `http://127.0.0.1:3001/mcp`; address, port, and path are
 validated at startup. Keep the listener private and configure any Secure MCP
-Tunnel separately; this story does not verify ChatGPT connectivity or tunnel
-setup.
+Tunnel separately. The dated official compatibility and access prerequisites,
+including the documented `--mcp-server-url` option form, are recorded in the
+[developer guide](development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26).
+This story does not claim a live tunnel or ChatGPT connection.
 
-For the external compatibility and access prerequisites that were checked for
-this story, see the dated source record in the [developer guide](development.md).
+### 2. Configure Codex
 
-For long-running MCP use, publish to a separate versioned directory. Keeping the
-published server apart from development outputs avoids executable/DLL locks.
-See the [developer guide](development.md) for temporary-output validation when
-an existing server already holds a build output open.
-
----
-## 2. Configure Codex CLI
-Edit **~/.codex/config.toml** in WSL. Example:
+Edit `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows),
+or `config.toml` under your custom `CODEX_HOME`. Replace the example path and
+credentials with your own. For Windows, TOML literal strings keep backslashes
+readable:
 
 ```toml
-[projects]
-"/home/bgauthier/src/TaskGame" = { trust_level = "trusted" }
-"/home/bgauthier/src/grit-journal" = { trust_level = "trusted" }
-
 [mcp_servers.taiga]
-command = "/home/bgauthier/projects/TaigaMCP/bin/Release/net8.0/linux-x64/publish/TaigaMCP"
+command = 'C:\Tools\TaigaMCP\v1\TaigaMCP.exe'
 args = []
-env = { TAIGA__BASEURL = "https://api.taiga.io/api/v1", TAIGA__USERNAME = "you@example.com", TAIGA__PASSWORD = "yourpass" }
+
+[mcp_servers.taiga.env]
+TAIGA__BASEURL = "https://api.taiga.io/api/v1/"
+TAIGA__USERNAME = "your-user"
+TAIGA__PASSWORD = "your-password"
 ```
 
-> **Tip:** Inline tables (like `env = { ... }`) must all be on one line. Breaking across lines causes TOML parse errors.
-
----
-
-## 3. Build a Self-Contained Binary
-Running `dotnet run` inside Codex can time out. Publish a binary to avoid JIT delays:
-
-```bash
-dotnet publish -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true
-```
-Binary path:
-```
-./bin/Release/net8.0/linux-x64/publish/TaigaMCP
-```
-Update `command` in `config.toml` to point to that file.
-
----
-
-## 4. Test with MCP Inspector
-Before using Codex, test the server:
-
-### GUI Mode
-```bash
-npx @modelcontextprotocol/inspector dotnet run --project ./TaigaMCP.csproj
-```
-- Transport: `STDIO`
-- Command: `dotnet`
-- Args: `run --project ./TaigaMCP.csproj`
-- Env: TAIGA__BASEURL, TAIGA__USERNAME, TAIGA__PASSWORD
-
-Click **Connect** → call tools interactively.
-
-### Identify the current account
-
-Call the no-argument tool:
-
-```json
-{}
-```
-
-It returns an identity object such as:
-
-```json
-{"id":42,"username":"synthetic-user","full_name":"Synthetic User","is_active":true}
-```
-
-Use the returned numeric `id` as `assigned_to` or `assignedTo` in existing
-work-item operations. When using the existing `list_projects` member filter,
-pass the same ID as a string, for example `{"member":"42"}`. The tool does
-not return email, roles, tokens, or other private profile fields.
-
-### List project members before assignment
-
-Read one project-membership page before choosing an assignee:
-
-```json
-{"projectId":123,"page":1}
-```
-
-The result distinguishes the membership record from the account:
-
-```json
-{"items":[{"membership_id":501,"project":123,"user_id":42,"role_id":7,"role_name":"Product Owner","full_name":"Active User","is_user_active":true,"is_admin":true,"is_owner":true}],"page":1,"total":1,"next_page":null,"has_more":false}
-```
-
-Use the returned `user_id` as `assigned_to` in a later work-item call. Do not
-send `membership_id` as the assignee. Pending invitations can omit `user_id`,
-and inactive users remain visible for context; neither is silently treated as
-an active assignable account. Email and invitation text are not returned.
-
-### Resolve a work-item reference before editing
-
-Use a numeric project-local `ref` and a known kind to get the internal ID. Do
-not include the human-facing `#` and do not pass the ref to a detail or update
-tool:
-
-```json
-{"projectId":123,"kind":"task","ref":42}
-```
-
-The result is an identity receipt such as
-`{"kind":"task","id":203,"ref":42,"project":123,"subject":"Implement saved-search endpoint","version":2}`.
-Then read the authoritative detail and use its returned version for a later
-edit:
-
-```json
-{"taskId":203}
-{"taskId":203,"version":2,"status":11}
-```
-
-The same ref can identify different kinds or occur in another project. The
-resolver never guesses the kind, searches other projects, scans lists, or
-performs the subsequent read/update automatically.
-
-### Create a user story
-
-Use the required arguments for a minimal backlog story:
-
-```json
-{"projectId":123,"subject":"Allow saved searches"}
-```
-
-Put acceptance criteria in `description`. To place the story in a sprint and
-assign it, provide project-specific internal IDs:
-
-```json
-{"projectId":123,"subject":"Allow saved searches","description":"Acceptance: saved searches can be reopened.","status":7,"assigned_to":42,"tags":["search","saved"],"milestoneId":55}
-```
-
-Taiga applies project defaults for omitted optional fields. The returned JSON
-contains the server-created story detail, including its `id`, `ref`, and
-`version`. Status, assignee, and milestone membership are validated by Taiga.
-
-### Create a task
-
-Create a standalone task with project defaults, or select a sprint explicitly:
-
-```json
-{"projectId":123,"subject":"Capture deployment checklist"}
-{"projectId":123,"subject":"Prepare release notes","milestoneId":55}
-```
-
-To break down a story, provide its internal ID. The server reads the parent,
-validates the project, and returns the authoritative inherited sprint. Omit
-`milestoneId` for inheritance; if supplied, it must match the parent's sprint
-and is omitted from the wire request. Ordinary creation uses `POST /tasks`, so
-it does not inherit the sprint-only restriction of Taiga's native bulk-create
-endpoint:
-
-```json
-{"projectId":123,"subject":"Implement saved-search endpoint","userStoryId":102,"description":"Acceptance: preserve the search filters.","status":11,"assigned_to":42,"tags":["search"]}
-```
-
-The response is the created task detail with server-generated `id`, `ref`, and
-`version`, plus the resulting parent and sprint.
-
-### Read an epic
-
-Use `list_epics` to obtain a project-scoped page. Pass an item's internal `id`
-to `get_epic`; the displayed `ref` is not accepted as the detail identifier:
-
-```json
-{"projectId":123,"page":1,"includeClosed":false}
-{"epicId":301}
-```
-
-The detail result preserves the server's description, status, assignment,
-color, tags, version, and optional summary fields such as
-`user_stories_counts`. It does not enumerate related stories or calculate
-progress. Use the returned internal epic ID for later story-linking commands.
-
-### Create an epic
-
-Create one epic with Taiga's project defaults, then use its returned internal
-ID for reads or a later story link:
-
-```json
-{"projectId":123,"subject":"Saved search experience"}
-```
-
-Optional values are project-specific status and assignee IDs. Color is passed
-to Taiga for validation, while an omitted color lets Taiga generate its
-default:
-
-```json
-{"projectId":123,"subject":"Saved search experience","description":"Group saved-search delivery work.","status":7,"assigned_to":42,"color":"#336699","tags":["search","saved"]}
-```
-
-This creates only the epic. It does not create stories or change project
-settings. To organize an existing story under the new epic, call the separate
-link tool:
-
-```json
-{"epicId":301,"userStoryId":102,"order":9001}
-```
-
-The response is `{"epic_id":301,"user_story_id":102,"order":9001,"created":true}`
-when the relationship is new. A repeat call returns the existing order with
-`created=false`, even if a different order is requested.
-
-### Create a story and link it to an epic
-
-Use the returned story `id` from `create_user_story`, not its displayed `ref`,
-in the link call. The workflow is:
-
-```json
-{"projectId":123,"subject":"Allow saved searches"}
-{"epicId":301,"userStoryId":102}
-```
-
-The link operation does not move or update the story. Cross-project links are
-left to Taiga's permissions and validation.
-
-### Inspect stories linked to an epic
-
-After linking or when auditing an existing epic, list one relationship page and
-use a returned `user_story_id` with `get_user_story` when full story details are
-needed:
-
-```json
-{"epicId":301,"page":1}
-{"items":[{"epic_id":301,"user_story_id":102,"order":9001}],"page":1,"total":1,"next_page":null,"has_more":false}
-{"userStoryId":102}
-```
-
-The list is a lightweight relationship index. It does not return full story
-objects, creation state, calculated epic progress, or project data for each
-story; Taiga decides whether accessible cross-project links are valid.
-
-### Discover sprints before scheduling work
-
-Taiga calls sprints **milestones**. List a page, then use a returned `id` as
-`milestoneId` when creating a story or standalone task. Omit `closed` (or pass
-`null`) to include both open and closed sprints; pass `false` or `true` to select
-one state:
-
-```json
-{"projectId":123,"page":1}
-{"items":[{"id":55,"project":123,"name":"Sprint 2026-09","slug":"sprint-2026-09","estimated_start":"2026-09-01","estimated_finish":"2026-09-14","closed":false}],"page":1,"total":null,"next_page":null,"has_more":null}
-{"projectId":123,"page":1,"closed":false}
-{"projectId":123,"subject":"Prepare release notes","milestoneId":55}
-```
-
-The result keeps ISO date-only values and does not expand user stories or point
-summaries. If `next_page` is present, request that page explicitly. The separate
-Taiga summary counts for all open/closed milestones are not substituted for the
-page envelope's `total`.
-
-### Discover story workflow statuses
-
-Before creating or transitioning a story, call `list_user_story_statuses` with
-the project ID. It returns a page envelope, including closed and archived
-choices, for example:
-
-```json
-{"items":[{"id":10,"project":123,"name":"Terminado","slug":"terminado","order":0,"is_closed":true,"is_archived":false,"wip_limit":0}],"page":1,"total":null,"next_page":null,"has_more":null}
-```
-
-Pass the returned status `id` as `status` to `create_user_story` or
-`update_user_story`; status IDs are specific to this project and the story
-resource. If `next_page` is present, call the same tool with that page number.
-Do not match statuses by English names.
-
-### Discover task workflow statuses
-
-Read the task first, call `list_task_statuses` for its project, choose one of
-the returned task-specific IDs, and pass it with the task's current version to
-`update_task`:
-
-```json
-{"taskId":203}
-{"projectId":123,"page":1}
-{"items":[{"id":11,"project":123,"name":"Ready","slug":"ready","order":0,"color":"#00aa00","is_closed":false},{"id":12,"project":123,"name":"Terminé","slug":"termine","order":1,"is_closed":true}],"page":1,"total":null,"next_page":null,"has_more":null}
-{"taskId":203,"version":2,"status":12}
-```
-
-Task status IDs are not interchangeable with story status IDs. The task status
-reader includes closed choices and does not expose story-only archive or WIP
-fields. If `next_page` is present, call the same tool with that page number.
-
-### Discover epic workflow statuses
-
-Before creating or changing an epic, call `list_epic_statuses` for its project
-and pass a returned epic-specific `id` as `status`:
-
-```json
-{"projectId":123,"page":1}
-{"items":[{"id":7,"project":123,"name":"Ready","slug":"ready","order":0,"color":"#336699","is_closed":false},{"id":8,"project":123,"name":"Terminé","slug":"termine","order":1,"color":"#cc0000","is_closed":true}],"page":1,"total":null,"next_page":null,"has_more":null}
-{"projectId":123,"subject":"Saved-search delivery","status":8}
-```
-
-Epic status IDs are not interchangeable with story or task status IDs. The
-reader includes closed choices and does not expose story-only archive or WIP
-fields. If `next_page` is present, call the same tool with that page number.
-
-### Update an epic
-
-Read an epic first, discover its project-specific statuses, and pass the
-returned `version` and a selected status ID to `update_epic`. Omitted fields
-stay unchanged; empty description or tags are explicit clears, and
-`clearFields=["assigned_to"]` unassigns the primary assignee:
-
-```json
-{"epicId":301}
-{"projectId":123,"page":1}
-{"epicId":301,"version":4,"status":8,"clearFields":["assigned_to"],"comment":"Delivery complete."}
-```
-
-The result is the server's authoritative epic detail, including its new
-version. A comment-only update is valid when the comment is nonblank. The
-client does not refresh a version or retry an ambiguous write; read the epic
-again before retrying after an uncertain transport or response failure.
-
-For assignment, call `list_project_members` first and use an active member's
-`user_id` as `assigned_to`; `membership_id` identifies the membership record
-and is not an assignee ID. To unassign later, fetch the new epic `version` and
-send `clearFields=["assigned_to"]`:
-
-```json
-{"projectId":123,"page":1}
-{"epicId":301,"version":4,"assigned_to":42}
-{"epicId":301,"version":5,"clearFields":["assigned_to"]}
-```
-
-### Update a user story
-
-Read the story first and pass its returned `version` to the update. Omitted
-fields remain unchanged; use exact wire names in `clearFields` for explicit
-nulls:
-
-```json
-{"userStoryId":102,"version":4,"clearFields":["milestone"],"comment":"Move back to backlog."}
-```
-
-`milestoneId` places a story in a sprint, `clearFields=["milestone"]` returns
-it to the backlog, and `clearFields=["assigned_to"]` unassigns it. Empty
-`description` or `tags` values are explicit clears. The returned `version` and
-other fields are authoritative; the server is not blindly retried after a
-conflict or ambiguous write failure. `status` is a project-specific internal
-status ID, so use an open or closed status ID from Taiga to reopen or close a
-story. Only the primary assignee is supported; multiple assignees remain
-planned.
-
-### Add a work-item comment
-
-Read the item first and use its current `version`. Select the internal ID and
-one of the four closed `kind` values. The comment text can contain Markdown,
-mentions, line breaks, and Unicode:
-
-```json
-{"kind":"task","id":203,"version":2,"text":"**Implementation complete**\n@reviewer — ready for review ✓"}
-```
-
-The result is a small receipt such as
-`{"kind":"task","id":203,"version":3,"comment_submitted":true}`.
-The command confirms the versioned PATCH succeeded; it does not return a
-history-entry ID or perform a separate history read. A version conflict,
-permission error, missing item, malformed success response, or ambiguous
-transport failure is surfaced as an error and is not automatically retried.
-
-### Read work-item comments
-
-Use the internal work-item ID and a `kind` of `issue`, `user_story`, `task`, or
-`epic` to read one visible comment page. History-entry IDs are opaque strings;
-they are not the numeric work-item ID or displayed `#ref`:
-
-```json
-{"kind":"task","id":203,"page":1}
-```
-
-The result is a page envelope. Hidden, deleted, blank, and whitespace-only
-comments are omitted, but `total`, `next_page`, and `has_more` describe the
-upstream history page, so `items` can be empty while another page exists:
-
-```json
-{"items":[{"id":"history-entry","comment":"Reproduced locally","created_at":"2026-09-28T12:01:00Z","user":{"id":42,"name":"Example User","username":"example","is_active":true}}],"page":1,"total":3,"next_page":2,"has_more":true}
-```
-
-Call `add_work_item_comment` with the current item version, then call
-`list_work_item_comments` to read the resulting visible conversation. This
-read does not edit, delete, restore, or fetch comment revisions.
-
-### Read work-item history
-
-Use `get_work_item_history` when you need field changes as well as visible
-comments. It uses the same internal ID and four-kind set, but requests the full
-history stream without `type=comment`:
-
-```json
-{"kind":"task","id":203,"page":1}
-```
-
-The page preserves numeric event `type`, actor/time data, structured
-`diff`/`values_diff`, and available edit/delete metadata. Hidden entries are
-omitted. Deleted comment bodies are suppressed and reported with
-`comment_deleted=true`; comment-labelled or matching text is also removed from
-structured changes. Use a later page explicitly when `next_page` is present:
+On Linux/WSL, use an absolute executable path instead, such as
+`command = "/home/you/.local/share/TaigaMCP/v1/TaigaMCP"`. Use paths and
+credentials visible in the environment where Codex launches the server; a
+Windows executable path is not a WSL Linux path.
+
+This example stores credentials in your local configuration. Keep it and its
+backups private. Alternatively, set the variables in the environment that
+launches Codex and use `env_vars = ["TAIGA__USERNAME", "TAIGA__PASSWORD"]`
+inside `[mcp_servers.taiga]`, omitting those two values from its `env` table.
+Use `env` for any fixed base URL or optional settings. Do not register a Taiga
+API URL as an MCP endpoint: TaigaMCP calls Taiga itself. If you select HTTP,
+register the configured MCP endpoint or a separately secured tunnel endpoint,
+not the Taiga API URL.
+
+The official [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp)
+also describes `codex mcp add`, environment forwarding, and configuration.
+Restart Codex after changing the connection.
+
+## Verify the connection
+
+In a terminal, `codex mcp list` shows configured servers. In Codex CLI, `/mcp`
+shows active MCP servers. Then ask for a read-only call:
 
 ```text
-Call the tool get_work_item_history with kind="task", id=203, and page=2
+Call get_current_user, then use its returned ID as the member string in list_projects with page=1.
 ```
 
-### CLI Mode
-```bash
-npx @modelcontextprotocol/inspector --cli ./bin/Release/net8.0/linux-x64/publish/TaigaMCP \
-  --method tools/call \
-  --tool-name list_projects \
-  --tool-arg member=6
+A successful identity result might be:
+
+```json
+{"id":42,"username":"example-user","full_name":"Example User","is_active":true}
 ```
 
----
+`list_projects` defaults to no member filter. Use `resolve_project` with a
+known slug if needed; it returns an object such as `{"project":123}`.
+Next, list one page of work in that project:
 
-## 5. Use in Codex CLI
-Launch Codex:
-```bash
-codex
+```text
+Call list_user_stories with projectId=123, page=1, and includePageInfo=true.
 ```
 
-### Check connection
-```
-/status
-```
-Look for `taiga` in the MCP servers list.
+Replace `123` with an ID returned by your own project lookup. These checks read
+live Taiga data but do not change it. See [work-item examples](work_item_examples.md)
+for assignment, sprints, statuses, story/task/epic creation, updates, and history.
 
-### Try tools
-```
-List projects I belong to
-Call the tool list_projects with member=6 and page=1
-Call the tool list_project_members with projectId=12345 and page=1
-Call the tool list_sprints with projectId=12345 and closed=false
-Call the tool resolve_work_item with projectId=12345, kind="task", and ref=42
-Call the tool list_issues with projectId=12345 and page=1
-Call the tool list_issues with projectId=12345, statusIds=[8], and includePageInfo=true
-Call the tool list_user_stories with projectId=12345 and backlogOnly=true
-Call the tool list_user_stories with projectId=12345, milestoneId=678, and includePageInfo=true
-Call the tool list_user_story_statuses with projectId=12345 and page=1
-Call the tool list_task_statuses with projectId=12345 and page=1
-Call the tool list_epic_statuses with projectId=12345 and page=1
-Call the tool list_tasks with projectId=12345, userStoryId=102, and includeClosed=false
-Call the tool list_tasks with projectId=12345, milestoneId=678, assignedTo=42
-Call the tool list_epics with projectId=12345, includeClosed=false, and query="search"
-Call the tool get_epic with epicId=301
-Call the tool list_epic_user_stories with epicId=301 and page=1
-Select a returned user_story_id, then call unlink_user_story_from_epic with epicId=301 and that userStoryId; a successful removal returns removed=true
-Call the tool list_epic_user_stories with epicId=301 and page=1 again to verify the selected relationship is absent
-Call the tool update_epic with epicId=301, version=4, status=8, and comment="Delivery complete."
-Call the tool get_task with taskId=203
-Call the tool update_task with taskId=203, version=2, status=11
-Call the tool update_task with taskId=203, version=3, isBlocked=false, blockedNote="", comment="Dependency resolved."
-Call the tool list_work_item_comments with kind="task", id=203, and page=1
-Call the tool get_work_item_history with kind="task", id=203, and page=1
-Call the tool get_user_story with userStoryId=102
-Call the tool get_issue with issueId=67890
-Call the tool list_issue_statuses with projectId=12345
-Call the tool list_issue_severities with projectId=12345
-Call the tool list_issue_types with projectId=12345
-Call the tool list_issue_priorities with projectId=12345
-Create a Taiga issue in project 12345 with subject "Bug"
-Update Taiga issue 67890 setting subject "Fix title" with version 3
-Update Taiga issue 67890 with version 4 and clearFields=["assigned_to"]
+## Optional: MCP Inspector
+
+[MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector) currently
+requires Node.js 22.19.0 or newer and npm. Set the server credentials in the
+launching shell first, then
+inspect the **published executable**, so build output cannot enter the protocol
+stream. For example, in PowerShell:
+
+```powershell
+$env:TAIGA__USERNAME = 'your-user'
+$env:TAIGA__PASSWORD = 'your-password'
+npx @modelcontextprotocol/inspector C:\Tools\TaigaMCP\v1\TaigaMCP.exe
 ```
 
-For task edits, first use `list_tasks` to identify the internal task ID, then
-call `get_task` and use its fresh `version` with `update_task`. `get_task`
-accepts the internal ID, not the displayed `#ref`. Use
-`clearFields=["assigned_to"]` to unassign, and pass
-`isBlocked=false, blockedNote=""` when both the blocker and its note should be
-cleared. The request keeps omitted fields absent, but Taiga clears
-`blocked_note` on save whenever the task is unblocked, including if a nonempty
-note is supplied.
+Or use its CLI mode for a read-only tool call:
 
----
+```powershell
+npx @modelcontextprotocol/inspector --cli C:\Tools\TaigaMCP\v1\TaigaMCP.exe --method tools/call --tool-name get_current_user
+```
 
-## 6. Troubleshooting
+For Linux/WSL, substitute the absolute published Linux executable path. Select
+stdio in the Inspector UI. The server environment must include your required
+credentials; the Codex configuration does not configure Inspector.
 
-### TOML errors
-- `newlines are unsupported in inline tables`: keep inline tables on one line.
-- Use `[projects]` syntax instead of inline table if you have multiple trusted projects.
+## Troubleshooting
 
-### MCP server timeout
-- Build and point Codex at a published binary (`dotnet publish`).
-- Ensure no `Console.WriteLine` writes to stdout. Use `ILogger` → stderr only.
-- Verify binary runs cleanly with:
-  ```bash
-  ./bin/Release/net8.0/linux-x64/publish/TaigaMCP
-  ```
-  It should sit idle without output.
+| Symptom | Check |
+| --- | --- |
+| SDK not found | Install a non-preview SDK in the `10.0.4xx` feature band allowed by `global.json`. |
+| Framework missing when running tests | Install both the .NET 8 runtime and ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`); a newer SDK alone does not supply them. |
+| Server fails at startup | Check nonblank credentials, the API base URL, and positive TTL/attachment-size settings. Inspect stderr. |
+| Configured server is unavailable | Check the absolute executable path and environment in the client that launches it; restart the client after configuration changes. |
+| TOML parse error | Use the nested `env` table above. If using an inline `env = { ... }` table, keep it on one line. |
+| Protocol error or timeout | Launch the published executable directly, without build commands or shell startup messages on stdout. Logs belong on stderr. |
+| 401 or 403 | Check the account credentials, project access, and permissions. TaigaMCP attempts one auth replay on a received 401; 403 does not trigger API reauthentication. |
+| Missing closed or archived work | Lists default to open work; story lists also exclude archived work. Use the appropriate include flags or explicit status IDs. |
+| Version conflict or uncertain write | Read the item again. Never blindly repeat a create/update/delete when the error says it may already have applied. |
+| Attachment download fails | Use an absolute new destination with an existing parent directory, check the size limit, and use the download tool to obtain fresh media metadata. |
+| Build output locked by a running server | Use a unique external output directory as shown in the [developer guide](development.md#build-and-test). |
 
-### Test outside Codex
-- Use MCP Inspector GUI/CLI to confirm tools respond.
-- Example CLI:
-  ```bash
-  npx @modelcontextprotocol/inspector --cli ./TaigaMCP --method tools/list
-  ```
+The default STDIO server launched directly waits for MCP input on stdin; waiting
+alone does not prove the credentials or connection work. HTTP mode listens on
+the configured endpoint instead. Normal host logs can appear on stderr. Verify
+using an actual read-only tool call.
 
-### Common mistakes
-- Wrong binary path in `config.toml`
-- Env vars not on one line in TOML
-- Include the current `version` on updates. Taiga may report a version conflict as a 400 field-validation response or a 409 conflict, depending on the deployed version and overlap; inspect the returned validation details and do not blindly retry an ambiguous write.
+Keep logging at Information or higher during stdio use. The current console
+configuration routes Information and higher to stderr, but enabling Debug or
+Trace can put diagnostic messages on stdout and break the MCP connection.
+Sanitize logs and never share credentials or signed attachment URLs.
 
----
-
-## Outcome
-You now have:
-- A custom MCP server in C#
-- Tools for Taiga projects and issues
-- Verified connection via MCP Inspector
-- Integrated Codex CLI for natural language interaction
-- Troubleshooting steps for TOML parse errors, startup timeouts, and stdout logging
-
-
-### Validated configuration and updates
+## Validated configuration
 
 `TAIGA__USERNAME` and `TAIGA__PASSWORD` must be nonblank. Optional
 `TAIGA__BASEURL` is an absolute HTTP/HTTPS API URL without embedded credentials,
@@ -585,29 +203,6 @@ query, or fragment. Optional `TAIGA__METADATATTLSECONDS` is a positive integer
 
 `MCP__TRANSPORT` is `stdio` by default and also accepts `http` for Streamable
 HTTP. For HTTP, `MCP__ADDRESS` defaults to `127.0.0.1`, `MCP__PORT` to `3001`,
-and `MCP__PATH` to `/mcp`; all three are validated at startup. STDIO remains the
-default for existing Codex configurations.
-
-Use positive internal project/entity IDs and pages >= 1. For an update of only
-description/tags, omit `subject` and pass the current `version`; use
-`description: ""` or `tags: []` to empty those fields. Null optional values
-leave fields unchanged. To unassign explicitly, pass
-`clearFields: ["assigned_to"]`; do not combine it with `assigned_to`. Empty
-updates, unsupported clear fields, and negative versions are rejected before
-HTTP.
-A write error saying it may already have applied requires reading the entity
-before deciding whether to retry. See [development conventions](development.md).
-
-## Intentional list behavior changes
-
-`list_projects` now defaults to `member=null` (no member filter). To retain the
-previous account-specific selection, call `list_projects(member="6")`, or send
-`{"member":"6"}` over MCP. Explicit member values remain URL-encoded.
-Story lists use Taiga's `status__is_closed=false` and
-`status__is_archived=false` by default; nonempty status IDs override both,
-and include flags selectively remove them. `backlogOnly=true` uses
-`milestone__isnull=true`, while `milestoneId` selects a sprint. English labels
-such as Done/Archived never determine filtering. Issue lists use
-`status__is_closed=false` only: unsupported issue archive filtering and
-redundant status-exclusion requests were removed. These are behavior
-corrections, not behavior-preserving refactoring.
+and `MCP__PATH` to `/mcp`; all three are validated at startup. The dated
+official tunnel compatibility and access record is in the
+[developer guide](development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26).

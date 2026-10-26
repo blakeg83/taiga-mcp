@@ -30,17 +30,13 @@ The current server exposes 44 tools:
   `download_work_item_attachment`, `update_work_item_attachment`, and
   `delete_work_item_attachment`.
 
-All 15 selected first-batch functions are implemented within their defined
-scope: three existing tools were expanded and twelve were added, bringing the
-first-batch total to 23. Goals 01 through 07 of the [second batch](goals/second-batch/README.md)
-add `get_current_user`, `list_project_members`, `resolve_work_item`,
-`list_user_story_statuses`, `list_task_statuses`, `list_epic_statuses`, and
-`list_sprints`; goal 08 adds `update_epic`; goal 09 adds
-`list_epic_user_stories`, and `unlink_user_story_from_epic`; goal 11 adds
-`list_work_item_comments`, and goal 12 adds `get_work_item_history`. The broader
-inventory still includes deferred fields and operations.
-`update_user_story`
-uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
+The [command inventory](taiga_command_inventory.md) distinguishes delivered
+coverage from proposed extensions. The sections below describe current behavior;
+external source-review dates identify historical evidence, not deployed versions.
+
+### `update_user_story` contract
+
+`update_user_story` uses `userStoryId`, a nonnegative `version`, optional `subject`, `description`,
 `status`, `assigned_to`, `tags`, `milestoneId`, and `comment`, plus
 `clearFields` containing only the wire names `assigned_to` and `milestone`.
 Omitted nullable fields remain untouched; explicit clear fields send JSON null;
@@ -48,7 +44,7 @@ Omitted nullable fields remain untouched; explicit clear fields send JSON null;
 to the story and Taiga determines any effects on child tasks; the MCP tool does
 not patch child tasks separately. Invalid IDs, blank subjects, empty updates,
 unsupported clear names, and set/clear collisions fail before HTTP; write
-failures are not replayed.
+failures are not replayed except for the single received-401 authentication replay.
 
 ### `set_user_story_estimates` contract
 
@@ -97,7 +93,8 @@ The route and permissions were checked against the pinned backend
 [router](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/routers.py),
 [attachment view sets](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/api.py),
 and [permissions](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/permissions.py).
-For issue #240 in project 12, list with `kind="issue", id=472, projectId=12`;
+For an illustrative issue with internal ID 201 in project 123, list with
+`kind="issue", id=201, projectId=123`;
 then pass the returned attachment ID to the download tool with an explicit local
 destination. The displayed issue ref is not the parent ID or attachment ID.
 
@@ -491,11 +488,11 @@ snapshot fields. This is pinned source evidence, not a deployed-version claim.
 The `list_epics` and `get_epic` contracts are source-verified and their
 domain APIs/MCP wrappers are implemented. `list_epics` has the signature
 `list_epics(projectId, page=1, statusIds?, assignedTo?, tags?, query?,
-includeClosed=false)`, and it will always return the page envelope
+includeClosed=false)`, and it always returns the page envelope
 `{ items, page, total, next_page, has_more }`. The default wire filter is
 `status__is_closed=false`; nonempty `statusIds` or `includeClosed=true` omit
 that restriction. The allowlisted filters are `status`, `assigned_to`,
-`tags`, and `q`, with encoded values. Epic list items will expose
+`tags`, and `q`, with encoded values. Epic list items expose
 `id`, `ref`, `project`, `subject`, `status_id`, `status`, `assigned_to`,
 `color`, `tags`, `modified`, and optional `version`; no related-story
 lookups or progress aggregation are part of this list operation. Invalid
@@ -510,11 +507,11 @@ Use the returned internal `id` with the `get_epic` command and the epic story
 relationship tools; the displayed `ref` is for human-facing project context
 only.
 
-The `create_epic` MCP wrapper is implemented for goal 13. Its signature is
+The `create_epic` MCP wrapper is implemented. Its signature is
 `create_epic(projectId, subject, description?, status?, assigned_to?, color?,
 tags?)`. The request maps to `POST /api/v1/epics` with `project`, `subject`,
 `description`, `status`, `assigned_to`, `color`, and `tags`; omitted optional
-values stay omitted so Taiga can apply project defaults. The response will use
+values stay omitted so Taiga can apply project defaults. The response uses
 the existing epic detail mapping and expose the server's authoritative `id`,
 `ref`, and nonnegative `version`. This call creates one epic only; linking
 stories and setting requirement flags remain separate operations.
@@ -533,10 +530,10 @@ The `link_user_story_to_epic` contract was source-verified on
 `/api/v1/epics/{epicId}/related_userstories/{userStoryId}`: the story ID is
 the nested lookup key, and creation sends `epic`, `user_story`, and optional
 `order`. A successful response contains `epic`, `user_story`, and the
-server-selected or requested `order`; the public result will rename those
-identifiers to `epic_id` and `user_story_id` and add `created`.
+server-selected or requested `order`; the public result renames those
+identifiers to `epic_id` and `user_story_id` and adds `created`.
 
-The implementation will first read the nested relationship. A confirmed
+The implementation first reads the nested relationship. A confirmed
 existing link returns `created=false` with its current order and ignores a new
 order request. A 404 is not treated as an absent link until the existing epic
 and story readers confirm that both resources are accessible. A recognized
@@ -648,9 +645,9 @@ server-supplied scalar context (`is_closed`, `is_blocked`, `blocked_note`,
 `user_stories_counts` summary when the server provides it. Missing optional
 values are omitted from tool JSON; unknown upstream fields are ignored.
 
-The client will preserve Markdown/Unicode description text and the numeric
-status ID even when no inline status label is available. It will not fetch
-related stories, history, comments, or status metadata, and it will not
+The client preserves Markdown/Unicode description text and the numeric
+status ID even when no inline status label is available. It does not fetch
+related stories, history, comments, or status metadata, and it does not
 compute progress. The detail mapping was checked on 2026-09-28
 against taiga-back revision
 `4d11baef9027f5598f6341d6eb4261de2840688e` ([epic API](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/epics/api.py),
@@ -665,7 +662,7 @@ signature `get_epic(epicId)`. It accepts the positive internal epic ID, not the
 displayed `#ref`, and returns one detail object rather than a page envelope.
 
 See the [command inventory](taiga_command_inventory.md)
-and [second-batch plan index](goals/second-batch/README.md) for remaining
+for remaining
 planned coverage.
 
 ### `get_current_user` contract
@@ -839,6 +836,11 @@ or infer estimates, and list operations do not issue per-story detail reads.
 | `create_issue` | `projectId`, `subject` required; `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, and `tags` optional and default null | One issue object returned by Taiga after mapping metadata IDs to labels. |
 | `update_issue` | `issueId` and `version` required; `subject`, `description`, `status`, `type`, `priority`, `severity`, `assigned_to`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One issue object returned by Taiga after the PATCH. |
 | `add_work_item_comment` | `kind`, `id`, `version`, and `text` required; `kind` is one of `issue`, `user_story`, `task`, or `epic`; `id` is positive; `version` is nonnegative; `text` is nonblank | `{ "kind": "task", "id": 203, "version": 3, "comment_submitted": true }` after one confirmed comment-only PATCH. |
+| `list_work_item_comments` | `kind`, `id` required; `page` integer, default `1` | Page envelope of visible nonblank comments. Hidden/deleted comments are omitted; metadata describes the upstream page. History-entry IDs are opaque strings. |
+| `get_work_item_history` | `kind`, `id` required; `page` integer, default `1` | Page envelope of visible field changes and comments with safe actor/time metadata. Hidden entries and deleted comment bodies are suppressed. |
+| `list_work_item_attachments` | `kind`, `id`, `projectId` required; `page` integer, default `1` | Page envelope of attachment metadata and available locations. Supports `issue`, `user_story`, `task`, and `epic`; `id` is the parent work-item ID. |
+| `get_work_item_attachment` | `kind`, `attachmentId` required | One attachment metadata object. The attachment ID is distinct from the parent work-item ID. Use the download tool for file contents. |
+| `upload_work_item_attachment` | `kind`, `id`, `projectId`, `file` required; `description` optional, default null | One authoritative attachment metadata object after uploading an explicit absolute local file within the configured size limit. |
 | `download_work_item_attachment` | `kind`, `attachmentId`, and `destination` required; `kind` is one of `epic`, `user_story`, `task`, or `issue` | `{ destination, bytes, attachment }`; streams bounded binary bytes to a new explicit absolute destination after metadata inspection, with origin-scoped authentication, manual redirects, atomic placement, and cleanup on failure. |
 | `update_work_item_attachment` | `kind`, `attachmentId`, and `fields` required; `fields` is a nonempty object containing only `description`, `order`, and/or `is_deprecated` | One authoritative attachment object after one JSON PATCH; omitted fields stay unchanged, empty/zero/false values are preserved, no attachment version is sent, and only a received 401 is replayed. |
 | `delete_work_item_attachment` | `kind` and `attachmentId` required; `kind` is one of `epic`, `user_story`, `task`, or `issue` | `{ kind, attachment_id, deleted: true }` only after one confirmed HTTP 204 DELETE; 404/repeated deletion is an error and ambiguous writes are not retried. |
@@ -858,6 +860,7 @@ or infer estimates, and list operations do not issue per-story detail reads.
 | `list_epics` | `projectId` integer, required; `page` integer, default `1`; `statusIds`, `assignedTo`, `tags`, `query`, and `includeClosed=false` optional | Always `{ items, page, total, next_page, has_more }`, with epic items `{ id, ref, project?, subject?, status_id?, status?, assigned_to?, color?, tags?, modified?, version? }`. Explicit status IDs override the automatic open-only restriction. |
 | `get_epic` | `epicId` integer, required | One detail object with `{ id, ref, project, subject?, description?, status_id?, status?, assigned_to?, color?, tags?, modified?, is_closed?, is_blocked?, blocked_note?, client_requirement?, team_requirement?, user_stories_counts?, version }`. `epicId` is the internal ID, not displayed `#ref`; related stories and computed progress are not loaded. |
 | `create_epic` | `projectId`, `subject` required; `description`, `status`, `assigned_to`, `color`, and `tags` optional and default null | One server-created epic detail with authoritative `id`, `ref`, and `version`. Omitted optional fields use project defaults; `description=""` and `tags=[]` are explicit values. Use the separate `link_user_story_to_epic` tool for existing stories. Requirement flags, bulk creation, and custom fields remain planned. |
+| `link_user_story_to_epic` | `epicId`, `userStoryId` required; `order` integer optional, default null | `{ epic_id, user_story_id, order, created }`. Existing links return `created=false` and retain their order. Both IDs identify existing work items. |
 | `update_epic` | `epicId`, `version` required; `subject`, `description`, `status`, `assigned_to`, `color`, `tags`, `comment`, and `clearFields` optional. `clearFields` accepts only `assigned_to`. | One authoritative epic detail after a versioned PATCH. Omitted fields stay unchanged; empty description/tags are explicit clears, and `clearFields=["assigned_to"]` emits JSON null. Use `list_epic_statuses` for project-specific status IDs; ordering, requirement flags, blocking, dates, custom fields, project moves, and linked-story changes remain planned. |
 | `list_epic_user_stories` | `epicId` integer, required; `page` integer, default `1` | `{ items, page, total, next_page, has_more }`, where items are `{ epic_id, user_story_id, order }`. This is a one-page relationship index; use `get_user_story` for selected details. Creation state, project enrichment, progress aggregation, reordering, and all-page fetching remain out of scope. |
 | `unlink_user_story_from_epic` | `epicId`, `userStoryId` integers, both required | `{ epic_id, user_story_id, removed: true }` after confirmed HTTP 204. Deletes only the selected relationship; 404 remains an error, no version is accepted, and ambiguous DELETE failures are not retried. |
@@ -917,7 +920,7 @@ transport, malformed JSON, and malformed required status data are returned as
 safe MCP errors without raw upstream bodies; the tool never writes task data.
 
 The route and fields follow the pinned taiga-back source evidence recorded in
-[the second-batch sources](goals/second-batch/sources.md), revision
+[task status API](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/api.py) and [serializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/serializers.py), revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`. This is pinned source evidence,
 not a deployed version claim.
 
@@ -1003,7 +1006,7 @@ The result is always an envelope, even for an empty page:
 {"items":[{"id":301,"ref":12,"project":123,"subject":"Saved search epic","status_id":7,"status":"Ready","assigned_to":42,"color":"#336699","tags":[["search","#336699"]],"modified":"2026-09-28T12:03:00Z","version":4}],"page":1,"total":null,"next_page":null,"has_more":null}
 ```
 
-The `id` is the internal epic identifier for the `get_epic` and future
+The `id` is the internal epic identifier for the `get_epic` and
 story-linking commands; `ref` is the displayed project reference.
 
 Parameter names are the public names generated from the C# method signatures;
@@ -1288,7 +1291,8 @@ An update returns the server's authoritative detail, for example:
   `status__is_closed=false` restriction is omitted when nonempty explicit
   statuses or `includeClosed=true` are selected. Invalid positive-ID/page
   inputs fail before HTTP.
-- Current list methods request one page and return bare arrays by default.
+- Current list methods request one page. Project and issue-metadata lists
+  return arrays; task/epic and most discovery lists return page envelopes.
   `list_issues` and `list_user_stories` additionally support the opt-in page
   envelope; missing or malformed pagination headers remain explicit `null`
   values rather than being treated as zero totals or a completed result.
@@ -1306,7 +1310,7 @@ An update returns the server's authoritative detail, for example:
   IDs, `includeClosed=false` sends `status__is_closed=false`; explicit statuses
   or `includeClosed=true` omit that restriction. Task status labels come only
   from inline `status_extra_info.name`; an unavailable label leaves the
-  numeric `status_id` intact. Standalone tasks preserve null parent/sprint
+  numeric `status_id` intact. Standalone tasks omit unavailable parent/sprint
   values, and listing makes no parent or detail requests.
 - `list_epics` maps `statusIds`, `assignedTo`, `tags`, and `query` to Taiga's
   verified `status`, `assigned_to`, `tags`, and `q` filters. With no explicit
@@ -1346,9 +1350,11 @@ An update returns the server's authoritative detail, for example:
   `milestone` and `version` only when the list response supplies them. A
   missing list version is not fabricated as zero.
 - The public tool serializers use `JsonIgnoreCondition.WhenWritingNull`, so
-  null-valued response properties such as an unassigned issue's `assigned_to`
-  are omitted from current tool JSON. This response omission is distinct from
-  the page envelope, whose missing pagination values are explicit JSON `null`.
+  most null-valued response properties such as an unassigned issue's `assigned_to`
+  are omitted from current tool JSON. Point-option `value` is an exception:
+  an explicit null identifies an unestimated option. This response omission is
+  distinct from the page envelope, whose missing pagination values are explicit
+  JSON `null`.
 - Nullable create/update fields use separate request policies. Create fields
   still omit nulls so project defaults apply. `create_user_story` sends
   `project`, `subject`, and only supplied `description`, `status`,
@@ -1415,92 +1421,11 @@ The following sources were checked on 2026-09-28:
   and `CallToolAsync`. The matching SDK tag was observed at
   [`15f8e89ac3aedb2bb4fa9232f6093f092b2ce956`](https://github.com/modelcontextprotocol/csharp-sdk/tree/15f8e89ac3aedb2bb4fa9232f6093f092b2ce956).
 
-## Foundation baseline
+## Historical validation
 
-Commands run before adding the test harness on 2026-09-28:
-
-| Command | Result |
-| --- | --- |
-| `dotnet restore` | Passed; packages were already restored. |
-| `dotnet build -c Debug` | Blocked by four pre-existing `TaigaMCP.exe` processes locking `bin/Debug/net8.0/TaigaMCP.exe`; the compiler was not reached for a clean apphost copy. A lock-free build property is used during development validation. |
-| `dotnet test` | Passed with no test project/tests discovered. |
-
-The foundation fixture conventions are: fake HTTP at the `HttpMessageHandler`
-boundary, a queued/route-based response handler that records each request, a
-synthetic auth response, and no live endpoint access. Later goals should add
-only fixtures that assert their actual serialized request, response mapping,
-pagination, or error behavior.
-
-The reusable fixture lives in `tests/TaigaMCP.Tests/FakeHttpMessageHandler.cs`.
-It matches method and path, captures headers/body/query strings, and can return
-JSON/text responses, response headers, HTTP failures, or transport exceptions.
-`TaigaTestClient` registers a synthetic `/auth` route and creates the real
-`AuthClient` with synthetic credentials. The focused command is:
-
-```text
-dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug
-```
-
-If a local TaigaMCP server process holds the normal output files, use a
-temporary output directory without stopping that process:
-
-```text
-dotnet test tests/TaigaMCP.Tests/TaigaMCP.Tests.csproj -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation\ -p:UseAppHost=false
-```
-
-At the earlier 33-tool foundation baseline, the MCP integration fixture launched the built application with
-`StdioClientTransport`, points its configured base URL at a local fake HTTP
-listener, and uses `McpClientFactory.CreateAsync` with the installed
-`0.3.0-preview.4` SDK and verified the then-current 33-name `tools/list` result,
-the required/optional schema entries, a real `list_projects` `tools/call`, and
-that a fake HTTP 500 is returned as a tool result with `IsError=true`. The
-fixture also tees the child process's raw STDOUT before the SDK sees it and
-validates every nonblank line as a JSON-RPC 2.0 request, notification, or
-response. A separate negative test rejects blank lines, plain-text logs, and
-JSON values that are not MCP messages. The end-to-end contamination test runs
-a temporary copied application behind a launcher that writes a plain-text
-startup line; the strict fixture fails before the SDK can accept the session.
-A separate test-only stream server probes argument binding for explicit
-`false`, an empty array, an explicit null, and a missing required integer; the
-probe type is compiled only in the test project.
-
-The original foundation validation on 2026-09-28 used the repository root and
-an explicit temporary output directory because pre-existing `TaigaMCP.exe`
-processes held the default apphost file:
-
-```text
-dotnet restore
-dotnet build TaigaMCP.sln -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation-final\ -p:UseAppHost=false --no-restore
-dotnet test TaigaMCP.sln -c Debug -p:OutputPath=C:\Temp\TaigaMCP-validation-final\ -p:UseAppHost=false --no-restore
-```
-
-Restore passed; the alternate-output solution build passed with 0 warnings and
-the solution test run passed all 8 tests. The default commands were also run
-and stopped before compilation/test execution when MSBuild could not replace
-the locked default apphost. No server process was stopped, and no generated
-`bin/`, `obj/`, `.vs/`, credential, or live Taiga payload was added to the
-foundation commits.
-
-The corrected review validation reran the root commands after the output lock
-was no longer present:
-
-```text
-dotnet restore
-dotnet build -c Debug
-dotnet test
-```
-
-All three commands passed; the Debug build had 0 warnings and the solution
-test run passed all 13 tests. The focused strict STDIO run also passed its 5
-integration tests, including the expected failure of the contaminated
-temporary-copy experiment. The nullable issue contract was verified through
-the real `IssueTools.GetIssue` path, with `assigned_to` absent from the public
-JSON when the upstream value is null.
-
-Cleanup compatibility: production C# types now live in `TaigaMCP.Api`,
-`TaigaMCP.Tools`, and other folder namespaces. The unused aggregate facade is
-removed; internal consumers use domain APIs. MCP signatures, defaults, JSON
-property names and response omission are unchanged at this stage.
+The [foundation cleanup record](history/foundation-cleanup.md) preserves the
+early implementation and test results. Its tool/test counts are historical;
+use the [developer guide](development.md#build-and-test) for current commands.
 
 ## Input validation and configuration
 
@@ -1517,7 +1442,9 @@ Cancellation is injected by MCP and is not a tool argument.
 Credentials must be nonblank. `TAIGA__BASEURL` accepts an absolute HTTP/HTTPS URL
 without credentials/query/fragment and normalizes a trailing slash.
 `TAIGA__METADATATTLSECONDS` is positive, defaults to 300, and controls metadata
-refresh. See [development](development.md) for lifetimes and future contracts.
+refresh. `TAIGA__MAXATTACHMENTBYTES` is positive, defaults to 10485760 (10 MiB),
+and bounds uploads and downloads. See [development](development.md) for service
+lifetimes and extension conventions.
 
 ## Intentional list behavior changes
 

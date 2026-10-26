@@ -1,7 +1,6 @@
 # Work-item attachment list contract
 
-This contract supports story #21, task #27, and is the shared boundary for
-the attachment-list implementation in task #28. It was checked on 2026-10-02
+This document defines the implemented attachment-list boundary. It was checked on 2026-10-02
 against the Taiga documentation at `main` and Taiga backend revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`. The revision is source evidence,
 not a claim about every deployed Taiga instance.
@@ -44,9 +43,9 @@ Evidence:
 - The list operation performs no parent detail lookup, relationship expansion,
   status lookup, or all-page traversal. `project` and `object_id` are sent to
   Taiga together so its permission and ownership filters remain authoritative.
-- This goal lists metadata and download locations only. It does not download
+- This operation lists metadata and download locations only. It does not download
   file content or mutate attachments; URLs are returned as opaque upstream
-  strings and are never followed by the client.
+  strings and are never followed by the list operation.
 
 ## DTO and null policy
 
@@ -66,8 +65,8 @@ The API owns mapping and response validation. `TaigaTransport` owns HTTP
 responses, bounded safe errors, JSON parsing, headers, and cancellation. The
 MCP wrapper remains thin and serializes the standard page envelope.
 
-## Explicit non-goals
+## Scope of this operation
 
-This contract does not include attachment detail, upload, update, delete,
+This operation does not include attachment detail, upload, update, delete,
 download-to-destination, file-content access, or bulk
 export. A caller must request later pages explicitly.

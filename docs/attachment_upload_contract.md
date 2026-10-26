@@ -1,7 +1,6 @@
 # Work-item attachment upload contract
 
-This contract supports story #23, task #33, and the streamed upload
-implementation in task #34. It was verified on 2026-10-02 against the Taiga
+This document defines the implemented streamed-upload boundary. It was verified on 2026-10-02 against the Taiga
 documentation at `main` and Taiga backend revision
 `4d11baef9027f5598f6341d6eb4261de2840688e`. The revision is source evidence,
 not a claim about every deployed Taiga instance.
@@ -72,6 +71,6 @@ reported as possibly applied.
 - [Pinned attachment validator](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/validators.py)
 - [Pinned attachment serializer](https://github.com/taigaio/taiga-back/blob/4d11baef9027f5598f6341d6eb4261de2840688e/taiga/projects/attachments/serializers.py)
 
-Binary-content, disposal, cancellation, and real MCP binding tests are task
-#35. Download, update, delete, and bulk upload remain out
-of scope.
+Binary-content, disposal, cancellation, and MCP binding tests live in the
+attachment test suites. Download, update, and delete use separate tools; bulk
+upload is outside this command.
