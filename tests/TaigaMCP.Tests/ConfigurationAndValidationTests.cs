@@ -113,6 +113,29 @@ public sealed class ConfigurationTests
     }
 
     [Theory]
+    [InlineData("not a host", 3001, "/mcp")]
+    [InlineData("127.0.0.1", 0, "/mcp")]
+    [InlineData("127.0.0.1", 65_536, "/mcp")]
+    [InlineData("127.0.0.1", 3001, "mcp")]
+    [InlineData("127.0.0.1", 3001, "/mcp?token=secret")]
+    public void McpOptions_InvalidHttpListenerSettings_AreRejected(string address, int port, string path)
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Taiga:BaseUrl"] = "http://localhost/api",
+            ["Taiga:Username"] = "synthetic",
+            ["Taiga:Password"] = "synthetic",
+            ["Mcp:Transport"] = "http",
+            ["Mcp:Address"] = address,
+            ["Mcp:Port"] = port.ToString(),
+            ["Mcp:Path"] = path
+        }).Build();
+
+        using var provider = new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<McpOptions>>().Value);
+    }
+
+    [Theory]
     [InlineData("", false)]
     [InlineData("not a host", false)]
     [InlineData("https://localhost", false)]
