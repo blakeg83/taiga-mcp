@@ -142,18 +142,47 @@ public sealed class WorkItemAttachmentApi
         InputValidation.Positive(attachmentId, nameof(attachmentId));
         InputValidation.Required(destination, nameof(destination));
 
-        var attachment = await GetAsync(kind, attachmentId, cancellationToken);
-        if (attachment.Size is > 0 && attachment.Size.Value > _options.Value.MaxAttachmentBytes)
-            throw new TaigaRequestException($"attachment exceeds the configured maximum size of {_options.Value.MaxAttachmentBytes} bytes.");
-
-        var plan = AttachmentDownloadContract.CreatePlan(attachment, destination, _options);
-        var result = await _transport.DownloadAsync(plan, cancellationToken);
-        return new WorkItemAttachmentDownloadDto
+        TaigaRequestException? mediaFailure = null;
+        Uri? rejectedSource = null;
+        while (true)
         {
-            Destination = result.DestinationPath,
-            Bytes = result.BytesWritten,
-            Attachment = attachment
-        };
+            WorkItemAttachmentDto attachment;
+            try
+            {
+                attachment = await GetAsync(kind, attachmentId, cancellationToken);
+            }
+            catch (TaigaRequestException exception)
+            {
+                throw new TaigaRequestException($"Taiga attachment metadata request failed. {exception.Message}", exception.StatusCode);
+            }
+
+            if (attachment.Size is > 0 && attachment.Size.Value > _options.Value.MaxAttachmentBytes)
+                throw new TaigaRequestException($"attachment exceeds the configured maximum size of {_options.Value.MaxAttachmentBytes} bytes.");
+
+            var plan = AttachmentDownloadContract.CreatePlan(attachment, destination, _options);
+            // A media 403 is not an API authentication failure. Refresh metadata
+            // once, and retry only if Taiga supplies a different download URL.
+            // Compare the complete URL, including its signed query and fragment.
+            if (mediaFailure is not null && plan.SourceUri.AbsoluteUri == rejectedSource!.AbsoluteUri)
+                throw mediaFailure;
+
+            try
+            {
+                var result = await _transport.DownloadAsync(plan, cancellationToken);
+                return new WorkItemAttachmentDownloadDto
+                {
+                    Destination = result.DestinationPath,
+                    Bytes = result.BytesWritten,
+                    Attachment = attachment
+                };
+            }
+            catch (TaigaRequestException exception) when (
+                exception.StatusCode == System.Net.HttpStatusCode.Forbidden && mediaFailure is null)
+            {
+                mediaFailure = exception;
+                rejectedSource = plan.SourceUri;
+            }
+        }
     }
 
     internal async Task<WorkItemAttachmentListPage> ListPageAsync(

@@ -12,6 +12,123 @@ namespace TaigaMCP.Tests;
 
 public sealed class WorkItemAttachmentDownloadTests
 {
+    [Fact]
+    public async Task DownloadAsync_PreservesValidSignedQueryWithoutRecovery()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddJsonRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901",
+                DownloadFixtures.DetailWithUrl("https://files.example/protected.bin?token=valid%2Bsignature#_taiga-refresh:901", size: 3))
+            .AddRoute(HttpMethod.Get, "/protected.bin", request =>
+            {
+                Assert.Equal("?token=valid%2Bsignature", request.Uri.Query);
+                Assert.False(request.Headers.ContainsKey("Authorization"));
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) };
+            });
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            try
+            {
+                await NewApi(handler, auth).DownloadAsync("task", 901, destination);
+                Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(destination));
+                Assert.Equal(3, handler.Requests.Count);
+            }
+            finally { File.Delete(destination); }
+        }
+    }
+
+    [Theory]
+    [InlineData("expired")]
+    [InlineData(null)]
+    public async Task DownloadAsync_RefreshesRejectedMediaUrlWithoutRefreshingApiAuthentication(string? token)
+    {
+        var metadataReads = 0;
+        var originalUrl = "https://files.example/protected.bin" + (token is null ? "" : $"?token={token}");
+        const string freshUrl = "https://files.example/protected.bin?token=fresh%2Bsignature#_taiga-refresh:901";
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(DownloadFixtures.DetailWithUrl(++metadataReads == 1 ? originalUrl : freshUrl, size: 3))
+            })
+            .AddRoute(HttpMethod.Get, "/protected.bin", request => request.Uri.Query == "?token=fresh%2Bsignature"
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([1, 2, 3]) }
+                : new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent("media secret") });
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            try
+            {
+                var result = await NewApi(handler, auth).DownloadAsync("task", 901, destination);
+
+                Assert.Equal(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(destination));
+                Assert.Equal(freshUrl, result.Attachment.Url);
+                Assert.Equal(2, metadataReads);
+                var mediaRequests = handler.Requests.Where(request => request.Uri.AbsolutePath == "/protected.bin").ToArray();
+                Assert.Equal(2, mediaRequests.Length);
+                Assert.All(mediaRequests, request => Assert.False(request.Headers.ContainsKey("Authorization")));
+                Assert.Single(handler.Requests, request => request.Uri.AbsolutePath == "/api/v1/auth");
+                Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath == "/api/v1/auth/refresh");
+                Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(destination)!, $".{Path.GetFileName(destination)}.*.download"));
+            }
+            finally { File.Delete(destination); }
+        }
+    }
+
+    [Theory]
+    [InlineData(false, 1)]
+    [InlineData(true, 2)]
+    public async Task DownloadAsync_BoundsMedia403RecoveryAndReportsSafeContext(bool changedUrl, int expectedMediaRequests)
+    {
+        var metadataReads = 0;
+        var handler = new FakeHttpMessageHandler()
+            .AddRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(DownloadFixtures.DetailWithUrl(
+                    $"https://files.example/protected.bin?token=secret{(changedUrl ? ++metadataReads : 0)}", size: 3))
+            })
+            .AddTextRoute(HttpMethod.Get, "/protected.bin", "media secret", HttpStatusCode.Forbidden);
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).DownloadAsync("task", 901, destination));
+
+            Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
+            Assert.Contains("attachment download HTTP 403: media access denied", error.Message);
+            Assert.DoesNotContain("secret", error.Message);
+            Assert.DoesNotContain("files.example", error.Message);
+            Assert.Equal(2, handler.Requests.Count(request => request.Uri.AbsolutePath == "/api/v1/tasks/attachments/901"));
+            Assert.Equal(expectedMediaRequests, handler.Requests.Count(request => request.Uri.AbsolutePath == "/protected.bin"));
+            Assert.DoesNotContain(handler.Requests, request => request.Uri.AbsolutePath == "/api/v1/auth/refresh");
+            Assert.False(File.Exists(destination));
+            Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(destination)!, $".{Path.GetFileName(destination)}.*.download"));
+        }
+    }
+
+    [Fact]
+    public async Task DownloadAsync_DistinguishesMetadata403WithoutMediaRequestsOrRecovery()
+    {
+        var handler = new FakeHttpMessageHandler()
+            .AddTextRoute(HttpMethod.Get, "/api/v1/tasks/attachments/901", "metadata secret", HttpStatusCode.Forbidden);
+        var destination = Path.Combine(Path.GetTempPath(), $"taiga-download-{Guid.NewGuid():N}.bin");
+        var (http, auth) = TaigaTestClient.Create(handler);
+        using (http)
+        {
+            var error = await Assert.ThrowsAsync<TaigaRequestException>(() =>
+                NewApi(handler, auth).DownloadAsync("task", 901, destination));
+
+            Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
+            Assert.Contains("attachment metadata request failed", error.Message);
+            Assert.Contains("permission denied", error.Message);
+            Assert.DoesNotContain("secret", error.Message);
+            Assert.Equal(2, handler.Requests.Count);
+            Assert.False(File.Exists(destination));
+        }
+    }
+
     [Theory]
     [InlineData("epic", "/api/v1/epics/attachments/901")]
     [InlineData("user_story", "/api/v1/userstories/attachments/901")]
