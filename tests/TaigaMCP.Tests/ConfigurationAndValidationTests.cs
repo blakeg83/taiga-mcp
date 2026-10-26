@@ -49,6 +49,87 @@ public sealed class ConfigurationTests
         Assert.Equal(10 * 1024 * 1024, provider.GetRequiredService<IOptions<TaigaOptions>>().Value.MaxAttachmentBytes);
     }
 
+    [Fact]
+    public void McpOptions_DefaultTransport_IsStdioWithLoopbackDefaults()
+    {
+        using var provider = Build("http://localhost/api");
+        var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
+
+        Assert.Equal(McpOptions.StdioTransport, options.Transport);
+        Assert.Equal("127.0.0.1", options.Address);
+        Assert.Equal(3001, options.Port);
+        Assert.Equal("/mcp", options.Path);
+    }
+
+    [Fact]
+    public void McpOptions_ExplicitStdio_IsCaseInsensitiveAndNormalized()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Taiga:BaseUrl"] = "http://localhost/api",
+            ["Taiga:Username"] = "synthetic",
+            ["Taiga:Password"] = "synthetic",
+            ["Mcp:Transport"] = " STDIO "
+        }).Build();
+
+        using var provider = new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();
+        Assert.Equal(McpOptions.StdioTransport, provider.GetRequiredService<IOptions<McpOptions>>().Value.Transport);
+    }
+
+    [Fact]
+    public void McpOptions_Http_UsesConfiguredListener()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Taiga:BaseUrl"] = "http://localhost/api",
+            ["Taiga:Username"] = "synthetic",
+            ["Taiga:Password"] = "synthetic",
+            ["Mcp:Transport"] = "HTTP",
+            ["Mcp:Address"] = "localhost",
+            ["Mcp:Port"] = "43127",
+            ["Mcp:Path"] = "/gateway"
+        }).Build();
+
+        using var provider = new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<McpOptions>>().Value;
+        Assert.True(options.IsHttp);
+        Assert.Equal("http://localhost:43127", options.ListenerUrl);
+        Assert.Equal("/gateway", options.Path);
+    }
+
+    [Fact]
+    public void McpOptions_InvalidTransport_IsRejected()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Taiga:BaseUrl"] = "http://localhost/api",
+            ["Taiga:Username"] = "synthetic",
+            ["Taiga:Password"] = "synthetic",
+            ["Mcp:Transport"] = "websocket"
+        }).Build();
+
+        using var provider = new ServiceCollection().AddTaigaServices(config).BuildServiceProvider();
+        Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<McpOptions>>().Value);
+    }
+
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("not a host", false)]
+    [InlineData("https://localhost", false)]
+    [InlineData("127.0.0.1", true)]
+    [InlineData("localhost", true)]
+    [InlineData("[::1]", true)]
+    public void McpOptions_AddressValidation_IsBounded(string address, bool valid)
+        => Assert.Equal(valid, McpOptions.IsValidAddress(address));
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(65535, true)]
+    [InlineData(65536, false)]
+    public void McpOptions_PortValidation_UsesTcpRange(int port, bool valid)
+        => Assert.Equal(valid, McpOptions.IsValidPort(port));
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

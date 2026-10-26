@@ -4,7 +4,8 @@ TaigaMCP is a .NET 8 [Model Context Protocol (MCP)](https://modelcontextprotocol
 server that lets Codex and other local MCP clients work with
 [Taiga](https://taiga.io/), an open-source project management tool for Scrum,
 Kanban, and issue tracking. It connects to Taiga Cloud or a self-hosted Taiga
-REST API over a local **stdio** connection.
+REST API over local **stdio** by default, with configurable Streamable HTTP for
+clients that need a network transport.
 
 New to Taiga? Visit the [Taiga homepage](https://taiga.io/) or browse its
 [GitHub repositories](https://github.com/taigaio), including the
@@ -34,16 +35,18 @@ which changes you want. It does not implement the entire Taiga API; the
 features from proposed coverage.
 
 ## Requirements
-
 - To build: the SDK selected by [global.json](global.json), currently
   **10.0.401 with `latestPatch` roll-forward** (10.0.4xx feature band).
-- To run a framework-dependent build or the tests: the **.NET 8 runtime**.
-  A self-contained published server includes its runtime.
+- To run a framework-dependent build or the tests: the **.NET 8 runtime** and
+  the **ASP.NET Core 8 shared framework** (`Microsoft.AspNetCore.App`). The
+  ASP.NET Core companion package is loaded in both HTTP and STDIO modes.
+- A self-contained published server includes both required runtimes and shared
+  frameworks on the target; framework-dependent launches and tests require them.
 - A Taiga account with username/password authentication and access to the
   target projects.
-- An MCP client that supports local stdio servers. Codex setup is documented
-  below; other clients can launch the same published executable with the same
-  environment variables.
+- An MCP client that supports local stdio servers or Streamable HTTP. Codex
+  setup is documented below; other clients can launch the same published
+  executable with the same environment variables.
 
 The Windows installer additionally needs PowerShell **7.3+** and Codex CLI on
 `PATH`. Manual publish commands are provided for Windows and Linux/WSL in the
@@ -97,9 +100,14 @@ $env:TAIGA__PASSWORD = 'your-password'
 dotnet run --no-build
 ```
 
-The server waits for MCP messages on stdin; it is not an interactive shell or
-an HTTP service. Configure your MCP client to launch it. Protocol messages go
-to stdout and normal host logs go to stderr.
+STDIO is the default: the server waits for MCP messages on stdin, and protocol
+messages go to stdout while normal host logs go to stderr. To select Streamable
+HTTP, set `MCP__TRANSPORT=http`; the default private listener is
+`http://127.0.0.1:3001/mcp`. Configure `MCP__ADDRESS`, `MCP__PORT`, and
+`MCP__PATH` for another listener address, port, or endpoint path. See the
+[developer guide](docs/development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26)
+for the dated tunnel compatibility and access prerequisites; this repository
+does not claim a live tunnel or ChatGPT connection.
 
 ## Configuration
 
@@ -112,10 +120,15 @@ Set these variables in the **server process's environment**:
 | `TAIGA__BASEURL` | No | `https://api.taiga.io/api/v1/`; include the API path for self-hosted Taiga |
 | `TAIGA__METADATATTLSECONDS` | No | `300`; positive metadata-cache lifetime in seconds |
 | `TAIGA__MAXATTACHMENTBYTES` | No | `10485760` (10 MiB); positive upload/download size limit |
+| `MCP__TRANSPORT` | No | `stdio`; use `http` for Streamable HTTP |
+| `MCP__ADDRESS` | No | `127.0.0.1`; HTTP listener address |
+| `MCP__PORT` | No | `3001`; HTTP listener port |
+| `MCP__PATH` | No | `/mcp`; HTTP MCP endpoint path |
 
 Startup validates these settings. The base URL must be absolute HTTP/HTTPS
 without embedded credentials, a query, or a fragment; a trailing slash is
-normalized. Prefer HTTPS when sending credentials over a network.
+normalized. The transport must be `stdio` or `http`; HTTP address, port, and
+path are also validated. Prefer HTTPS when sending credentials over a network.
 
 TaigaMCP logs in to Taiga itself and keeps bearer/refresh tokens in process
 memory. Application-token authentication is not implemented. Never commit

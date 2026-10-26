@@ -1,9 +1,15 @@
 # Taiga MCP quickstart
 
-This guide connects a local TaigaMCP stdio server to Codex. Other MCP clients
-can use the same executable and environment variables. See the
+This guide connects a local TaigaMCP stdio server to Codex by default. Other
+MCP clients can use the same executable and environment variables, including
+the configurable Streamable HTTP transport. See the
 [README](../README.md#requirements) for build/runtime requirements and the
 [configuration table](../README.md#configuration) for all settings.
+
+Framework-dependent launches and tests require both the .NET 8 runtime and the
+ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`), including for
+STDIO because the HTTP companion package is part of the application.
+Self-contained publishing includes both frameworks on the target.
 
 ## Windows installer
 
@@ -55,6 +61,26 @@ Self-contained publishing includes the runtime. It avoids building at MCP
 startup; it does **not** eliminate .NET JIT compilation. The SDK pin does not
 change the application's `net8.0` target or its package versions.
 
+### Streamable HTTP mode
+
+STDIO remains the default for Codex. To select Streamable HTTP on a private
+loopback listener, configure the server process before starting it:
+
+```powershell
+$env:MCP__TRANSPORT = 'http'
+$env:MCP__ADDRESS = '127.0.0.1'
+$env:MCP__PORT = '3001'
+$env:MCP__PATH = '/mcp'
+dotnet run --no-build
+```
+
+The endpoint is then `http://127.0.0.1:3001/mcp`; address, port, and path are
+validated at startup. Keep the listener private and configure any Secure MCP
+Tunnel separately. The dated official compatibility and access prerequisites,
+including the documented `--mcp-server-url` option form, are recorded in the
+[developer guide](development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26).
+This story does not claim a live tunnel or ChatGPT connection.
+
 ### 2. Configure Codex
 
 Edit `~/.codex/config.toml` (`%USERPROFILE%\.codex\config.toml` on Windows),
@@ -83,7 +109,9 @@ backups private. Alternatively, set the variables in the environment that
 launches Codex and use `env_vars = ["TAIGA__USERNAME", "TAIGA__PASSWORD"]`
 inside `[mcp_servers.taiga]`, omitting those two values from its `env` table.
 Use `env` for any fixed base URL or optional settings. Do not register a Taiga
-API URL as a remote MCP endpoint: this server uses stdio and calls Taiga itself.
+API URL as an MCP endpoint: TaigaMCP calls Taiga itself. If you select HTTP,
+register the configured MCP endpoint or a separately secured tunnel endpoint,
+not the Taiga API URL.
 
 The official [Codex MCP documentation](https://learn.chatgpt.com/docs/extend/mcp)
 also describes `codex mcp add`, environment forwarding, and configuration.
@@ -145,7 +173,7 @@ credentials; the Codex configuration does not configure Inspector.
 | Symptom | Check |
 | --- | --- |
 | SDK not found | Install a non-preview SDK in the `10.0.4xx` feature band allowed by `global.json`. |
-| Framework missing when running tests | Install the .NET 8 runtime; a newer SDK alone does not supply it. |
+| Framework missing when running tests | Install both the .NET 8 runtime and ASP.NET Core 8 shared framework (`Microsoft.AspNetCore.App`); a newer SDK alone does not supply them. |
 | Server fails at startup | Check nonblank credentials, the API base URL, and positive TTL/attachment-size settings. Inspect stderr. |
 | Configured server is unavailable | Check the absolute executable path and environment in the client that launches it; restart the client after configuration changes. |
 | TOML parse error | Use the nested `env` table above. If using an inline `env = { ... }` table, keep it on one line. |
@@ -156,11 +184,25 @@ credentials; the Codex configuration does not configure Inspector.
 | Attachment download fails | Use an absolute new destination with an existing parent directory, check the size limit, and use the download tool to obtain fresh media metadata. |
 | Build output locked by a running server | Use a unique external output directory as shown in the [developer guide](development.md#build-and-test). |
 
-A server launched directly waits for MCP input on stdin; waiting alone does
-not prove the credentials or connection work. Normal host logs can appear on
-stderr. Verify using an actual read-only tool call.
+The default STDIO server launched directly waits for MCP input on stdin; waiting
+alone does not prove the credentials or connection work. HTTP mode listens on
+the configured endpoint instead. Normal host logs can appear on stderr. Verify
+using an actual read-only tool call.
 
 Keep logging at Information or higher during stdio use. The current console
 configuration routes Information and higher to stderr, but enabling Debug or
 Trace can put diagnostic messages on stdout and break the MCP connection.
 Sanitize logs and never share credentials or signed attachment URLs.
+
+## Validated configuration
+
+`TAIGA__USERNAME` and `TAIGA__PASSWORD` must be nonblank. Optional
+`TAIGA__BASEURL` is an absolute HTTP/HTTPS API URL without embedded credentials,
+query, or fragment. Optional `TAIGA__METADATATTLSECONDS` is a positive integer
+(default 300). Startup rejects invalid configuration.
+
+`MCP__TRANSPORT` is `stdio` by default and also accepts `http` for Streamable
+HTTP. For HTTP, `MCP__ADDRESS` defaults to `127.0.0.1`, `MCP__PORT` to `3001`,
+and `MCP__PATH` to `/mcp`; all three are validated at startup. The dated
+official tunnel compatibility and access record is in the
+[developer guide](development.md#secure-mcp-tunnel-compatibility-and-access-record-checked-2026-10-26).

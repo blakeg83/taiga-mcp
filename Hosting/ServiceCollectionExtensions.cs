@@ -25,6 +25,16 @@ public static class ServiceCollectionExtensions
             .Validate(o => o.MaxAttachmentBytes > 0, "Taiga maximum attachment size must be positive")
             .ValidateOnStart();
 
+        services
+            .AddOptions<McpOptions>()
+            .Bind(config.GetSection(McpOptions.SectionName))
+            .PostConfigure(o => o.Normalize())
+            .Validate(o => McpOptions.IsSupportedTransport(o.Transport), "MCP transport must be either 'stdio' or 'http'")
+            .Validate(o => McpOptions.IsValidAddress(o.Address), "MCP HTTP address must be a host name or IP address")
+            .Validate(o => McpOptions.IsValidPort(o.Port), "MCP HTTP port must be between 1 and 65535")
+            .Validate(o => McpOptions.IsValidPath(o.Path), "MCP HTTP path must start with '/' and contain no query, fragment, or whitespace")
+            .ValidateOnStart();
+
         services.AddHttpClient("taiga", (sp, client) =>
         {
             var opts = sp.GetRequiredService<IOptions<TaigaOptions>>().Value;
@@ -51,11 +61,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<WorkItemResolverApi>();
         services.AddSingleton<WorkItemHistoryApi>();
         services.AddSingleton<WorkItemAttachmentApi>();
-        services
-            .AddMcpServer()
-            .WithStdioServerTransport()
-            .WithToolsFromAssembly();
-
         return services;
     }
+
+    public static IMcpServerBuilder AddTaigaMcpServer(this IServiceCollection services)
+        => services.AddMcpServer().WithToolsFromAssembly();
 }
