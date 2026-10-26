@@ -3,6 +3,7 @@ using System.Text.Json;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using TaigaMCP.Config;
 using Xunit;
 
 namespace TaigaMCP.Tests;
@@ -2388,6 +2389,44 @@ public sealed class McpIntegrationTests
     }
 
     [Fact]
+    public async Task ProductionServer_ExplicitStdioTransport_PreservesMcpSessionAndSafeErrors()
+    {
+        await using var taiga = FakeTaigaHttpServer.Start();
+        var serverAssembly = Path.Combine(AppContext.BaseDirectory, "TaigaMCP.dll");
+        await using var process = StrictMcpProcess.Start(
+            "dotnet",
+            [serverAssembly],
+            CreateEnvironment(taiga, McpOptions.StdioTransport),
+            Path.GetDirectoryName(serverAssembly));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var client = await McpClientFactory.CreateAsync(process.Transport, cancellationToken: timeout.Token);
+
+        var tools = await client.ListToolsAsync(cancellationToken: timeout.Token);
+        Assert.Contains(tools, tool => tool.Name == "list_projects");
+
+        var projects = await client.CallToolAsync(
+            "list_projects",
+            new Dictionary<string, object?> { ["page"] = 1 },
+            cancellationToken: timeout.Token);
+        Assert.False(projects.IsError == true, GetText(projects));
+        Assert.Contains("Demo", GetText(projects));
+
+        taiga.ProjectsStatusCode = HttpStatusCode.InternalServerError;
+        var failed = await client.CallToolAsync(
+            "list_projects",
+            new Dictionary<string, object?> { ["page"] = 1 },
+            cancellationToken: timeout.Token);
+        Assert.True(failed.IsError);
+        Assert.Contains("500", GetText(failed));
+        Assert.DoesNotContain("synthetic", GetText(failed), StringComparison.OrdinalIgnoreCase);
+
+        await process.DisposeAsync();
+        await process.ValidationCompleted.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Null(process.ValidationFailure);
+        Assert.NotEmpty(process.RawStdoutLines);
+    }
+
+    [Fact]
     public async Task ProductionServer_IssueAttachments_SupportsDownloadAndMutationTools()
     {
         await using var taiga = FakeTaigaHttpServer.Start();
@@ -2937,14 +2976,23 @@ public sealed class McpIntegrationTests
         Assert.ThrowsAny<Exception>(() => McpProtocolLineValidator.ValidateLine(line));
     }
 
-    private static IReadOnlyDictionary<string, string> CreateEnvironment(FakeTaigaHttpServer taiga)
-        => new Dictionary<string, string>
+    private static IReadOnlyDictionary<string, string> CreateEnvironment(
+        FakeTaigaHttpServer taiga,
+        string? transport = null)
+    {
+        var environment = new Dictionary<string, string>
         {
             ["TAIGA__BASEURL"] = taiga.BaseUrl,
             ["TAIGA__USERNAME"] = "integration-user",
             ["TAIGA__PASSWORD"] = "integration-password",
             ["DOTNET_NOLOGO"] = "1"
         };
+
+        if (transport is not null)
+            environment["MCP__TRANSPORT"] = transport;
+
+        return environment;
+    }
 
     private static string CreateTemporaryApplicationCopy()
     {

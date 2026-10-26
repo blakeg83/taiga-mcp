@@ -135,6 +135,27 @@ public sealed class ConfigurationTests
         Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<McpOptions>>().Value);
     }
 
+    [Fact]
+    public async Task Host_Start_RejectsInvalidMcpTransportConfiguration()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Taiga:BaseUrl"] = "http://localhost/api",
+            ["Taiga:Username"] = "synthetic",
+            ["Taiga:Password"] = "synthetic",
+            ["Mcp:Transport"] = "http",
+            ["Mcp:Address"] = "127.0.0.1",
+            ["Mcp:Port"] = "0",
+            ["Mcp:Path"] = "/mcp"
+        }).Build();
+
+        using var host = Host.CreateDefaultBuilder()
+            .ConfigureServices(services => services.AddTaigaServices(config))
+            .Build();
+
+        await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
     [Theory]
     [InlineData("", false)]
     [InlineData("not a host", false)]
